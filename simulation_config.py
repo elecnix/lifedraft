@@ -670,6 +670,18 @@ class YearResult:
     str_business_income: float = 0.0
     gst_hst_registration_required: bool = False
 
+    # Issue #702: the year's attribution-rule DETECTION over the declared
+    # private loans -- ITA s.74.1 (spousal property transfer), s.74.2 (minor
+    # child) and s.74.5(1) (below-market / prescribed-rate-loan escape) -- one
+    # dict per loan, computed by simulation._attribution_checks_for from the
+    # rule functions in countries.canada.attribution (DP#10). DETECTION ONLY:
+    # it changes no tax number (the one attribution flow the engine PRICES --
+    # a minor LENDER's interest attributed to the borrower under s.74.2 -- is
+    # #929's wiring in private_loan_interest.classify_private_loan_interest).
+    # Empty for a household that declares no private loans (the golden path,
+    # DP#32: no trigger data -> no entries, zero overhead).
+    attribution_summary: List[Dict] = field(default_factory=list)
+
     # Mortgage details
     mortgage_payment: float = 0.0
     mortgage_interest: float = 0.0

@@ -682,6 +682,206 @@ def _private_loan_interest_for(
     return p_income, s_income, p_deduction, s_deduction
 
 
+def _attribution_checks_for(
+        cfg, sim_year: int, primary_member: dict, spouse_member: dict
+) -> List[Dict]:
+    """Issue #702: the year's attribution-rule DETECTION over the declared
+    private loans -- ITA s.74.1 (spousal property transfer), s.74.2 (minor
+    child) and s.74.5(1) (below-market / prescribed-rate-loan escape) -- run
+    each year their trigger data is present (DP#16) and surfaced on
+    ``YearResult.attribution_summary`` for reports/objectives to read.
+
+    DETECTION ONLY: this changes no tax number. The one attribution flow the
+    engine PRICES -- a minor LENDER's interest attributed back to the
+    borrower under s.74.2 -- is #929's wiring in
+    ``private_loan_interest.classify_private_loan_interest`` and is not
+    duplicated here. The tax law lives in countries.canada.attribution
+    (DP#10); this helper is only household-structure plumbing: resolve each
+    person_id to a role, read ages from birth_year (DP#1), and decide which
+    rule's trigger data is present.
+
+    Trigger data (DP#16 -- no trigger, no rule call):
+    - s.74.2 minor child: the BORROWER is a declared child under 18 at
+      ``sim_year`` (age computed from birth_year -- DP#1). The lender may be
+      a household member or an external individual (a grandparent). The
+      below-market check runs too: the s.74.5(2) escape covers s.74.2 loans
+      as well as s.74.1 ones.
+    - s.74.1 spousal property: the loan's lender and borrower are exactly
+      the two taxed spouses (a loan/transfer BETWEEN them).
+    A loan with neither trigger (third-party loan to an adult household
+    member, an adult-child borrower, a minor lender -- that last already
+    priced by #929) gets an explicit ``rule: None`` entry naming why nothing
+    fires -- reported, never silently skipped (DP#32).
+
+    The s.74.5(2)(a) benchmark is ``attribution.PRESCRIBED_RATE_FALLBACK``
+    (DP#13: the same dated 2% planning default ``debt.PrescribedRateLoan``
+    documents); the contract declares the loan's own rate but no leaf for
+    the rate actually prescribed at inception, so the escape status is
+    reported AGAINST that documented default and each entry carries the
+    benchmark used -- a reader never silently assumes.
+
+    Returns one dict per declared loan (empty list when none -- the golden
+    household): ``{loan_id, lender, borrower, rule, attributed,
+    escape_available, reason, income_types_attributed, below_market,
+    prescribed_rate_loan, benchmark_prescribed_rate}``. Pure (DP#3): same
+    config and year, same output.
+    """
+    loans = getattr(cfg, 'private_loans', [])
+    if not loans:
+        return []
+
+    # Epic #795 bite 4 pattern (DP#10/DP#25): the ITA rules live in the
+    # Canada jurisdiction module, lazy-imported; the generic fold keeps only
+    # the household-structure plumbing.
+    from countries.canada.attribution import (
+        PRESCRIBED_RATE_FALLBACK,
+        TransferType,
+        check_attribution,
+        check_below_market_loan_attribution,
+    )
+    from countries.canada.debt import PrescribedRateLoan
+    from countries.canada.private_loan_interest import interest_is_payable
+
+    primary_id = primary_member.get('id', '')
+    spouse_id = spouse_member.get('id', '')
+    children_by_id = {c.get('id'): c for c in cfg.children if c.get('id')}
+
+    def _taxed_role_of(person_id: str) -> Optional[str]:
+        if person_id == primary_id:
+            return 'primary'
+        if person_id == spouse_id:
+            return 'spouse'
+        return None
+
+    def _label_of(person_id: str) -> str:
+        role = _taxed_role_of(person_id)
+        return person_id if role is None else role
+
+    def _child_age(person_id: str) -> Optional[int]:
+        ch = children_by_id.get(person_id)
+        if ch is not None and ch.get('birth_year') is not None:
+            return sim_year - int(ch['birth_year'])
+        return None
+
+    out: List[Dict] = []
+    for loan in loans:
+        lender = loan['lender']
+        borrower_id = loan['borrower']
+        lender_is_external = isinstance(lender, dict)
+        lender_id = lender['id'] if lender_is_external else lender
+        borrower_role = _taxed_role_of(borrower_id)
+        borrower_child_age = _child_age(borrower_id)
+        lender_role = None if lender_is_external else _taxed_role_of(lender_id)
+        donor_label = (
+            f"{lender_id} (external)" if lender_is_external
+            else _label_of(lender_id))
+        borrower_label = _label_of(borrower_id)
+
+        # s.74.5(2)(b): the timely-interest test. The contract expresses
+        # payability exactly once -- reuse #832's classifier predicate (DP#9)
+        # rather than re-spelling it: interest='paid', or repayment=
+        # 'amortizing' (scheduled payments imply the interest is paid). The
+        # default on-demand demand loan pays NO interest, so it fails the
+        # timing test -- an interest-free spousal/minor loan flags
+        # attribution, which is the statute's answer.
+        timely = interest_is_payable(loan)
+
+        # The one PrescribedRateLoan tracker this loan produces (issue #702:
+        # roles from the RESOLVED person ids -- never the hardcoded
+        # 'primary'/'spouse' defaults). start_year is the simulation start:
+        # the contract carries no inception date for the loan, so the
+        # tracker's year anchor is the projection start, stated here rather
+        # than guessed silently (DP#32).
+        prl = PrescribedRateLoan(
+            principal=float(loan['principal']), rate=float(loan['rate']),
+            lender=donor_label, borrower=borrower_label,
+            start_year=cfg.start_year, interest_paid_by_jan30=timely)
+
+        entry: Dict = {
+            'loan_id': loan.get('id', ''),
+            'lender': donor_label,
+            'borrower': borrower_label,
+            'rule': None,
+            'attributed': False,
+            'escape_available': False,
+            'reason': '',
+            'income_types_attributed': [],
+            'below_market': None,
+            'prescribed_rate_loan': prl.summary(),
+            'benchmark_prescribed_rate': PRESCRIBED_RATE_FALLBACK,
+        }
+
+        def _below_market() -> Dict:
+            return vars(check_below_market_loan_attribution(
+                loan_principal=float(loan['principal']),
+                loan_rate=float(loan['rate']),
+                prescribed_rate=PRESCRIBED_RATE_FALLBACK,
+                interest_paid_by_jan30=timely,
+                recipient_role=borrower_label,
+                donor_role=donor_label))
+
+        if borrower_child_age is not None:
+            # ITA s.74.2: a loan/transfer to a related MINOR. The rule module
+            # owns the < 18 decision; the fold only computes the age (DP#1).
+            result = check_attribution(
+                TransferType.MINOR_CHILD,
+                donor_role=donor_label,
+                recipient_role=borrower_label,
+                recipient_age=borrower_child_age,
+            )
+            entry['rule'] = 's.74.2_minor_child'
+            entry['attributed'] = result.attributed
+            entry['escape_available'] = result.escape_available
+            entry['reason'] = result.reason
+            entry['income_types_attributed'] = [
+                t.value for t in result.income_types_attributed]
+            entry['below_market'] = _below_market()
+        elif (borrower_role is not None and lender_role is not None
+                and {lender_role, borrower_role} == {'primary', 'spouse'}):
+            # ITA s.74.1: a loan/transfer of property BETWEEN the spouses.
+            # Income AND capital gains attribute back -- the rule module's
+            # own documented semantics.
+            result = check_attribution(
+                TransferType.PROPERTY_TRANSFER,
+                donor_role=lender_role,
+                recipient_role=borrower_role,
+                interest_paid_by_jan30=timely,
+                prescribed_rate_used=(
+                    float(loan['rate']) >= PRESCRIBED_RATE_FALLBACK),
+            )
+            entry['rule'] = 's.74.1_spousal_property'
+            entry['attributed'] = result.attributed
+            entry['escape_available'] = result.escape_available
+            entry['reason'] = result.reason
+            entry['income_types_attributed'] = [
+                t.value for t in result.income_types_attributed]
+            entry['below_market'] = _below_market()
+        else:
+            # No attribution trigger (DP#16): name why, loudly, in the entry
+            # itself. An adult-child borrower is the gap issue #702 itself
+            # documents (s.74.2 stops at 18; s.56(4.1) disguised-gift
+            # analysis is NOT modelled -- no function exists); a third-party
+            # loan to an adult household member has no attribution dimension
+            # at all; a minor LENDER is already priced by #929's s.74.2
+            # wiring and needs no duplicate detection here.
+            if borrower_role is not None and borrower_child_age is None:
+                who = 'an ADULT household member'
+                why = ('ITA s.74.1/s.74.2 attribute only between spouses or to a '
+                       'related MINOR; a loan to an adult household member '
+                       'carries no Part I attribution. (s.56(4.1) '
+                       'disguised-gift analysis for adult children is not '
+                       'modelled -- no function for it exists yet.)')
+            else:
+                who = 'this pair'
+                why = ('no s.74.1/s.74.2 trigger data: the borrower is not a '
+                       'taxed spouse and not a declared minor child (a minor '
+                       'LENDER\'s interest is already attributed by #929\'s '
+                       's.74.2 wiring in private_loan_interest).')
+            entry['reason'] = f"No attribution rule fires for {who}: {why}"
+        out.append(entry)
+    return out
+
+
 def _rental_income_for(
         cfg, sim_year: int, primary_member: dict, spouse_member: dict,
         opening_ucc_by_prop: Dict[str, float]
@@ -1544,6 +1744,11 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # (0.0 / False) for a household with no STR (the golden path, DP#32).
     result.str_business_income, result.gst_hst_registration_required = (
         _short_term_rental_facts(cfg))
+    # Issue #702: surface the year's attribution-rule detection over the
+    # declared private loans (s.74.1/s.74.2/s.74.5) -- empty, and free, when
+    # no private loan is declared (the golden household, DP#32).
+    result.attribution_summary = _attribution_checks_for(
+        cfg, sim_year, primary_member, spouse_member)
     return result, next_state
 
 
@@ -2569,6 +2774,10 @@ class FamilySimulation:
             # simulate_year's identical block). Inert for a household with no STR.
             result.str_business_income, result.gst_hst_registration_required = (
                 _short_term_rental_facts(cfg))
+            # Issue #702: the attribution detection summary -- same helper as
+            # the annual path (DP#9), so monthly and yearly agree.
+            result.attribution_summary = _attribution_checks_for(
+                cfg, sim_year, primary_member, spouse_member)
             results.append(result)
 
         # Update canonical state
