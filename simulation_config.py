@@ -242,6 +242,11 @@ _INTERNAL_ROOT_ALLOWED_KEYS = {
     # writes onto a scenario's config for the engine (SimState.initial carve +
     # simulation_rules.apply_deposit_product_growth). Both absence-safe (DP#32).
     'deposit_products', 'deposit_product',
+    # Issue #1036: the DECLARED borrow-to-invest options, read directly by
+    # optimize.run_borrow_to_invest_exploration (the optimizer, not the
+    # simulator, DP#22). Not lifted onto a SimulationConfig field (a dead
+    # surface -- D7); the raw key is the one spelling. Absence-safe (DP#32).
+    'borrow_to_invest_options',
     # Issue #692 (epic #690 bite 1): the couple's NON-principal real properties
     # (a cottage, a rental) as a first-class {id, kind, net_equity} list. Their
     # net equity reaches the annual balance sheet (SimulationConfig.properties
@@ -1823,6 +1828,26 @@ class SimulationConfig:
     deposit_products: List[Dict] = field(default_factory=list)
     deposit_product: Optional[Dict] = None
 
+    # Issue #1036: `capitalize_interest` is the HELOC's declared interest-
+    # handling mode, mapped from liabilities[kind=heloc].capitalize_interest by
+    # input_contract. True (the default when the key is absent, e.g. every
+    # internal-config test built directly) = capitalize the drawn-margin
+    # interest up to the charge, servicing the rest in cash (the pre-#1036
+    # behaviour, byte-identical). False = service ALL the drawn-margin interest
+    # in cash (a retiree paying HELOC interest in cash is no longer modelled as
+    # capitalizing it). Read by simulation_rules.apply_margin_heloc_interest.
+    # The internal-config default (absent key) is True so every test that
+    # builds the internal dict directly stays byte-identical (DP#32: absence is
+    # the fallback, never a coercion).
+    #
+    # NOTE: `capitalize_interest` is a FACILITY-level fact wired only to the
+    # drawn-MARGIN leg (apply_margin_heloc_interest / new_heloc_balance). The
+    # SM readvance leg (new_sm_heloc) is untouched -- its interest is priced
+    # and deducted by apply_sm_interest, never capitalized into the balance
+    # (the readvance grows the line by principal paydown, not by capitalized
+    # interest). Wiring it there too is defensible but out of scope here.
+    capitalize_interest: bool = True
+
     # Issue #823: per-account expected_return / locked_until overrides,
     # pot-keyed (rrsp/tfsa/non_reg/lira/lif/fhsa). Both default to empty --
     # a household that declares neither gets today's global-rate, fully-
@@ -2041,6 +2066,15 @@ class SimulationConfig:
             # (DP#24/DP#32).
             deposit_products=list(cfg.get('deposit_products', [])),
             deposit_product=cfg.get('deposit_product'),
+            # Issue #1036: capitalize_interest defaults True when absent
+            # (property.capitalize_interest key absent) so every internal-
+            # config test built directly stays byte-identical to the pre-#1036
+            # capitalization path (DP#32: absence is the fallback, never a
+            # coercion of a supplied value). The raw cfg['borrow_to_invest_
+            # options'] key is read directly by optimize.run_borrow_to_invest_
+            # exploration (the optimizer, not the simulator, DP#22); it is NOT
+            # lifted onto a SimulationConfig field (a dead surface -- D7).
+            capitalize_interest=prop.get('capitalize_interest', True),
             account_return_overrides=accounts.get('return_overrides', {}) if isinstance(accounts, dict) else {},
             account_locked=accounts.get('locked', {}) if isinstance(accounts, dict) else {},
             account_mer_drag=accounts.get('mer_drag', {}) if isinstance(accounts, dict) else {},
@@ -2198,6 +2232,13 @@ class SimulationConfig:
                 # round-trip as an explicit null.
                 **({'heloc_rate': self.heloc_rate} if self.heloc_rate is not None else {}),
                 **({'heloc_rate_type': self.heloc_rate_type} if self.heloc_rate_type is not None else {}),
+                # Issue #1036 (DP#24): only re-emit capitalize_interest when
+                # it is NOT the default (True) -- True round-trips to 'absent'
+                # (the pre-#1036 capitalization path, byte-identical), False is
+                # a real declared 'service in cash' that must survive a
+                # load->modify->save cycle (DP#32).
+                **({'capitalize_interest': self.capitalize_interest}
+                   if self.capitalize_interest is not True else {}),
                 # issue #689: only re-emitted when actually declared -- None
                 # means "never declared" (DP#32), same convention as
                 # heloc_rate above.
@@ -2408,7 +2449,16 @@ def apply_overlay(base_cfg: dict, overlay: ScenarioOverlay) -> dict:
 
     # Property values
     house_value = cfg['property']['house_value']
-    orig_mortgage = cfg['property']['mortgage_balance']
+    # Issue #1036: a mortgage-free household (no kind=mortgage liability) has
+    # no `mortgage_balance` key in its internal property block --
+    # input_contract.py omits it rather than writing 0 (DP#32: a missing
+    # mortgage is a first-class state, not a zero mortgage). This overlay path
+    # used to index the key directly and crash with KeyError on every overlay
+    # (the LTV/cash-out exploration), so a mortgage-free household could not
+    # run through main() at all. Treat the absent key as a $0 incumbent mortgage
+    # -- the explicit-absence-test the rest of this function already uses for
+    # margin_available (#663), never a truthiness coercion (DP#32).
+    orig_mortgage = cfg['property']['mortgage_balance'] if 'mortgage_balance' in cfg['property'] else 0
     cash_out = overlay.cash_out
 
     # Money-flow model (issue #257): a cash-out refinance is a MORTGAGE increase.

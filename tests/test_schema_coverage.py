@@ -1050,10 +1050,14 @@ if "heloc" in _EXAMPLE_LIABILITY_KINDS:
     # issue #577: the heloc's own opening/DRAWN balance never reaches SimState.initial() --
     # a draw is a simulation decision (FamilySimulation's lump_sum handling), never a fact
     # read off this field. See tests/architecture/test_contract_reachability.py.
-    DEAD_ALLOWLIST["liabilities[kind=heloc].balance.amount"] = ("#577", "the DRAWN heloc balance "
-        "has no legacy home: SimState.initial() always starts heloc_balance at 0 (undrawn) by "
-        "design, regardless of any declared opening balance -- a draw is a simulation decision "
-        "made elsewhere (FamilySimulation's lump_sum handling), never a fact read off this field.")
+    # Issue #1036: this leaf is now READ by input_contract.py -- to REFUSE it
+    # loudly when > 0 (the engine starts a HELOC undrawn by design, #577; a
+    # declared opening drawn balance was silently dropped before #1036). A
+    # balance of 0 (undrawn) is the documented accepted state and reaches no
+    # decision, so the oracle measures it unprobeable (mutating 0 -> >0
+    # raises ContractAdaptationError). Consumed by the refusal, not dead.
+    CONSUMED["liabilities[kind=heloc].balance.amount"] = (
+        "input_contract.py", 'heloc["balance"]["amount"]')
     # issue #654: THE fix. heloc.rate now maps to property.heloc_rate -> SimulationConfig.
     # heloc_rate -> FamilySimulation's heloc_path, which honours it outright instead of
     # deriving a HELOC rate from the mortgage's rate path (the bug this issue closes).
@@ -1070,14 +1074,29 @@ if "heloc" in _EXAMPLE_LIABILITY_KINDS:
         "'variable' vs 'fixed' to switch on yet (that would be assumptions.rate_paths.heloc's "
         "job, which is itself unwired end-to-end -- see input_contract.py's heloc mapping "
         "comment). Genuinely parsed, not yet consumed.")
-    DEAD_ALLOWLIST["liabilities[kind=heloc].capitalize_interest"] = ("#603", "legacy[\"heloc\"] "
-        "(the only place this was mapped to) confirmed to have ZERO production readers and "
-        "deleted from to_internal_config in epic #603 -- see input_contract.py's module "
-        "docstring findings section.")
-    DEAD_ALLOWLIST["liabilities[kind=heloc].deductibility.investment_portion"] = ("#603",
-        "see liabilities[kind=heloc].capitalize_interest above -- same non-consumption.")
-    DEAD_ALLOWLIST["liabilities[kind=heloc].deductibility.personal_portion"] = ("#603",
-        "see liabilities[kind=heloc].capitalize_interest above -- same non-consumption.")
+    # Issue #1036: capitalize_interest is now READ -- mapped by input_contract.py to
+    # property.capitalize_interest -> SimulationConfig.capitalize_interest, and consumed
+    # by simulation_rules.apply_margin_heloc_interest (false = service in cash, true =
+    # capitalize up to the charge). Removed from DEAD_ALLOWLIST (it reaches a decision).
+    CONSUMED["liabilities[kind=heloc].capitalize_interest"] = (
+        "simulation_rules.py", "ctx.config.capitalize_interest")
+    # Issue #1036: heloc.deductibility is now READ by input_contract.py -- to
+    # REFUSE investment_portion > 0 loudly at load (the s.20(1)(c) trace is
+    # COMPUTED from the borrowing's purpose, never a declared ratio on the HELOC
+    # -- same stance as the consumer-loan path). The example declares
+    # investment_portion=0 (the accepted personal-use state); the oracle
+    # measures it unprobeable (mutating 0 -> >0 raises ContractAdaptationError).
+    # Consumed by the refusal, not dead.
+    CONSUMED["liabilities[kind=heloc].deductibility.investment_portion"] = (
+        "input_contract.py", 'heloc_deductibility["investment_portion"]')
+    # personal_portion is part of the deductibility block (read by
+    # heloc.get('deductibility')) but NOT consumed by name -- only
+    # investment_portion drives the refusal (the trace is computed from the
+    # borrowing's purpose, not a declared personal share). The oracle measures
+    # it DROPPED (mutating personal_portion moves nothing in the config);
+    # allowlist as dead (parsed-but-not-consumed-by-name).
+    DEAD_ALLOWLIST["liabilities[kind=heloc].deductibility.personal_portion"] = (
+        "#1036", "part of the deductibility block (read by heloc.get('deductibility')) but not consumed by name -- only investment_portion drives the refusal")
 
 if "line_of_credit" in _EXAMPLE_LIABILITY_KINDS:
     # Issue #689: THE fix -- a revolving, unsecured (or secured) credit

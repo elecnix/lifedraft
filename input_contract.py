@@ -3403,21 +3403,80 @@ def to_internal_config(doc: Dict) -> Dict:
         # mortgage_rate, the #654/#595B bug).
         prop_cfg["heloc_rate"] = heloc["rate"]
         prop_cfg["heloc_rate_type"] = heloc["rate_type"]
-        # heloc["balance"]/.capitalize_interest/.deductibility/
-        # .qc_carryforward_opening are NOT mapped to a `legacy["heloc"]`
-        # block (there used to be one here). Confirmed (epic #603 Track C
-        # Phase 2b) that legacy["heloc"] has ZERO production readers:
-        # SimulationConfig dropped its heloc_data field in Phase 2a (DP#9,
-        # "HELOCConfig had zero production callers") and nothing else
-        # reads cfg['heloc'] either (grepped clean). Writing this block
-        # was producing confident-looking output that reached no decision
-        # -- exactly the DP#32 failure this epic exists to end, so it is
-        # deleted, not carried forward as a duplicate declaration. The
-        # opening drawn balance is deliberately NOT mapped: issue #577
-        # makes SimState.initial() always start heloc_balance at 0 (undrawn)
-        # by design, regardless of any declared opening balance -- a draw is
-        # something the simulation decides, not a fact the household states
-        # (see simulation_state.py's SimState.initial docstring).
+        # Issue #1036: the three heloc declarations that used to be silently
+        # dropped here are now each either READ or REFUSED LOUDLY (DP#32:
+        # absence must fail loudly, never default to zero / never drop a
+        # declared fact). The schema-coverage DEAD_ALLOWLIST entries for
+        # these three are removed in the same PR -- a leaf is no longer
+        # allowlisted as dead once the engine consumes or refuses it.
+        #
+        # 1. capitalize_interest -- READ. Mapped to property.capitalize_interest
+        #    and consumed by simulation_rules.apply_margin_heloc_interest: false
+        #    = service the drawn-margin interest in CASH (via the existing
+        #    heloc_interest_servicing rule); true = capitalize up to the charge,
+        #    servicing the rest (the pre-#1036 behaviour). A retiree paying
+        #    HELOC interest in cash is no longer modelled as capitalizing it.
+        #    The internal-config default (when this key is absent, e.g. every
+        #    test that builds the internal dict directly) is True -- byte-
+        #    identical to the pre-#1036 capitalization path (DP#32: absence is
+        #    the fallback, never a coercion of a supplied value).
+        prop_cfg["capitalize_interest"] = heloc["capitalize_interest"]
+        # 2. balance (the DRAWN amount) -- REFUSED LOUDLY when > 0. The engine
+        #    starts a HELOC undrawn by design (#577: a draw is a simulation
+        #    decision, never a fact read off this field), so a declared
+        #    opening drawn balance was silently dropped before #1036 -- a
+        #    household already mid-strategy would have started at zero drawn
+        #    and zero traced. A draw the household wants the engine to make
+        #    is expressed via decisions.borrow_to_invest (this issue) or the
+        #    readvanceable SM mechanism; honouring an opening drawn balance
+        #    as a true starting position is real, separate follow-up work.
+        #    balance = 0 (undrawn) is the documented accepted state.
+        heloc_drawn = heloc["balance"]["amount"]
+        if heloc_drawn > 0:
+            raise ContractAdaptationError(
+                f"liability {heloc['id']!r} (kind=heloc) declares balance.amount="
+                f"{heloc_drawn:,.0f} > 0, an OPENING DRAWN balance. The engine "
+                f"starts a HELOC undrawn by design (#577: a draw is a simulation "
+                f"decision, never a fact read off this field), so before #1036 "
+                f"this declaration was silently dropped -- a household already "
+                f"mid-strategy would have started at zero drawn and zero traced. "
+                f"Express a draw the engine should make via decisions.borrow_to_invest "
+                f"(#1036) or the readvanceable SM mechanism; honouring an opening "
+                f"drawn position as a true start is tracked as follow-up. Refusing "
+                f"loudly rather than silently dropping a real declared fact (DP#32)."
+            )
+        # 3. deductibility -- REFUSED LOUDLY when declared at all. The s.20(1)(c)
+        #    trace is COMPUTED from the borrowing's purpose (the readvance / the
+        #    borrow-to-invest draw), never a declared ratio on the HELOC -- the
+        #    same stance the consumer-loan path already takes (a declared
+        #    investment_portion > 0 on a car/student/personal loan is refused).
+        #    Silently honouring OR silently dropping a declared HELOC
+        #    deductibility would both be the DP#32 two-way trap. Removing it
+        #    from schema/example.json is byte-safe: it was never read.
+        # Issue #1036: refuse a declared HELOC deductibility only when it
+        # ASSERTS a deductible investment portion (> 0) -- the s.20(1)(c) trace
+        # is COMPUTED from the borrowing's purpose, never a declared ratio on
+        # the HELOC (same stance the consumer-loan path takes at :3309, whose
+        # message instructs 'declare investment_portion=0'). A pure
+        # personal-use declaration (investment_portion=0) is the safe, accepted
+        # state -- the user's real contracts declare exactly that, and refusing
+        # it would block every production contract. investment_portion=0 is
+        # accepted; investment_portion>0 is refused loudly.
+        heloc_deductibility = heloc.get("deductibility")
+        if heloc_deductibility is not None and heloc_deductibility["investment_portion"] > 0:
+            raise ContractAdaptationError(
+                f"liability {heloc['id']!r} (kind=heloc) declares deductibility."
+                f"investment_portion={heloc_deductibility['investment_portion']:.4f} "
+                f"> 0, asserting some of its interest is deductible (ITA s.20(1)(c)). "
+                f"The s.20(1)(c) trace is COMPUTED from the borrowing's purpose (the "
+                f"readvanceable readvance / the decisions.borrow_to_invest draw), "
+                f"never a declared ratio on the HELOC itself -- the same stance the "
+                f"consumer-loan path takes. Silently honouring OR silently dropping "
+                f"this declaration would both be the DP#32 defect. Declare "
+                f"investment_portion=0 (personal-use, not deductible), or express a "
+                f"draw the engine should make via decisions.borrow_to_invest (#1036). "
+                f"Refusing loudly."
+            )
 
     if credit_facility:
         # issue #689: makes the facility reachable by the engine at all --
@@ -4492,6 +4551,126 @@ def to_internal_config(doc: Dict) -> Dict:
     deposit_products = list(doc["decisions"].get("deposit_products", []))
     if deposit_products:
         legacy["deposit_products"] = deposit_products
+
+    # Issue #1036: decisions.borrow_to_invest -- a first-class, swept,
+    # objective-ranked one-shot borrow-to-invest decision (draw $X against a
+    # declared HELOC at year 0, invest the proceeds in non-reg, deduct the
+    # interest under ITA s.20(1)(c)). Mirrors decisions.mortgage
+    # .structure_options[] / refinance_options[]: each declared option is a
+    # rung on the amount ladder, and the optimizer also runs the implicit
+    # amount=0 (no-draw) baseline so 'do nothing' is always the frame of
+    # reference (DP#33: a declaration is a lens, not a blindfold -- the sweep
+    # is not replaced by the declared set, it is annotated by it). The draw
+    # reuses the year-0 margin-draw machinery (initial_state_for_run); the
+    # interest is priced and deducted by the existing drawn-margin rules,
+    # traced 100% investment. No readvanceable facility is required -- a
+    # mortgage-free household with a HELOC can express leverage this way.
+    #
+    # DP#32 boundary refusals (a partial/unsupported declaration must FAIL
+    # LOUDLY, never silently coerce to the supported value):
+    #   - `source` must resolve to a declared kind=heloc liability. A typo or a
+    #     reference to a non-heloc liability (a margin account, an unsecured
+    #     line_of_credit) is refused loudly -- the engine draws against a
+    #     property-secured HELOC in this slice; other sources are follow-up.
+    #   - `amount` must be > 0 and <= the source HELOC's limit. A draw larger
+    #     than the limit is refused (it would silently cap, hiding the
+    #     over-limit declaration); a zero/negative amount is refused (it is
+    #     not a borrow-to-invest candidate, it is the no-draw baseline the
+    #     sweep already runs implicitly).
+    #   - `target_account` must be `non_reg`. Registered targets (RRSP/TFSA)
+    #     are non-deductible under s.18(11) and are refused loudly until a
+    #     separate slice models them.
+    # Mapped only when the household declares some: an empty list is a
+    # household with no borrow-to-invest question (the golden path), and
+    # emitting it would move the internal shape away from 'absent' -- kept
+    # conditional so a no-borrow-to-invest household round-trips byte-
+    # identically, matching every other optional block (DP#24/DP#32). The
+    # unwind trigger (#1017 decumulation lever) is NOT modelled in this slice.
+    borrow_to_invest = list(doc["decisions"].get("borrow_to_invest", []))
+    if borrow_to_invest:
+
+        # The set of declared kind=heloc liability ids + their limits, for
+        # source resolution and the amount<=limit check. The engine supports a
+        # single HELOC facility today (_find_liability returns one), but the
+        # schema permits more than one, so resolve by id across all of them.
+        heloc_limits = {
+            liab["id"]: liab["limit"]
+            for liab in doc.get("liabilities", [])
+            if liab["kind"] == "heloc"
+        }
+        # The engine models ONE HELOC facility today: `heloc` (found above by
+        # _find_liability, scoped to the principal residence then any heloc) is
+        # that facility, and `property.margin_available` is ITS limit. The
+        # single-facility charge check refuses two helocs on the PRINCIPAL
+        # residence, but a SECOND heloc on a non-principal (recreational/rental)
+        # property passes it -- so `heloc_limits` can hold more than one entry
+        # (D5). A borrow-to-invest source must be the FACILITY heloc (`heloc`):
+        # the draw is booked on `new_heloc_balance` (the engine's one drawn
+        # margin), at the facility's rate and charge room. A source naming any
+        # other heloc (e.g. a recreational-property line) would pass the
+        # amount<=limit check against THAT line's limit while the draw actually
+        # hits the principal facility -- silently aliasing another liability,
+        # exactly the DP#32 defect. Refuse unless source == the facility.
+        facility_heloc_id = heloc["id"] if heloc else None
+        btv_options: List[Dict[str, Any]] = []
+        for opt in borrow_to_invest:
+            source_id = opt["source"]
+            if source_id not in heloc_limits:
+                raise ContractAdaptationError(
+                    f"decisions.borrow_to_invest[id={opt['id']!r}] declares "
+                    f"source={source_id!r}, but no kind=heloc liability with "
+                    f"that id is declared (declared heloc ids: "
+                    f"{sorted(heloc_limits)}). This slice draws against a "
+                    f"property-secured HELOC only; a margin account or an "
+                    f"unsecured line_of_credit source is follow-up. Refusing "
+                    f"loudly rather than silently drawing against nothing or "
+                    f"silently aliasing another liability (DP#32)."
+                )
+            if facility_heloc_id is None or source_id != facility_heloc_id:
+                raise ContractAdaptationError(
+                    f"decisions.borrow_to_invest[id={opt['id']!r}] declares "
+                    f"source={source_id!r}, but the engine's single drawn "
+                    f"HELOC facility is {facility_heloc_id!r} (whose limit is "
+                    f"property.margin_available). A draw against any other "
+                    f"heloc -- e.g. a non-principal-property line -- would pass "
+                    f"the amount<=limit check against THAT line while the draw "
+                    f"actually books on the principal facility, silently "
+                    f"aliasing another liability (D5/DP#32). Refusing loudly; "
+                    f"multi-facility support is follow-up."
+                )
+            amount = opt["amount"]
+            if amount <= 0:
+                raise ContractAdaptationError(
+                    f"decisions.borrow_to_invest[id={opt['id']!r}] declares "
+                    f"amount={amount}, which is not a borrow-to-invest draw. "
+                    f"The no-draw baseline is the implicit amount=0 rung the "
+                    f"sweep already includes; a declared option must be a real "
+                    f"draw > 0. Refusing loudly (DP#32)."
+                )
+            source_limit = heloc_limits[source_id]
+            if amount > source_limit:
+                raise ContractAdaptationError(
+                    f"decisions.borrow_to_invest[id={opt['id']!r}] declares "
+                    f"amount={amount:,.0f} > source {source_id!r}'s limit "
+                    f"({source_limit:,.0f}). The draw is capped at the HELOC's "
+                    f"limit at runtime; declaring an over-limit amount would "
+                    f"silently cap, hiding the over-limit declaration. Refusing "
+                    f"loudly rather than silently drawing less than declared "
+                    f"(DP#32)."
+                )
+            # target_account is enforced by the schema's enum ("non_reg" only)
+            # -- a registered target (RRSP/TFSA) is non-deductible under s.18(11)
+            # and is refused loudly at schema validation, never silently coerced.
+            # No duplicate check here (DP#9: validate_contract enforces the enum
+            # before this loop runs).
+            btv_options.append({
+                "id": opt["id"],
+                "label": opt["label"],
+                "source": source_id,
+                "amount": amount,
+                "target_account": opt["target_account"],
+            })
+        legacy["borrow_to_invest_options"] = btv_options
 
     # Issue #692 (epic #690 bite 1): the couple's NON-principal properties reach
     # the annual balance sheet as a first-class `properties` list

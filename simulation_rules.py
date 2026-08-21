@@ -1127,9 +1127,22 @@ RULE_ORDER: tuple = (
     'second_property_mortgage',
     'margin_heloc_interest',
     'sm_readvance',
-    'sm_interest',
     'sm_investment_growth',
     'heloc_interest_servicing',
+    # Issue #1036 D4/N2: 'sm_interest' runs AFTER 'heloc_interest_servicing' so
+    # the Leg 3 (drawn-margin) deduction can EXCLUDE the unfunded interest --
+    # the portion that was neither paid (serviced from pots) nor capitalized
+    # (added to the balance). A s.20(1)(c) deduction requires interest paid or
+    # payable; the unfunded is neither (it evaporates from the balance sheet),
+    # so it must not be deducted. sm_interest's outputs (readvance_interest,
+    # tax_savings, qc_*, carry-forward) are read only at the year-end snapshot,
+    # so moving it later is safe; its inputs (new_sm_investment, new_nonreg_bal)
+    # are now post-growth/post-servicing, which changes the QC investment-income
+    # cap base for drawn-margin households (a correction -- the cap is on the
+    # investment income the grown pot earns). The golden household hits the
+    # `if not sm_active and traced_deductible <= 0` early return (no draw,
+    # personal mortgage), so it is byte-identical (DP#32).
+    'sm_interest',
     # Issue #956 bite E (principal-residence disposition): a declared
     # mid-horizon SALE of the PRINCIPAL residence settles in its sale year.
     # The principal flows via house_value/mortgage_balance/heloc_balance/
@@ -3262,9 +3275,20 @@ def apply_sm_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # ── Leg 3: the drawn revolving margin (#850). Its deductible balance does
     # not amortize -- apply_margin_heloc_interest capitalizes it, never
     # repays it.
+    # Issue #1036 D4/N2: deduct only interest that was PAID (serviced from pots)
+    # or PAYABLE (capitalized into the balance) -- NOT the `heloc_interest_
+    # unfunded` portion that was neither (it evaporated because the pots could
+    # not service it and the charge had no room to capitalize it). A s.20(1)(c)
+    # deduction requires interest paid or payable; the unfunded is neither, so
+    # deducting it was a confident wrong number in the tax computation (and the
+    # dollar-exact engine of the D2 inverted incentive). This runs AFTER
+    # heloc_interest_servicing (see the rule order), so ws.heloc_interest_unfunded
+    # is final here. 0.0 when there is no drawn margin or it is fully paid /
+    # capitalized (the byte-identical path, incl. the golden household).
     margin_proportion = compute_heloc_deductible_proportion(
         ws.new_margin_tracing, yield_rate=yield_rate)
-    ws.margin_deductible_interest = ws.margin_heloc_interest * margin_proportion
+    paid_or_payable_margin_interest = ws.margin_heloc_interest - ws.heloc_interest_unfunded
+    ws.margin_deductible_interest = paid_or_payable_margin_interest * margin_proportion
     ws.margin_deductible_balance = ws.new_heloc_balance * margin_proportion
 
     traced_deductible = ws.advance_deductible_interest + ws.margin_deductible_interest
@@ -3414,13 +3438,15 @@ def apply_margin_heloc_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ``heloc_interest_servicing`` rule below, which runs once the SM balances
     it is paid out of are final.
 
-    NOTE (honest scope limit): the contract declares
-    ``liabilities[kind=heloc].capitalize_interest`` and the engine still does
-    not read it -- a household that says "I pay my HELOC interest in cash"
-    is modelled here as capitalizing up to the charge anyway. Wiring that
-    declared fact is real, separate work (it is still listed in
-    tests/architecture/test_contract_reachability.py); this rule fixes the
-    unboundedness, not the declaration gap.
+    NOTE (issue #1036): the contract declares
+    ``liabilities[kind=heloc].capitalize_interest`` and the engine now READS
+    it (mapped to ``property.capitalize_interest`` -> ``SimulationConfig
+    .capitalize_interest``). When False, the drawn-margin interest is serviced
+    in cash -- none of it capitalizes, regardless of charge room. When True
+    (the default when the contract omits the field, and the pre-#1036
+    behaviour), capitalize up to the charge and service the rest. The
+    capitalized-vs-serviced split is honoured below. This closes the
+    declaration gap this NOTE used to record.
     """
     margin_heloc_interest = ws.opening_heloc_balance * ctx.heloc_rate
 
@@ -3439,6 +3465,20 @@ def apply_margin_heloc_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
         heloc_ltv_limit=ctx.config.heloc_ltv_limit,
     )
     capitalized = min(margin_heloc_interest, room)
+    # Issue #1036: honour liabilities[kind=heloc].capitalize_interest. When
+    # False, the household pays the drawn-margin interest in CASH -- none of
+    # it capitalizes into the balance, regardless of how much charge room is
+    # left (a retiree servicing their HELOC interest in cash is no longer
+    # modelled as capitalizing it up to the charge anyway). When True (the
+    # default when the contract omits the field, and the pre-#1036 behaviour),
+    # capitalize up to the charge and service the rest in cash. The serviced
+    # portion is booked by the ``heloc_interest_servicing`` rule below, which
+    # runs once the SM balances it is paid out of are final -- so wiring this
+    # here is money-conserving (the interest leaves the balance sheet via the
+    # pots, never silently absorbed) and DP#32-honest (when the pots cannot
+    # cover it, ``heloc_interest_unfunded`` reports it).
+    if not ctx.config.capitalize_interest:
+        capitalized = 0.0
 
     ws.margin_heloc_interest = margin_heloc_interest
     ws.margin_heloc_interest_capitalized = capitalized

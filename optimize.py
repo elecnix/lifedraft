@@ -2568,6 +2568,232 @@ def _print_property_funding_report(results: List[Dict]) -> None:
     print(f"  re-optimisation, not a restated input (DP#22).")
 
 
+def run_borrow_to_invest_exploration(cfg: Dict, input_path: str = "input.json",
+                                     objective: ObjectiveFunction = None
+                                     ) -> List[Dict]:
+    """Run the full optimizer once per (borrow-to-invest amount rung x income
+    scenario) cell -- issue #1036.
+
+    ``decisions.borrow_to_invest`` exists so a mortgage-free household (or any
+    household with a declared HELOC) can ask the tool to RANK drawing $X
+    against home equity and investing it in non-reg -- a one-shot, non-
+    readvanceable leverage decision independent of any mortgage -- rather than
+    hand-authoring one contract document per draw amount and diffing the
+    outputs. The amount ladder is the declared options array; the optimizer
+    also runs the implicit amount=0 (no-draw) baseline so 'do nothing' is
+    always the frame of reference (DP#33: a declaration is a lens, not a
+    blindfold -- the sweep is not replaced by the declared set, it is
+    annotated by it).
+
+    The draw reuses the year-0 margin-draw machinery already built for the
+    ``draw_fraction`` axis: each declared amount becomes a
+    ``draw_fraction = amount / margin_available`` rung, and ``run_optimization``
+    books ``lump_sum = margin_available * draw_fraction`` via
+    ``initial_state_for_run`` -> ``heloc_balance``, invests it in non-reg, and
+    the existing ``apply_margin_heloc_interest`` + ``sm_interest`` Leg 3 price
+    the interest and deduct it under ITA s.20(1)(c) (traced 100% investment --
+    a borrow-to-invest draw has no personal portion). No readvanceable
+    facility is required: a mortgage-free household with a HELOC gets a
+    leveraged trajectory without any SM readvance.
+
+    Crossed with EVERY declared income scenario (``decisions.income[]``,
+    #665) so the household can see whether the answer *changes* under job
+    loss -- a leverage choice that is optimal at full income and ruinous on
+    EI is precisely what this composition must surface (DP#5: anchor
+    decisions, overlay sensitivities; DP#22: the optimizer ranks, it doesn't
+    choose).
+
+    Returns the UNION of every (amount rung, income scenario) cell's ranked
+    results, each tagged with ``borrow_to_invest_id``/``borrow_to_invest_label``
+    /``borrow_to_invest_amount`` and ``income_scenario_id``/
+    ``income_scenario_label``. When the household declares NO
+    ``borrow_to_invest`` this is never called -- ``main`` gates it on a
+    declaration, so the golden trajectory is byte-identical (DP#32).
+    """
+    from scenario_discovery import discover_anchors
+    options = list(cfg.get('borrow_to_invest_options', []))
+    if not options:
+        return []
+    # D2 / #1081 / #1037: REFUSE borrow-to-invest under any regime where
+    # outstanding HELOC debt distorts the ranking toward 'borrow the most and
+    # die owing it', until the asset-liability coupling (#1037) and/or the
+    # objective's debt-floor (#1081) land. The root cause is NOT
+    # liquidate_to_target -- it is that `min_after_tax_estate` scores
+    # `-net_estate`, and outstanding debt reduces net_estate 1:1, so 'borrow
+    # the maximum and die owing it' ranks highest (proven dollar-exact: every
+    # borrowed dollar left outstanding buys exactly one dollar of objective
+    # score, terminal assets identical across rungs). #1068 (the #1065
+    # insolvency floor) does NOT cover this: every net_estate here is positive,
+    # so its branch never fires (verified by transplant). This refusal is at
+    # the EXPLORATION INVOCATION point (not at load-time contract mapping) so
+    # it sees the RESOLVED objective -- including a `--objective
+    # min_after_tax_estate` CLI override, which a load-time check cannot catch
+    # (the objective is resolved per-run, not per-document). Borrow-to-invest
+    # stays available under the accumulation / wealth-maximising objectives
+    # (e.g. the default max_net_benefit, max_after_tax_estate), never shipping
+    # a ranked table that rewards dying in debt (DP#32: refuse loudly, never
+    # silently wrong).
+    _obj_name = getattr(objective, 'name', None)
+    _liq = cfg.get('retirement', {}).get('liquidate_to_target') is True
+    _d2_reasons = []
+    if _obj_name == 'min_after_tax_estate':
+        _d2_reasons.append(
+            "the run is scored under min_after_tax_estate, which scores "
+            "-net_estate; outstanding borrow-to-invest HELOC debt reduces "
+            "net_estate dollar-for-dollar, so 'borrow the maximum and die "
+            "owing it' ranks highest (the inverted incentive filed as "
+            "#1081). This fires whether or not liquidate_to_target is set.")
+    if _liq:
+        _d2_reasons.append(
+            "retirement.liquidate_to_target is true: the die-with-zero "
+            "drawdown liquidates the borrowed non-reg pot to fund spending "
+            "while the matching HELOC is never repaid in decumulation "
+            "(apply_sm_unwind is gated on the SM sleeve, which this draw "
+            "does not touch), so the household spends the borrowed proceeds "
+            "and dies owing the HELOC (the unwind coupling is #1037).")
+    if _d2_reasons:
+        raise ValueError(
+            "decisions.borrow_to_invest is declared but the run is scored "
+            "under a regime where outstanding borrow-to-invest debt distorts "
+            "the ranking toward 'borrow the most and die owing it'. Refusing "
+            "rather than shipping that table (DP#32). Reason(s):\n  - "
+            + "\n  - ".join(_d2_reasons)
+            + "\n\nborrow-to-invest remains available under the accumulation "
+            "/ wealth-maximising objectives (e.g. max_net_benefit, "
+            "max_after_tax_estate). Track #1081 (the min_after_tax_estate debt "
+            "floor) and #1037 (the asset-liability unwind coupling) for when "
+            "this refusal can lift.")
+    margin_available = cfg.get('property', {}).get('margin_available', 0)
+    income_scenarios = discover_anchors(cfg)['income']
+    # The amount ladder: the implicit no-draw baseline + one rung per declared
+    # option. The baseline is the frame of reference every draw is read
+    # against (DP#33); without it, a declared $50k draw that beats a $100k draw
+    # would also silently beat 'do nothing', and the household would never see
+    # that the better answer was to not borrow at all.
+    cells = [{'id': 'no_draw', 'label': 'No draw (baseline)',
+              'amount': 0.0, 'draw_fraction': 0.0}]
+    for opt in options:
+        cells.append({
+            'id': opt['id'], 'label': opt['label'],
+            'amount': opt['amount'],
+            'draw_fraction': opt['amount'] / margin_available,
+        })
+
+    scenarios = []
+    for cell in cells:
+        for inc in income_scenarios:
+            cfg_variant = _apply_income_scenario(cfg, inc)
+            # D3 / #1036: honour target_account=non_reg. fill_room
+            # (strategy.py) is a registered-first waterfall, so by default a
+            # borrow-to-invest draw would land ~75% in RRSP/TFSA -- the exact
+            # s.18(11) landing the schema refuses. Reuse the EXISTING
+            # borrowed-money-to-deductible-non-reg mechanism
+            # (property.refinance_advance_deductible_non_reg -> fill_room's
+            # deductible_non_reg_first) to front-load the WHOLE draw into
+            # non_reg before the registered waterfall runs, so the declared
+            # target_account is actually executed (DP#32: a declared decision
+            # the engine does not execute is the defect class this PR closes).
+            # The no-draw baseline (amount=0) sets 0 -- a no-op (there is no
+            # lump_sum to route). This is the ONE place borrow-to-invest
+            # diverges from a plain draw_fraction sweep.
+            # N1: ADD to any declared #792 refinance advance split rather than
+            # clobbering it -- a declared household decision must not be
+            # silently overwritten (DP#32). fill_room caps deductible_non_reg_
+            # first at the year-0 lump sum, and this exploration's lump sum is
+            # the borrow-to-invest draw (no refinance cash-out here), so the
+            # additive value still routes the whole draw to non_reg; the
+            # declared #792 split is preserved (added to), not discarded.
+            existing_split = cfg_variant['property'].get('refinance_advance_deductible_non_reg')
+            if existing_split is None:
+                existing_split = 0
+            cfg_variant['property']['refinance_advance_deductible_non_reg'] = existing_split + cell['amount']
+            scenarios.append((cell, inc, {'kwargs': dict(
+                cfg=cfg_variant, input_path=input_path, objective=objective,
+                draw_fraction_options=[cell['draw_fraction']])}))
+
+    all_results: List[Dict] = []
+    for (cell, inc, _payload), results in zip(
+            scenarios, _map_scenarios([s[2] for s in scenarios])):
+        for r in results:
+            r['borrow_to_invest_id'] = cell['id']
+            r['borrow_to_invest_label'] = cell['label']
+            r['borrow_to_invest_amount'] = cell['amount']
+            r['income_scenario_id'] = inc['id']
+            r['income_scenario_label'] = inc['label']
+        all_results.extend(results)
+
+    all_results.sort(
+        key=lambda r: ranking_key(r, r.get('objective_score', r.get('net_benefit', 0))),
+        reverse=True)
+    return all_results
+
+
+def winners_by_borrow_to_invest(results: List[Dict]) -> List[Dict]:
+    """Pure logic half of the borrow-to-invest ranking report (issue #1036):
+    for each amount rung present in ``results`` (in SCORE order -- best first,
+    because ``run_borrow_to_invest_exploration`` sorts by objective before
+    ``dict.fromkeys``; the no-draw baseline is NOT necessarily row 1, it is the
+    frame of reference ranked on its merits, DP#33), find the winning strategy
+    and record it. Split out from ``_print_borrow_to_invest_report`` so 'which
+    draw amount does the objective prefer' is a directly testable fact, not
+    something only observable by parsing printed text (mirrors
+    ``winners_by_property_funding``).
+
+    Returns one dict per amount rung:
+        {id, label, amount, strategy, net_benefit, objective_score}
+    The winner is selected by the RESOLVED objective's score (defaulting to
+    net_benefit), so a non-default ``decisions.objective`` reorders the
+    borrow-to-invest ranking exactly as it reorders the headline (DP#22).
+    """
+    seen = list(dict.fromkeys(r['borrow_to_invest_id'] for r in results))
+    winners = []
+    for bid in seen:
+        rows = [r for r in results if r['borrow_to_invest_id'] == bid]
+        best = max(rows, key=lambda r: r.get(
+            'objective_score', r.get('net_benefit', 0)))
+        winners.append({
+            'id': bid,
+            'label': rows[0]['borrow_to_invest_label'],
+            'amount': rows[0]['borrow_to_invest_amount'],
+            'strategy': best.get('strategy', '?'),
+            'net_benefit': best.get('net_benefit', 0),
+            'objective_score': best.get(
+                'objective_score', best.get('net_benefit', 0)),
+        })
+    return winners
+
+
+def _print_borrow_to_invest_report(results: List[Dict]) -> None:
+    """Issue #1036: print the borrow-to-invest ranking -- one row per amount
+    rung in SCORE order (best first; the no-draw baseline is ranked on its
+    merits, not pinned to row 1, DP#33), naming the winning strategy each
+    rung produces. The objective-winner is the top row (DP#22: the optimizer
+    ranks, the user reads the winner).
+
+    D9: the numeric column shown is the RESOLVED objective's score
+    (``objective_score`` -- the value that drove the order), not ``net_benefit``.
+    Under ``min_after_tax_estate`` the score is the negated after-tax estate
+    and ``net_benefit`` decreases monotonically down the ranking, so showing
+    ``net_benefit`` would contradict the order; showing the score makes the
+    table self-consistent. Under ``max_net_benefit`` the two are equal."""
+    winners = winners_by_borrow_to_invest(results)
+    if not winners:
+        return
+    obj_name = _objective_name_for_results(results) or 'max_net_benefit'
+    print(f"\n  🏦  BORROW-TO-INVEST RANKING (decisions.borrow_to_invest -- issue #1036)")
+    print(f"      objective: {obj_name}")
+    print(f"\n  {'#':<3} {'Draw':<36} {'Amount':>10} {'Strategy':<28} {'Score':>12}")
+    print(f"  {'-'*92}")
+    for i, w in enumerate(winners):
+        amt = f"${w['amount']/1000:.0f}k" if w['amount'] else '—'
+        score = w.get('objective_score', w.get('net_benefit', 0))
+        print(f"  {i+1:<3} {w['label']:<36} {amt:>10} {w['strategy']:<28} "
+              f"{score:>12,.0f}")
+    print(f"\n  The objective-winner is row 1. The no-draw baseline (—) is the")
+    print(f"  frame of reference every draw is read against (DP#33); each draw")
+    print(f"  amount is a real re-optimisation, not a restated input (DP#22).")
+
+
 def _print_decumulation_shortfall_report(results: List[Dict], cfg: Dict) -> None:
     """Issue #707's console deliverable: a plan that runs out of money before
     the horizon is surfaced as a FIRST-CLASS output, not a confident terminal
@@ -4167,6 +4393,19 @@ def main():
         funding_results = run_property_funding_exploration(
             cfg, args.input, objective=objective)
         _print_property_funding_report(funding_results)
+
+    # Issue #1036: borrow-to-invest ranking (draw $X against a declared HELOC
+    # at year 0, invest in non-reg, deduct the interest under ITA s.20(1)(c)).
+    # DP#16: gated on the household actually having declared
+    # ``decisions.borrow_to_invest`` -- no CLI flag, no opt-in, and no extra
+    # optimizer pass for the households that have not asked this question yet.
+    # A mortgage-free household with a HELOC can express leverage this way; a
+    # household that declares none never reaches the exploration and the golden
+    # trajectory is byte-identical (DP#32).
+    if cfg.get('borrow_to_invest_options'):
+        btv_results = run_borrow_to_invest_exploration(
+            cfg, args.input, objective=objective)
+        _print_borrow_to_invest_report(btv_results)
 
     # ── Export ── (DP#15: output files go to ~/.cache, not repo root)
     if args.export_csv:
