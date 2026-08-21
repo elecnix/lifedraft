@@ -3452,6 +3452,12 @@ def simulate_year_pure(
         heloc_interest_capitalized=ws.margin_heloc_interest_capitalized,
         heloc_interest_serviced=ws.margin_heloc_interest_serviced,
         heloc_interest_unfunded=ws.heloc_interest_unfunded,
+        # Issue #1069: the charged total and the funded slice, so the
+        # conservation identity (charged = capitalized + serviced =
+        # capitalized + funded + unfunded) is checkable from the outside by
+        # the run-path invariant instead of being taken on faith (DP#32).
+        heloc_interest_charged=ws.margin_heloc_interest,
+        heloc_servicing_funded=ws.heloc_servicing_funded,
         heloc_servicing_realized_gain=ws.heloc_servicing_realized_gain,
         heloc_servicing_tax=ws.heloc_servicing_tax,
         # Issue #679: solvency identity + forced-liquidation waterfall.

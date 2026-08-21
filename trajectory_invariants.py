@@ -159,6 +159,16 @@ RUN_PATH_INVARIANTS: tuple = (
     # principal DISPOSITION is the one legitimate break, and the check is
     # discharge-aware so a household that sells its home is not false-refused).
     'mortgage_conserves_principal',
+    # Issue #1069: the HELOC margin-interest conservation identity. Before
+    # this, ``heloc_interest_unfunded`` was written by the servicing rule and
+    # read by NOTHING -- a household that could not fund its cash-serviced
+    # HELOC interest (the default path once #1036 wires
+    # ``capitalize_interest: false``) lost that money silently, every year.
+    # Like the two checks above it, this is a structural property no correct
+    # trajectory can violate: it never refuses a household for being unable
+    # to pay (that is a reported outcome, not a breach) -- it refuses a
+    # bookkeeping that loses track of the interest dollars (DP#32).
+    'heloc_interest_fully_accounted',
 )
 
 
@@ -238,6 +248,10 @@ _ALL_NUMERIC_FIELDS = _BALANCE_FIELDS + [
     'employment_income', 'cpp_income', 'oas_income', 'pension_income',
     'non_reg_unrealized_gains', 'mortgage_payment', 'mortgage_interest',
     'mortgage_principal',
+    # issue #1069: the margin-interest split must never be NaN either.
+    'heloc_interest_charged', 'heloc_interest_capitalized',
+    'heloc_interest_serviced', 'heloc_servicing_funded',
+    'heloc_interest_unfunded',
     # issue #679
     'after_tax_income', 'living_costs', 'debt_service', 'contributions_total',
     'solvency_shortfall', 'solvency_covered', 'forced_liquidation_tax',
@@ -899,6 +913,85 @@ def check_invested_capital_equals_new_debt(results, ctx):
             f'${actual_new_debt - expected:+,.2f} of invested capital was '
             f'invested but never borrowed',
             actual_new_debt))
+    return violations
+
+
+# ============================================================================
+# HELOC margin-interest conservation (issue #1069; DP#18's "assert the
+# relation directly, every year, in the fold"). Every dollar of margin
+# interest charged on the drawn HELOC is either capitalized into the balance
+# or serviced in cash; every serviced dollar is either funded from the
+# non-reg/SM pots or reported on ``heloc_interest_unfunded`` -- never both
+# absorbed AND missing.
+# ============================================================================
+
+@invariant('heloc_interest_fully_accounted')
+def check_heloc_interest_fully_accounted(results, ctx):
+    """The margin-interest split conserves, every year (issue #1069).
+
+    ``apply_margin_heloc_interest`` charges
+    ``opening_heloc_balance * heloc_rate`` and splits it into the capitalized
+    slice (what the charge had room for) and the cash-serviced remainder;
+    ``apply_heloc_interest_servicing`` then splits the serviced slice into
+    what the pots actually delivered (net of the gross-up tax) and the
+    unfunded remainder. Both splits are surfaced on ``YearResult``, so the
+    two conservation identities are checkable directly, in the fold, on every
+    production run (DP#18/DP#32) -- which is what makes this invariant the
+    reader ``heloc_interest_unfunded`` never had:
+
+        heloc_interest_charged == heloc_interest_capitalized
+                                  + heloc_interest_serviced
+        heloc_interest_serviced == heloc_servicing_funded
+                                   + heloc_interest_unfunded
+
+    plus the range guard ``0 <= unfunded <= serviced``: a year may not
+    fabricate unfunded interest it did not owe, and may not absorb a negative
+    one. What this deliberately does NOT check is whether the pots COULD have
+    funded more -- the servicing rule's pot draws are priced through the
+    gross-up/tax arithmetic (``price_sm_unwind``), and reconstructing them
+    here would re-implement the engine inside the invariant (DP#11's trap).
+    A year that genuinely cannot pay reports the shortfall and stays legal;
+    a bookkeeping that loses interest dollars does not.
+    """
+    tol = 0.5  # cents-level; float noise on these identities is ~1e-9
+    violations = []
+    for r in results:
+        charged = getattr(r, 'heloc_interest_charged', 0.0)
+        capitalized = getattr(r, 'heloc_interest_capitalized', 0.0)
+        serviced = getattr(r, 'heloc_interest_serviced', 0.0)
+        funded = getattr(r, 'heloc_servicing_funded', 0.0)
+        unfunded = getattr(r, 'heloc_interest_unfunded', 0.0)
+        if abs((capitalized + serviced) - charged) > tol:
+            violations.append(Violation(
+                getattr(r, 'year', 0),
+                f'charged margin interest ${charged:,.2f} split into '
+                f'${capitalized:,.2f} capitalized + ${serviced:,.2f} serviced '
+                f'= ${capitalized + serviced:,.2f}: '
+                f'${charged - capitalized - serviced:+,.2f} of interest was '
+                f'absorbed -- neither capitalized nor serviced',
+                charged))
+        if abs((funded + unfunded) - serviced) > tol:
+            violations.append(Violation(
+                getattr(r, 'year', 0),
+                f'serviced interest ${serviced:,.2f} split into '
+                f'${funded:,.2f} funded from pots + ${unfunded:,.2f} unfunded '
+                f'= ${funded + unfunded:,.2f}: '
+                f'${serviced - funded - unfunded:+,.2f} of serviced interest '
+                f'was absorbed -- neither funded nor reported as unfunded',
+                serviced))
+        if unfunded < -tol:
+            violations.append(Violation(
+                getattr(r, 'year', 0),
+                f'heloc_interest_unfunded is ${unfunded:,.2f}: a negative '
+                f'shortfall is an absorbed overpayment, not a report',
+                unfunded))
+        if unfunded > serviced + tol:
+            violations.append(Violation(
+                getattr(r, 'year', 0),
+                f'heloc_interest_unfunded ${unfunded:,.2f} exceeds the '
+                f'serviced slice ${serviced:,.2f}: interest that was never '
+                f'charged cannot go unfunded',
+                unfunded))
     return violations
 
 

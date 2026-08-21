@@ -706,6 +706,12 @@ class YearResult:
     heloc_interest_capitalized: float = 0.0
     heloc_interest_serviced: float = 0.0
     heloc_interest_unfunded: float = 0.0
+    # Issue #1069: the year's TOTAL margin interest charged (opening drawn
+    # balance x rate), surfaced so the split below is CHECKABLE rather than
+    # taken on faith: capitalized + serviced must equal it, and serviced must
+    # equal funded + unfunded -- the identity
+    # 'heloc_interest_fully_accounted' asserts every year in the fold (DP#18).
+    heloc_interest_charged: float = 0.0
     # Issue #1034: forced dispositions of the non-reg and SM pots to service
     # HELOC interest realize a taxed capital gain and reduce the cost basis
     # proportionally (matching sm_unwind, which reuses price_sm_unwind).
@@ -719,6 +725,12 @@ class YearResult:
     # byte-identical (DP#32).
     heloc_servicing_realized_gain: float = 0.0
     heloc_servicing_tax: float = 0.0
+    # Issue #1069: what the pots actually DELIVERED toward the serviced
+    # interest (net of the gross-up tax), accumulated leg by leg. With
+    # ``heloc_interest_unfunded`` it closes the serviced-slice identity:
+    # heloc_interest_serviced == heloc_servicing_funded +
+    # heloc_interest_unfunded, asserted every year by the run-path invariant.
+    heloc_servicing_funded: float = 0.0
     # Issue #1031: the Smith-Manoeuvre investment SLEEVE -- the leveraged
     # non-registered portfolio that lives in jurisdiction_state['canada']
     # (NOT the top-level non_reg_balance), tracked separately because it was

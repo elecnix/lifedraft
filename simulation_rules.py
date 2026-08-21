@@ -555,6 +555,12 @@ class YearWorkingState:
     margin_heloc_interest_capitalized: float = 0.0
     margin_heloc_interest_serviced: float = 0.0
     heloc_interest_unfunded: float = 0.0
+    # Issue #1069: the slice of the serviced interest the pots ACTUALLY
+    # delivered (net of the gross-up tax), accumulated independently by each
+    # disposition leg. Together with ``heloc_interest_unfunded`` (the
+    # remainder) it closes the conservation identity the trajectory invariant
+    # checks every year: charged = capitalized + funded + unfunded.
+    heloc_servicing_funded: float = 0.0
     # Issue #1034: forced dispositions of the non-reg and SM pots to service
     # HELOC interest realize a capital gain (taxed) and reduce the cost basis
     # PROPORTIONALLY to the units sold -- mirroring sm_unwind (which reuses
@@ -3640,6 +3646,7 @@ def apply_heloc_interest_servicing(ws: YearWorkingState, ctx: RuleContext) -> bo
     unfunded = ws.margin_heloc_interest_serviced
     if unfunded <= 0:
         ws.heloc_interest_unfunded = 0.0
+        ws.heloc_servicing_funded = 0.0
         return False
 
     # The household's already-recognized taxable income this year: employment
@@ -3702,6 +3709,7 @@ def apply_heloc_interest_servicing(ws: YearWorkingState, ctx: RuleContext) -> bo
         ws.new_nonreg_bal, ws.new_nonreg_acb, gain, tax, delivered = (
             _service_from_pot(ws.new_nonreg_bal, ws.new_nonreg_acb, from_nonreg))
         unfunded -= delivered
+        ws.heloc_servicing_funded += delivered
         ws.heloc_servicing_realized_gain += gain
         ws.heloc_servicing_tax += tax
         ws.heloc_servicing_taxable += gain * inclusion
@@ -3713,6 +3721,7 @@ def apply_heloc_interest_servicing(ws: YearWorkingState, ctx: RuleContext) -> bo
             _service_from_pot(ws.new_sm_investment, ws.new_sm_cost_basis,
                               from_sm))
         unfunded -= delivered
+        ws.heloc_servicing_funded += delivered
         ws.heloc_servicing_realized_gain += gain
         ws.heloc_servicing_tax += tax
         ws.heloc_servicing_taxable += gain * inclusion
