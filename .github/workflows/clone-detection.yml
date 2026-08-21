@@ -28,6 +28,17 @@ name: Clone detection
 on:
   pull_request:
     branches: [main]
+    # Only opine when the PR touches something this job can opine on: Python
+    # source (the duplication detectors' input), the dupdelta config that
+    # tunes them, or this workflow itself (so a change to the filter
+    # self-tests). A docs-only PR skips the job entirely instead of paying
+    # for a fetch-depth:0 checkout and a full-tree scan that can only ever
+    # come back clean. Skipped is safe: the job is advisory (WARN, never
+    # FAIL) and main has no required status checks.
+    paths:
+      - '**/*.py'
+      - '.dupdelta.toml'
+      - '.github/workflows/clone-detection.yml'
 
 # Supersede an in-flight run on the same PR -- the older one is scanning a
 # commit nobody will merge. (Observed: duplicate runs racing to completion.)
