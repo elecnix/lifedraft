@@ -198,9 +198,18 @@ class TestInsolvencyReachability:
             f"bonus is not live; revisit the #1065 framing")
         assert pre_fix_score > 0.0  # the fabricated bonus
         # The fix: the insolvency is PRICED, scoring below the clean-$0 best.
+        # Issue #1081 redefined the score as -drawable_after_tax - debts -
+        # insolvency: the $250k life-insurance death benefit IS spend-down
+        # surface (drawable = net + debts - house = -50k + 300k - 0 = 250k),
+        # the $300k surviving loan is priced dollar-for-dollar as a pure
+        # penalty (never netted against assets), and the $50k insolvency is
+        # priced again: -250k - 300k - 50k = -600k. (Under #1068's interim
+        # -2|net| shape this scored -100k; #1081's decomposition is what
+        # stops debt from buying score.)
         post_fix_score = MIN_AFTER_TAX_ESTATE.evaluate(rs, cfg)
-        assert post_fix_score == -100_000.0, (
-            f"POST-fix score {post_fix_score:.2f} != -100,000 (-2|net|)")
+        assert post_fix_score == -600_000.0, (
+            f"POST-fix score {post_fix_score:.2f} != -600,000 "
+            f"(-drawable - debts - insolvency)")
         assert post_fix_score < 0.0 < pre_fix_score  # corrected direction
         # Acceptance criterion #1: a clean $0 death strictly outranks this
         # insolvent trajectory under min_after_tax_estate.
@@ -531,18 +540,29 @@ class TestGoldenHouseholdIsByteExact:
             f"9709753.139463063 -- the #1065 fix must not move the golden "
             f"household (the diff touches no engine file)")
 
-    def test_golden_min_after_tax_estate_score_is_unchanged(self):
-        """The golden household is solvent, so ``min_after_tax_estate`` returns
-        ``-net_estate`` exactly as before the fix -- the insolvency penalty
-        branch is inert for every reachable household today."""
+    def test_golden_min_after_tax_estate_score_follows_the_die_with_zero_formula(self):
+        """Issue #1081 redefined the score as ``-drawable_after_tax - debts -
+        insolvency`` (debt priced as a pure penalty, residence outside the
+        spend-down surface) -- so the golden household's score is NO LONGER
+        ``-net_estate`` (the pre-#1081 solvent-regime value): it diverges by
+        exactly the residence equity that now sits outside the surface. This
+        test pins the NEW formula via the named EstateResult fields -- no
+        magic constants -- so the objective and its score cannot drift apart.
+        The ENGINE output is untouched (see the byte-exact test above; the
+        diff touches no fold file)."""
         cfg = golden_household_config()
         rs = _run(cfg)
         estate = compute_after_tax_estate(rs, cfg)
-        assert estate.net_estate > 0.0  # solvent -> the fix is a no-op
+        assert estate.net_estate > 0.0  # solvent
         assert not estate.insolvent
+        assert estate.insolvency == 0.0
         score = MIN_AFTER_TAX_ESTATE.evaluate(rs, cfg)
-        # Pre-fix and post-fix both return -net_estate for a solvent estate.
-        assert score == pytest.approx(-estate.net_estate)
+        # The #1081 decomposition, read off the named fields:
+        assert score == pytest.approx(
+            -estate.drawable_after_tax - estate.debts - estate.insolvency)
+        # And the disclosed divergence from the negated estate is exactly the
+        # residence equity (outside the spend-down surface):
+        assert score == pytest.approx(-estate.net_estate + estate.house_equity)
 
     def test_golden_estate_result_is_not_insolvent(self):
         cfg = golden_household_config()

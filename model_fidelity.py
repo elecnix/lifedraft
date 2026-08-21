@@ -398,10 +398,12 @@ def to_dict(cfg: dict, objective_name: Optional[str] = None) -> Dict:
 # hence the predicate rather than `applies=None`.
 _PRETAX_WEALTH_OBJECTIVES = {'max_terminal_wealth'}
 
-# The objectives whose figure is the after-tax estate under the SAME
-# deemed-disposition math (compute_after_tax_estate): the maximising
-# `max_after_tax_estate` and its #1009 mirror `min_after_tax_estate` (the
-# negated estate). Every estate-figure caveat below applies equally to
+# The objectives whose figure is derived from the after-tax estate under the
+# SAME deemed-disposition math (compute_after_tax_estate): the maximising
+# `max_after_tax_estate` and `min_after_tax_estate` (issues #1009/#1065/#1081:
+# since #1081 it ranks the SPEND-DOWN surface -- drawable_after_tax -- with
+# terminal debt priced as a pure penalty, no longer the plain negated
+# estate). Every estate-figure caveat below applies equally to
 # both — a household optimising toward die-with-zero runs the same estate
 # defaults and the same point-in-time valuation, so suppressing the
 # caveat under the min objective would be a false disclosure gap.

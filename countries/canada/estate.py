@@ -333,6 +333,42 @@ class EstateResult:
         return self.gross_estate - self.total_tax
 
     @property
+    def drawable_after_tax(self) -> float:
+        """After-tax value of every estate pot EXCEPT the designated principal
+        residence -- the spend-down surface the die-with-zero objective ranks
+        on (issue #1081).
+
+        "Die with zero" means the household's SPENDABLE savings are consumed,
+        not that the balance-sheet residual is minimised. Two consequences,
+        both load-bearing for ``objective._neg_after_tax_estate``:
+
+        - The residence is OUTSIDE the spend-down target: it is consumed by
+          living in it, so keeping it is not failing to spend down. A home-
+          sale strategy that converts the residence into portfolio cash (and
+          then spends it) is modelled by #956/#964 -- a sold principal
+          contributes neither value nor debt here, so it drops out of this
+          quantity naturally, with no special-casing.
+        - DEBT must never cancel ASSETS in the score. ``net_estate`` nets
+          them dollar-for-dollar, which let a strategy that borrows and does
+          not repay buy one point of score per borrowed dollar while total
+          assets stayed flat (#1081's central gradient). This property ADDS
+          the debt back onto the asset side (``net_estate + debts``), so the
+          score can price debt SEPARATELY as a pure penalty; the mortgage is
+          already netted inside ``house_equity`` and therefore outside the
+          spend-down surface with the residence itself.
+
+        Identity (one spelling -- derived, never recomputed by callers):
+
+            drawable_after_tax == net_estate + debts - house_equity
+
+        Every non-residence pot enters after its own deemed-disposition tax
+        (registered as ordinary income, non-reg/SM/taxable property at the
+        capital-gains inclusion, CCA recapture stacked); the residence is
+        PRE-exempt so no residence tax term exists to subtract.
+        """
+        return self.net_estate + self.debts - self.house_equity
+
+    @property
     def insolvent(self) -> bool:
         """True when debt outlives the assets at death -- a negative
         ``net_estate`` (issue #1065). The predicate ``insolvency`` (below) is
