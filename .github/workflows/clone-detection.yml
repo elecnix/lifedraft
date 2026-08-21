@@ -11,16 +11,18 @@ name: Clone detection
 # WARN, never FAIL: dupdelta always exits 0, and this job is not wired into
 # required-status-checks branch protection, so it can never block a merge.
 #
-# NOTE on cost: there are THREE self-hosted runners
-# (`gh api repos/:owner/:repo/actions/runners` -> total_count 3), so this job
-# does fan out in parallel with the `Tests` leg rather than queueing behind
-# it, and it does not lengthen the critical path by its full runtime.
+# NOTE on cost: this job runs on the same ephemeral autoscaling cloud pods
+# (Actions Runner Controller on Hetzner) as every other workflow here —
+# `runs-on: arc-runners` below; the pods register as runners named
+# `arc-runners-*` (`gh api repos/:owner/:repo/actions/runners`). The single
+# persistent registered runner (`vandenberg-lifedraft`, labels
+# self-hosted/Linux/X64) lacks the `arc-runners` label and never serves these
+# jobs. Because pods scale from zero on demand, this job CAN fan out in
+# parallel with the `Tests` leg rather than queueing behind it — but a cold
+# cluster pays a pod-startup delay before either leg begins, so a second
+# concurrent job does lengthen wall-clock time somewhat.
 #
-# But "parallel" is not "free" here the way it was on GitHub-hosted VMs: all
-# three runners live on the MAINTAINER'S WORKSTATION and share its 16 cores,
-# so a job that runs concurrently is a job competing with him and with the
-# other CI jobs, not one running somewhere else on GitHub's dime. Keep it
-# fast for that reason. dupdelta is a single compiled binary (downloaded from
+# Keep it fast anyway: dupdelta is a single compiled binary (downloaded from
 # its GitHub release, no pip/npm install step) and a full-tree scan of this
 # repo takes seconds, so this job is far cheaper than the old one (~2-4 min
 # of O(n^2) SequenceMatcher scans + a Node/jscpd cold start).
@@ -46,17 +48,17 @@ on:
 # `cancel-in-progress` is already PR-scoped; the `Tests` workflow, which also
 # runs on pushes to `main`, has to gate it on the event name instead.
 #
-# This also matters more than it used to: the three runners all live on the
-# maintainer's workstation, so a superseded run is not merely wasted minutes
-# -- it is a share of the CPU he is trying to work on, and a runner nobody
-# else can use until it finishes.
+# This matters even on ephemeral cloud pods: a superseded run is wasted
+# pod-minutes and occupies autoscaler capacity that an in-flight run of a
+# newer commit could otherwise use.
 concurrency:
   group: clones-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   clone-detection:
-    # Self-hosted: GitHub-hosted minutes are exhausted.
+    # Self-hosted ARC (ephemeral autoscaling pods on Hetzner cloud), like every
+    # other workflow in this repo.
     runs-on: arc-runners
     permissions:
       contents: read
