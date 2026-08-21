@@ -1724,6 +1724,37 @@ class FamilySimulation:
         from simulation_state import initial_state_for_run
         self._state = initial_state_for_run(config, self.lump_sum)
 
+        # Issue #1000 (DP#32): a declared fhsa_room_accumulated activates the
+        # FHSA store (initial_state_for_run builds it from that key directly),
+        # but StrategyEngine.allocate gates the FHSA sweep on
+        # ``strategy.fhsa_pct > 0`` and every default/built-in strategy carries
+        # ``fhsa_pct = 0.0`` -- so a household can declare room, watch the
+        # engine build the store, and still route $0 to the FHSA for the whole
+        # horizon: the parsed input never reaches the allocation decision.
+        # Surface it. Logged, not raised (#654 precedent): an explicit
+        # ``fhsa_pct = 0`` beside declared room is a legitimate "do not sweep
+        # to the FHSA" instruction -- this warns that the room is inert, it
+        # does not second-guess the zero -- and warnings.warn is a hard test
+        # failure under this repo's filterwarnings=["error"] pytest config,
+        # which would make it identical to a raise for every caller.
+        from simulation_state import (
+            adult_fhsa_total_room,
+            adult_fhsa_total_lifetime_remaining,
+        )
+        _canada = self._state.jurisdiction_state.get('canada', {})
+        if (adult_fhsa_total_room(_canada) > 0
+                and adult_fhsa_total_lifetime_remaining(_canada) > 0
+                and self.strategy.fhsa_pct <= 0):
+            logger.warning(
+                "This household declares FHSA contribution room "
+                "(fhsa_room_accumulated), but the active strategy %r has "
+                "fhsa_pct unset/0 -- no savings will be routed to the FHSA "
+                "and the declared room moves nothing for the whole horizon "
+                "(issue #1000). Set strategy.fhsa_pct > 0 to sweep savings "
+                "into the FHSA.",
+                self.strategy.name,
+            )
+
     # ── Lazy properties (computed from config/adapter, not stored in __init__) ─
     
     @property
