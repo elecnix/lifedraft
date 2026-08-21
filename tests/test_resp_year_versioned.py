@@ -685,7 +685,7 @@ class TestIncomeDependentImportantNotes(unittest.TestCase):
         cfg = {
             'family': {
                 'members': [{'gross_income': 200000}],
-                'children': [{'name': 'Alice', 'age': 18}, {'name': 'Bob', 'age': 10}]
+                'children': [{'name': 'child_a', 'age': 18}, {'name': 'child_b', 'age': 10}]
             },
             'accounts': {
                 'resp_current_balance': 5000,
@@ -694,8 +694,8 @@ class TestIncomeDependentImportantNotes(unittest.TestCase):
         result = analyze_resp_for_family(cfg)
         notes = result['family_summary']['important_notes']
         notes_text = ' '.join(notes)
-        self.assertIn('Alice', notes_text)
-        self.assertIn('Bob', notes_text)
+        self.assertIn('child_a', notes_text)
+        self.assertIn('child_b', notes_text)
         # Should NOT contain hardcoded "Child 1" or "Child 2"
         self.assertNotIn('Child 1', notes_text)
         self.assertNotIn('Child 2', notes_text)
