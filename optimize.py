@@ -49,7 +49,10 @@ from countries.canada.rate_model import (
     amortization_schedule, annual_summary, monthly_payment,
 )
 from countries.canada.cashout_optimizer import compute_min_extraction, print_cashout_report
-from countries.canada.retirement import DrawdownOptimizer, RetirementState, project_retirement
+from countries.canada.retirement import (
+    DrawdownOptimizer, RetirementState, project_retirement,
+    get_oas_annual_max,  # DP#20 year-versioned (#1029)
+)
 from countries.canada.lsif_credit import compute_lsif_credit, lsif_from_config, LSIFPurchase
 # Issue #732 (DP#25): objective.py resolves the estate math through the
 # jurisdiction provider seam and cannot import countries.canada.estate. The
@@ -84,23 +87,38 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 
-# DP#13: fallback OAS annual amount used by compute_net_benefit() when the
-# household's config supplies no ``assumptions.oas_annual``. This is a named
-# fallback for ABSENT input only -- an explicit ``0`` is honoured (the
-# ``dict.get`` call below uses this as the default, NOT ``x or DEFAULT``, so
-# DP#32 is respected: a configured zero stays zero).
+# DP#13/DP#20: fallback OAS annual amount used by compute_net_benefit() when
+# the household's config supplies no ``assumptions.oas_annual``. This is a
+# named fallback for ABSENT input only -- an explicit ``0`` is honoured (the
+# ``dict.get`` calls below use it as the dict.get default, NOT
+# ``x or DEFAULT``, so DP#32 is respected: a configured zero stays zero).
 #
-# Provenance / divergence note: the year-versioned table
-# ``countries.canada.retirement.get_oas_annual_max(year)`` returns the
-# *actual* government-set OAS maximum per tax year (e.g. 8908 for 2026), and
-# that is the convention-consistent source used elsewhere (pension_split_optimizer
-# via #331, simulation_rules, retirement). Switching this fallback to
-# ``get_oas_annual_max(year)`` would CHANGE the value (8500 -> 8908 for 2026)
-# and therefore move optimizer results -- a behaviour change that is out of
-# scope for the byte-exact naming fix in #986 and must be a separate, deliberate
-# decision. The literal 8500 is preserved here so nothing moves until that
-# decision is made explicitly. See issue #986.
-_DEFAULT_OAS_ANNUAL = 8500
+# Issue #1029 (the deliberate decision #986 deferred): the fallback AMOUNT is
+# read live from the year-versioned government table
+# ``countries.canada.retirement.get_oas_annual_max(year)`` -- the same source
+# every other consumer uses (pension_split_optimizer via #331,
+# simulation_rules, retirement) -- instead of a frozen literal. The relevant
+# year is the household's simulation start year (``cfg['tax']['start_year']``,
+# which run_optimization always writes into the objective cfg); a hand-built
+# config without that block falls back to ``_CURRENT_YEAR``, the same
+# current-year convention compute_net_benefit already uses for its age and
+# LSIF math. For 2026 this reads 8908 (pre-#1029 it was the stale frozen
+# 8500), so optimizer net-benefit numbers MOVE for households omitting
+# ``assumptions.oas_annual`` -- that delta is the intended correctness fix.
+_CURRENT_YEAR = 2026
+
+
+def _default_oas_annual(cfg: Dict) -> float:
+    """Year-versioned OAS maximum for ABSENT ``assumptions.oas_annual`` (#1029).
+
+    Reads the live government table for the household's simulation start year;
+    an unknown year raises ValueError from ``get_oas_annual_max`` rather than
+    silently coercing (DP#32).
+    """
+    start_year = cfg.get('tax', {}).get('start_year')
+    if start_year is None:
+        start_year = _CURRENT_YEAR
+    return get_oas_annual_max(start_year)
 
 
 # ── Scenario-sweep parallelism (perf) ────────────────────────────────────────
@@ -358,7 +376,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
             # Compute CPP annual from monthly estimate
             cpp_annual = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
             # Compute OAS annual from config or defaults
-            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _DEFAULT_OAS_ANNUAL)
+            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
             # LIF withdrawal from simulation results (issue #230)
             lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
             ret_state = RetirementState(
@@ -382,7 +400,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
             # Compute actual retirement income from CPP + OAS + pension + LIF.
             cpp_monthly_estimated = primary.get('cpp_monthly_estimated', 0)
             cpp_annual_income = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
-            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _DEFAULT_OAS_ANNUAL)
+            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
             pension_income_annual = primary.get('pension_income_annual', 0)
             lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
             retirement_income = cpp_annual_income + oas_annual + pension_income_annual + lif_withdrawal
@@ -403,7 +421,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     # rate applied to capital gains. Use actual CPP/OAS/pension data from config.
     cpp_monthly_for_cg = primary.get('cpp_monthly_estimated', 0)
     cpp_annual_for_cg = cpp_monthly_for_cg * 12 if cpp_monthly_for_cg > 0 else 0
-    oas_annual_for_cg = cfg.get('assumptions', {}).get('oas_annual', _DEFAULT_OAS_ANNUAL)
+    oas_annual_for_cg = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
     pension_income_for_cg = primary.get('pension_income_annual', 0)
     lif_withdrawal_for_cg = getattr(final, 'lif_withdrawal', 0)
     retirement_income = cpp_annual_for_cg + oas_annual_for_cg + pension_income_for_cg + lif_withdrawal_for_cg
