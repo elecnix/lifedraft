@@ -49,8 +49,7 @@ from typing import Dict, List, Optional
 
 def cap_qc_investment_interest(
     total_deductible: float,
-    qc_income_base: float,
-    yield_rate: float,
+    investment_income: float,
     opening_carry_forward: float,
 ) -> tuple:
     """Quebec TP-1 Schedule L investment-expense cap (TA s.336.0.1): investment
@@ -60,38 +59,41 @@ def cap_qc_investment_interest(
     Returns ``(qc_deductible, new_carry_forward)`` -- the slice of
     ``total_deductible`` Quebec lets the household claim this year, and the
     unused excess that survives to next year (a deduction deferred, not denied).
+    The carry-forward is released against a LATER year's investment income --
+    including the year-of-death deemed disposition, where the caller threads it
+    into ``compute_estate`` (issue #1035).
 
-    This is the QUEBEC provincial limit ONLY. The federal s.20(1)(c) deduction
-    has NO investment-income limit -- the full ``total_deductible`` is deductible
-    federally. The two are DISTINCT, and conflating them (valuing the capped
-    Quebec amount at the combined federal+Quebec rate) is the pre-existing scope
-    limit #850 named and #1035 will refactor. This helper is isolated from the
-    deduction-routing path (issue #1033) so #1035 can later split the federal
-    deduction from this Quebec cap without touching how the deduction reaches
-    taxable income / the OAS clawback base.
+    This is the QUEBEC provincial limit ONLY -- the caller applies it only for
+    Quebec households (#1035: an Ontario household is capped by no statute).
+    The federal s.20(1)(c) deduction has NO investment-income limit -- the full
+    ``total_deductible`` is deductible federally. The two are DISTINCT savings
+    and must be valued separately (federal slice on ``total_deductible``,
+    Quebec slice on ``qc_deductible``, each on its own bracket set), never as
+    one capped amount at a blended combined rate.
 
-    Pure function (DP#3): same inputs -> same output. The carry-forward here
-    sits on the AVAILABLE side (interest + prior carry-forward, capped by the
-    year's investment income) -- the spelling ``apply_sm_interest`` already
-    used inline; ``quebec_interest_deduction`` below places it on the LIMIT side
-    instead, and reconciling the two is #1035's job, not this helper's.
+    Pure function (DP#3): same inputs -> same output. The carry-forward sits on
+    the AVAILABLE side (interest + prior carry-forward, capped by the year's
+    investment income) -- the spelling ``apply_sm_interest`` has always used;
+    ``quebec_interest_deduction`` below places it on the LIMIT side instead.
 
     Args:
         total_deductible: the s.20(1)(c)-qualifying, purpose-traced interest
             across EVERY borrowing the household has this year (the SM readvance
             line + the mortgage advance + the drawn revolving margin, #850).
-        qc_income_base: the investment-income base of the pots the traced
-            borrowings bought (the SM pot, plus the plain non-reg pot when one
-            of the traced legs is present) -- the dollars Quebec's limit is
-            measured against.
-        yield_rate: the configurable non-reg yield rate (DP#2) -- the income the
-            base generates this year is ``qc_income_base * yield_rate``.
+        investment_income: the year's net investment income of the pots the
+            traced borrowings bought -- the SCHEDULE L BASE (eligible dividends
+            + non-eligible dividends + interest/other + 50% of realized capital
+            gains + net rental), NOT a balance-times-yield product (#1035:
+            the pre-fix base ``balance * yield_rate`` could not see the income
+            breakdown and permanently under-used the cap for growth-tilted
+            portfolios). Build it with
+            ``countries.canada.portfolio.compute_investment_income`` and sum
+            the type-specific components per Schedule L lines 2-6.
         opening_carry_forward: unused Quebec investment-interest from prior
             years (Schedule L carry-forward).
     """
-    max_qc_deduction = qc_income_base * yield_rate
     qc_available = total_deductible + opening_carry_forward
-    qc_deductible = min(qc_available, max_qc_deduction)
+    qc_deductible = min(qc_available, investment_income)
     new_carry_forward = max(0.0, qc_available - qc_deductible)
     return qc_deductible, new_carry_forward
 

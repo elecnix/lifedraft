@@ -353,6 +353,25 @@ def _terminal_calendar_year(results: List[YearResult], cfg: Dict) -> int:
     return 2026
 
 
+def _qc_provincial_brackets(terminal_cal_year: int, cfg: Dict) -> Optional[list]:
+    """The PROVINCIAL slice of the terminal-year brackets (#1035).
+
+    The QC investment-expense carry-forward released at death is a Quebec-only
+    deduction, so it is valued on the provincial brackets alone -- never on the
+    combined federal+provincial list. ``None`` when the provider has no data
+    for the year (compute_estate then refuses loudly if a carry-forward is
+    actually present, DP#32; a zero carry-forward never needs it).
+    """
+    tax_cfg = cfg.get('tax', {}) or {}
+    province = tax_cfg.get('province', 'quebec')
+    try:
+        _, provincial = default_tax_provider().get_split_brackets(
+            terminal_cal_year, province=province)
+        return provincial
+    except ValueError:
+        return None
+
+
 def _terminal_brackets(results: List[YearResult], cfg: Dict) -> list:
     """The combined federal+provincial brackets for the projection's terminal
     year, derived identically for the estate and the per-member family net
@@ -593,6 +612,17 @@ def _estate_call_args(results: List[YearResult], cfg: Dict) -> Optional[Dict]:
         # sleeve (the golden household) -> byte-identical (DP#32).
         'sm_investment_fmv': final.sm_investment_balance,
         'sm_investment_acb': final.sm_investment_cost_basis,
+        # Issue #1035: the QC investment-expense carry-forward the annual cap
+        # stranded (TA s.336.0.1 allows applying it in a later year INCLUDING
+        # the year of death). The terminal deemed disposition's taxable gains
+        # on the non-reg + SM pots are investment income, so compute_estate
+        # releases it there -- valued on the PROVINCIAL slice of the same
+        # terminal-year brackets (a Quebec-only deduction must not be valued
+        # on the combined list). 0.0 for households that never stranded
+        # anything -> byte-identical estate (DP#32).
+        'qc_carry_forward': final.sm_qc_carry_forward,
+        'qc_provincial_brackets': _qc_provincial_brackets(
+            terminal_cal_year, cfg),
     }
 
 
