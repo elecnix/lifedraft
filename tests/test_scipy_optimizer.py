@@ -14,7 +14,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
-from scipy_optimizer import ScipyOptimizer, ScipyResult
+from unittest.mock import patch
+from scipy_optimizer import ScipyOptimizer, ScipyResult, _load_minimize
 from simulation import SimulationConfig
 from simulation_config import apply_ltv_overlay, apply_overlay, ScenarioOverlay
 from return_model import FixedReturn
@@ -125,79 +126,62 @@ class TestScipyFallback(unittest.TestCase):
 
 
 class TestScipyFallbackForcedImportError(unittest.TestCase):
-    """Issue #765: the ImportError fallback (scipy_optimizer.py:148-157) is only
-    exercised when scipy is NOT importable. On a runner where scipy IS
-    installed (the CI self-hosted runner carries it outside the declared
-    dependency set), the real ``scipy.optimize.minimize`` path runs instead
-    and the fallback block is never reached -- so the coverage gate measured
-    it as uncovered (a regression the ratchet then flagged). This test forces
-    the fallback DETERMINISTICALLY by nulling ``sys.modules['scipy.optimize']``
-    (the import protocol raises ``ImportError`` for a ``None`` entry), so the
-    fallback grid-search runs and its lines are covered regardless of whether
-    scipy is actually installed.
+    """Issue #765: the ImportError fallback in optimize() is only exercised
+    when scipy is NOT importable. On a runner where scipy IS installed (CI
+    declares it as a dev dependency since #1080), the real
+    ``scipy.optimize.minimize`` path runs instead and the fallback block is
+    never reached -- so the coverage gate measured it as uncovered (a
+    regression the ratchet then flagged).
+
+    Issue #1074: the fallback is forced by patching ``_load_minimize`` to
+    return None -- the seam optimize() actually consults -- rather than by
+    nulling ``sys.modules['scipy.optimize']`` around engine calls. The old
+    dance mutated process-global state whose finally-restore an interrupted
+    xdist worker can skip, silently flipping every later optimize() call in
+    that worker onto the fallback and flaking the coverage gate on the
+    minimize-path lines (142-145 flipped 0/3 across CI runs). The REAL import
+    protocol (a None sys.modules entry -> ImportError -> loader returns None)
+    is still verified, narrowly, by TestLoadMinimizeImportProtocol below.
     """
 
     def test_forced_import_error_runs_fallback_grid_search(self):
-        import sys
         opt = ScipyOptimizer(_make_config(), optimize_vars=['ltv'])
-        saved = sys.modules.get('scipy.optimize')
-        sys.modules['scipy.optimize'] = None  # import protocol: None -> ImportError
-        try:
+        with patch('scipy_optimizer._load_minimize', return_value=None):
             results = opt.optimize(strategies=[STRATEGY_BALANCED])
-        finally:
-            # Restore the real module (or remove the forced None) so other
-            # tests that genuinely use scipy are unaffected.
-            if saved is not None:
-                sys.modules['scipy.optimize'] = saved
-            else:
-                sys.modules.pop('scipy.optimize', None)
         # The fallback still returns a ranked result (grid search over the
-        # same LTV candidates), proving the ImportError branch completed.
+        # same LTV candidates), proving the no-scipy branch completed.
         self.assertGreater(len(results), 0)
 
 
 class TestScipyMinimizePathDeterministic(unittest.TestCase):
-    """Issue #765 covered the ImportError fallback deterministically. The REAL
-    ``scipy.optimize.minimize`` path (scipy_optimizer.py:142-145) is covered by
-    TestScipyOptimizer when scipy is installed, but the real call runs
-    ``neg_objective`` (a full simulation) ~50 times, which is slow; under CI
-    contention sysmon has been observed to miss the surrounding Python lines,
-    making the coverage gate flake on a file the PR did not touch (a regression
-    the ratchet then flags). This test patches ``scipy.optimize.minimize`` to a
-    fast stub so the minimize-path WIRING (result.x -> optimal_x,
-    result.success -> convergence) is exercised as fast Python calls sysmon
-    catches reliably, decoupling that coverage from runner load. It is a real
-    structural assertion (optimize() delegates to scipy.optimize.minimize and
-    reads result.x / result.success), not a coverage-only hack."""
+    """The REAL ``scipy.optimize.minimize`` path wiring (result.x ->
+    optimal_x, result.success -> convergence) is exercised through a fast
+    stub: the real call runs ``neg_objective`` (a full simulation) ~50 times,
+    which is slow, and under CI contention sysmon has been observed to miss
+    the surrounding Python lines, making the coverage gate flake on a file
+    the PR did not touch (a regression the ratchet then flags).
+
+    Issue #1074: the stub is injected by patching ``_load_minimize`` -- the
+    seam optimize() consults -- so this test no longer imports scipy at all
+    (the previous version patched ``scipy.optimize.minimize``, required a
+    real scipy import, and could be poisoned by another test's leftover
+    ``sys.modules['scipy.optimize'] = None``). It is a real structural
+    assertion (optimize() delegates to whatever _load_minimize supplies and
+    reads result.x / result.success), not a coverage-only hack.
+    """
 
     def test_minimize_path_wiring_is_exercised(self):
-        import sys
-        # A prior scipy-nulling test (TestScipyFallbackForcedImportError /
-        # TestScipyImportErrorFallback) in the SAME xdist worker may have left
-        # sys.modules['scipy.optimize'] = None (or a worker SIGTERM under CI
-        # contention may have skipped its finally). Pop any forced-None so a
-        # fresh import runs -- otherwise `import scipy.optimize` raises
-        # ImportError and THIS test skips, leaving the minimize path uncovered.
-        if sys.modules.get('scipy.optimize') is None:
-            sys.modules.pop('scipy.optimize', None)
-        try:
-            import scipy.optimize  # noqa: F401
-        except ImportError:
-            self.skipTest("scipy not installed; the minimize path is the "
-                          "ImportError fallback here, covered elsewhere")
-        from unittest.mock import patch
         from types import SimpleNamespace
         opt = ScipyOptimizer(_make_config(), optimize_vars=['ltv'])
         # A fast stub standing in for scipy.optimize.minimize: it ignores the
         # objective (no 50-simulation search) and returns a result the
         # minimize branch reads result.x / result.success from.
         stub_result = SimpleNamespace(x=[0.5], success=True)
-        # Re-assert scipy.optimize is the REAL module before patching (a prior
-        # test may have nulled it; pop+re-import above restored it). Patching
-        # scipy.optimize.minimize makes `from scipy.optimize import minimize`
-        # inside optimize() bind the stub, so lines 142-145 run as fast Python
-        # calls sysmon catches reliably under load.
-        with patch('scipy.optimize.minimize', return_value=stub_result):
+
+        def stub_minimize(*args, **kwargs):
+            return stub_result
+
+        with patch('scipy_optimizer._load_minimize', return_value=stub_minimize):
             results = opt.optimize(strategies=[STRATEGY_BALANCED])
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].optimal_params['ltv'], 0.5,
@@ -271,42 +255,33 @@ if __name__ == '__main__':
     unittest.main()
 
 class TestScipyImportErrorFallback(unittest.TestCase):
-    """Issue #835: the `except ImportError` grid-search fallback (lines ~148-157)
-    only runs when scipy is ABSENT. Locally scipy is absent -> the fallback runs
-    -> 3 uncovered; in CI scipy IS installed -> the fallback never runs -> 9
-    uncovered -> the coverage gate flaps 3 vs 9 across environments and breaks
-    CI on every branch.
+    """Issue #835: the grid-search fallback only runs when scipy is ABSENT.
+    Locally scipy is absent -> the fallback runs; in CI scipy IS installed
+    (dev dependency since #1080) -> the fallback never runs -> the coverage
+    gate flapped across environments.
 
-    These tests FORCE the ImportError path by making ``from scipy.optimize import
-    minimize`` raise ImportError (``sys.modules['scipy.optimize'] = None``), so
-    the fallback is exercised in BOTH environments -- making the uncovered count
-    deterministic. Fabricated round numbers (DP#15)."""
+    These tests FORCE the no-scipy branch by patching ``_load_minimize`` to
+    return None, so the fallback is exercised in BOTH environments -- making
+    the uncovered count deterministic. Issue #1074: they no longer null
+    ``sys.modules['scipy.optimize']`` around engine calls -- that dance is
+    process-global state whose restore an interrupted xdist worker can skip,
+    which is exactly how the minimize-path lines flapped 0/3 uncovered under
+    ``--dist worksteal``. The REAL import protocol is still verified narrowly
+    by TestLoadMinimizeImportProtocol. Fabricated round numbers (DP#15)."""
 
     _TRIAL_LTVS = [0.0, 0.2, 0.4, 0.6, 0.8]
 
-    def _force_import_error(self):
-        """Context manager: make `from scipy.optimize import minimize` raise
-        ImportError, then restore sys.modules however the test exits."""
-        saved_optimize = sys.modules.get('scipy.optimize')
-        sys.modules['scipy.optimize'] = None  # `from scipy.optimize import X` -> ImportError
-        return saved_optimize
-
-    def _restore(self, saved_optimize):
-        if saved_optimize is None:
-            sys.modules.pop('scipy.optimize', None)
-        else:
-            sys.modules['scipy.optimize'] = saved_optimize
+    def _no_scipy(self):
+        """Context-manager patch: _load_minimize() -> None, i.e. scipy absent."""
+        return patch('scipy_optimizer._load_minimize', return_value=None)
 
     def test_import_error_fallback_returns_a_trial_ltv_point(self):
         """The grid-search fallback returns the best of the trial LTV points
         (0.0, 0.2, 0.4, 0.6, 0.8), never a scipy-optimized continuous value."""
-        saved = self._force_import_error()
-        try:
+        with self._no_scipy():
             opt = ScipyOptimizer(_make_config(), optimize_vars=['ltv'])
             results = opt.optimize(strategies=[STRATEGY_BALANCED],
                                    use_readvanceable=False, deduct_later=False)
-        finally:
-            self._restore(saved)
         self.assertEqual(len(results), 1)
         self.assertIn(results[0].optimal_params['ltv'], self._TRIAL_LTVS,
                       "the fallback must return one of the grid-search trial "
@@ -314,26 +289,20 @@ class TestScipyImportErrorFallback(unittest.TestCase):
 
     def test_import_error_fallback_reports_no_convergence(self):
         """The fallback cannot claim scipy convergence -- convergence is False."""
-        saved = self._force_import_error()
-        try:
+        with self._no_scipy():
             opt = ScipyOptimizer(_make_config(), optimize_vars=['ltv'])
             results = opt.optimize(strategies=[STRATEGY_BALANCED],
                                    use_readvanceable=False, deduct_later=False)
-        finally:
-            self._restore(saved)
         self.assertFalse(results[0].convergence,
                          "the grid-search fallback is not a scipy convergence")
 
     def test_import_error_fallback_evaluates_every_trial_point(self):
         """The fallback evaluates neg_objective at each of the 5 trial LTV
         points, so n_evaluations is at least 5 (plus the final re-eval)."""
-        saved = self._force_import_error()
-        try:
+        with self._no_scipy():
             opt = ScipyOptimizer(_make_config(), optimize_vars=['ltv'])
             results = opt.optimize(strategies=[STRATEGY_BALANCED],
                                    use_readvanceable=False, deduct_later=False)
-        finally:
-            self._restore(saved)
         # 5 grid points + the final re-evaluation of the chosen optimum.
         self.assertGreaterEqual(results[0].n_evaluations, len(self._TRIAL_LTVS),
                                 "the grid-search fallback must evaluate every "
@@ -346,13 +315,10 @@ class TestScipyImportErrorFallback(unittest.TestCase):
         # Reference: run the fallback once to get the chosen score, then
         # independently score each trial LTV via the GridOptimizer at the same
         # LTV and confirm the fallback's score >= each trial's score.
-        saved = self._force_import_error()
-        try:
+        with self._no_scipy():
             opt = ScipyOptimizer(_make_config(), optimize_vars=['ltv'])
             results = opt.optimize(strategies=[STRATEGY_BALANCED],
                                    use_readvanceable=False, deduct_later=False)
-        finally:
-            self._restore(saved)
         chosen_score = results[0].score
         chosen_ltv = results[0].optimal_params['ltv']
         # The chosen score must be finite (at least one trial LTV was feasible).
@@ -360,13 +326,44 @@ class TestScipyImportErrorFallback(unittest.TestCase):
                             "at least one trial LTV must produce a finite score")
         # The chosen LTV is the best of the grid -- re-running the fallback is
         # deterministic (FixedReturn), so the chosen LTV is reproducible.
-        saved = self._force_import_error()
-        try:
+        with self._no_scipy():
             opt2 = ScipyOptimizer(_make_config(), optimize_vars=['ltv'])
             results2 = opt2.optimize(strategies=[STRATEGY_BALANCED],
                                      use_readvanceable=False, deduct_later=False)
-        finally:
-            self._restore(saved)
         self.assertEqual(results2[0].optimal_params['ltv'], chosen_ltv,
                          "the grid-search fallback is deterministic under "
                          "FixedReturn: the same best trial LTV every time")
+
+
+class TestLoadMinimizeImportProtocol(unittest.TestCase):
+    """Issue #1074: the ONE narrow test that still exercises the real import
+    protocol, on the loader alone -- no engine call inside the dance.
+    ``sys.modules['scipy.optimize'] = None`` must make ``_load_minimize()``
+    return None (the import protocol raises ImportError for a None entry),
+    which is what routes optimize() onto the grid-search fallback. Keeping
+    this verification on the tiny loader -- instead of around whole
+    optimize() calls -- means an xdist worker interrupt that skips the
+    finally can no longer leave a poisoned worker silently running the
+    fallback through unrelated engine tests."""
+
+    def test_none_sysmodules_entry_yields_none_loader(self):
+        import sys
+        saved = sys.modules.get('scipy.optimize')
+        sys.modules['scipy.optimize'] = None  # import protocol: None -> ImportError
+        try:
+            self.assertIsNone(_load_minimize(),
+                              "a None sys.modules entry must route to the "
+                              "fallback (loader returns None)")
+        finally:
+            if saved is not None:
+                sys.modules['scipy.optimize'] = saved
+            else:
+                sys.modules.pop('scipy.optimize', None)
+
+    def test_real_scipy_import_yields_callable(self):
+        """With scipy genuinely importable (CI installs it since #1080), the
+        loader returns the real minimize -- the minimize path is live."""
+        minimize = _load_minimize()
+        if minimize is None:
+            self.skipTest("scipy not installed; fallback is the live path here")
+        self.assertTrue(callable(minimize))

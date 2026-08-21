@@ -40,6 +40,25 @@ _STRATEGIES = list_strategies()
 STRATEGY_BALANCED = _STRATEGIES.get('balanced')
 
 
+def _load_minimize():
+    """Load ``scipy.optimize.minimize`` lazily; None when scipy is absent.
+
+    scipy is a dev-only dependency (#765/#1080): the ImportError fallback in
+    optimize() is a supported mode, not dead code. Issue #1074: this loader is
+    the seam that makes BOTH branches deterministically coverable -- tests
+    patch _load_minimize instead of setting ``sys.modules['scipy.optimize'] =
+    None`` around engine calls. The sys.modules dance is process-global state
+    whose finally-restore an interrupted xdist worker can skip, leaving the
+    worker poisoned: every later optimize() call silently takes the fallback
+    and the coverage gate flaps on lines 142-145 (0 vs 3 uncovered).
+    """
+    try:
+        from scipy.optimize import minimize
+    except ImportError:
+        return None
+    return minimize
+
+
 @dataclass
 class ScipyResult(RankedScenario):
     """Extended RankedScenario with continuous optimization results."""
@@ -137,13 +156,13 @@ class ScipyOptimizer(Optimizer):
 
             return -score  # Negate for minimization
         
-        try:
-            from scipy.optimize import minimize
+        minimize = _load_minimize()
+        if minimize is not None:
             result = minimize(neg_objective, x0, method=method, bounds=bounds,
                             options={'maxiter': 50, 'ftol': 1e-6})
             optimal_x = result.x
             convergence = result.success
-        except ImportError:
+        else:
             # Fallback: grid search if scipy not available
             optimal_x = x0
             convergence = False
