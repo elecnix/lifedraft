@@ -3423,6 +3423,10 @@ def simulate_year_pure(
         deduction_advantage_vs_now=ws.deduction_advantage_vs_now,
         readvance_interest=ws.readvance_interest,
         readvance_tax_savings=ws.readvance_tax_savings,
+        # Issue #1083: the deduction's statutory saving on the retired
+        # primary's prologue-taxed rental/loan slice (0.0 in accumulation and
+        # whenever the deduction fits inside the drawdown base).
+        sm_interest_nondrawdown_tax_saving=ws.sm_interest_nondrawdown_tax_saving,
         sm_qc_deductible=ws.qc_deductible,
         sm_qc_carry_forward=ws.new_qc_carry_forward,
         sm_deductible_proportion=ws.deductible_proportion,

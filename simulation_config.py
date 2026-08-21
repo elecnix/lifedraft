@@ -611,6 +611,15 @@ class YearResult:
     deduction_advantage_vs_now: float = 0.0
     readvance_interest: float = 0.0
     readvance_tax_savings: float = 0.0
+    # Issue #1083: the s.20(1)(c) deduction's statutory (bracket-fill) tax
+    # saving on the retired primary's PROLOGUE-taxed slice (rental/loan
+    # income), for the share of the deduction the cpp+pension drawdown base
+    # could not absorb. Booked as cash by ``apply_solvency`` (the
+    # tuition_credit path); 0.0 in every accumulation year and for any
+    # household whose deduction fits inside the drawdown base. The flat
+    # objective side-credit (``readvance_tax_savings``) stays 0 in retirement
+    # -- this is the taxable-income routing, not its return.
+    sm_interest_nondrawdown_tax_saving: float = 0.0
     sm_qc_deductible: float = 0.0
     sm_qc_carry_forward: float = 0.0
     sm_deductible_proportion: float = 0.0  # From HELOC tracing
