@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/countries/canada/input_schema.json",
+  "title": "lifedraft input contract — Canada overlay (target shape, Track C / #602)",
+  "$comment": "Composed with schema/input_schema.json by input_contract.compose_schema() -- see that function's docstring for the exact, total merge rule (no fallback/or chains: every overlay key either REPLACES or ADDS to the matching universal key, deterministically). This file supplies everything that is genuinely Canada-specific: the closed province/account-kind enums, CPP/OAS/RRSP/TFSA/FHSA/RESP/LIRA/LSIF vocabulary and sub-shapes, and the per-person registered-room pool. Per DP#16, this file's presence (and the countries/canada package) is what triggers Canada as the active jurisdiction.",
+
+  "properties": {
+    "jurisdiction": {
+      "properties": {
+        "country": { "const": "canada" }
+      }
+    }
+  },
+
+  "$defs": {
+
+    "province": {
+      "type": "string",
+      "enum": ["quebec", "ontario", "british_columbia", "alberta", "manitoba", "saskatchewan", "new_brunswick", "nova_scotia", "prince_edward_island", "newfoundland_and_labrador", "northwest_territories", "yukon", "nunavut"],
+      "description": "Long form only — one spelling (#595 flagged 'qc' vs 'quebec' as a self-inconsistent example in the old schema). TaxDataProvider's postal-code aliasing is deleted, not documented (DP#9)."
+    },
+
+    "account_kind": {
+      "type": "string",
+      "enum": ["rrsp", "spousal_rrsp", "tfsa", "fhsa", "rrif", "lif", "lira", "resp", "non_reg", "dcpp", "dbpp", "lsif"]
+    },
+
+    "product": {
+      "type": ["string", "null"],
+      "enum": ["fonds_ftq", null],
+      "description": "Issue #826 (DP#7/#10/#12): a branded-product flag that triggers a Canada program module encoding the product's well-known, identical-for-every-holder rules. 'fonds_ftq' resolves to countries/canada/fonds_ftq.py: a 7.3% 10-year-CAR expected return and locked-until-age-65 illiquidity (plus the LSIF credit in lsif_credit.py). null = a generic account with no product-module rules (today's behaviour). An explicit account.expected_return / account.locked_until OVERRIDES the product default (DP#13)."
+    },
+
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contribution_room", "as_of"],
+      "properties": {
+        "contribution_room": { "$ref": "#/$defs/money",
+          "x-uncertainty": {
+            "resolvability": "document",
+            "plausible_range": [0, 100000],
+            "resolved_by": "CRA My Account > RRSP and TFSA > contribution room. (Also on your latest Notice of Assessment for RRSP.)",
+            "question": "What is this person's actual unused contribution room?"
+          } },
+        "as_of": { "$ref": "#/$defs/date" }
+      },
+      "$comment": "The x-uncertainty band on contribution_room (#671) is a deliberately coarse, jurisdiction-level DEFAULT shared by rrsp/tfsa/fhsa/resp -- it is the room question's shape, not any household's answer. A document that knows better states a tighter plausible_range in its provenance sidecar (#660), which OVERRIDES this default per DP#13 (a default is a fallback for absent input, never a coercion of input that was supplied)."
+    },
+
+    "room_grant": {
+      "anyOf": [{ "$ref": "#/$defs/room" }, { "type": "null" }]
+    },
+
+    "person_room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rrsp", "tfsa", "fhsa", "resp"],
+      "properties": {
+        "rrsp": { "$ref": "#/$defs/room_grant" },
+        "tfsa": { "$ref": "#/$defs/room_grant" },
+        "fhsa": { "$ref": "#/$defs/room_grant" },
+        "resp": { "$ref": "#/$defs/room_grant", "description": "RESP contribution room is a lifetime entitlement of the BENEFICIARY (child), shared across every RESP account that names them, not a per-account figure." }
+      },
+      "description": "Contribution room is a PERSON-level entitlement, not an account-level one (a person's RRSP room is one pool shared across every RRSP/spousal-RRSP they own or contribute to — putting it on the account, as the old schema's per-bucket totals implied, double-counts a person with two RRSPs at different institutions). This is why account.room does not exist in this schema (migration-plan.md, hard decision #2)."
+    },
+
+    "benefit_claim": {
+      "properties": {
+        "cpp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start_date", "monthly_amount", "as_of"],
+          "properties": {
+            "start_date": { "$ref": "#/$defs/date" },
+            "monthly_amount": { "$ref": "#/$defs/money" },
+            "as_of": { "$ref": "#/$defs/date", "description": "Date of the Service Canada estimate/statement this figure is from." }
+          }
+        },
+        "oas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start_date", "defer_months"],
+          "properties": {
+            "start_date": { "$ref": "#/$defs/date" },
+            "defer_months": { "type": "integer", "minimum": 0, "maximum": 60 }
+          }
+        }
+      }
+    },
+
+    "benefit_entitlement": {
+      "properties": {
+        "cpp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["estimated_monthly_at_65", "as_of", "claim_age"],
+          "properties": {
+            "estimated_monthly_at_65": { "$ref": "#/$defs/money", "description": "Issue #650: the projected monthly CPP the person's Service Canada Statement of Contributions estimates they will receive if they start AT AGE 65 — the engine's cpp_monthly_estimated convention (retirement_transition.cpp_from_estimate age-adjusts it for an earlier/later claim). This is the one number the user actually holds; without this field there was nowhere to put it and the engine had to fall back on a defaulted/maximum guess (DP#32)." },
+            "as_of": { "$ref": "#/$defs/date", "description": "The date the estimate was produced. A CPP estimate ages — three years on it is no longer the same number — so a pre-claim entitlement MUST be dated (#597)." },
+            "claim_age": { "type": "integer", "minimum": 60, "maximum": 70, "description": "The MODELED age at which the person plans to begin CPP (60–70). Distinct from a benefit_claim's committed start_date: the person has not claimed yet, so this is a forward-looking plan the claiming-age optimizer (#291) can vary, not money already flowing. Maps to cpp_start_age." }
+          }
+        },
+        "oas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["as_of", "claim_age"],
+          "properties": {
+            "as_of": { "$ref": "#/$defs/date", "description": "The date the OAS eligibility/estimate was assessed (#597). OAS is residency-based and paid from the year-versioned table (not a statement number), so no estimated amount is carried — only the dating and the modeled claim age." },
+            "claim_age": { "type": "integer", "minimum": 65, "maximum": 70, "description": "The MODELED age at which the person plans to begin OAS (65–70; OAS cannot start before 65). Maps to oas_start_age, and the deferral bonus is DERIVED as (claim_age − 65) × 12 months so the claim age is stated exactly once (DP#32), never as a separate, possibly-inconsistent defer_months." }
+          }
+        }
+      }
+    },
+
+    "account": {
+      "properties": {
+        "fhsa": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["opened_date", "first_time_buyer_since"],
+          "properties": {
+            "opened_date": { "$ref": "#/$defs/date", "description": "Starts the 15-year participation window (#597) — the load-bearing date the old schema never had." },
+            "first_time_buyer_since": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+          },
+          "description": "Present only when kind=fhsa."
+        },
+        "lira": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["jurisdiction", "source_pension_plan", "transfer_date", "reference_rate"],
+          "properties": {
+            "jurisdiction": { "type": "string", "enum": ["federal", "ontario", "quebec"] },
+            "source_pension_plan": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+            "transfer_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+            "reference_rate": { "$ref": "#/$defs/rate" },
+            "conversion_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "Issue #708: an elected early CRI/LIRA -> LIF/FRV conversion date (DP#1: a date, not an age). null/absent = no early election; the mandatory age-71 backstop (end of the year the owner turns 71) then applies, unchanged. When set, the LIRA converts at the earlier of this date's year and the age-71 backstop, down to the jurisdiction's earliest-permitted conversion age (Quebec: none, sourced -- Retraite Quebec; federal/Ontario: not sourced, an early election is rejected rather than guessed). The year component drives the conversion calendar year." }
+          },
+          "description": "Present only when kind is lira or lif. No birth_year field (#599) — age is looked up through owner."
+        },
+        "lsif": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["purchase_date", "purchase_province", "federally_registered", "prior_redemption", "is_hbp_replacement", "quebec_carryforward", "acquisition_date", "redeemed_date", "reference_year_taxable_income"],
+          "properties": {
+            "purchase_date": { "$ref": "#/$defs/date" },
+            "purchase_province": { "$ref": "#/$defs/province", "description": "Residency AT PURCHASE, which can differ from the owner's current residency — kept explicit rather than derived." },
+            "federally_registered": { "type": "boolean" },
+            "prior_redemption": { "type": "boolean" },
+            "is_hbp_replacement": { "type": "boolean", "description": "ITA s.211.8: replacement shares, not HBP funds used for the purchase." },
+            "quebec_carryforward": { "$ref": "#/$defs/money", "description": "Opening QC credit carryforward amount (not a purchase amount)." },
+            "acquisition_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+            "redeemed_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+            "reference_year_taxable_income": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }] },
+            "holding_amount": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "Issue #649: the dollar value of the LSIF shares held INSIDE this account's wrapper — an LSIF nested in an RRSP (the Quebec 'REER FTQ'), where the wrapper (RRSP) supplies the deduction/deferral and the nested LSIF portion earns its own 30% credit. Set ONLY when the lsif block sits on a wrapper account (kind=rrsp/spousal_rrsp); the credit is computed on this amount. null/absent on a standalone kind=lsif account, whose LSIF value is its own balance." }
+          },
+          "description": "Present when kind=lsif (a standalone Quebec Labour-Sponsored Investment Fund account) OR nested on a kind=rrsp/spousal_rrsp account (issue #649: an LSIF held inside an RRSP wrapper — the 'REER FTQ'). No embedded employment_income (#599) — looked up through owner's incomes[]. No retirement_year/pension_start_year — those are DERIVED per candidate scenario from the owner's chosen decisions.retirement_age and people[].benefits.employer_pension.start_date, not authored facts (DP#1/#598)."
+        },
+        "resp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subscribers", "beneficiaries", "contributions_total", "cesg_received", "qesi_received", "clb_received"],
+          "properties": {
+            "subscribers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/person_id" } },
+            "beneficiaries": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/person_id" } },
+            "contributions_total": { "$ref": "#/$defs/money" },
+            "cesg_received": { "$ref": "#/$defs/money" },
+            "qesi_received": { "$ref": "#/$defs/money" },
+            "clb_received": { "$ref": "#/$defs/money" }
+          },
+          "description": "Present only when kind=resp. owner is the primary subscriber; subscribers lists all (joint RESPs are common for couples). Grant PROGRAM RATES (CESG %, lifetime maxima) are never config — they are code tables (resp_rules.py) and do not appear anywhere in this schema (#593)."
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "tfsa" } } }, "then": {}, "else": { "properties": { "successor_holder": { "const": null } } } },
+        { "if": { "properties": { "kind": { "enum": ["rrsp", "spousal_rrsp", "tfsa", "fhsa", "rrif", "lif", "lira", "dcpp", "dbpp", "lsif"] } } },
+          "then": { "properties": { "owner": { "$ref": "#/$defs/person_id" } } },
+          "description": "Registered/individual account kinds must have a single owner, never joint." },
+        { "if": { "properties": { "kind": { "const": "fhsa" } } },
+          "then": { "required": ["fhsa"] },
+          "else": { "not": { "required": ["fhsa"] } } },
+        { "if": { "properties": { "kind": { "enum": ["lira", "lif"] } } },
+          "then": { "required": ["lira"] },
+          "else": { "not": { "required": ["lira"] } } },
+        { "if": { "properties": { "kind": { "const": "lsif" } } },
+          "then": { "required": ["lsif"] } },
+        { "if": { "properties": { "kind": { "enum": ["lsif", "rrsp", "spousal_rrsp"] } } },
+          "then": {},
+          "else": { "not": { "required": ["lsif"] } },
+          "description": "Issue #649: the lsif sub-object is REQUIRED on a standalone kind=lsif account and OPTIONAL on a kind=rrsp/spousal_rrsp account (an LSIF nested in an RRSP wrapper — the 'REER FTQ'); forbidden on every other kind." },
+        { "if": { "properties": { "kind": { "const": "resp" } } },
+          "then": { "required": ["resp"] },
+          "else": { "not": { "required": ["resp"] } } },
+        { "if": { "properties": { "kind": { "const": "spousal_rrsp" } } },
+          "then": {},
+          "else": { "not": { "required": ["contributors"] } },
+          "description": "contributors is optional even for spousal_rrsp (defaults to [owner] when omitted), but meaningless — and therefore forbidden — for every other kind." }
+      ]
+    },
+
+    "liability": {
+      "properties": {
+        "qc_carryforward_opening": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "Optional, heloc only: an opening Quebec interest-deduction carryforward balance (TP-1 Schedule L) for a family already mid-carryforward when this document's as_of falls. null = none/not applicable." }
+      }
+    },
+
+    "tax_law_overrides": {
+      "required": ["oas"],
+      "properties": {
+        "oas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["disabled", "annual_max_override"],
+          "properties": {
+            "disabled": { "type": "boolean", "description": "The explicit flag for 'no OAS' (#592) — NEVER expressed as annual_max_override=0, which the old schema's or-fallthrough silently treated as 'not set, use the code table' instead of 'zero'." },
+            "annual_max_override": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "null = use the year-versioned CPP_OAS_BY_YEAR table. A loud warning is logged whenever this is non-null and shadows the table (#595G)." }
+          }
+        }
+      }
+    },
+
+    "contribution_limit_overrides": {
+      "required": ["rrsp_annual_max", "tfsa_annual_room"],
+      "properties": {
+        "rrsp_annual_max": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }] },
+        "tfsa_annual_room": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }] }
+      }
+    },
+
+    "assumptions": {
+      "required": ["resp"],
+      "properties": {
+        "resp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eap_tax_rate", "eap_taxable_portion", "study_start_age", "study_duration_years", "used_for_education"],
+          "properties": {
+            "eap_tax_rate": { "$ref": "#/$defs/rate", "description": "Assumed marginal rate the EAP (Educational Assistance Payment) is taxed at in the beneficiary's hands." },
+            "eap_taxable_portion": { "$ref": "#/$defs/percent0to1", "description": "Fraction of each EAP payment that is taxable income to the beneficiary (the rest is a tax-free return of contributions)." },
+            "study_start_age": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Age (applied uniformly to every RESP beneficiary -- the engine has no per-child study window, #598 follow-up) at which the study period, and EAP payouts, begin (issue #578)." },
+            "study_duration_years": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Length of the study window that pays out EAPs before the plan winds down (issue #578)." },
+            "used_for_education": { "type": "boolean", "description": "A FAMILY DECISION (DP#30), not a government rule: whether the RESP will actually be used for the beneficiary's education. When false, the plan collapses (grant repayment + AIP) at study_start_age instead of paying out EAPs (issue #578)." }
+          },
+          "description": "Grant PROGRAM RATES (CESG %, lifetime maxima, CLB amounts) are never config — they stay as code tables in resp_rules.py (#593). These five fields are the genuinely study-specific RESP beliefs the engine reads (issue #578's winddown fields joined the original eap_tax_rate/eap_taxable_portion pair in epic #603 Track C Phase 2b)."
+        }
+      }
+    },
+
+    "contribution_allocation": {
+      "required": ["rrsp_pct", "spousal_rrsp_pct", "tfsa_pct", "fhsa_pct", "resp_pct"],
+      "properties": {
+        "rrsp_pct": { "$ref": "#/$defs/percent0to1" },
+        "spousal_rrsp_pct": { "$ref": "#/$defs/percent0to1" },
+        "tfsa_pct": { "$ref": "#/$defs/percent0to1" },
+        "fhsa_pct": { "$ref": "#/$defs/percent0to1" },
+        "resp_pct": { "$ref": "#/$defs/percent0to1" }
+      }
+    }
+  }
+}

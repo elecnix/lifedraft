@@ -1,0 +1,51 @@
+__pycache__/
+*.pyc
+.venv/
+.ralph/
+*.csv
+baseline_results.csv
+# CSV outputs are now written to ~/.cache/lifedraft/ (DP#15)
+# The gitignore rule is a safety net — the primary protection is output_paths.py
+# Pi session/task data (not version-controlled)
+.pi/tasks/
+.pi/sessions/
+.pi/settings.json
+
+# Pi agent and chain definitions ARE version-controlled
+# (tracked in .pi/agents/ and .pi/chains/)
+*.egg-info/
+uv.lock
+input_compat.json
+
+# DP#15: Personal data never enters version control
+input.json
+ANALYSIS.md
+SITUATION.md
+.coverage
+progress.md
+
+# Generated reports (contain personal data derived from input.json)
+*.html
+*.json
+*.txt
+!input_schema.json
+!pyproject.json
+# The coverage ratchet baseline MUST be version-controlled -- it is the gate's only
+# memory of what "not worse" means. The blanket `*.json` above would silently swallow
+# it, leaving `git add` a no-op and the ratchet inert against an empty baseline.
+# (It carries no personal data: file paths and integer line counts only -- DP#15.)
+!tools/coverage_baseline.json
+!tools/perf_baseline.json
+!package.json
+!.pi/chains/*.chain.json
+!requirements.txt
+# Issue #602 (epic #603, Track C): the target input contract -- schema
+# documents and its synthetic (DP#15: no personal data) example, not
+# generated output.
+!schema/input_schema.json
+!schema/countries/canada/input_schema.json
+!schema/example.json
+inputs/
+
+# Implementation output artifacts (ephemeral, not version-controlled)
+impl-*-output.md

@@ -1,0 +1,289 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, refactor-modular-libraries]
+  pull_request:
+    branches: [main]
+  # The full support matrix runs here, nightly, instead of on every merge. 07:00 UTC
+  # is ~02:00-03:00 in the maintainer's timezone, i.e. while the workstation is idle.
+  schedule:
+    - cron: "0 7 * * *"
+  # ...and on demand, so the full matrix is always one click away when a change
+  # actually warrants it (a syntax-level or stdlib-version-sensitive change).
+  workflow_dispatch:
+
+# Two runs of this workflow on the same branch are never both useful -- the older
+# one is verifying a commit nobody will merge. Cancel it. (Observed: two full
+# three-version matrices racing to completion on one branch, ~126 wasted minutes.)
+#
+# `cancel-in-progress` is deliberately scoped to pull requests only. A push to
+# `main` must always be verified to completion, even if another push lands while
+# it runs -- otherwise a broken main could go unnoticed because its run was
+# superseded.
+#
+# The group keys on the event name as well as the ref, so the nightly matrix and a
+# push to `main` (both of which are `refs/heads/main`) do not land in the same
+# concurrency group and serialize behind one another.
+concurrency:
+  group: tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    # Self-hosted: GitHub-hosted minutes are exhausted, so a GitHub-hosted job
+    # fails immediately with zero steps executed.
+    runs-on: arc-runners
+    strategy:
+      # Don't cancel 3.10 because 3.12 failed -- we want the full picture on main.
+      fail-fast: false
+      matrix:
+        # PRs, and pushes to `main`, run 3.12 ONLY. The full 3.10/3.11/3.12 matrix
+        # runs on the nightly `schedule:` (and on `workflow_dispatch`).
+        #
+        # WHY. What is scarce is no longer GitHub's bill -- it is the maintainer's
+        # workstation, which is where the self-hosted runners live. There are THREE
+        # of them, so a three-version matrix does NOT queue politely: it fans out and
+        # runs three ~30-minute jobs CONCURRENTLY on the same 16-core box the
+        # maintainer is trying to work on. Load has been observed at 24, and a CI job
+        # has been SIGTERM-killed by the contention it caused.
+        #
+        # (An earlier version of this comment claimed "there is exactly ONE runner,
+        # so matrix legs ... execute SEQUENTIALLY". That was true when it was written
+        # and is now false -- `gh api repos/:owner/:repo/actions/runners` reports 3.
+        # Recorded here because a stale caveat is a lie with a timestamp.)
+        #
+        # A version-specific break is rare, nothing here ships to a release, and
+        # catching one within 24 hours is as good as catching it within one merge.
+        # What the nightly buys is a workstation that stays usable during the day.
+        #
+        # If a 3.10/3.11-only failure ever does bite between nightlies, revisit --
+        # but record WHY here rather than silently restoring the matrix on `main`.
+        # (Folded with `>-` at a single indent level, so YAML joins these lines
+        # with spaces into ONE expression -- extra-indenting the continuations
+        # would preserve literal newlines inside the `${{ }}`.)
+        python-version: >-
+          ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+          && fromJSON('["3.10", "3.11", "3.12"]')
+          || fromJSON('["3.12"]') }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Set up Python ${{ matrix.python-version }}
+        # On a bare self-hosted runner this downloads the requested interpreter
+        # into the runner's own tool cache (_work/_tool) rather than finding it
+        # pre-installed; it is cached there for subsequent runs. Verified by
+        # actually running the matrix on the runner, not assumed.
+        #
+        # Deliberately NOT `cache: pip`. That would make sense on a GitHub-hosted
+        # runner, where every job starts on a fresh VM with a cold pip cache. This
+        # runner is a persistent machine: ~/.cache/pip already survives between
+        # jobs on local disk, so `cache: pip` would only add a restore/save round
+        # trip to GitHub's cache service to rebuild something we already have.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Run unit tests
+        run: |
+          python tests/test_modules.py
+          python tests/test_strategy_simulation.py
+
+      - name: Run integration tests
+        run: |
+          PYTHONPATH=. python tests/test_integration.py
+
+      - name: Validate target input contract example (issue #602)
+        run: |
+          python -c "
+          import input_contract as ic
+          import json
+          doc = json.loads(open(ic.EXAMPLE_PATH).read())
+          ic.validate_contract(doc)
+          print('schema/example.json validates against the composed target schema (0 errors).')
+          "
+
+      # COVERAGE: no extra job, no extra matrix leg, no measurable extra time.
+      #
+      # Coverage is folded INTO the pytest run this job already performs, and only on
+      # the 3.12 leg -- which is the only leg PRs and `main` run at all. So it adds
+      # zero jobs and zero legs. The nightly full matrix instruments 3.12 and leaves
+      # 3.10/3.11 clean, because a second and third measurement of the same lines buys
+      # nothing.
+      #
+      # The tracer choice is the whole ballgame, and it was MEASURED, not assumed
+      # (3 engine-heavy test files, `nice -n 19`, 2 reps, CPU time = user+sys, which is
+      # robust to the load other jobs put on this box):
+      #
+      #     no coverage                8.21 s CPU     1.00x
+      #     COVERAGE_CORE=sysmon       7.96 s CPU     ~1.00x  (within noise)
+      #     default C tracer          18.70 s CPU     2.28x   (+128%)
+      #
+      # The stock C tracer would MORE THAN DOUBLE a ~25-35 min suite, to ~57-80 min.
+      # That is unaffordable on a box the maintainer is working on, and it is why this
+      # is not just `pytest --cov`.
+      #
+      # `sysmon` is CPython 3.12's sys.monitoring backend (coverage >= 7.4). It is free
+      # here to within measurement noise -- and it is genuinely measuring, not silently
+      # no-op'ing: a sysmon run and a ctrace run of the same test file produce
+      # BYTE-IDENTICAL executed-line sets (77 files, 4535 lines, 0 files differing).
+      # That check matters; a "free" instrument is exactly what a broken instrument
+      # looks like.
+      #
+      # Consequence: coverage is cheap enough to run on every PR, so the ratchet blocks
+      # a regression BEFORE it lands rather than one merge after. If the tracer ever
+      # stops being free (e.g. the 3.12 leg is dropped), move this to the nightly and
+      # accept catching regressions a day late.
+      - name: Run tests via pytest (coverage-instrumented on 3.12)
+        env:
+          COVERAGE_CORE: sysmon
+        # `python -m pytest`, NOT bare `pytest`. This is load-bearing on a self-hosted
+        # runner and it is not cosmetic:
+        #
+        # `pip install ".[dev]"` here installs into the USER site-packages of the
+        # matrix interpreter (the log says "Requirement already satisfied: pytest ... in
+        # ~/.local/lib/python3.12/site-packages"), because this runner is a
+        # persistent machine and not a throwaway VM. But bare `pytest` resolves through
+        # PATH to a console script owned by a DIFFERENT interpreter, which does not see
+        # those packages -- so `pytest-cov` was installed and then not loaded, and
+        # `--cov` came back as "unrecognized arguments" even though the dependency was
+        # right there in the dev extra.
+        #
+        # `python -m pytest` runs the module with THE interpreter setup-python selected,
+        # so the plugins installed for it are the plugins that load.
+        #
+        # Worth flagging beyond coverage: bare `pytest` never errored before only because
+        # nothing it was passed needed a plugin. It means the matrix legs were not
+        # necessarily executing on the Python the matrix names -- a 3.10 leg that
+        # actually runs some other interpreter is a green tick that proves nothing.
+        run: |
+          python -c "import sys; print('interpreter:', sys.executable, sys.version)"
+          # Capture peak RSS via GNU time when present, but never let its absence
+          # break the test job itself (defensive: fall back to a bare run).
+          TIME=""
+          command -v /usr/bin/time >/dev/null 2>&1 && TIME="/usr/bin/time -v -o rss.txt"
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            $TIME python -m pytest -q --cov \
+              --cov-report=json:coverage.json \
+              --cov-report=term-missing:skip-covered --durations=25 \
+              -n auto --dist worksteal
+          else
+            python -m pytest -q --durations=25 -n auto --dist worksteal
+          fi
+
+      - name: Peak memory (RSS) -> job summary
+        if: always()
+        run: |
+          if [ -f rss.txt ]; then
+            echo "### Peak memory" >> "$GITHUB_STEP_SUMMARY"
+            grep -E "Maximum resident set size|Elapsed \(wall clock\)" rss.txt >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+
+      # Gate A (no production file has zero covered lines) + Gate B (no file increases
+      # its uncovered-line count vs tools/coverage_baseline.json) + Gate C (no new
+      # `# pragma: no cover`). See tools/README.md for why the ratchet counts uncovered
+      # LINES rather than a percentage.
+      #
+      # When this fails, the answer is to write a test -- not to grow the allowlist.
+      - name: Coverage gate (zero-coverage + per-file uncovered-line ratchet)
+        if: matrix.python-version == '3.12'
+        run: python tools/coverage_gate.py --check
+
+      # `always()`: the findings are most useful precisely when the gate just failed.
+      - name: Coverage findings -> job summary
+        if: always() && matrix.python-version == '3.12'
+        run: |
+          {
+            echo '### Coverage findings'
+            echo '```'
+            python tools/coverage_gate.py --report || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage.json (machine-readable artifact)
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: coverage-json
+          path: coverage.json
+          if-no-files-found: warn
+
+      # PERF GATE: the conftest.py plugin writes test_timings.json on every
+      # pytest run (no opt-in flag -- it is always-on). This gate compares
+      # per-test durations against tools/perf_baseline.json and fails if any
+      # test got materially slower (>1.5x AND >+1.0s beyond baseline).
+      #
+      # Unlike coverage, improvements do NOT auto-tighten: timing is noisy on
+      # this self-hosted runner, so a fast run must not set a too-tight
+      # baseline. The baseline is only updated by an explicit --update.
+      #
+      # 3.12 only: the baseline is calibrated on 3.12 (the only leg PRs and
+      # main run), and cross-version timing is not comparable.
+      - name: Perf gate (per-test runtime regression)
+        if: always() && matrix.python-version == '3.12'
+        run: python tools/perf_gate.py --check
+
+      - name: Perf findings -> job summary
+        if: always() && matrix.python-version == '3.12'
+        run: |
+          {
+            echo '### Runtime findings'
+            echo '```'
+            python tools/perf_gate.py --report || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test_timings.json (machine-readable artifact)
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: test-timings-json
+          path: test_timings.json
+          if-no-files-found: warn
+
+  # FAST-SIGNAL (issue #943): a separate, quick job that runs the suite WITHOUT
+  # coverage instrumentation, so a PR fails fast on an obvious break instead of
+  # waiting on the coverage-instrumented `test` job for red/green. The `test` job
+  # above remains the authoritative coverage/ratchet gate and runs in parallel.
+  #
+  # Python 3.12 only (no matrix): this mirrors the PR/`main` leg of `test`, which
+  # is the only leg that matters for a fast signal. The nightly full matrix still
+  # comes from `test`.
+  quick-tests:
+    runs-on: arc-runners
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Run tests via pytest (no coverage)
+        run: python -m pytest -q -n auto --dist worksteal
+
+      # PERF GATE: same gate as the `test` job, but on the fast-signal leg.
+      # The conftest.py plugin writes test_timings.json here too. This is
+      # advisory (the quick-tests job is a fast-signal, not the authoritative
+      # gate) -- it runs --report to surface regressions in the job summary,
+      # but does not fail the job.
+      - name: Perf findings -> job summary (advisory)
+        if: always()
+        run: |
+          {
+            echo '### Runtime findings (quick-tests, advisory)'
+            echo '```'
+            python tools/perf_gate.py --report || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

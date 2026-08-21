@@ -1,0 +1,60 @@
+# dupdelta configuration for this repository.
+#
+# dupdelta (https://github.com/elecnix/dupdelta) replaced the home-grown AST
+# clone detectors (tools/clone_scan.py, tools/module_vocab_scan.py,
+# tools/clone_ci_diff.py, tools/jscpd_ci_filter.py, tools/ci_annotate.py) and
+# the jscpd advisory step in .github/workflows/clone-detection.yml. The design
+# rationale carries over unchanged: warn ONLY about duplication a PR adds or
+# worsens relative to its merge-base, never about the codebase's standing,
+# already-accepted duplication (#634/#635, the RRSP/TFSA account near-clones,
+# ...). dupdelta's three detectors map onto the old trio:
+#
+#   [function]  -> clone_scan.py   (blind-rename + literal abstraction)
+#   [vocab]     -> module_vocab_scan.py (whole-module "second engine")
+#   [blocks]    -> jscpd            (literal sub-function copy-paste)
+#
+# Thresholds are dupdelta's documented defaults for a small-to-medium
+# repository (this one: ~136 first-party .py files). The old tools' own
+# thresholds (min_nodes 30, overlap 0.3, min_vocab 15) are not directly
+# comparable — dupdelta counts tree-sitter syntax nodes and identifiers, which
+# are finer-grained than the Python `ast` counts the old tools used — and the
+# delta mechanism means standing duplication is filtered out regardless, so
+# what matters is only that NEW duplication clears the bar. Verified against
+# this tree: a deliberate near-duplicate of a real function, a second-engine
+# module, and a copy-pasted block are all reported as new.
+
+excludes = ["/tests/", ".venv", "/build/", "/.egg-info", "/.git/"]
+
+[function]
+min_similarity = 0.85   # where true positives concentrate
+min_nodes = 40          # ignore units smaller than this many syntax nodes
+
+[vocab]
+min_overlap = 0.55
+min_vocabulary = 30
+worsened_delta = 0.05   # how much an existing pair must grow to count as worse
+
+[blocks]
+min_tokens = 100        # normalized tokens, which are denser than source lines
+
+[vocab.noise]
+# Identifiers that carry no domain signal, so that two files are not paired on
+# boilerplate alone. Ported from the old module_vocab_scan.py
+# COMMON_STDLIB_NOISE (including the CLI-script scaffolding entries added
+# after #603's own CI-integration PR flagged its new tools/*.py scripts
+# against each other on nothing but argparse/json/os boilerplate — see
+# tools/README.md). Every entry is a name this project genuinely uses
+# everywhere, not a way to quiet a finding someone did not want to look at.
+python = [
+    "self", "cls", "args", "kwargs", "self_", "value", "data", "result",
+    "item", "items", "key", "keys", "val", "obj", "i", "j", "k", "x", "y",
+    "n", "s", "e", "f", "p", "d", "config", "cfg", "get", "set", "append",
+    "update", "pop", "len", "str", "int", "float", "bool", "dict", "list",
+    "tuple", "range", "enumerate", "zip", "None", "True", "False",
+    "__init__", "__post_init__", "__repr__", "__str__", "__eq__", "main",
+    "argparse", "ArgumentParser", "add_argument", "parse_args",
+    "help", "required", "default", "action", "type",
+    "json", "dump", "dumps", "load", "loads",
+    "os", "sys", "re", "open", "read", "write", "close", "fh",
+    "stderr", "stdout", "exit", "path", "environ",
+]

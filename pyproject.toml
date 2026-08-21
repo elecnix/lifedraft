@@ -1,0 +1,165 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lifedraft"
+version = "0.5.0"
+description = "Financial rehearsal engine — simulate a household's whole financial life year by year and rank strategies by after-tax outcome"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Nicolas Marchildon"},
+]
+keywords = ["financial-planning", "simulation", "rehearsal", "mortgage", "retirement", "tax", "optimizer", "personal-finance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+# numpy is a runtime dependency: simulate.py imports it unconditionally for the
+# RNG (DP#23, issue #333). Previously it was dev-only, so `simulate.py` crashed
+# on a non-dev install with ModuleNotFoundError. pandas stays optional (optimize.py
+# guards its import with try/except).
+# jsonschema is a runtime dependency (issue #596/#602, epic #603 Track C):
+# input_contract.py validates the target input contract at load time via
+# jsonschema.Draft202012Validator. Per #367's precedent (pandas silently
+# degrading the ranked summary), this is a REAL dependency, not a silent
+# optional import -- a missing jsonschema install must fail loudly at import
+# time, not degrade validation into a no-op.
+dependencies = ["numpy>=1.24", "jsonschema>=4.18"]
+
+[project.optional-dependencies]
+# pytest-cov>=5 pulls coverage>=7.4, which is the first release able to use
+# CPython 3.12's `sys.monitoring` backend (COVERAGE_CORE=sysmon). That is what
+# makes the coverage gate affordable on the single self-hosted runner -- the
+# stock C tracer costs materially more. See tools/README.md.
+dev = ["pytest>=7.0", "pytest-cov>=5.0", "pytest-xdist", "pandas>=2.0", "numpy>=1.24", "jsonschema>=4.18", "scipy>=1.10"]
+# scipy is a declared DEV dependency (not a runtime one -- scipy_optimizer.py
+# imports it lazily and falls back to grid search when it is absent, issue #765)
+# so CI DETERMINISTICALLY installs it: the scipy_optimizer `minimize` path
+# (scipy_optimizer.py:142-145) is only coverable when scipy is importable, and
+# the coverage baseline (tools/coverage_baseline.json) was measured with scipy
+# installed. Previously scipy rode on the self-hosted runner's GLOBAL Python
+# ("outside the declared dependency set", issue #765) -- a fragility that broke
+# the coverage gate when that global scipy was removed. Declaring it makes the
+# minimize path coverable in CI regardless of the runner's global state.
+
+# The repo root holds ~38 flat top-level modules (optimize.py, simulate.py,
+# strategy.py, ...). [tool.setuptools.packages.find] only discovers *packages*
+# (directories with __init__.py: countries/, docs/, schema/, tools/), so the
+# root-level flat files are NOT otherwise installed importable -- the editable
+# finder's MAPPING omits them, and a console script launched from an arbitrary
+# CWD cannot `import optimize`. That is the deeper reason the #749 entry points
+# crashed even after repointing at the live modules: the targets existed in the
+# source tree but were never on sys.path post-install. Declaring them as
+# `py-modules` makes setuptools install every root-level *.py as a top-level
+# module, so `optimize:main` / `simulate:main` resolve from anywhere (issue
+# #749). These are all real shipped modules the test suite already imports as
+# top-level -- `py-modules` merely makes that importable post-install too.
+[tool.setuptools]
+py-modules = [
+    "decumulation", "dp_optimizer", "input_contract", "jurisdiction",
+    "jurisdiction_providers", "liquidation_waterfall", "loop",
+    "make_retirement_input", "model_fidelity", "module_registry",
+    "monte_carlo_optimizer", "next_action", "objective", "optimize",
+    "optimizer", "output_paths", "output_plugins", "provenance",
+    "retirement_analysis", "return_model", "runway", "scenario_discovery",
+    "scipy_optimizer", "sensitivity", "session_log", "simulate",
+    "simulation", "simulation_config", "simulation_rules",
+    "simulation_state", "strategy", "stress_scenarios", "sweep",
+    "tax_calculator", "tax_data", "trajectory_invariants", "voi",
+]
+
+[tool.setuptools.packages.find]
+include = ["*", "countries", "countries.*"]
+exclude = ["countries.*.tests*", "tests*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.md"]
+"schema" = ["*.json", "countries/canada/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "countries/canada/tests", "countries/canada/provinces/quebec/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = ["error"]
+strict_config = true
+
+[tool.coverage.run]
+# `source = ["."]` (a directory, not a module list) is load-bearing: it makes
+# coverage.py walk the tree and report files it never imported at 0%, instead of
+# omitting them from the report entirely. Gate A (zero-coverage) depends on that.
+source = ["."]
+relative_files = true
+omit = [
+    # Not production source. Everything else IS measured -- a file that is hard to
+    # test belongs in the zero-coverage allowlist (tools/coverage_baseline.json),
+    # where it is individually justified and issue-linked, NOT hidden here.
+    "tests/*",
+    "countries/*/tests/*",
+    "countries/*/provinces/*/tests/*",
+    ".venv/*",
+    "__pycache__/*",
+    "build/*",
+    "dist/*",
+    "setup.py",
+    # CI utilities, exercised by .github/workflows/tests.yml rather than by
+    # pytest. Measuring them under pytest would brand them dead when they are not.
+    "tools/*",
+    # Test infrastructure: the always-on duration profiler is a pytest plugin
+    # (auto-loaded via conftest.py), not production simulation code. It is
+    # exercised on every test run but not importable as a library module, so
+    # measuring it under the coverage gate would brand its error-handling paths
+    # (write failures, xdist worker fragments) as dead when they are not.
+    "conftest.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# NOTE: there is deliberately no `fail_under` here.
+#
+# A repo-wide percentage is theatre at this size: 200 untested lines added to a
+# ~40k-line codebase moves the global number by ~0.5%, so a threshold that would
+# catch them would have to sit so tight it fires on noise. Worse, the previous
+# `fail_under = 93` was never executed at all -- `coverage` was not installed and
+# no workflow invoked it -- which is precisely the defect class this repo exists
+# to eliminate (config that is parsed and never read).
+#
+# It is replaced by tools/coverage_gate.py, which enforces per-file:
+#   Gate A: no production file may have ZERO covered lines.
+#   Gate B: no production file may INCREASE its uncovered-line count vs baseline.
+# See docs in tools/coverage_gate.py for why the ratchet counts lines, not percent.
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A"]
+ignore = ["E501", "B008"]
+
+# [project.scripts] entry points resolve to modules that actually exist.
+# The original family_optimize.py / compare_scenarios.py were folded into the
+# single-script architecture (simulate.py + optimize.py) but the entry points
+# were never updated -- both advertised commands hard-crashed with
+# ModuleNotFoundError on a real install (issue #749).
+#   family-optimize  -> optimize.py:main   (the strategy optimizer; successor
+#                       of the deleted family_optimize.py)
+#   compare-scenarios -> simulate.py:main  (discover anchors, evaluate
+#                       overlays, rank head-to-head; successor of the deleted
+#                       compare_scenarios.py)
+# tests/architecture/test_console_scripts.py guards this mapping.
+[project.scripts]
+family-optimize = "optimize:main"
+compare-scenarios = "simulate:main"

@@ -1,0 +1,33 @@
+# gitleaks configuration for CI secret scanning (.github/workflows/secret-scan.yml).
+#
+# The default rule set is extended unchanged; this file exists only to carry
+# the allowlist of false positives triaged when scanning was wired up. Every
+# entry cites the finding, the mechanism of the false positive, and where it
+# was triaged — an unexplained allowlist entry is how a real leak gets waved
+# through, so grow this list reluctantly and document each addition.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "False positives triaged when secret scanning was wired into CI"
+paths = [
+    # .secrets.baseline is the detect-secrets baseline: by construction it
+    # stores SHA-1 hashes of already-triaged findings (nine entries — eight
+    # salted SHA-256 constants from the DP#15 guard test, plus one
+    # KeywordDetector self-match on the version pin inside this workflow's
+    # own install command). gitleaks' generic-api-key rule fires on those
+    # hash strings themselves; the file contains no credential. Triaged in
+    # the PR that wired secret scanning into CI.
+    '''\.secrets\.baseline$''',
+]
+regexes = [
+    # generic-api-key fires on the comment phrase "older/synthetic"
+    # (commit 1c061d3f, tests/test_issue_707_decumulation_shortfall.py:228):
+    # prose describing "older/synthetic rows" in a ranking-key test. The
+    # heuristic keys on the word/word shape plus entropy; there is no
+    # credential here. Triaged in the PR that wired gitleaks into CI
+    # (manual run: `gitleaks git` over 1,174 commits reported exactly one
+    # finding, this one).
+    '''older/synthetic''',
+]

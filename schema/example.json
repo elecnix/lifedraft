@@ -1,0 +1,1334 @@
+{
+  "schema_version": "2026-07",
+  "as_of": "2026-07-12",
+  "currency": "CAD",
+  "dollars": "nominal",
+  "jurisdiction": {
+    "country": "canada",
+    "province": "quebec"
+  },
+  "people": [
+    {
+      "id": "ggm",
+      "label": "great_grandmother",
+      "legal_name": null,
+      "birth_date": "1934-02-11",
+      "death_date": null,
+      "residency": {
+        "province": "quebec",
+        "since": "1960-01-01"
+      },
+      "relationships": [
+        {
+          "type": "spouse_of",
+          "person": "ggf",
+          "from": "1955-06-18",
+          "to": "2019-11-03"
+        }
+      ],
+      "incomes": [],
+      "benefits": {
+        "cpp": {
+          "start_date": "1999-02-01",
+          "monthly_amount": 620,
+          "as_of": "2026-01-15"
+        },
+        "oas": {
+          "start_date": "1999-02-01",
+          "defer_months": 0
+        }
+      },
+      "study_periods": [],
+      "room": {
+        "rrsp": null,
+        "tfsa": {
+          "contribution_room": 0,
+          "as_of": "2026-01-01"
+        },
+        "fhsa": null,
+        "resp": null
+      }
+    },
+    {
+      "id": "ggf",
+      "label": "great_grandfather",
+      "legal_name": null,
+      "birth_date": "1932-09-30",
+      "death_date": "2019-11-03",
+      "residency": {
+        "province": "quebec",
+        "since": "1955-06-18"
+      },
+      "relationships": [
+        {
+          "type": "spouse_of",
+          "person": "ggm",
+          "from": "1955-06-18",
+          "to": "2019-11-03"
+        },
+        {
+          "type": "parent_of",
+          "person": "gf",
+          "from": null,
+          "to": null
+        }
+      ],
+      "incomes": [],
+      "study_periods": [],
+      "room": {
+        "rrsp": null,
+        "tfsa": null,
+        "fhsa": null,
+        "resp": null
+      }
+    },
+    {
+      "id": "gf",
+      "label": "grandfather",
+      "legal_name": null,
+      "birth_date": "1954-05-01",
+      "death_date": null,
+      "residency": {
+        "province": "quebec",
+        "since": "1980-04-01"
+      },
+      "relationships": [
+        {
+          "type": "spouse_of",
+          "person": "gm",
+          "from": "1979-08-25",
+          "to": null
+        },
+        {
+          "type": "parent_of",
+          "person": "p1",
+          "from": null,
+          "to": null
+        }
+      ],
+      "incomes": [],
+      "benefits": {
+        "cpp": {
+          "start_date": "2019-05-01",
+          "monthly_amount": 1180,
+          "as_of": "2025-11-01"
+        },
+        "oas": {
+          "start_date": "2019-05-01",
+          "defer_months": 0
+        },
+        "employer_pension": {
+          "start_date": "2019-06-01",
+          "annual_amount": 38000,
+          "indexed": false
+        }
+      },
+      "study_periods": [],
+      "room": {
+        "rrsp": null,
+        "tfsa": null,
+        "fhsa": null,
+        "resp": null
+      }
+    },
+    {
+      "id": "gm",
+      "label": "grandmother",
+      "legal_name": null,
+      "birth_date": "1956-12-19",
+      "death_date": null,
+      "residency": {
+        "province": "quebec",
+        "since": "1980-04-01"
+      },
+      "relationships": [
+        {
+          "type": "spouse_of",
+          "person": "gf",
+          "from": "1979-08-25",
+          "to": null
+        }
+      ],
+      "incomes": [],
+      "benefits": {
+        "cpp": {
+          "start_date": "2021-09-01",
+          "monthly_amount": 640,
+          "as_of": "2025-11-01"
+        },
+        "oas": {
+          "start_date": "2021-09-01",
+          "defer_months": 0
+        },
+        "employer_pension": {
+          "start_date": "2021-09-01",
+          "annual_amount": 14000,
+          "indexed": false
+        }
+      },
+      "study_periods": [],
+      "room": {
+        "rrsp": {
+          "contribution_room": 4000,
+          "as_of": "2026-01-01"
+        },
+        "tfsa": {
+          "contribution_room": 8000,
+          "as_of": "2026-01-01"
+        },
+        "fhsa": null,
+        "resp": null
+      }
+    },
+    {
+      "id": "p1",
+      "label": "primary",
+      "legal_name": null,
+      "birth_date": "1980-03-14",
+      "death_date": null,
+      "residency": {
+        "province": "quebec",
+        "since": "1980-03-14"
+      },
+      "relationships": [
+        {
+          "type": "spouse_of",
+          "person": "p2",
+          "from": "2008-06-21",
+          "to": null
+        },
+        {
+          "type": "parent_of",
+          "person": "ca",
+          "from": null,
+          "to": null
+        },
+        {
+          "type": "parent_of",
+          "person": "cb",
+          "from": null,
+          "to": null
+        }
+      ],
+      "incomes": [
+        {
+          "id": "p1_employment",
+          "kind": "employment",
+          "amount": 118000,
+          "from": "2015-01-01",
+          "to": null,
+          "employer_rrsp_match": {
+            "into_account": "p1_rrsp",
+            "pct": 0.03,
+            "max": 3900
+          },
+          "employment": {
+            "non_compete": {
+              "months": 12,
+              "scope": "payments technology",
+              "geography": "Canada"
+            },
+            "probation_end": null,
+            "notice_days": 0
+          }
+        }
+      ],
+      "study_periods": [],
+      "room": {
+        "rrsp": {
+          "contribution_room": 42000,
+          "as_of": "2026-01-01"
+        },
+        "tfsa": {
+          "contribution_room": 18000,
+          "as_of": "2026-01-01"
+        },
+        "fhsa": null,
+        "resp": null
+      }
+    },
+    {
+      "id": "p2",
+      "label": "spouse",
+      "legal_name": null,
+      "birth_date": "1982-09-02",
+      "death_date": null,
+      "residency": {
+        "province": "quebec",
+        "since": "1982-09-02"
+      },
+      "relationships": [
+        {
+          "type": "parent_of",
+          "person": "ca",
+          "from": null,
+          "to": null
+        },
+        {
+          "type": "parent_of",
+          "person": "cb",
+          "from": null,
+          "to": null
+        }
+      ],
+      "incomes": [
+        {
+          "id": "p2_employment",
+          "kind": "employment",
+          "amount": 96000,
+          "from": "2018-03-01",
+          "to": null,
+          "employer_rrsp_match": null
+        }
+      ],
+      "study_periods": [],
+      "room": {
+        "rrsp": {
+          "contribution_room": 31000,
+          "as_of": "2026-01-01"
+        },
+        "tfsa": {
+          "contribution_room": 26000,
+          "as_of": "2026-01-01"
+        },
+        "fhsa": null,
+        "resp": null
+      }
+    },
+    {
+      "id": "ca",
+      "label": "child_a",
+      "legal_name": null,
+      "birth_date": "2010-04-22",
+      "death_date": null,
+      "residency": {
+        "province": "quebec",
+        "since": "2010-04-22"
+      },
+      "relationships": [],
+      "incomes": [],
+      "study_periods": [
+        {
+          "institution": "Lycee Synthetique",
+          "program": "Secondary V",
+          "start_date": "2025-08-25",
+          "end_date": "2026-06-20"
+        }
+      ],
+      "room": {
+        "rrsp": null,
+        "tfsa": null,
+        "fhsa": null,
+        "resp": {
+          "contribution_room": 4000,
+          "as_of": "2026-01-01"
+        }
+      }
+    },
+    {
+      "id": "cb",
+      "label": "child_b",
+      "legal_name": null,
+      "birth_date": "2013-01-09",
+      "death_date": null,
+      "residency": {
+        "province": "quebec",
+        "since": "2013-01-09"
+      },
+      "relationships": [],
+      "incomes": [],
+      "study_periods": [],
+      "room": {
+        "rrsp": null,
+        "tfsa": null,
+        "fhsa": null,
+        "resp": {
+          "contribution_room": 4000,
+          "as_of": "2026-01-01"
+        }
+      }
+    }
+  ],
+  "accounts": [
+    {
+      "id": "p1_rrsp",
+      "owner": "p1",
+      "kind": "rrsp",
+      "balance": {
+        "amount": 210000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_global_equity_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "p2",
+      "successor_holder": null
+    },
+    {
+      "id": "p2_rrsp",
+      "owner": "p2",
+      "kind": "rrsp",
+      "balance": {
+        "amount": 95000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_global_equity_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "p1",
+      "successor_holder": null
+    },
+    {
+      "id": "spousal_rrsp_p2",
+      "owner": "p2",
+      "kind": "spousal_rrsp",
+      "balance": {
+        "amount": 60000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_global_equity_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "p1",
+      "successor_holder": null,
+      "contributors": [
+        "p1"
+      ]
+    },
+    {
+      "id": "p1_tfsa",
+      "owner": "p1",
+      "kind": "tfsa",
+      "balance": {
+        "amount": 71000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_global_equity_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "p2",
+      "successor_holder": "p2"
+    },
+    {
+      "id": "p2_tfsa",
+      "owner": "p2",
+      "kind": "tfsa",
+      "balance": {
+        "amount": 54000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_global_equity_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "p1",
+      "successor_holder": "p1"
+    },
+    {
+      "id": "p2_lira",
+      "owner": "p2",
+      "kind": "lira",
+      "balance": {
+        "amount": 38000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "p1",
+      "successor_holder": null,
+      "lira": {
+        "jurisdiction": "quebec",
+        "source_pension_plan": "Former employer DC plan",
+        "transfer_date": "2016-04-01",
+        "reference_rate": 0.045
+      }
+    },
+    {
+      "id": "joint_nonreg",
+      "owner": {
+        "joint": [
+          {
+            "person": "p1",
+            "pct": 0.5
+          },
+          {
+            "person": "p2",
+            "pct": 0.5
+          }
+        ]
+      },
+      "kind": "non_reg",
+      "balance": {
+        "amount": 85000,
+        "as_of": "2026-06-30"
+      },
+      "acb": 62000,
+      "holdings": [
+        {
+          "product": "synthetic_global_equity_index",
+          "weight": 0.7
+        },
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 0.3
+        }
+      ],
+      "beneficiary": null,
+      "successor_holder": null
+    },
+    {
+      "id": "family_resp",
+      "owner": {
+        "joint": [
+          {
+            "person": "p1",
+            "pct": 0.5
+          },
+          {
+            "person": "p2",
+            "pct": 0.5
+          }
+        ]
+      },
+      "kind": "resp",
+      "balance": {
+        "amount": 46000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_balanced_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": null,
+      "successor_holder": null,
+      "resp": {
+        "subscribers": [
+          "p1",
+          "p2"
+        ],
+        "beneficiaries": [
+          "ca",
+          "cb"
+        ],
+        "contributions_total": 32000,
+        "cesg_received": 6400,
+        "qesi_received": 3200,
+        "clb_received": 0
+      }
+    },
+    {
+      "id": "gf_lif",
+      "owner": "gf",
+      "kind": "lif",
+      "balance": {
+        "amount": 145000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "gm",
+      "successor_holder": null,
+      "lira": {
+        "jurisdiction": "quebec",
+        "source_pension_plan": "Employer DB commuted value",
+        "transfer_date": "2019-06-15",
+        "reference_rate": 0.045
+      }
+    },
+    {
+      "id": "gm_rrsp",
+      "owner": "gm",
+      "kind": "rrsp",
+      "balance": {
+        "amount": 88000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "gf",
+      "successor_holder": null
+    },
+    {
+      "id": "gm_tfsa",
+      "owner": "gm",
+      "kind": "tfsa",
+      "balance": {
+        "amount": 45000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "gf",
+      "successor_holder": "gf"
+    },
+    {
+      "id": "gm_nonreg",
+      "owner": "gm",
+      "kind": "non_reg",
+      "balance": {
+        "amount": 30000,
+        "as_of": "2026-06-30"
+      },
+      "acb": 24000,
+      "holdings": [
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "gf",
+      "successor_holder": null
+    },
+    {
+      "id": "ggm_nonreg",
+      "owner": "ggm",
+      "kind": "non_reg",
+      "balance": {
+        "amount": 52000,
+        "as_of": "2026-06-30"
+      },
+      "acb": 40000,
+      "holdings": [
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "gf",
+      "successor_holder": null
+    },
+    {
+      "id": "ggm_tfsa",
+      "owner": "ggm",
+      "kind": "tfsa",
+      "balance": {
+        "amount": 22000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "gf",
+      "successor_holder": null
+    },
+    {
+      "id": "p2_fhsa",
+      "owner": "p2",
+      "kind": "fhsa",
+      "balance": {
+        "amount": 12000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_fixed_income_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "p1",
+      "successor_holder": null,
+      "fhsa": {
+        "opened_date": "2023-05-01",
+        "first_time_buyer_since": "2023-05-01"
+      }
+    },
+    {
+      "id": "p1_lsif",
+      "owner": "p1",
+      "kind": "lsif",
+      "balance": {
+        "amount": 15000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "holdings": [
+        {
+          "product": "synthetic_balanced_index",
+          "weight": 1.0
+        }
+      ],
+      "beneficiary": "p2",
+      "successor_holder": null,
+      "lsif": {
+        "purchase_date": "2020-03-01",
+        "purchase_province": "quebec",
+        "federally_registered": true,
+        "prior_redemption": false,
+        "is_hbp_replacement": false,
+        "quebec_carryforward": 0,
+        "acquisition_date": "2020-03-01",
+        "redeemed_date": null,
+        "reference_year_taxable_income": null
+      }
+    }
+  ],
+  "liabilities": [
+    {
+      "id": "mortgage_main",
+      "owner": {
+        "joint": [
+          {
+            "person": "p1",
+            "pct": 0.5
+          },
+          {
+            "person": "p2",
+            "pct": 0.5
+          }
+        ]
+      },
+      "kind": "mortgage",
+      "balance": {
+        "amount": 340000,
+        "as_of": "2026-06-30"
+      },
+      "rate": 0.045,
+      "rate_type": "fixed",
+      "amortization": {
+        "years": 18,
+        "payment_monthly": 2450
+      },
+      "renewal_date": "2028-09-01",
+      "term_start_date": "2023-09-01",
+      "collateral": "principal_residence"
+    },
+    {
+      "id": "heloc_main",
+      "owner": "p1",
+      "kind": "heloc",
+      "balance": {
+        "amount": 65000,
+        "as_of": "2026-06-30"
+      },
+      "limit": 150000,
+      "rate": 0.0545,
+      "rate_type": "variable",
+      "deductibility": {
+        "investment_portion": 0.6,
+        "personal_portion": 0.4
+      },
+      "collateral": "principal_residence",
+      "readvanceable": true,
+      "capitalize_interest": false
+    },
+    {
+      "id": "personal_loc",
+      "owner": "p2",
+      "kind": "line_of_credit",
+      "balance": {
+        "amount": 0,
+        "as_of": "2026-06-30"
+      },
+      "limit": 30000,
+      "rate": 0.0725,
+      "rate_type": "variable",
+      "collateral": null
+    },
+    {
+      "id": "car_loan_p2",
+      "owner": "p2",
+      "kind": "car_loan",
+      "balance": {
+        "amount": 12500,
+        "as_of": "2026-06-30"
+      },
+      "rate": 0.069,
+      "rate_type": "fixed",
+      "amortization": {
+        "years": 4,
+        "payment_monthly": 310
+      },
+      "collateral": null
+    }
+  ],
+  "properties": [
+    {
+      "id": "principal_residence",
+      "owner": {
+        "joint": [
+          {
+            "person": "p1",
+            "pct": 0.5
+          },
+          {
+            "person": "p2",
+            "pct": 0.5
+          }
+        ]
+      },
+      "kind": "principal",
+      "value": {
+        "amount": 650000,
+        "as_of": "2026-06-30"
+      },
+      "acb": null,
+      "designated_principal_residence_years": [
+        {
+          "from": "2023-09-01",
+          "to": null
+        }
+      ]
+    },
+    {
+      "id": "grandparents_cottage",
+      "owner": {
+        "joint": [
+          {
+            "person": "gf",
+            "pct": 0.5
+          },
+          {
+            "person": "gm",
+            "pct": 0.5
+          }
+        ]
+      },
+      "kind": "recreational",
+      "value": {
+        "amount": 310000,
+        "as_of": "2026-06-30"
+      },
+      "acb": 180000,
+      "designated_principal_residence_years": []
+    }
+  ],
+  "cash_flows": [
+    {
+      "id": "cf_tuition_ca_2032",
+      "owner": null,
+      "date": "2032-08-25",
+      "amount": -18000,
+      "tax_treatment": "not_applicable",
+      "description": "Planned private secondary tuition for child_a, 2032-2036."
+    },
+    {
+      "id": "cf_p2_retention_bonus",
+      "owner": "p2",
+      "date": "2027-03-01",
+      "amount": 15000,
+      "tax_treatment": "taxable_ordinary",
+      "description": "Contracted retention bonus, payable 2027-03-01."
+    }
+  ],
+  "household_budget": {
+    "annual_living_costs": 78000,
+    "discretionary_fraction": 0.25,
+    "expense_segments": [
+      {
+        "description": "private-school tuition, child_a (ends when the child reaches public post-secondary)",
+        "amount": 14000,
+        "from": "2026-09-01",
+        "to": "2032-07-01",
+        "non_discretionary": true
+      }
+    ]
+  },
+  "estate": {
+    "default_spousal_rollover": true,
+    "rollover_overrides": [
+      {
+        "account": "spousal_rrsp_p2",
+        "spousal_rollover": false
+      }
+    ],
+    "life_insurance": [
+      {
+        "id": "term_p1",
+        "owner": "p1",
+        "insured": "p1",
+        "beneficiary": "p2",
+        "kind": "term",
+        "face_amount": 500000,
+        "premium_annual": 620,
+        "as_of": "2026-01-01",
+        "term_end_date": "2040-01-01"
+      },
+      {
+        "id": "permanent_p2",
+        "owner": "p2",
+        "insured": "p2",
+        "beneficiary": "p1",
+        "kind": "permanent",
+        "face_amount": 250000,
+        "premium_annual": 3400,
+        "as_of": "2026-01-01",
+        "term_end_date": null
+      },
+      {
+        "id": "permanent_gf",
+        "owner": "gf",
+        "insured": "gf",
+        "beneficiary": "gm",
+        "kind": "permanent",
+        "face_amount": 150000,
+        "premium_annual": 2100,
+        "as_of": "2026-01-01",
+        "term_end_date": null
+      }
+    ]
+  },
+  "assumptions": {
+    "return_model": {
+      "type": "fixed",
+      "rate": 0.06
+    },
+    "inflation": 0.02,
+    "salary_growth": 0.02,
+    "savings_rate": 0.15,
+    "rate_paths": {
+      "mortgage": {
+        "type": "fixed",
+        "rate": 0.045
+      },
+      "heloc": {
+        "type": "variable",
+        "path": [
+          0.0545,
+          0.0545,
+          0.06,
+          0.06,
+          0.055
+        ]
+      }
+    },
+    "retirement": {
+      "spending_target": 90000,
+      "net_replacement_rate": 0.7,
+      "drawdown_tax_mode": "net",
+      "drawdown_order": [
+        "tfsa",
+        "non_reg",
+        "rrsp",
+        "rrif",
+        "lif"
+      ]
+    },
+    "mortality": [
+      {
+        "person": "ggm",
+        "assumed_death_age": 96,
+        "assumed_death_date": null
+      },
+      {
+        "person": "gf",
+        "assumed_death_age": 92,
+        "assumed_death_date": null
+      },
+      {
+        "person": "gm",
+        "assumed_death_age": 94,
+        "assumed_death_date": null
+      },
+      {
+        "person": "p1",
+        "assumed_death_age": 95,
+        "assumed_death_date": null
+      },
+      {
+        "person": "p2",
+        "assumed_death_age": 95,
+        "assumed_death_date": null
+      },
+      {
+        "person": "ca",
+        "assumed_death_age": 95,
+        "assumed_death_date": null
+      },
+      {
+        "person": "cb",
+        "assumed_death_age": 95,
+        "assumed_death_date": null
+      }
+    ],
+    "tax_law_overrides": {
+      "capital_gains_inclusion": null,
+      "frozen_brackets": false,
+      "oas": {
+        "disabled": false,
+        "annual_max_override": null
+      },
+      "contribution_limit_overrides": {
+        "rrsp_annual_max": null,
+        "tfsa_annual_room": null
+      }
+    },
+    "products": {
+      "synthetic_global_equity_index": {
+        "category": "global_equity_index",
+        "us_equity_pct": 0.6,
+        "intl_equity_pct": 0.4,
+        "foreign_income": 0.02,
+        "capital_gains": 0.01,
+        "mer": 0.002,
+        "foreign_content": 0.75,
+        "withholding_exposure": 0.011,
+        "turnover": 0.05
+      },
+      "synthetic_fixed_income_index": {
+        "category": "aggregate_bond",
+        "us_equity_pct": 0.0,
+        "intl_equity_pct": 0.0,
+        "foreign_income": 0.0,
+        "capital_gains": 0.0,
+        "mer": 0.0015,
+        "foreign_content": 0.0,
+        "withholding_exposure": 0.0,
+        "turnover": 0.4
+      },
+      "synthetic_balanced_index": {
+        "category": "canadian_dividend",
+        "us_equity_pct": 0.3,
+        "intl_equity_pct": 0.2,
+        "foreign_income": 0.01,
+        "capital_gains": 0.01,
+        "mer": 0.0018,
+        "foreign_content": 0.4,
+        "withholding_exposure": 0.006,
+        "turnover": 0.15
+      }
+    },
+    "time_step": "yearly",
+    "emergency_reserve": {
+      "target_months": 12,
+      "held_in": "p1_tfsa",
+      "instrument": "cash",
+      "rate": 0.03,
+      "replenish_priority": 1
+    },
+    "default_non_reg_yield": null,
+    "resp": {
+      "eap_tax_rate": 0.15,
+      "eap_taxable_portion": 0.6,
+      "study_start_age": 18,
+      "study_duration_years": 4,
+      "used_for_education": true
+    }
+  },
+  "decisions": {
+    "horizon": {
+      "person": "p1",
+      "until_age": 95
+    },
+    "retirement_age": [
+      {
+        "person": "p1",
+        "candidate_ages": [
+          60,
+          62,
+          65
+        ]
+      },
+      {
+        "person": "p2",
+        "candidate_ages": [
+          60,
+          63,
+          65
+        ]
+      }
+    ],
+    "contribution_strategy": [
+      {
+        "id": "balanced",
+        "label": "Balanced (RRSP-first)",
+        "allocation": {
+          "rrsp_pct": 0.5,
+          "spousal_rrsp_pct": 0.1,
+          "tfsa_pct": 0.2,
+          "fhsa_pct": 0.0,
+          "resp_pct": 0.1,
+          "non_reg_pct": 0.1
+        },
+        "use_smith": false,
+        "deduct_later": false,
+        "deduct_later_bracket_target": null
+      },
+      {
+        "id": "smith_deduct_later",
+        "label": "Smith Manoeuvre + RRSP deduct-later",
+        "allocation": {
+          "rrsp_pct": 0.3,
+          "spousal_rrsp_pct": 0.1,
+          "tfsa_pct": 0.2,
+          "fhsa_pct": 0.0,
+          "resp_pct": 0.1,
+          "non_reg_pct": 0.3
+        },
+        "use_smith": true,
+        "deduct_later": true,
+        "deduct_later_bracket_target": 117045
+      }
+    ],
+    "income": [
+      {
+        "id": "stay",
+        "label": "Stay at current jobs",
+        "overrides": []
+      },
+      {
+        "id": "p1_promotion",
+        "label": "Primary promoted to director",
+        "overrides": [
+          {
+            "income_id": "p1_employment",
+            "kind": "employment",
+            "amount": 150000,
+            "from": "2026-09-01",
+            "to": null
+          }
+        ]
+      },
+      {
+        "id": "p1_job_loss_ei",
+        "label": "Primary laid off, EI then re-employed at the 12-month non-compete expiry (#767)",
+        "overrides": [
+          {
+            "income_id": "p1_employment",
+            "kind": "ei",
+            "amount": 32000,
+            "from": "2026-09-01",
+            "to": "2027-06-01"
+          },
+          {
+            "income_id": "p1_employment",
+            "kind": "employment",
+            "amount": 118000,
+            "from": "2027-09-01",
+            "to": null
+          }
+        ]
+      }
+    ],
+    "mortgage": {
+      "refinance_options": [
+        {
+          "id": "no_refi",
+          "label": "No refinance",
+          "cash_out": 0,
+          "ltv": 0.0,
+          "amortization_years": 18
+        },
+        {
+          "id": "refi_50k",
+          "label": "Refinance, cash out $50k",
+          "cash_out": 50000,
+          "ltv": 0.55,
+          "amortization_years": 25,
+          "advance_split": { "deductible_non_reg": 25000 }
+        }
+      ],
+      "renewal_options": [
+        {
+          "id": "5yr_fixed",
+          "label": "5-year fixed",
+          "rate": 0.045,
+          "type": "fixed",
+          "term_years": 5
+        },
+        {
+          "id": "3yr_fixed",
+          "label": "3-year fixed",
+          "rate": 0.042,
+          "type": "fixed",
+          "term_years": 3
+        }
+      ],
+      "structure_options": [
+        {
+          "id": "all_mortgage",
+          "label": "Whole charge as an amortizing mortgage; no revolving line",
+          "revolving_share": 0.0
+        },
+        {
+          "id": "readvanceable",
+          "label": "Whole charge as an amortizing mortgage, but readvanceable: the line starts at $0 and grows as principal is repaid",
+          "revolving_share": 0.0,
+          "readvanceable": true,
+          "revolving_rate": 0.0545,
+          "revolving_rate_type": "variable"
+        },
+        {
+          "id": "split_with_line",
+          "label": "Smaller mortgage plus a 30% revolving line against the same charge",
+          "revolving_share": 0.3,
+          "revolving_rate": 0.0545,
+          "revolving_rate_type": "variable"
+        }
+      ]
+    },
+    "resp_action": [
+      {
+        "id": "keep",
+        "label": "Keep RESP as-is",
+        "cash_out": false
+      }
+    ],
+    "estate_elections": [
+      {
+        "id": "rollover",
+        "label": "Elect spousal rollover on first death",
+        "spousal_rollover": true
+      },
+      {
+        "id": "no_rollover",
+        "label": "Do not roll over \u2014 use the first spouse's low brackets now",
+        "spousal_rollover": false
+      }
+    ]
+  },
+  "private_loans": [
+    {
+      "id": "p2_to_p1",
+      "lender": "p2",
+      "borrower": "p1",
+      "rate": 0.05,
+      "principal": 10000,
+      "use": "investment",
+      "repayment": "amortizing",
+      "interest": "paid"
+    },
+    {
+      "id": "grandparent_to_p1",
+      "lender": {
+        "id": "grandparent_a",
+        "relationship": "grandparent"
+      },
+      "borrower": "p1",
+      "rate": 0.04,
+      "principal": 20000,
+      "use": "investment",
+      "repayment": "on_demand",
+      "interest": "on_demand"
+    }
+  ],
+  "gifts": [
+    {
+      "id": "p1_fills_ca_room",
+      "from": "p1",
+      "to": "ca",
+      "amount": 20000,
+      "repayable": true
+    }
+  ],
+  "sensitivity": {
+    "presets": {
+      "conservative": {
+        "investment_return": 0.04,
+        "salary_growth": 0.01,
+        "inflation": 0.03,
+        "label": "Conservative (4% return, 1% salary growth, 3% inflation)"
+      },
+      "moderate": {
+        "investment_return": 0.06,
+        "salary_growth": 0.02,
+        "inflation": 0.02,
+        "label": "Moderate (6% return, 2% salary growth, 2% inflation)"
+      },
+      "aggressive": {
+        "investment_return": 0.08,
+        "salary_growth": 0.03,
+        "inflation": 0.02,
+        "label": "Aggressive (8% return, 3% salary growth, 2% inflation)"
+      }
+    },
+    "sweeps": {
+      "investment_return": [
+        0.04,
+        0.06,
+        0.08
+      ],
+      "mortgage_rate": [
+        0.03,
+        0.045,
+        0.06
+      ],
+      "savings_rate": [
+        0.1,
+        0.15,
+        0.2
+      ],
+      "assumptions.retirement.spending_target": [
+        70000,
+        85000,
+        100000,
+        125000
+      ]
+    }
+  },
+  "provenance": {
+    "/accounts/0/balance/amount": {
+      "confidence": "measured",
+      "source": "file:///home/user/documents/statements/rrsp_2026_q2.pdf#page=1",
+      "as_of": "2026-06-30"
+    },
+    "/people/0/room/tfsa/contribution_room": {
+      "confidence": "stated",
+      "plausible_range": [
+        0,
+        102000
+      ]
+    },
+    "/accounts/6/acb": {
+      "confidence": "derived",
+      "resolved_by": "Reconcile against the brokerage-issued ACB summary or T5008 slips to upgrade from computed to measured."
+    },
+    "/estate/default_spousal_rollover": {
+      "confidence": "assumed",
+      "domain": [
+        true,
+        false
+      ],
+      "resolved_by": "Read the will. In Quebec this designation can only live there."
+    },
+    "/people/0/legal_name": {
+      "confidence": "unknown"
+    }
+  }
+}
