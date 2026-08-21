@@ -1023,3 +1023,65 @@ def check_ruin_marks_terminal_figures(results, ctx):
             'trajectory reports ruined=True',
             None)]
     return []
+
+
+# ============================================================================
+# Minimum-tax shortfall surfaced (#1082).
+# ============================================================================
+
+@invariant('amt_minimum_tax_accounted')
+def check_amt_minimum_tax_accounted(results, ctx):
+    """Every dollar of assessed minimum tax must be either funded or
+    reported unfunded -- never silently discarded (issue #1082, DP#32).
+
+    ``apply_amt`` charges the year's net minimum tax (federal AMT + Quebec
+    IMR surcharges, minus recovered carry-forward credits) against the
+    non-registered pot whose disposition triggered the assessment. Before
+    #1082 a slice larger than the pot simply vanished: no field, no
+    invariant, no raise -- $380k of assessed tax disappeared in the issue's
+    reported case (fabricated round figures, DP#4/DP#15), understating tax
+    and overstating leveraged net worth.
+    The rule now records the unfunded remainder on ``amt_unfunded``; this
+    invariant pins the bookkeeping from the reported trajectory:
+
+    * a year reporting an unfunded slice must have assessed a positive net
+      charge, and the slice must fit inside it (a refund year funds
+      nothing; a slice larger than the charge mis-sizes the field);
+    * a year with no net charge must report nothing unfunded.
+
+    Reads ``amt_net_charge``/``amt_unfunded``/``amt_surcharge``/
+    ``qc_imr_surcharge`` on ``YearResult``; a no-op on result objects that
+    predate those fields (all default 0.0).
+    """
+    tol = ctx.get('tolerance', 0.5)
+    start_year = ctx.get('start_year', 0)
+    violations = []
+    for i, r in enumerate(results):
+        net = getattr(r, 'amt_net_charge', 0.0)
+        unfunded = getattr(r, 'amt_unfunded', 0.0)
+        if net <= tol:
+            if unfunded > tol:
+                violations.append(Violation(
+                    start_year + i,
+                    f'amt_unfunded {unfunded:.2f} recorded in a year with no '
+                    f'assessed net minimum-tax charge ({net:.2f})',
+                    unfunded))
+            continue
+        if unfunded < -tol or unfunded > net + tol:
+            violations.append(Violation(
+                start_year + i,
+                f'amt_unfunded {unfunded:.2f} does not fit inside the '
+                f'assessed net charge {net:.2f} (must be 0 <= unfunded <= '
+                f'charge: the shortfall is the unfunded slice of THIS '
+                f"year's charge, nothing else)",
+                unfunded))
+        if unfunded > tol and (
+                getattr(r, 'amt_surcharge', 0.0)
+                + getattr(r, 'qc_imr_surcharge', 0.0)) <= tol:
+            violations.append(Violation(
+                start_year + i,
+                f'amt_unfunded {unfunded:.2f} recorded but no minimum-tax '
+                f'surcharge was assessed this year -- a shortfall cannot '
+                f'exist without an assessment',
+                unfunded))
+    return violations

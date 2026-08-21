@@ -3359,6 +3359,10 @@ def simulate_year_pure(
         amt_credit_recovered=ws.amt_credit_recovered,
         qc_imr_credit_recovered=ws.qc_imr_credit_recovered,
         amt_credit_balance=sum(c.amount for c in ws.amt_credit_closing),
+        # Issue #1082: the assessed net minimum-tax charge and the slice of it
+        # the non-reg pot could not fund -- reported, never absorbed (DP#32).
+        amt_net_charge=ws.amt_net_charge,
+        amt_unfunded=ws.amt_unfunded,
         lira_balance=ws.new_lira_balance,
         lif_balance=ws.new_lif_balance,
         lif_withdrawal=ws.lif_withdrawal,

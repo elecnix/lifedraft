@@ -787,6 +787,15 @@ class YearResult:
     amt_credit_recovered: float = 0.0
     qc_imr_credit_recovered: float = 0.0
     amt_credit_balance: float = 0.0
+    # Issue #1082: the net minimum-tax charge assessed this year (new
+    # surcharges minus recovered credits, floored at 0) and the slice of it the
+    # non-registered pot could not fund -- reported, never silently absorbed
+    # (DP#32; before #1082 an unfunded remainder simply vanished, understating
+    # tax by up to $380k in the issue's reported case -- fabricated round
+    # figures, DP#4/DP#15). Both 0.0 whenever no minimum
+    # tax is assessed or the pot fully funds it (the golden household).
+    amt_net_charge: float = 0.0
+    amt_unfunded: float = 0.0
 
     # CRI/LIRA and LIF (issue #230)
     lira_balance: float = 0.0          # CRI/LIRA balance (accumulation phase)
