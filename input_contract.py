@@ -1332,6 +1332,12 @@ def _normalized_mortgage_facility(tranche: Dict) -> Dict:
         "not deductible", never a fabricated balance or interest).
       - ``cash_back_total``: this tranche's declared origination cash-back
         amount, else a real 0.0 (no incentive declared, no inflow).
+      - ``cash_back_min_house_amount``: this tranche's declared cash-back
+        CONDITION -- the minimum house tranche amount the origination inflow
+        is credited at (issue #1075 optimizer half); ABSENT when the
+        cash_back block declares none, meaning the credit is unconditional
+        (the pre-#1075 behaviour, DP#13: absence is not an opinion, and the
+        key is never fabricated).
 
     ``id``/``collateral`` are carried for the rate_paths reconciliation
     (#685) and the charge-limit check (#664) respectively, which name the
@@ -1339,7 +1345,7 @@ def _normalized_mortgage_facility(tranche: Dict) -> Dict:
     """
     balance = tranche["balance"]["amount"]
     cash_back = tranche.get("cash_back")
-    return {
+    normalized = {
         "id": tranche["id"],
         "kind": tranche["kind"],
         "balance": {"amount": balance, "as_of": tranche["balance"]["as_of"]},
@@ -1351,6 +1357,12 @@ def _normalized_mortgage_facility(tranche: Dict) -> Dict:
         "deductible_interest": balance * tranche["rate"] if tranche.get("deductible") else 0.0,
         "cash_back_total": cash_back["amount"] if cash_back else 0.0,
     }
+    # DP#32: presence-based -- a cash_back block that declares a
+    # min_house_amount carries it; one that does not carries NO key, so
+    # "unconditional credit" and "conditional on $0" stay distinguishable.
+    if cash_back is not None and cash_back.get("min_house_amount") is not None:
+        normalized["cash_back_min_house_amount"] = cash_back["min_house_amount"]
+    return normalized
 
 
 def _aggregate_mortgage_facility(
@@ -1486,6 +1498,20 @@ def _aggregate_mortgage_facility(
         m["balance"]["amount"] * m["rate"] for m in matches if m.get("deductible"))
     facility["cash_back_total"] = sum(
         m["cash_back"]["amount"] for m in matches if m.get("cash_back"))
+    # Issue #1075 (optimizer half): the summed origination inflow is ONE
+    # credit, so its condition is the STRICTEST declared one -- the whole
+    # credit is withheld unless the swept house tranche clears every
+    # declared threshold. Presence-based (DP#32): no declaration, no key.
+    # (Read the RAW cash_back blocks -- ``matches`` are document
+    # liabilities, not the normalized facilities; the base facility built
+    # from ``first`` already carries the first tranche's condition, and
+    # this max over ALL of them overwrites it with the true strictest.)
+    declared_house_conditions = [
+        m["cash_back"]["min_house_amount"] for m in matches
+        if m.get("cash_back") is not None
+        and m["cash_back"].get("min_house_amount") is not None]
+    if declared_house_conditions:
+        facility["cash_back_min_house_amount"] = max(declared_house_conditions)
     return facility
 
 
@@ -4425,11 +4451,24 @@ def to_internal_config(doc: Dict) -> Dict:
     ]
     origination_cash_back = mortgage.get("cash_back_total", 0.0) if mortgage else 0.0
     if origination_cash_back > 0:
-        legacy_cash_flows.append({
+        origination_flow = {
             "year": start_year,
             "amount": origination_cash_back,
             "tax_treatment": "non-taxable",
-        })
+        }
+        # Issue #1075 (optimizer half): a cash-back that declares
+        # ``min_house_amount`` is CONDITIONAL on the swept house tranche
+        # amount -- the key rides ON the flow, so the sweep's cell
+        # composition (optimize.py) withholds the inflow for a sweep point
+        # whose house amount is below it, and a household that never
+        # declares the condition keeps today's unconditional credit
+        # byte-for-byte (DP#13/DP#32: the key's absence is the marker, and
+        # no other cash_flow can carry it -- the schema forbids the key on
+        # user-declared flows, so the adapter's flow is the only one gated).
+        min_house = mortgage.get("cash_back_min_house_amount") if mortgage else None
+        if min_house is not None:
+            origination_flow["min_house_amount"] = min_house
+        legacy_cash_flows.append(origination_flow)
 
     legacy: Dict[str, Any] = {
         "assumptions": assumptions_cfg,

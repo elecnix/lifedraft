@@ -49,6 +49,13 @@ logger = logging.getLogger(__name__)
 OSFI_B20_CHARGE_LTV_MAX = 0.80
 OSFI_B20_REVOLVING_LTV_MAX = 0.65
 
+# Issue #1075 (optimizer half): the DEFAULT floor for the house tranche's
+# sweep -- 60% of the registered charge -- when the structure declares no
+# ``min_house_floor``. DP#13: a fallback for ABSENT input, never an opinion
+# that overrides a declared floor (``_tranche_house_floor`` prefers the
+# declared value, and the sweep's floor is not the cash-back threshold).
+_HOUSE_SWEEP_FLOOR_FRACTION = 0.6
+
 # Dollar tolerance for charge-limit comparisons (floating-point rounding, not
 # a policy margin).
 _CHARGE_TOLERANCE = 0.01
@@ -2687,6 +2694,14 @@ def _validate_tranche_spec(structure: Dict) -> Dict:
                 f"programs price); the investment and line amounts are swept "
                 f"from the charge (issue #1075)."
             )
+        if 'min_house_floor' in t and kind != 'house':
+            raise ValueError(
+                f"structure {label!r} tranche {kind!r} declares a "
+                f"min_house_floor -- only the 'house' tranche carries a sweep "
+                f"floor (its amount is the household's house mortgage, which is "
+                f"what a lender's cash-back programs price); the investment and "
+                f"line amounts are swept from the charge (issue #1075)."
+            )
         if t.get('deductible') and kind != 'investment':
             raise ValueError(
                 f"structure {label!r} tranche {kind!r} declares deductible: true "
@@ -2702,6 +2717,35 @@ def _validate_tranche_spec(structure: Dict) -> Dict:
             )
         by_kind[kind] = t
     return by_kind
+
+
+def _tranche_house_floor(by_kind: Dict, charge: float) -> float:
+    """Issue #1075 (optimizer half): the house tranche amount's SWEEP FLOOR.
+
+    ``min_house_floor`` when the house tranche declares one, else 60% of the
+    registered charge (``_HOUSE_SWEEP_FLOOR_FRACTION`` -- DP#13: a fallback
+    for absent input, never an opinion). This is NOT the ``min_amount``:
+    that is the CASH-BACK THRESHOLD (the point the sweep reports the
+    incentive at), and the whole point of this sweep is that the house
+    mortgage may go BELOW it, forgoing the cash-back. The sweep enumerates
+    house amounts from this floor UP to the charge (``_tranche_sweep_points``
+    in optimize.py); ``_apply_tranched_structure`` refuses a split below it
+    loudly (DP#32: never clamp, never silently no-op).
+
+    A structure that declares no house tranche at all has no house mortgage
+    to floor -- the sweep is over the investment/line split alone, house
+    pinned at 0, exactly as before this dimension existed.
+    """
+    house_tranche = by_kind.get('house')
+    if house_tranche is None:
+        return 0.0
+    declared_floor = house_tranche.get('min_house_floor')
+    # DP#32: explicit presence test -- a declared floor of exactly 0 is a
+    # real value (sweep the whole charge's worth of house room), never
+    # shadowed by the fallback.
+    if declared_floor is not None:
+        return declared_floor
+    return charge * _HOUSE_SWEEP_FLOOR_FRACTION
 
 
 def _tranche_line_rate(structure: Dict, by_kind: Dict) -> tuple:
@@ -2741,27 +2785,32 @@ def _apply_tranched_structure(property_cfg: dict, structure: Dict) -> dict:
     / line) to a ``property`` dict, returning a derived copy.
 
     The tranche spec declares the KINDS and the FIXED facts (the house
-    tranche's floor, the investment tranche's deductibility, each tranche's
-    own rate); the AMOUNTS come from ``structure['tranche_amounts']`` -- a
-    concrete ``{house, investment, line}`` split summing to the registered
-    charge, as the optimizer's sweep enumerates. The amounts are the OPENING
-    POSITION, not a re-split of a carried-through drawn balance (#851's
-    invariant applies to the share form): the household's drawn mortgage IS
-    house + investment (the investment tranche was borrowed to invest), the
-    undrawn room IS the line, and the deductible investment tranche's EXACT
-    interest (balance x its OWN rate -- never the blended-rate product, which
-    drags the house tranche's cheaper rate in) is carried on
+    tranche's SWEEP FLOOR -- ``min_house_floor``, defaulting to 60% of the
+    charge, NOT the cash-back threshold, which the sweep may go below -- the
+    investment tranche's deductibility, each tranche's own rate); the
+    AMOUNTS come from ``structure['tranche_amounts']`` -- a concrete
+    ``{house, investment, line}`` split summing to the registered charge, as
+    the optimizer's sweep enumerates. The amounts are the OPENING POSITION,
+    not a re-split of a carried-through drawn balance (#851's invariant
+    applies to the share form): the household's drawn mortgage IS house +
+    investment (the investment tranche was borrowed to invest), the undrawn
+    room IS the line, and the deductible investment tranche's EXACT interest
+    (balance x its OWN rate -- never the blended-rate product, which drags
+    the house tranche's cheaper rate in) is carried on
     ``deductible_mortgage_balance``/``deductible_mortgage_interest`` for the
     s.20(1)(c) pricing.
 
     Without ``tranche_amounts`` (the contract-load check's call), the
-    MINIMUM point is applied instead -- house at its floor, investment 0, the
-    whole rest of the charge as the line. That is the binding point for both
-    OSFI B-20 ceilings (the largest possible revolving segment; the combined
-    cap cannot bind since the split sums to the charge by construction), so a
-    structure that passes it passes every sweep point -- and one whose floor
-    exceeds the charge fails loudly here, at contract load, rather than when
-    a sweep happens to reach it (DP#32).
+    MINIMUM point is applied instead -- house at its SWEEP FLOOR (the
+    smallest amount the sweep will ever enumerate; ``min_amount`` is NOT
+    consulted -- it is the cash-back threshold, and going below it is the
+    point of the sweep), investment 0, the whole rest of the charge as the
+    line. That is the binding point for both OSFI B-20 ceilings (the
+    largest possible revolving segment; the combined cap cannot bind since
+    the split sums to the charge by construction), so a structure that
+    passes it passes every sweep point -- and one whose floor exceeds the
+    charge fails loudly here, at contract load, rather than when a sweep
+    happens to reach it (DP#32).
 
     Money is conserved by construction: the three amounts partition the
     charge exactly, and the engine books mortgage debt for house + investment
@@ -2790,33 +2839,37 @@ def _apply_tranched_structure(property_cfg: dict, structure: Dict) -> dict:
 
     house_tranche = by_kind.get('house')
     investment_tranche = by_kind.get('investment')
-    house_min = house_tranche.get('min_amount', 0.0) if house_tranche else 0.0
+    house_floor = _tranche_house_floor(by_kind, charge)
 
     amounts = structure.get('tranche_amounts')
     if amounts is None:
         # Contract-load feasibility check: the minimum point (house at its
-        # floor, no investment, the whole remainder as the line -- the
-        # binding revolving-cap case).
-        if house_min > charge + _CHARGE_TOLERANCE:
+        # SWEEP FLOOR -- the smallest amount the sweep will ever enumerate;
+        # ``min_amount`` is the cash-back threshold and is NOT a floor, see
+        # ``_tranche_house_floor`` -- no investment, the whole remainder as
+        # the line: the binding revolving-cap case).
+        if house_floor > charge + _CHARGE_TOLERANCE:
             raise ChargeLimitExceededError(
-                f"structure {label!r}: its house tranche floor of "
-                f"${house_min:,.0f} exceeds the ${charge:,.0f} registered charge "
-                f"-- there is no room for the house mortgage at its declared "
-                f"minimum, so no 3-tranche split exists to sweep (issue #1075)."
+                f"structure {label!r}: its house sweep floor of "
+                f"${house_floor:,.0f} exceeds the ${charge:,.0f} registered charge "
+                f"-- there is no house amount between the floor and the charge, "
+                f"so no 3-tranche split exists to sweep (issue #1075)."
             )
-        amounts = {'house': house_min, 'investment': 0.0,
-                   'line': max(0.0, charge - house_min)}
+        amounts = {'house': house_floor, 'investment': 0.0,
+                   'line': max(0.0, charge - house_floor)}
 
     house = amounts['house']
     investment = amounts['investment']
     line = amounts['line']
 
-    if house < house_min - _CHARGE_TOLERANCE:
+    if house < house_floor - _CHARGE_TOLERANCE:
         raise ChargeLimitExceededError(
             f"structure {label!r}: its house tranche amount of ${house:,.0f} "
-            f"is below the declared ${house_min:,.0f} minimum -- the cash-back "
-            f"programs price a house mortgage of at least that size, so a "
-            f"split that undercuts it is not a candidate (issue #1075)."
+            f"is below the ${house_floor:,.0f} sweep floor (the declared "
+            f"min_house_floor, defaulting to 60% of the registered charge) -- "
+            f"the sweep varies the house mortgage from its floor up to the "
+            f"charge, and a split below the floor is not a candidate (issue "
+            f"#1075)."
         )
     if abs((house + investment + line) - charge) > _CHARGE_TOLERANCE:
         raise ChargeLimitExceededError(

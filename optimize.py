@@ -1731,51 +1731,170 @@ def _tranche_sweep_points(cfg: Dict, structure: Dict) -> List[Dict]:
     """Issue #1075: enumerate the concrete 3-tranche splits the optimizer
     sweeps for ONE tranches-declared structure at ONE refinance basis.
 
-    The split is of the basis's POST-REFINANCE charge: the house tranche is
-    pinned at its declared minimum (the household's house mortgage -- the
-    sweep decides what to do with the SURPLUS, it does not re-ask how big the
-    house mortgage is), and the surplus (charge - house minimum) is split
-    between the deductible investment tranche and the line at 0/25/50/75/100%
-    -- the same 5-point ladder ``_discover_draw_fraction_options`` uses
-    (#735), so the two sweeps speak the same granularity. Each point's
-    amounts SUM to the charge by construction (a partition, DP#18); the
-    overlay's own sum check is the backstop.
+    The split is of the basis's POST-REFINANCE charge, and BOTH axes move:
+
+      - the HOUSE amount is swept from its floor up to the charge: the
+        floor is the house tranche's declared ``min_house_floor``, defaulting
+        to 60% of the charge (``simulation_config._tranche_house_floor``),
+        and the steps are fixed 25k increments (coarsened to 50k/100k while
+        the house x split product would exceed ``_TRANCHE_SWEEP_CELL_CAP``
+        cells -- the optimizer stays fast, and a range that cannot fit
+        refuses loudly instead of silently dropping points, DP#32). The
+        charge and the cash-back threshold are always ON the grid, so the
+        incentive-boundary point is evaluated. The house tranche's
+        ``min_amount`` is NOT the floor anymore: it is the CASH-BACK
+        THRESHOLD, and putting the house mortgage below it -- FORGOING the
+        incentive -- is exactly the trade-off this sweep prices;
+      - the SURPLUS (charge - house) is split between the deductible
+        investment tranche and the line at 10% steps (0..100%, 11 points --
+        the finer grid replacing the old 5-point 25% ladder, so a 10% step
+        is reachable).
+
+    Each point's amounts SUM to the charge by construction (a partition,
+    DP#18); the overlay's own sum check is the backstop. Each point also
+    carries the cash-back facts it was scored at -- ``cash_back_amount`` /
+    ``cash_back_threshold`` (read off the declared origination cash-back
+    flow, when one is CONDITIONAL on the house amount; None otherwise) and
+    ``cash_back_credited`` (house >= the threshold) -- the cell composition
+    withholds the inflow when the credit is forgone, and the report states
+    the verdict beside the winning split (DP#9: the printed verdict is the
+    condition the printed net benefit was scored under).
 
     Returns one dict per point, each a copy of ``structure`` carrying its
     concrete ``tranche_amounts`` and the derived ``revolving_share`` (the
     line's share of the charge -- the #687 tag other machinery reads), or an
-    empty list when the basis's charge leaves no feasible split (the house
-    minimum alone exceeds the charge) -- the caller records the refusal.
+    empty list when the basis's charge leaves no feasible split (the sweep
+    FLOOR alone exceeds the charge) -- the caller records the refusal.
 
     Raises:
         ValueError: the structure's ``tranches`` spec is invalid
             (``simulation_config._validate_tranche_spec``: unknown kind,
-            overlapping kinds, ``min_amount`` on a non-house tranche,
-            ``deductible`` on a non-investment tranche, ``rate_type`` without
-            a rate) -- validated HERE, before any point is enumerated, so an
-            invalid template form is refused ONCE, as one named cell, never
-            per-sweep-point (DP#32, issue #1075).
+            overlapping kinds, ``min_amount``/``min_house_floor`` on a
+            non-house tranche, ``deductible`` on a non-investment tranche,
+            ``rate_type`` without a rate) -- validated HERE, before any
+            point is enumerated, so an invalid template form is refused
+            ONCE, as one named cell, never per-sweep-point (DP#32, issue
+            #1075).
+        ChargeLimitExceededError: the house sweep floor exceeds the charge,
+            or the house range cannot fit inside ``_TRANCHE_SWEEP_CELL_CAP``
+            cells even at the coarsest step -- refused loudly, naming the
+            remedy (a declared ``min_house_floor`` narrowing the range),
+            never silently dropping sweep points (DP#32).
     """
-    from simulation_config import _CHARGE_TOLERANCE, _validate_tranche_spec
+    from simulation_config import (
+        _CHARGE_TOLERANCE,
+        _structure_label,
+        _tranche_house_floor,
+        _validate_tranche_spec,
+    )
     prop = cfg.get('property', {})
     charge = prop.get('mortgage_balance', 0.0) + prop.get('margin_available', 0.0)
     by_kind = _validate_tranche_spec(structure)
-    house_tranche = by_kind.get('house')
-    house_min = house_tranche.get('min_amount', 0.0) if house_tranche else 0.0
-    surplus = charge - house_min
-    if surplus < -_CHARGE_TOLERANCE:
+    floor = _tranche_house_floor(by_kind, charge)
+    if floor > charge + _CHARGE_TOLERANCE:
         return []
-    surplus = max(0.0, surplus)
+    label = _structure_label(structure)
+    house_tranche = by_kind.get('house')
+    # The sweep's cash-back facts (issue #1075, optimizer half): the
+    # declared origination inflow's amount and condition, when the flow is
+    # CONDITIONAL (carries ``min_house_amount``). Presence-based (DP#32):
+    # no conditional cash-back -> both stay None -> every point carries
+    # ``cash_back_credited`` None (nothing to credit, forgo, or gate) and
+    # the report prints no note -- byte-identical to pre-#1075.
+    cash_back_amount = None
+    cash_back_threshold = None
+    if house_tranche is None:
+        # A structure with no house tranche has no house mortgage to sweep
+        # -- house pinned at 0, the surplus split between investment and
+        # line, exactly as before the house dimension existed.
+        house_amounts = [0.0]
+        anchor_threshold = None
+    else:
+        # The cash-back threshold the grid anchors on: the strictest of the
+        # structure's declared ``min_amount`` and the declared origination
+        # cash-back's ``min_house_amount`` (carried on the flow -- the
+        # sweep's credit condition), when either lies inside the swept range.
+        anchor_threshold = house_tranche.get('min_amount')
+        for cf in cfg.get('cash_flows', []):
+            condition = cf.get('min_house_amount')
+            if condition is not None:
+                cash_back_amount = cf['amount']
+                cash_back_threshold = condition
+                if anchor_threshold is None or condition > anchor_threshold:
+                    anchor_threshold = condition
+        house_amounts = _tranche_house_amounts(
+            charge, floor, anchor_threshold, label)
     points = []
-    for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
-        investment = surplus * fraction
-        line = surplus - investment
-        amounts = {'house': house_min, 'investment': investment, 'line': line}
-        point = dict(structure)
-        point['tranche_amounts'] = amounts
-        point['revolving_share'] = (line / charge) if charge > 0 else 0.0
-        points.append(point)
+    for house in house_amounts:
+        surplus = charge - house
+        for fraction in _TRANCHE_SPLIT_FRACTIONS:
+            investment = surplus * fraction
+            line = surplus - investment
+            point = dict(structure)
+            point['tranche_amounts'] = {
+                'house': house, 'investment': investment, 'line': line}
+            point['revolving_share'] = (line / charge) if charge > 0 else 0.0
+            # DP#32: presence-based, never a fabricated boolean -- a sweep
+            # with no conditional cash-back carries None (nothing to credit
+            # or forgo, nothing to gate). ``cash_back_amount`` and
+            # ``cash_back_threshold`` are set TOGETHER (one flow carries
+            # both), so a declared condition always has its threshold.
+            if cash_back_amount is None:
+                point['cash_back_credited'] = None
+            else:
+                point['cash_back_credited'] = (
+                    house >= cash_back_threshold - 1e-6)
+            point['cash_back_amount'] = cash_back_amount
+            point['cash_back_threshold'] = cash_back_threshold
+            points.append(point)
     return points
+
+
+def _tranche_house_amounts(charge: float, floor: float,
+                           threshold: Optional[float], label: str) -> List[float]:
+    """The house amounts ONE 3-tranche sweep enumerates (issue #1075,
+    optimizer half): from ``floor`` up to the ``charge`` in fixed
+    ``_TRANCHE_HOUSE_STEPS`` increments, with the charge always included as
+    the top and the cash-back ``threshold`` (when it lies inside the range)
+    included as an anchor -- the boundary where the incentive flips is
+    exactly what this sweep exists to price, so it must be evaluated, not
+    merely straddled. The step coarsens (25k -> 50k -> 100k) while the
+    house count x split count would exceed ``_TRANCHE_SWEEP_CELL_CAP``; a
+    range that still cannot fit refuses loudly (DP#32 -- never silently
+    drop sweep points, and never hand the user a surprise 30-minute sweep).
+    """
+    from simulation_config import _CHARGE_TOLERANCE
+    split_count = len(_TRANCHE_SPLIT_FRACTIONS)
+    for step in _TRANCHE_HOUSE_STEPS:
+        amounts = {floor}
+        h = floor
+        while h <= charge - _CHARGE_TOLERANCE:
+            amounts.add(round(h))
+            h += step
+        if threshold is not None and floor - _CHARGE_TOLERANCE <= threshold <= charge:
+            amounts.add(threshold)
+        amounts.add(charge)
+        amounts = sorted(amounts)
+        if len(amounts) * split_count <= _TRANCHE_SWEEP_CELL_CAP:
+            return amounts
+    raise ChargeLimitExceededError(
+        f"structure {label!r}: its house sweep range of "
+        f"${floor:,.0f}..${charge:,.0f} cannot fit inside the "
+        f"{_TRANCHE_SWEEP_CELL_CAP}-cell sweep cap even at the coarsest "
+        f"step -- declare a min_house_floor nearer the charge (or a smaller "
+        f"charge) to narrow the range, or the sweep would silently drop "
+        f"candidate splits (issue #1075)."
+    )
+
+
+# Issue #1075 (optimizer half): the sweep's fixed axes -- the house-amount
+# steps (coarsened while the cell product exceeds the cap) and the
+# investment/line split ladder (10% steps, the finer grid replacing the old
+# 5-point 25% ladder), and the per-structure cell cap that keeps the
+# optimizer fast (house grid x split grid).
+_TRANCHE_HOUSE_STEPS = (25_000, 50_000, 100_000)
+_TRANCHE_SPLIT_FRACTIONS = tuple(i / 10 for i in range(11))
+_TRANCHE_SWEEP_CELL_CAP = 150
 
 
 def _compose_structure_cell(cfg: Dict, basis: Dict, structure: Dict) -> List[Dict]:
@@ -1822,9 +1941,10 @@ def _compose_structure_cell(cfg: Dict, basis: Dict, structure: Dict) -> List[Dic
         if not points:
             return [{'basis': basis, 'structure': structure, 'cfg': None,
                      'refusal': "ChargeLimitExceededError: the house tranche's "
-                                "minimum alone exceeds this basis's registered "
-                                "charge -- no 3-tranche split exists to sweep "
-                                "(issue #1075)."}]
+                                "sweep floor (the declared min_house_floor, "
+                                "defaulting to 60% of the charge) exceeds this "
+                                "basis's registered charge -- no 3-tranche "
+                                "split exists to sweep (issue #1075)."}]
         for point in points:
             cells.extend(_compose_structure_cell(cfg, basis, point))
         return cells
@@ -1840,6 +1960,21 @@ def _compose_structure_cell(cfg: Dict, basis: Dict, structure: Dict) -> List[Dic
             else:
                 cfg_basis = cfg
             cell['cfg'] = _apply_structure_scenario(cfg_basis, structure)
+            # Issue #1075 (optimizer half): a CONDITIONAL origination
+            # cash-back (the flow carries its ``min_house_amount`` -- see
+            # input_contract.py) is withheld when this point's house tranche
+            # is below the threshold. The sweep point's own
+            # ``cash_back_credited`` flag -- computed by
+            # ``_tranche_sweep_points`` from the SAME threshold -- is the
+            # single source of truth, so the verdict the report prints and
+            # the config the engine was scored at cannot disagree (DP#9). A
+            # flow with no condition is never touched (byte-identical for
+            # the unconditional and pre-#1075 paths); ``cell['cfg']`` is a
+            # fresh deep copy, so stripping is local to this cell.
+            if structure.get('cash_back_credited') is False:
+                cell['cfg']['cash_flows'] = [
+                    cf for cf in cell['cfg']['cash_flows']
+                    if cf.get('min_house_amount') is None]
         elif basis['cash_out'] > 0:
             cfg_basis = build_overlay_config(cfg, _candidate_overlay(cfg, basis))
             cell['cfg'] = _apply_sourcing_scenario(cfg_basis, structure)
@@ -1996,8 +2131,14 @@ def run_mortgage_structure_exploration(cfg: Dict, input_path: str = "input.json"
             # Issue #1075: the sweep point this row was scored at, carried ON
             # the row -- so the winning row's OWN tranche amounts are what the
             # report prints (DP#9: the printed optimal split cannot disagree
-            # with the row that produced it).
+            # with the row that produced it) -- and the point's cash-back
+            # verdict (whether the conditional origination cash-back was
+            # credited under this house amount), which the report states
+            # beside the split.
             r['structure_tranche_amounts'] = structure.get('tranche_amounts')
+            r['structure_cash_back_amount'] = structure.get('cash_back_amount')
+            r['structure_cash_back_threshold'] = structure.get('cash_back_threshold')
+            r['structure_cash_back_credited'] = structure.get('cash_back_credited')
             r['income_scenario_id'] = inc['id']
             r['income_scenario_label'] = inc['label']
             # Issue #845: the refinance option -- and the leverage -- this
@@ -2069,8 +2210,12 @@ def winners_by_structure_scenario(results: List[Dict]) -> List[Dict]:
             'draw_fraction': best.get('draw_fraction', 0.0),
             # issue #1075: the 3-tranche sweep point that won for THIS
             # structure -- the optimal {house, investment, line} split, read
-            # off the row that produced it (None for a share-form structure).
+            # off the row that produced it (None for a share-form structure)
+            # -- and the cash-back verdict the split was scored under.
             'tranche_amounts': best.get('structure_tranche_amounts'),
+            'cash_back_amount': best.get('structure_cash_back_amount'),
+            'cash_back_threshold': best.get('structure_cash_back_threshold'),
+            'cash_back_credited': best.get('structure_cash_back_credited'),
             'net_benefit': best.get('net_benefit', 0),
             'ruined': bool(solvency.get('ruined', False)),
             'solvency': solvency,
@@ -2386,6 +2531,24 @@ def _print_structure_report_for_basis(results: List[Dict]) -> None:
                   f" (deductible)  +  line ${a['line']:,.0f}  =  ${total:,.0f} charge")
             print(f"          net benefit ${w['net_benefit']:,.0f}"
                   f" (strategy {w['strategy']})")
+            # Issue #1075 (optimizer half): state the cash-back verdict the
+            # winning split was scored under -- credited (house >= the
+            # threshold) or FORGONE (house below it, the trade-off this
+            # sweep exists to price). Only a CONDITIONAL cash-back prints
+            # anything (``cash_back_amount`` is carried only when the
+            # declared origination inflow is conditional): a household with
+            # no such declaration sees the exact pre-#1075 report.
+            if w.get('cash_back_amount') is not None:
+                thresh = w.get('cash_back_threshold')
+                if w.get('cash_back_credited'):
+                    verdict = (f"cash-back ${w['cash_back_amount']:,.0f} CREDITED "
+                               f"(house ${a['house']:,.0f} >= the "
+                               f"${thresh:,.0f} threshold)")
+                else:
+                    verdict = (f"cash-back ${w['cash_back_amount']:,.0f} FORGONE "
+                               f"(house ${a['house']:,.0f} below the "
+                               f"${thresh:,.0f} threshold)")
+                print(f"          {verdict}")
             if basis_cash_out > 0:
                 line_draw = min(basis_cash_out, a['line'])
                 advance = basis_cash_out - line_draw
