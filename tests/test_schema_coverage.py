@@ -659,6 +659,15 @@ CONSUMED = {
     "assumptions.tax_law_overrides.frozen_brackets": ("simulation.py", "self.config.frozen_brackets"),
     "assumptions.tax_law_overrides.oas.disabled": ("input_contract.py", "retirement_out[\"oas_annual_max\"] = 0"),
     "assumptions.tax_law_overrides.oas.annual_max_override": ("input_contract.py", "retirement_out[\"oas_annual_max\"] = oas_override[\"annual_max_override\"]"),
+    # ── assumptions.return_beliefs.* (issue #993, DP#21) ──
+    # The adapter passes the block through verbatim (input_contract.py maps it
+    # onto assumptions_cfg["return_beliefs"]); the DECISION is risk_allocation's
+    # blend: each sleeve belief weights the recommended mix's blended mean/sigma
+    # that feeds StochasticReturn for the P10/P50/P90 metrics.
+    "assumptions.return_beliefs.equity_mean": ("risk_allocation.py", "beliefs[\"equity_mean\"]"),
+    "assumptions.return_beliefs.equity_sigma": ("risk_allocation.py", "beliefs[\"equity_sigma\"]"),
+    "assumptions.return_beliefs.fixed_income_mean": ("risk_allocation.py", "beliefs[\"fixed_income_mean\"]"),
+    "assumptions.return_beliefs.fixed_income_sigma": ("risk_allocation.py", "beliefs[\"fixed_income_sigma\"]"),
     # ── assumptions.rate_paths.* (issue #685) ──
     # Reconciled against the SIGNED rate on the matching liability, never used to
     # set it. `.type` selects which leaf carries year zero (`.rate` for fixed,

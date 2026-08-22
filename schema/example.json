@@ -919,6 +919,12 @@
       "type": "fixed",
       "rate": 0.06
     },
+    "return_beliefs": {
+      "equity_mean": 0.068,
+      "equity_sigma": 0.16,
+      "fixed_income_mean": 0.03,
+      "fixed_income_sigma": 0.05
+    },
     "inflation": 0.02,
     "salary_growth": 0.02,
     "savings_rate": 0.15,

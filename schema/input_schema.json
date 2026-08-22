@@ -927,6 +927,19 @@
       }
     },
 
+    "return_beliefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "equity_mean": { "$ref": "#/$defs/rate" },
+        "equity_sigma": { "type": "number", "minimum": 0 },
+        "fixed_income_mean": { "$ref": "#/$defs/rate" },
+        "fixed_income_sigma": { "type": "number", "minimum": 0 }
+      },
+      "description": "Per-sleeve long-run return beliefs (issue #993, DP#21): what the household believes global equity and fixed income return, mean and volatility, before the recommended mix blends them. All keys optional; an omitted key keeps the engine default (equity 6.8%/16%, fixed income 3.0%/5%)."
+    },
+
     "retirement_beliefs": {
       "type": "object",
       "additionalProperties": false,
@@ -985,6 +998,7 @@
         "tax_law_overrides": { "$ref": "#/$defs/tax_law_overrides" },
         "products": { "type": "object", "additionalProperties": { "$ref": "#/$defs/product_definition" }, "description": "Synthetic product composition registry (issue #547). DP#15: synthetic names only, never real tickers." },
         "time_step": { "type": "string", "enum": ["yearly", "monthly"] },
+        "return_beliefs": { "$ref": "#/$defs/return_beliefs", "description": "Issue #993 (DP#21): the household's long-run sleeve return beliefs used to price the risk-allocation recommendation's P10/P50/P90 metrics. Optional -- every key absent means the engine's documented default for that sleeve stands (a PARTIAL declaration merges over the defaults; it never zeroes the undeclared sleeves, DP#32). An explicit 0.0 is honoured as exactly zero." },
         "emergency_reserve": { "$ref": "#/$defs/emergency_reserve", "description": "Issue #688: how much the household keeps OUT of the market, WHERE, and held as WHAT. Optional (DP#16 trigger data) and deliberately NOT in this object's `required` list -- but its absence is not a neutral default: it means the household holds a $0 reserve, and the ruin report (#679) says so explicitly rather than assuming one into existence (DP#32)." }
       }
     },
