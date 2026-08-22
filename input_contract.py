@@ -3391,6 +3391,32 @@ def to_internal_config(doc: Dict) -> Dict:
                 f"plan). Every facility secured against the SAME property shares "
                 f"ONE registered charge -- this is not a valid combination (#664/#689)."
             )
+        # Issue #1039: the OPENING POSITION cross-check (#664). The check
+        # above validates the facilities' LIMITS -- potential borrowing.
+        # This validates the household's TRUE OPENING POSITION: mortgage +
+        # actually-drawn HELOC balance <= the registered charge. When the
+        # drawn balance is within its own limit it is arithmetically implied
+        # by the limits check above (drawn <= limit), so this fires only when
+        # a document declares a drawn balance ABOVE its facility's limit that
+        # also breaches the charge -- and it fires BEFORE the over-limit
+        # refusal below so the household learns about the charge breach (the
+        # fact that governs any refinancing) first, never just the
+        # bookkeeping error.
+        opening_drawn = heloc["balance"]["amount"] if heloc else 0
+        if (opening_drawn > 0
+                and declared_mortgage + opening_drawn > combined_limit + _CHARGE_TOLERANCE):
+            raise ContractAdaptationError(
+                f"liability {heloc['id']!r} (kind=heloc) declares an opening "
+                f"drawn balance of ${opening_drawn:,.0f}, which together with "
+                f"the mortgage (${declared_mortgage:,.0f}) puts ${declared_mortgage + opening_drawn:,.0f} "
+                f"of secured debt against {principal['id']!r} -- beyond the "
+                f"charge registered on it (${combined_limit:,.0f} = "
+                f"{OSFI_B20_CHARGE_LTV_MAX:.0%} of ${house_value:,.0f} house "
+                f"value). An opening drawn position is honoured as a true "
+                f"starting balance (#1039), but no true position can exceed "
+                f"the registered charge securing it (#664). Refusing loudly "
+                f"rather than simulating debt no lender could have advanced."
+            )
         if heloc:
             revolving_limit = _heloc_revolving_limit(house_value, OSFI_B20_REVOLVING_LTV_MAX)
             if declared_heloc_limit > revolving_limit + _CHARGE_TOLERANCE:
@@ -3409,7 +3435,53 @@ def to_internal_config(doc: Dict) -> Dict:
                 )
 
     if heloc:
-        prop_cfg["margin_available"] = heloc["limit"]
+        # Issue #1039: an opening DRAWN balance is a TRUE STARTING POSITION,
+        # not a refusal and not a silent drop. A household already partway
+        # through a borrow-to-invest strategy starts the simulation from its
+        # real position: heloc_balance = balance.amount, margin_available =
+        # limit - drawn (less standby room), and a margin_tracing derived
+        # from the DECLARED deductibility.investment_portion -- the original
+        # borrowing's purpose is a historical fact that predates the
+        # snapshot, so it is carried in, never re-derived from a simulation
+        # decision (#577 governs DRAWS THE ENGINE MAKES; this honours a draw
+        # THE HOUSEHOLD ALREADY MADE). DP#32 keeps absence loud: a declared
+        # opening balance WITHOUT a deductibility block would leave the trace
+        # un-derivable (defaulting it to 0 or 1 would both be fabrications),
+        # so that combination still refuses.
+        heloc_drawn = heloc["balance"]["amount"]
+        heloc_deductibility = heloc.get("deductibility")
+        if heloc_drawn > 0 and heloc_deductibility is None:
+            raise ContractAdaptationError(
+                f"liability {heloc['id']!r} (kind=heloc) declares balance.amount="
+                f"{heloc_drawn:,.0f} > 0, an OPENING DRAWN balance, but no "
+                f"deductibility block. The engine honours an opening drawn "
+                f"position as a true starting balance (#1039) -- but its "
+                f"s.20(1)(c) trace cannot be derived: the original borrowing's "
+                f"purpose is a historical fact only the document carries, and "
+                f"defaulting it to fully-deductible or fully-personal would "
+                f"both fabricate a tax position (DP#32). Declare "
+                f"deductibility.investment_portion = p (the share of the "
+                f"opening balance traced to investment use), or set "
+                f"balance.amount = 0 if the facility is actually undrawn."
+            )
+        if heloc_drawn > heloc["limit"]:
+            raise ContractAdaptationError(
+                f"liability {heloc['id']!r} (kind=heloc) declares "
+                f"balance.amount={heloc_drawn:,.0f} above its own limit "
+                f"({heloc['limit']:,.0f}). An opening drawn position is "
+                f"honoured as a true starting balance (#1039), but a facility "
+                f"cannot be drawn past its declared credit limit -- no lender "
+                f"balances that. Fix the balance or the limit; refusing "
+                f"loudly rather than simulating a negative undrawn room."
+            )
+        prop_cfg["margin_available"] = heloc["limit"] - heloc_drawn
+        if heloc_drawn > 0:
+            # Only written when a draw exists, so absence in the internal
+            # dict keeps meaning "undrawn" -- the same >0-only convention
+            # deductible_mortgage_balance uses (DP#24/DP#32).
+            prop_cfg["heloc_opening_balance"] = heloc_drawn
+            prop_cfg["heloc_opening_investment_portion"] = \
+                heloc_deductibility["investment_portion"]
         prop_cfg["heloc_readvance"] = heloc.get("readvanceable", False)
         # issue #654: the HELOC's OWN declared rate/rate_type -- direct
         # indexing (not .get()), same as mortgage["rate"] above, because
@@ -3447,61 +3519,41 @@ def to_internal_config(doc: Dict) -> Dict:
         #    identical to the pre-#1036 capitalization path (DP#32: absence is
         #    the fallback, never a coercion of a supplied value).
         prop_cfg["capitalize_interest"] = heloc["capitalize_interest"]
-        # 2. balance (the DRAWN amount) -- REFUSED LOUDLY when > 0. The engine
-        #    starts a HELOC undrawn by design (#577: a draw is a simulation
-        #    decision, never a fact read off this field), so a declared
-        #    opening drawn balance was silently dropped before #1036 -- a
-        #    household already mid-strategy would have started at zero drawn
-        #    and zero traced. A draw the household wants the engine to make
-        #    is expressed via decisions.borrow_to_invest (this issue) or the
-        #    readvanceable SM mechanism; honouring an opening drawn balance
-        #    as a true starting position is real, separate follow-up work.
-        #    balance = 0 (undrawn) is the documented accepted state.
-        heloc_drawn = heloc["balance"]["amount"]
-        if heloc_drawn > 0:
-            raise ContractAdaptationError(
-                f"liability {heloc['id']!r} (kind=heloc) declares balance.amount="
-                f"{heloc_drawn:,.0f} > 0, an OPENING DRAWN balance. The engine "
-                f"starts a HELOC undrawn by design (#577: a draw is a simulation "
-                f"decision, never a fact read off this field), so before #1036 "
-                f"this declaration was silently dropped -- a household already "
-                f"mid-strategy would have started at zero drawn and zero traced. "
-                f"Express a draw the engine should make via decisions.borrow_to_invest "
-                f"(#1036) or the readvanceable SM mechanism; honouring an opening "
-                f"drawn position as a true start is tracked as follow-up. Refusing "
-                f"loudly rather than silently dropping a real declared fact (DP#32)."
-            )
-        # 3. deductibility -- REFUSED LOUDLY when declared at all. The s.20(1)(c)
-        #    trace is COMPUTED from the borrowing's purpose (the readvance / the
-        #    borrow-to-invest draw), never a declared ratio on the HELOC -- the
-        #    same stance the consumer-loan path already takes (a declared
-        #    investment_portion > 0 on a car/student/personal loan is refused).
-        #    Silently honouring OR silently dropping a declared HELOC
-        #    deductibility would both be the DP#32 two-way trap. Removing it
-        #    from schema/example.json is byte-safe: it was never read.
-        # Issue #1036: refuse a declared HELOC deductibility only when it
-        # ASSERTS a deductible investment portion (> 0) -- the s.20(1)(c) trace
-        # is COMPUTED from the borrowing's purpose, never a declared ratio on
-        # the HELOC (same stance the consumer-loan path takes at :3309, whose
-        # message instructs 'declare investment_portion=0'). A pure
-        # personal-use declaration (investment_portion=0) is the safe, accepted
-        # state -- the user's real contracts declare exactly that, and refusing
-        # it would block every production contract. investment_portion=0 is
-        # accepted; investment_portion>0 is refused loudly.
-        heloc_deductibility = heloc.get("deductibility")
-        if heloc_deductibility is not None and heloc_deductibility["investment_portion"] > 0:
+        # 2. balance (the DRAWN amount) -- HONOURED as the opening position
+        #    when > 0 (issue #1039): mapped to property.heloc_opening_balance
+        #    (+ property.heloc_opening_investment_portion off the declared
+        #    deductibility), read by SimulationConfig.from_dict, seeded into
+        #    SimState.heloc_balance / canada.margin_tracing by SimState.initial
+        #    -- wired all the way into the engine (DP#18). See the block at
+        #    the top of this `if heloc:` for the refusals that keep absence
+        #    loud (a draw with no deductibility; a draw above the limit).
+        #    balance = 0 (undrawn) remains the documented accepted state
+        #    (#577): margin_available then equals the full limit.
+        # 3. deductibility -- REFUSED LOUDLY when declared WITHOUT an opening
+        #    drawn balance and asserting a deductible portion (> 0). With an
+        #    opening draw it IS honoured (the #1039 opening trace); with none,
+        #    there is no opening interest to apply it to and future draws are
+        #    traced from their borrowing's purpose -- silently dropping the
+        #    declaration would be exactly the DP#32 defect, so it refuses
+        #    (same stance as the consumer-loan path at the consumer-loan
+        #    mapping, whose message instructs 'declare investment_portion=0').
+        #    investment_portion=0 is accepted either way -- the safe, accepted
+        #    state the user's real contracts declare.
+        if (heloc_drawn <= 0 and heloc_deductibility is not None
+                and heloc_deductibility["investment_portion"] > 0):
             raise ContractAdaptationError(
                 f"liability {heloc['id']!r} (kind=heloc) declares deductibility."
                 f"investment_portion={heloc_deductibility['investment_portion']:.4f} "
-                f"> 0, asserting some of its interest is deductible (ITA s.20(1)(c)). "
-                f"The s.20(1)(c) trace is COMPUTED from the borrowing's purpose (the "
-                f"readvanceable readvance / the decisions.borrow_to_invest draw), "
-                f"never a declared ratio on the HELOC itself -- the same stance the "
-                f"consumer-loan path takes. Silently honouring OR silently dropping "
-                f"this declaration would both be the DP#32 defect. Declare "
-                f"investment_portion=0 (personal-use, not deductible), or express a "
-                f"draw the engine should make via decisions.borrow_to_invest (#1036). "
-                f"Refusing loudly."
+                f"> 0 while balance.amount is 0 (undrawn). A declared ratio is "
+                f"honoured only as the trace of an OPENING drawn balance "
+                f"(#1039); with nothing drawn there is no interest to apply it "
+                f"to, and future draws are traced from their borrowing's "
+                f"purpose -- silently dropping this declaration would be the "
+                f"DP#32 defect. Declare investment_portion=0 (personal-use, "
+                f"not deductible), declare the real balance.amount with this "
+                f"deductibility to honour an opening position, or express a "
+                f"draw the engine should make via decisions.borrow_to_invest "
+                f"(#1036). Refusing loudly."
             )
 
     if credit_facility:

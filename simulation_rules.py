@@ -1936,6 +1936,10 @@ def apply_borrowing_purpose(ws: YearWorkingState, ctx: RuleContext) -> bool:
         # advance itself). Read off the OPENING balance, before this year's
         # amortization -- the proportion is fixed at the moment of borrowing.
         mortgage_balance=ws.opening_mortgage_balance,
+        # Issue #1039: ADD the new draw to a declared opening drawn balance's
+        # trace instead of clobbering it -- the historical position's purpose
+        # is a carried-in fact, not something a year-0 decision overwrites.
+        opening_margin_tracing=ws.opening_margin_tracing,
     )
     return True
 

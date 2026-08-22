@@ -1525,6 +1525,24 @@ class SimulationConfig:
     # added to the invested lump sum. margin_available is NOT inflated by this.
     cash_out: float = 0.0
 
+    # issue #1039: the OPENING DRAWN position of the mortgage-paired HELOC
+    # (liabilities[kind=heloc].balance.amount), mapped by from_dict() off
+    # property.heloc_opening_balance. 0.0 is #577's documented undrawn state.
+    # input_contract.py writes the key only when the contract declares a drawn
+    # balance WITH its deductibility, so absence here means "no opening draw"
+    # -- never a coerced zero (DP#32). Seeded into SimState.heloc_balance by
+    # SimState.initial() and carried by the fold; margin_available has already
+    # been reduced by the same draw upstream (undrawn room = limit - drawn).
+    heloc_opening_balance: float = 0.0
+    # issue #1039: the declared deductible proportion
+    # (deductibility.investment_portion) of that OPENING drawn balance. The
+    # original borrowing's purpose is a historical fact that predates the
+    # snapshot, so it is carried in as a declared ratio -- not re-derived from
+    # a simulation decision (#577 governs draws the engine makes). Consumed by
+    # SimState.initial() to seed canada.margin_tracing; only meaningful with
+    # heloc_opening_balance > 0.
+    heloc_opening_investment_portion: float = 0.0
+
     # issue #735: what FRACTION of margin_available is drawn and invested at
     # year 0. 0.0 is the DP#32-correct default -- a declared facility that is
     # simply left UNDRAWN, not a fabricated draw the household never made.
@@ -2030,6 +2048,13 @@ class SimulationConfig:
             ltv_max=prop.get('ltv_max', 0.80),
             amortization_years=prop.get('amortization_years', 13),
             margin_available=prop.get('margin_available', 0),
+            # issue #1039: absence-safe -- input_contract writes these keys
+            # only when an opening drawn balance is declared, so a legacy
+            # dict never carries them and 0.0 is the documented undrawn state
+            # (#577), never a coerced zero (DP#32).
+            heloc_opening_balance=prop.get('heloc_opening_balance', 0.0),
+            heloc_opening_investment_portion=prop.get(
+                'heloc_opening_investment_portion', 0.0),
             has_heloc=has_readvanceable_facility(cfg),
             # issue #654: absence-safe -- .get(key) with no default returns
             # None on a genuinely absent key, never coerces it (DP#32).
@@ -2279,6 +2304,16 @@ class SimulationConfig:
                 # re-emitted it, so any saved config lost the cash-out leg of
                 # its refinance on the next load.
                 **({'cash_out': self.cash_out} if self.cash_out else {}),
+                # Issue #1039 (DP#24): re-emit a declared opening drawn HELOC
+                # position so a load->modify->save cycle does not silently
+                # drop it. Emitted only when non-zero -- 0.0 round-trips to
+                # 'absent' (undrawn, #577), the same absence-safe convention
+                # cash_out uses above.
+                **({'heloc_opening_balance': self.heloc_opening_balance}
+                   if self.heloc_opening_balance else {}),
+                **({'heloc_opening_investment_portion':
+                    self.heloc_opening_investment_portion}
+                   if self.heloc_opening_investment_portion else {}),
                 'heloc_readvance': self.heloc_readvance,
                 'charge_ltv_limit': self.charge_ltv_limit,
                 'heloc_ltv_limit': self.heloc_ltv_limit,

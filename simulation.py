@@ -1850,6 +1850,9 @@ class FamilySimulation:
         _will_draw_heloc = (
             self.use_readvanceable
             or margin_draw_for_lump_sum(lump_sum, config.margin_available) > 0
+            # Issue #1039: a declared opening drawn balance carries interest
+            # from year 0 -- it needs a declared rate just as much.
+            or config.heloc_opening_balance > 0
         )
         if config.heloc_rate is None and _will_draw_heloc:
             # DP#32: "the run must say so" -- logged, not raised. A hard

@@ -425,10 +425,16 @@ class TestHelocDeclarationsRefusedOrRead(unittest.TestCase):
         ic.validate_contract(doc)
         return ic.to_internal_config(doc)
 
-    def test_heloc_opening_drawn_balance_refused_when_positive(self):
+    def test_heloc_opening_drawn_balance_without_deductibility_refused(self):
+        """Issue #1039 replaced #1036's blanket refusal with HONOURING an
+        opening drawn position -- but only when its s.20(1)(c) trace is
+        derivable. A declared balance WITHOUT a deductibility block still
+        refuses loudly (DP#32: defaulting the trace would fabricate a tax
+        position); see tests/test_issue_1039.py for the honoured path."""
         doc = _example_doc()
         heloc = next(l for l in doc["liabilities"] if l["kind"] == "heloc")
         heloc["balance"]["amount"] = 65_000
+        del heloc["deductibility"]
         with self.assertRaises(ic.ContractAdaptationError) as cm:
             self._load(doc)
         self.assertIn("OPENING DRAWN balance", str(cm.exception))
