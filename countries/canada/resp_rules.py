@@ -572,22 +572,9 @@ class RESPCalculator:
 
     def resp_collapse_proceeds(self, base_cfg: dict, n_mtr: float) -> dict:
         """Compute net proceeds from collapsing an RESP (no student enrolled)."""
-        accounts = base_cfg.get('accounts', {})
-        resp_balance = accounts.get('resp_current_balance', 0)
+        resp_balance, contributions, cesg, qesi, earnings = _resp_balance_and_composition(base_cfg)
         if resp_balance <= 0:
             return {'net_proceeds': 0.0, 'tax_cost': 0.0, 'grant_clawback': 0.0}
-
-        composition = accounts.get('resp_composition', {})
-        contributions = composition.get('total_contributions', 0)
-        cesg = composition.get('total_cesg_received', 0)
-        qesi = composition.get('total_qesi_received', 0)
-        earnings = composition.get('investment_earnings', 0)
-
-        if contributions + cesg + qesi + earnings == 0:
-            contributions = resp_balance * 0.50
-            cesg = resp_balance * 0.10
-            qesi = resp_balance * 0.05
-            earnings = resp_balance * 0.35
 
         grant_clawback = cesg + qesi
 
@@ -611,20 +598,9 @@ class RESPCalculator:
 
     def resp_eap_proceeds(self, base_cfg: dict) -> dict:
         """Compute net proceeds from normal EAP RESP withdrawals (student enrolled)."""
-        accounts = base_cfg.get('accounts', {})
-        resp_balance = accounts.get('resp_current_balance', 0)
+        resp_balance, contributions, cesg, qesi, earnings = _resp_balance_and_composition(base_cfg)
         if resp_balance <= 0:
             return {'net_proceeds': 0.0, 'tax_cost': 0.0}
-
-        composition = accounts.get('resp_composition', {})
-        contributions = composition.get('total_contributions', 0)
-        cesg = composition.get('total_cesg_received', 0)
-        qesi = composition.get('total_qesi_received', 0)
-        earnings = composition.get('investment_earnings', 0)
-
-        if contributions + cesg + qesi + earnings == 0:
-            contributions = resp_balance * 0.50
-            earnings = resp_balance * 0.50
 
         eap_portion = cesg + qesi + earnings
         student_mtr = base_cfg.get('assumptions', {}).get('resp_eap_tax_rate', 0.15)
@@ -796,6 +772,51 @@ def default_resp_composition(resp_balance: float) -> Dict[str, float]:
     }
 
 
+def _resolve_resp_composition(composition: Dict, resp_balance: float) -> tuple:
+    """Return the ``(contributions, cesg, qesi, earnings)`` tuple that prices a
+    withdraw/collapse, from ONE spelling (DP#9).
+
+    ``default_resp_composition`` is the single documented fallback for a
+    balance whose composition is ABSENT (an estimation convention, DP#13 --
+    real-tracked data always wins). Issue #95 (DP#19): the EAP path used to
+    fall back to a DIFFERENT flat 50/50 split, inventing a cost basis that
+    disagreed with the collapse path's own 50/10/5/35 convention -- two
+    spellings of one rule. Routing both through this helper and
+    ``default_resp_composition`` means a balance with no composition is priced
+    identically everywhere (DP#9), and a positive composition that reaches the
+    fold is honoured as-is, never overwritten by a fabricated split (DP#19/
+    DP#32: tracked cost basis wins; absence is the only fallback trigger).
+    """
+    contributions = composition.get('total_contributions', 0)
+    cesg = composition.get('total_cesg_received', 0)
+    qesi = composition.get('total_qesi_received', 0)
+    earnings = composition.get('investment_earnings', 0)
+    if contributions + cesg + qesi + earnings == 0:
+        default = default_resp_composition(resp_balance)
+        return (default['total_contributions'], default['total_cesg_received'],
+                default['total_qesi_received'], default['investment_earnings'])
+    return contributions, cesg, qesi, earnings
+
+
+def _resp_balance_and_composition(base_cfg: Dict) -> tuple:
+    """Resolve ``(resp_balance, contributions, cesg, qesi, earnings)`` from a
+    config, the ONE preamble shared by the EAP and collapse pricing methods
+    (DP#9: both read the balance and its tracked composition identically).
+
+    Extracted so the two methods do not duplicate the accounts-read + zero-
+    guard + composition-resolution opening (a clone-detection finding on the
+    single-spelling refactor). The zero-balance EARLY RETURN stays in each
+    method because its empty-payload dict differs (collapse returns
+    grant_clawback; EAP returns a bare pair) -- only the shared read is
+    unified here.
+    """
+    accounts = base_cfg.get('accounts', {})
+    resp_balance = accounts.get('resp_current_balance', 0)
+    contributions, cesg, qesi, earnings = _resolve_resp_composition(
+        accounts.get('resp_composition', {}), resp_balance)
+    return resp_balance, contributions, cesg, qesi, earnings
+
+
 def resp_annual_withdrawal(contributions: float, cesg: float, qesi: float,
                             earnings: float, years_remaining: int) -> Dict[str, float]:
     """Split this year's RESP withdrawal so the plan drains to (near) zero by
@@ -854,8 +875,6 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
 
     resp_balance = cfg['accounts']['resp_current_balance']
 
-    results = {}
-
     ref_year = cfg.get('assumptions', {}).get('start_year', 2026)
     cesg_t = get_cesg_thresholds(ref_year)
     qesi_t = get_qesi_thresholds(ref_year)
@@ -863,11 +882,27 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
     contrib_max = get_cesg_contribution_max(ref_year)
     annual_room = get_cesg_annual_room(ref_year)
 
+    # Issue #92 (DP#16): the household's province is DATA from the config
+    # (cfg['tax']['province'], the internal-shape location load_and_map
+    # writes), NEVER fabricated as 'quebec'. QESI eligibility turns on where
+    # the child actually RESIDES -- a Quebec assumption forced onto an
+    # Ontario household silently over-credits QESI. Absence stays the
+    # historical default 'quebec' (DP#32: an absent key falls back to the
+    # prior behaviour). A present-but-empty tax block and an absent one are
+    # both read via dict.get's default -- never `x or DEFAULT` (which would
+    # conflate "empty" with "absent" and is the fault line DP#32 exists to
+    # police).
+    tax_block = cfg.get('tax', {})
+    province = tax_block.get('province')
+    province = province if province else 'quebec'
+
+    results = {}
+
     for i, ch in enumerate(children):
         name = ch.get('name', f'Child {i+1}')
         age = ch.get('age', 0)
         birth_year = ref_year - age
-        child = RESPChild(name=name, birth_year=birth_year, province='quebec')
+        child = RESPChild(name=name, birth_year=birth_year, province=province)
         child.resp_balance = resp_balance / len(children) if len(children) > 0 else resp_balance
 
         eligible = child.cesg_eligible(ref_year)
@@ -884,6 +919,7 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
         results[name] = {
             'age': age,
             'birth_year': birth_year,
+            'province': province,  # issue #92: surface the household's province used
             'cesg_eligible': eligible,
             'cesg_16_17_eligible': age_16_17_eligible if age >= 16 else 'N/A (under 16)',
             'cesg_basic_rate': f"{calc.CESG_BASIC_RATE*100:.0f}%",

@@ -153,6 +153,12 @@ class InvariantBreachedError(ValueError):
 RUN_PATH_INVARIANTS: tuple = (
     'total_secured_debt_within_charge_limit',
     'heloc_within_revolving_limit',
+    # Issue #94 (DP#18): the mortgage amortization ledger identity -- no money
+    # appears or vanishes as the principal is paid down. A pure money-
+    # conservation relation every correct run satisfies (a mid-horizon
+    # principal DISPOSITION is the one legitimate break, and the check is
+    # discharge-aware so a household that sells its home is not false-refused).
+    'mortgage_conserves_principal',
 )
 
 
@@ -174,6 +180,20 @@ def run_path_ctx(config) -> Dict[str, Any]:
         # 'total_secured_debt_within_charge_limit' folds its drawn balance
         # into the charge check at all.
         'credit_facility_secured': config.credit_facility_secured,
+        # Issue #94: the run-path mortgage-conservation ledger identity needs
+        # the OPENING mortgage balance (SimState.initial seeds it from the
+        # config's mortgage_balance, which a cash-out refinance overlay has
+        # already sized) and the principal-sale declaration (so the check can
+        # exempt the disposition years rather than false-refuse a home sale).
+        # Only supplied when a property is declared (mirroring how
+        # 'total_secured_debt_within_charge_limit' no-ops on house_value == 0
+        # -- a house_value of 0 means "no property declared", NOT "a $0
+        # charge", DP#32 in reverse); without a property there is nothing to
+        # amortize, so the check stays a no-op (never invents a break from
+        # absent data).
+        'opening_mortgage_balance': (config.mortgage_balance
+                                     if config.house_value > 0 else None),
+        'principal_sale': getattr(config, 'principal_sale', None),
     }
 
 
@@ -358,15 +378,41 @@ def check_mortgage_conserves_principal(results, ctx):
     """No money appears or vanishes in the mortgage amortization ledger:
     mortgage_balance_t == mortgage_balance_{t-1} - principal_paid_t, every
     year. Requires ``ctx['opening_mortgage_balance']``; a no-op without it.
+
+    Discharge-aware (issue #94). A household that SELLS its principal
+    residence mid-horizon legitimately force-zeros the secured debt in the
+    sale year and every year after (``apply_principal_disposition``): the
+    balance drops to 0 and stays 0, NOT by amortization, while the
+    amortization *schedule* keeps producing a scheduled ``principal_paid``
+    (and ``principal_sale_discharged_debt`` reports the same scheduled
+    principal). A pure-ledger identity would read those post-sale years as a
+    conservation break and false-refuse a legitimate run -- so the check
+    skips every year from the sale on when ``ctx['principal_sale']`` is set.
+    Absence of the key (or a config with no principal sale -- the golden
+    fixture) verifies the pure identity every year, exactly as before
+    (byte-identical for every non-disposition household).
     """
     opening = ctx.get('opening_mortgage_balance')
     if opening is None:
         return []
     start_year = ctx.get('start_year', 0)
     tol = ctx.get('tolerance', 1.0)
+    sale = ctx.get('principal_sale')
+    sale_year = None
+    if isinstance(sale, dict):
+        sale_year = sale.get('year')
     violations = []
     prev = opening
     for i, r in enumerate(results):
+        this_year = start_year + i
+        # Issue #94: a principal disposition force-zeros the balance (and
+        # the schedule's principal continues to be booked straight to a paid-
+        # off mortgage) -- the ledged identity no longer holds BY DESIGN from
+        # the sale year on. Skip those years; they are verified by the
+        # disposition's own conservation (P_net + discharged_debt = V - costs).
+        if sale_year is not None and this_year >= sale_year:
+            prev = r.mortgage_balance
+            continue
         expected = prev - r.mortgage_principal
         if abs(r.mortgage_balance - expected) > tol:
             violations.append(Violation(

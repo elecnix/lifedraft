@@ -443,6 +443,31 @@ class MultiGenerationBoundaryTest(unittest.TestCase):
         self.assertIn("ADULT", msg)
         self.assertIn("#901", msg)
 
+    def test_member_with_null_birth_date_is_loudly_refused(self):
+        """DP#28/#32 (#100): a person admitted as a SIMULATED ADULT member
+        (the primary couple) must have a dateable birth. A missing birth_date
+        must refuse loudly, never silently gate the member as 'never retires'
+        (zero CPP/OAS/pension indistinguishable from a correctly ineligible
+        member). The schema sanctions birth_date: null ONLY for a deceased
+        ancestor, who is never admitted as a member -- so an admitted couple
+        member with no DOB is a data error, and DP#28's 'a gate built from
+        missing eligibility inputs isn't a legitimate zero' applies verbatim."""
+        doc = copy.deepcopy(self.base)
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1["birth_date"] = None
+        # Supply explicit death DATES so the estate mortality comparison
+        # (who dies first) does not depend on the derived birth date -- the
+        # ONLY defect left is the missing DOB on an admitted member.
+        for m in doc["assumptions"]["mortality"]:
+            if m["person"] in ("p1", "p2"):
+                m["assumed_death_date"] = "2080-01-01"
+        ic.validate_contract(doc)  # schema allows null birth_date
+        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+            ic.to_internal_config(doc)
+        msg = str(ctx.exception)
+        self.assertIn("p1", msg)
+        self.assertIn("birth_date", msg.lower())
+
 
 class NeedsAdultComputeTest(unittest.TestCase):
     """Issue #698 (Step 8): _needs_adult_compute is the predicate that decides

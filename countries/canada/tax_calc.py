@@ -42,6 +42,12 @@ from tax_calculator import (
     TaxDataProvider,
     )
 
+# Issue #86 (DP#10: one module per government program): CPP Act s.20 basic-
+# exemption logic lives in the consolidated CPP/QPP module (cpp_sharing);
+# tax_calc only re-exports it for import compatibility -- it does NOT own it
+# (DP#9: one spelling).
+from countries.canada.cpp_sharing import cpp_basic_exemption_pensionable  # noqa: F401,E402
+
 # =============================================================================
 # Canadian-specific constants
 # =============================================================================
@@ -683,50 +689,6 @@ def charitable_donation_credit(donations: float,
     credit += top_eligible * params.charitable_top_rate
     credit += (above - top_eligible) * params.charitable_high_rate
     return credit
-
-
-def cpp_basic_exemption_pensionable(employment_income: float,
-                                    year: int = 2026,
-                                    province: str = "quebec",
-                                    provider: TaxDataProvider = None) -> dict[str, float]:
-    """CPP/QPP pensionable earnings after the basic exemption (line 30800).
-
-    Clarifies where the CPP/QPP basic exemption lives (issue #315): it is a
-    contribution-base reduction, applied here before any contribution rate.
-    Pensionable earnings = min(income, YMPE) - basic_exemption, floored at 0.
-    CPP2 (the band between YMPE and YMPE2) has NO basic exemption.
-
-    DP#3: pure function. DP#12: YMPE, exemption, and rate come from
-    TaxDataProvider (Quebec data carries the QPP rate; federal carries CPP).
-
-    Args:
-        employment_income: Gross pensionable employment income.
-        year: Tax year.
-        province: 'quebec'/'qc' uses QPP rate; otherwise CPP rate.
-        provider: Optional TaxDataProvider override.
-
-    Returns:
-        Dict with basic_exemption, pensionable_earnings, contribution_rate,
-        and base_contribution (employee share on the first band).
-
-    Source: CPP Act s.20 (Year's Basic Exemption); CRA line 30800.
-    """
-    if provider is None:
-        provider = TaxDataProvider()
-    is_quebec = province.lower() in ('quebec', 'qc')
-    data = provider._load_year(year, 'canada', 'quebec' if is_quebec else 'federal')
-
-    exemption = data.cpp_exemption
-    ympe = data.cpp_max_pensionable
-    rate = data.qpp_rate if (is_quebec and data.qpp_rate) else data.cpp_rate
-
-    pensionable = max(0.0, min(employment_income, ympe) - exemption)
-    return {
-        'basic_exemption': exemption,
-        'pensionable_earnings': pensionable,
-        'contribution_rate': rate,
-        'base_contribution': pensionable * rate,
-    }
 
 
 # =============================================================================

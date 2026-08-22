@@ -924,6 +924,14 @@ def _map_member(doc: Dict, person_id: str, role: str,
         member["income_segments"] = future_segments
     if p.get("birth_date"):
         member["birth_year"] = int(p["birth_date"][:4])
+    # Note (issue #100): a person admitted as a SIMULATED ADULT member must have
+    # a dateable birth date, or the retirement gate silently maps them as
+    # 'never retires' (zero CPP/OAS/pension). That loud refusal lives at the
+    # CONTRACT BOUNDARY in to_internal_config (where a person is actually
+    # admitted as an engine member), NOT here -- _map_member is a pure mapper
+    # also exercised directly by unit tests that legitimately omit birth_date
+    # (e.g. a tuition-by-year mapping test). The schema sanctions birth_date:
+    # null only for a deceased ancestor, who is never admitted as a member.
 
     room = p["room"]  # schema-required on every person -- never absent post-validation
     for kind in ("rrsp", "tfsa", "fhsa"):
@@ -3116,6 +3124,31 @@ def to_internal_config(doc: Dict) -> Dict:
     # so the refusal happens before any partial mapping is built.
     registered_balances = _map_registered_balances(
         doc, primary_id, spouse_id, child_ids, extra_adult_ids)
+
+    # Issue #100 (DP#28/DP#32): a person ADMITTED as a simulated ADULT member
+    # (primary / spouse / accumulating extra adult) must have a dateable birth
+    # date. Without a DOB the engine cannot date retirement eligibility, CPP/
+    # OAS claim ages, or the RRIF/age-71 lifecycle -- and the retirement gate
+    # would silently map such a member as 'never retires' (zero CPP/OAS/
+    # pension), indistinguishable from a correctly-ineligible member (the
+    # silent-zero false green this codebase exists to eliminate). The schema
+    # sanctions birth_date: null ONLY for a deceased ancestor, who is never
+    # admitted as a member (the accumulator/extra-adult boundary refuses
+    # anyone it cannot date). Refuse loudly HERE, at the contract boundary,
+    # rather than let the gate fabricate a never-retiring member.
+    for _admitted_id in [primary_id] + ([spouse_id] if spouse_id else []) + extra_adult_ids:
+        _admitted = _people_by_id(doc).get(_admitted_id, {})
+        if not _admitted.get("birth_date"):
+            raise ContractAdaptationError(
+                f"Person {_admitted_id!r} is admitted as a simulated ADULT "
+                f"member but has no birth_date (DP#28/#100). The engine must "
+                f"date retirement eligibility, CPP/OAS claim ages, and the "
+                f"RRIF/age-71 lifecycle from a birth date; a null birth_date is "
+                f"sanctioned by the schema only for a DECEASED ANCESTOR, who is "
+                f"never admitted as a member. Without a DOB, mapping this member "
+                f"as 'never retires' (zero CPP/OAS/pension) would be a "
+                f"silent-zero gate -- refusing rather than inventing one."
+            )
 
     members = [_map_member(doc, primary_id, "primary", registered_balances)]
     if spouse_id:
