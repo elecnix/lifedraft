@@ -1,0 +1,72 @@
+name: PR body format
+
+# Flags a PR description that will RENDER BADLY on GitHub — before it reaches
+# review. GitHub renders a PR body in comment mode, where a single newline
+# becomes a `<br>`, so prose hard-wrapped at 80 columns arrives as a ragged
+# column of broken lines the author never sees (their editor shows the source).
+# elecnix/gh-pr-body-action also catches collapsed tables and mermaid blocks
+# `mermaid.parse()` rejects; see that repo's README for the full calibration.
+#
+# ADVISORY, on purpose. The action's own README explains why: on its
+# calibration corpus it flags ~12% of human-authored bodies — all already
+# merged — so making it required would redden the trunk over descriptions
+# nobody will rewrite. This job is NOT wired into required-status-checks
+# branch protection: it goes red without blocking the merge, and the author
+# reads the finding and fixes or dismisses it.
+#
+# No checkout, no Python setup: the action reads the PR body via the API and
+# brings its own Node + dependencies. That makes this one of the cheapest jobs
+# on the self-hosted runners (see docs/self-hosted-runner.md for why cost is
+# measured against the maintainer's 16 cores rather than GitHub minutes).
+#
+# NOTE on triggers: unlike the clone-detection workflow there is NO paths
+# filter — a body edit touches no code, so a paths filter would skip exactly
+# the `edited` runs where the author fixed (or broke) the description.
+on:
+  pull_request:
+    branches: [main]
+    # `edited` re-runs the check once the author fixes the body — without it
+    # the original red result stands.
+    types: [opened, edited, reopened, synchronize]
+
+concurrency:
+  group: pr-body-${{ github.ref }}
+  # This workflow only ever triggers on `pull_request`, so an unconditional
+  # cancel-in-progress is already PR-scoped: a superseded run would only ever
+  # be checking a body nobody will read.
+  cancel-in-progress: true
+
+jobs:
+  pr-body-format:
+    # Self-hosted: GitHub-hosted minutes are exhausted. See docs/self-hosted-runner.md.
+    runs-on: arc-runners
+    permissions:
+      contents: read
+      # The action reads the PR body via the API; without this scope it
+      # 403s ("Resource not accessible by integration") before it checks
+      # anything.
+      pull-requests: read
+    steps:
+      # The action's two checkers both shell out to the `gh` CLI, and these
+      # bare self-hosted runners have no gh installed (first run failed with
+      # "error: [Errno 2] No such file or directory: 'gh'" + "spawnSync gh
+      # ENOENT" — a read failure, exit 2/1, not a formatting finding). Same
+      # shape as the trufflehog step in secret-scan.yml: download the PINNED
+      # release tarball, verify it against the release's own checksums.txt,
+      # and put it on PATH for the action's step. No sudo/apt: the runners
+      # install plain binaries (see docs/self-hosted-runner.md).
+      - name: Install gh CLI (pinned, checksum-verified)
+        run: |
+          GH_VERSION=2.98.0
+          GH_SHA256=3b8ac6b30336802fc1a858d7c084e11cdf24ac1a761ca90b68022d7d729208de
+          curl --fail --silent --show-error --location \
+            -o "$RUNNER_TEMP/gh.tar.gz" \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          echo "${GH_SHA256}  $RUNNER_TEMP/gh.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/gh-cli"
+          tar -xzf "$RUNNER_TEMP/gh.tar.gz" -C "$RUNNER_TEMP/gh-cli" --strip-components=1
+          echo "$RUNNER_TEMP/gh-cli/bin" >> "$GITHUB_PATH"
+
+      # Pinned by commit SHA (repo convention) — the tag's SHA as reported by
+      # `gh api repos/elecnix/gh-pr-body-action/git/ref/tags/v1`.
+      - uses: elecnix/gh-pr-body-action@c9332cad71df85f44555ff198845f94b2d2fd2fa  # v1
