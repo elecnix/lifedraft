@@ -1,0 +1,39 @@
+# Cite — an open code reviewer.
+#
+# Reviews every pull request with a large language model and publishes a real
+# review with comments anchored to the lines they are about, plus a check run
+# that may be made a required check for merge. Every finding quotes the source
+# line it is about; a quote that does not match the file is dropped before it
+# reaches anyone (docs: https://github.com/elecnix/cite).
+#
+# No `actions/checkout` of the pull request head: Cite fetches the diff from
+# the GitHub API, so no head-controlled code ever executes in this job.
+#
+# MODEL_API_KEY is optional for a first look only if the repository later
+# moves to GitHub-hosted models; today bring-your-own-key is the path:
+#   1. Create an API key with your model provider.
+#   2. Add it as the repository secret MODEL_API_KEY.
+name: Cite review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+# Single-writer per pull request: publishing is short and must not be
+# cancelled mid-write. Reviewer-phase cancellation belongs elsewhere.
+concurrency:
+  group: cite-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cite review
+        uses: elecnix/cite@v0.1.0
+        with:
+          model_api_key: ${{ secrets.MODEL_API_KEY }}
