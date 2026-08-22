@@ -205,6 +205,11 @@ class TestInvariantRunsInProductionPath:
     def test_charge_invariants_are_in_the_run_path_set(self):
         assert 'total_secured_debt_within_charge_limit' in RUN_PATH_INVARIANTS
         assert 'heloc_within_revolving_limit' in RUN_PATH_INVARIANTS
+        # Issue #94 (DP#18): the mortgage-amortization money-conservation
+        # ledger identity is also a run-path invariant -- no dollar appears or
+        # vanishes in the primary mortgage as it amortizes, asserted directly
+        # in the fold every run, not only in a bespoke regression test.
+        assert 'mortgage_conserves_principal' in RUN_PATH_INVARIANTS
 
     def test_family_simulation_run_asserts_them(self):
         """Behavioural proof, not narration: monkeypatch the readvance bound
@@ -259,6 +264,61 @@ class TestInvariantRunsInProductionPath:
         with pytest.raises(InvariantBreachedError) as exc:
             assert_run_invariants(breaching, cfg)
         assert 'charge limit' in str(exc.value)
+
+    def test_mortgage_conservation_is_run_path_and_discharge_aware(self):
+        """Issue #94 (DP#18): the mortgage-amortization money-conservation
+        identity is asserted directly in the production run path, AND it is
+        discharge-aware -- a household that sells its principal residence
+        mid-horizon legitimately force-zeros the secured debt from the sale
+        year on, which would read as a conservation break to a naive ledger
+        check. The run-path ctx must (a) supply the opening balance from the
+        config, and (b) carry the principal-sale declaration so the check
+        exempts the disposition years rather than false-refusing a real home
+        sale."""
+        from trajectory_invariants import run_path_ctx
+
+        # The wiring: a property-holding config exposes the opening balance
+        # and principal_sale in its run-path ctx.
+        cfg = SimulationConfig(projection_years=10, house_value=HOUSE_VALUE,
+                                mortgage_balance=400_000, amortization_years=25,
+                                start_year=2026)
+        ctx = run_path_ctx(cfg)
+        assert ctx['opening_mortgage_balance'] == 400_000
+        assert ctx['principal_sale'] is None
+
+        # A config with NO property declares no opening (DP#32 in reverse: a
+        # house_value of 0 is "no property declared", never an opening of 0
+        # that the check would invent a breach from).
+        no_prop = SimulationConfig(projection_years=1, house_value=0,
+                                    start_year=2026)
+        assert run_path_ctx(no_prop)['opening_mortgage_balance'] is None
+
+        # Discharge-awareness: a principal disposition is the ONE legitimate
+        # way the ledger identity breaks. A household that sold its home in
+        # year 2 must not be refused by this invariant on the post-sale years.
+        sale_years = [YearResult(year=0, mortgage_balance=300_000,
+                                  mortgage_principal=0),
+                       YearResult(year=1, mortgage_balance=290_000,
+                                  mortgage_principal=10_000),
+                       # Sale year: balance force-zeroed (it was 290,000)
+                       # while the amortization schedule still books 10,000
+                       # of principal -- a naive ledger check reads this as
+                       # 290,000 - 10,000 != 0.
+                       YearResult(year=2, mortgage_balance=0,
+                                  mortgage_principal=10_000)]
+        ctx_sale = {'start_year': 2026,
+                    'principal_sale': {'year': 2028},
+                    'opening_mortgage_balance': 300_000.0}
+        # Without the discharge awareness the post-sale year 2 (balance 0
+        # with 10k of schedule principal still booked) is a false breach.
+        naive = run_invariant('mortgage_conserves_principal', sale_years,
+                              {'start_year': 2026,
+                               'opening_mortgage_balance': 300_000.0})
+        assert len(naive) == 1
+        # With the discharge declaration, the sale year and after are exempt.
+        aware = run_invariant('mortgage_conserves_principal', sale_years,
+                               ctx_sale)
+        assert aware == []
 
     def test_no_property_means_no_charge_to_breach(self):
         """DP#32 in reverse: house_value == 0 means "no property declared",
