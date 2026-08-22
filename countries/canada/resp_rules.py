@@ -854,8 +854,6 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
 
     resp_balance = cfg['accounts']['resp_current_balance']
 
-    results = {}
-
     ref_year = cfg.get('assumptions', {}).get('start_year', 2026)
     cesg_t = get_cesg_thresholds(ref_year)
     qesi_t = get_qesi_thresholds(ref_year)
@@ -863,11 +861,27 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
     contrib_max = get_cesg_contribution_max(ref_year)
     annual_room = get_cesg_annual_room(ref_year)
 
+    # Issue #92 (DP#16): the household's province is DATA from the config
+    # (cfg['tax']['province'], the internal-shape location load_and_map
+    # writes), NEVER fabricated as 'quebec'. QESI eligibility turns on where
+    # the child actually RESIDES -- a Quebec assumption forced onto an
+    # Ontario household silently over-credits QESI. Absence stays the
+    # historical default 'quebec' (DP#32: an absent key falls back to the
+    # prior behaviour). A present-but-empty tax block and an absent one are
+    # both read via dict.get's default -- never `x or DEFAULT` (which would
+    # conflate "empty" with "absent" and is the fault line DP#32 exists to
+    # police).
+    tax_block = cfg.get('tax', {})
+    province = tax_block.get('province')
+    province = province if province else 'quebec'
+
+    results = {}
+
     for i, ch in enumerate(children):
         name = ch.get('name', f'Child {i+1}')
         age = ch.get('age', 0)
         birth_year = ref_year - age
-        child = RESPChild(name=name, birth_year=birth_year, province='quebec')
+        child = RESPChild(name=name, birth_year=birth_year, province=province)
         child.resp_balance = resp_balance / len(children) if len(children) > 0 else resp_balance
 
         eligible = child.cesg_eligible(ref_year)
@@ -884,6 +898,7 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
         results[name] = {
             'age': age,
             'birth_year': birth_year,
+            'province': province,  # issue #92: surface the household's province used
             'cesg_eligible': eligible,
             'cesg_16_17_eligible': age_16_17_eligible if age >= 16 else 'N/A (under 16)',
             'cesg_basic_rate': f"{calc.CESG_BASIC_RATE*100:.0f}%",
