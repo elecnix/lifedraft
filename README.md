@@ -9,6 +9,8 @@ fast-forwards each option through 40+ years of tax rules, account rules, and mar
 beliefs, and shows you the scoreboard: what each choice leaves you with, including
 the ugly scenarios next to the average ones.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/elecnix/lifedraft)
+
 > **Not financial advice.** Lifedraft ranks options; it does not choose, and it
 > can be wrong. See the [LICENSE](LICENSE) for the warranty disclaimer.
 
