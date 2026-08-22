@@ -1363,3 +1363,55 @@ def project_cpp_sharing(
         spouse_cpp *= (1 + inflation)
 
     return results
+
+
+def cpp_basic_exemption_pensionable(employment_income: float,
+                                    year: int = 2026,
+                                    province: str = "quebec",
+                                    provider=None) -> dict[str, float]:
+    """CPP/QPP pensionable earnings after the basic exemption (line 30800).
+
+    Clarifies where the CPP/QPP basic exemption lives (issue #315): it is a
+    contribution-base reduction, applied here before any contribution rate.
+    Pensionable earnings = min(income, YMPE) - basic_exemption, floored at 0.
+    CPP2 (the band between YMPE and YMPE2) has NO basic exemption.
+
+    This is CPP program logic (the CPP Act s.20 Year's Basic Exemption), so it
+    lives in the consolidated CPP/QPP module (issue #86, DP#10: one module per
+    government program). tax_calc may call it but does not own it -- the
+    function previously lived there and was moved here to end the CPP
+    fragmentation across retirement.py / cpp_estimator.py / cpp_sharing.py /
+    tax_calc.py.
+
+    DP#3: pure function. DP#12: YMPE, exemption, and rate come from
+    TaxDataProvider (Quebec data carries the QPP rate; federal carries CPP).
+
+    Args:
+        employment_income: Gross pensionable employment income.
+        year: Tax year.
+        province: 'quebec'/'qc' uses QPP rate; otherwise CPP rate.
+        provider: Optional TaxDataProvider override.
+
+    Returns:
+        Dict with basic_exemption, pensionable_earnings, contribution_rate,
+        and base_contribution (employee share on the first band).
+
+    Source: CPP Act s.20 (Year's Basic Exemption); CRA line 30800.
+    """
+    if provider is None:
+        from tax_data import TaxDataProvider
+        provider = TaxDataProvider()
+    is_quebec = province.lower() in ('quebec', 'qc')
+    data = provider._load_year(year, 'canada', 'quebec' if is_quebec else 'federal')
+
+    exemption = data.cpp_exemption
+    ympe = data.cpp_max_pensionable
+    rate = data.qpp_rate if (is_quebec and data.qpp_rate) else data.cpp_rate
+
+    pensionable = max(0.0, min(employment_income, ympe) - exemption)
+    return {
+        'basic_exemption': exemption,
+        'pensionable_earnings': pensionable,
+        'contribution_rate': rate,
+        'base_contribution': pensionable * rate,
+    }

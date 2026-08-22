@@ -196,6 +196,7 @@ from countries.canada.cpp_sharing import (  # noqa: F401
     CPP_RATE_2026, QPP_RATE_2026, CPP2_RATE, CPP2_SELF_EMPLOYED_RATE,
     CPP2_ACCRUAL_RATE,
     CPP_SURVIVOR_RATE_65_PLUS, CPP_SURVIVOR_RATE_UNDER_65, QPP_SURVIVOR_RATE,
+    cpp_basic_exemption_pensionable,  # issue #86: consolidated CPP/QPP home
 )
 
 # Asset location optimizer
