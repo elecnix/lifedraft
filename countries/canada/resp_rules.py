@@ -572,22 +572,9 @@ class RESPCalculator:
 
     def resp_collapse_proceeds(self, base_cfg: dict, n_mtr: float) -> dict:
         """Compute net proceeds from collapsing an RESP (no student enrolled)."""
-        accounts = base_cfg.get('accounts', {})
-        resp_balance = accounts.get('resp_current_balance', 0)
+        resp_balance, contributions, cesg, qesi, earnings = _resp_balance_and_composition(base_cfg)
         if resp_balance <= 0:
             return {'net_proceeds': 0.0, 'tax_cost': 0.0, 'grant_clawback': 0.0}
-
-        composition = accounts.get('resp_composition', {})
-        contributions = composition.get('total_contributions', 0)
-        cesg = composition.get('total_cesg_received', 0)
-        qesi = composition.get('total_qesi_received', 0)
-        earnings = composition.get('investment_earnings', 0)
-
-        if contributions + cesg + qesi + earnings == 0:
-            contributions = resp_balance * 0.50
-            cesg = resp_balance * 0.10
-            qesi = resp_balance * 0.05
-            earnings = resp_balance * 0.35
 
         grant_clawback = cesg + qesi
 
@@ -611,20 +598,9 @@ class RESPCalculator:
 
     def resp_eap_proceeds(self, base_cfg: dict) -> dict:
         """Compute net proceeds from normal EAP RESP withdrawals (student enrolled)."""
-        accounts = base_cfg.get('accounts', {})
-        resp_balance = accounts.get('resp_current_balance', 0)
+        resp_balance, contributions, cesg, qesi, earnings = _resp_balance_and_composition(base_cfg)
         if resp_balance <= 0:
             return {'net_proceeds': 0.0, 'tax_cost': 0.0}
-
-        composition = accounts.get('resp_composition', {})
-        contributions = composition.get('total_contributions', 0)
-        cesg = composition.get('total_cesg_received', 0)
-        qesi = composition.get('total_qesi_received', 0)
-        earnings = composition.get('investment_earnings', 0)
-
-        if contributions + cesg + qesi + earnings == 0:
-            contributions = resp_balance * 0.50
-            earnings = resp_balance * 0.50
 
         eap_portion = cesg + qesi + earnings
         student_mtr = base_cfg.get('assumptions', {}).get('resp_eap_tax_rate', 0.15)
@@ -794,6 +770,51 @@ def default_resp_composition(resp_balance: float) -> Dict[str, float]:
         'total_qesi_received': resp_balance * 0.05,
         'investment_earnings': resp_balance * 0.35,
     }
+
+
+def _resolve_resp_composition(composition: Dict, resp_balance: float) -> tuple:
+    """Return the ``(contributions, cesg, qesi, earnings)`` tuple that prices a
+    withdraw/collapse, from ONE spelling (DP#9).
+
+    ``default_resp_composition`` is the single documented fallback for a
+    balance whose composition is ABSENT (an estimation convention, DP#13 --
+    real-tracked data always wins). Issue #95 (DP#19): the EAP path used to
+    fall back to a DIFFERENT flat 50/50 split, inventing a cost basis that
+    disagreed with the collapse path's own 50/10/5/35 convention -- two
+    spellings of one rule. Routing both through this helper and
+    ``default_resp_composition`` means a balance with no composition is priced
+    identically everywhere (DP#9), and a positive composition that reaches the
+    fold is honoured as-is, never overwritten by a fabricated split (DP#19/
+    DP#32: tracked cost basis wins; absence is the only fallback trigger).
+    """
+    contributions = composition.get('total_contributions', 0)
+    cesg = composition.get('total_cesg_received', 0)
+    qesi = composition.get('total_qesi_received', 0)
+    earnings = composition.get('investment_earnings', 0)
+    if contributions + cesg + qesi + earnings == 0:
+        default = default_resp_composition(resp_balance)
+        return (default['total_contributions'], default['total_cesg_received'],
+                default['total_qesi_received'], default['investment_earnings'])
+    return contributions, cesg, qesi, earnings
+
+
+def _resp_balance_and_composition(base_cfg: Dict) -> tuple:
+    """Resolve ``(resp_balance, contributions, cesg, qesi, earnings)`` from a
+    config, the ONE preamble shared by the EAP and collapse pricing methods
+    (DP#9: both read the balance and its tracked composition identically).
+
+    Extracted so the two methods do not duplicate the accounts-read + zero-
+    guard + composition-resolution opening (a clone-detection finding on the
+    single-spelling refactor). The zero-balance EARLY RETURN stays in each
+    method because its empty-payload dict differs (collapse returns
+    grant_clawback; EAP returns a bare pair) -- only the shared read is
+    unified here.
+    """
+    accounts = base_cfg.get('accounts', {})
+    resp_balance = accounts.get('resp_current_balance', 0)
+    contributions, cesg, qesi, earnings = _resolve_resp_composition(
+        accounts.get('resp_composition', {}), resp_balance)
+    return resp_balance, contributions, cesg, qesi, earnings
 
 
 def resp_annual_withdrawal(contributions: float, cesg: float, qesi: float,
