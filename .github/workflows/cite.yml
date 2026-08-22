@@ -34,6 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cite review
-        uses: elecnix/cite@v0.1.0
+        uses: elecnix/cite@v0.1.1
         with:
           model_api_key: ${{ secrets.MODEL_API_KEY }}
