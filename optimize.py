@@ -2858,6 +2858,10 @@ def run_borrow_to_invest_exploration(cfg: Dict, input_path: str = "input.json",
             'id': opt['id'], 'label': opt['label'],
             'amount': opt['amount'],
             'draw_fraction': opt['amount'] / margin_available,
+            # Issue #1040: hold_draw=true opts this rung's draw OUT of the
+            # RRSP-refund HELOC paydown sweep. Carried on the cell so the
+            # per-cell cfg_variant below can set the engine-facing flag.
+            'hold_draw': opt.get('hold_draw', False),
         })
 
     scenarios = []
@@ -2888,6 +2892,17 @@ def run_borrow_to_invest_exploration(cfg: Dict, input_path: str = "input.json",
             if existing_split is None:
                 existing_split = 0
             cfg_variant['property']['refinance_advance_deductible_non_reg'] = existing_split + cell['amount']
+            # Issue #1040: a hold_draw option books its draw through the same
+            # initial_state_for_run -> heloc_balance machinery, but opts OUT
+            # of the rrsp_refund_heloc_paydown sweep: set the engine-facing
+            # flag this cell's runs read (property.borrow_to_invest_hold_draw
+            # -> SimulationConfig.hold_borrow_to_invest_draw -> the paydown
+            # rule). The no-draw baseline and non-hold-draw rungs never set
+            # it -- absent stays False, the pre-#1040 sweep behaviour,
+            # byte-identical (DP#18: the decision modifies a key the engine
+            # actually reads; DP#32: absence is the fallback).
+            if cell.get('hold_draw'):
+                cfg_variant['property']['borrow_to_invest_hold_draw'] = True
             scenarios.append((cell, inc, {'kwargs': dict(
                 cfg=cfg_variant, input_path=input_path, objective=objective,
                 draw_fraction_options=[cell['draw_fraction']])}))

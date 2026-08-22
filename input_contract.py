@@ -4702,13 +4702,23 @@ def to_internal_config(doc: Dict) -> Dict:
             # and is refused loudly at schema validation, never silently coerced.
             # No duplicate check here (DP#9: validate_contract enforces the enum
             # before this loop runs).
-            btv_options.append({
+            btv_entry = {
                 "id": opt["id"],
                 "label": opt["label"],
                 "source": source_id,
                 "amount": amount,
                 "target_account": opt["target_account"],
-            })
+            }
+            # Issue #1040: hold_draw is OPTIONAL (the schema does not require
+            # it and declares no default), so absence and false are the SAME
+            # value here -- both mean 'run the existing RRSP-refund paydown
+            # sweep' (DP#32: the fallback is for absent input, and the schema
+            # does not distinguish absent from false). Emitted only when
+            # declared true so a config that omits it round-trips byte-
+            # identically (DP#24) -- the pre-#1040 internal shape is unchanged.
+            if opt.get("hold_draw"):
+                btv_entry["hold_draw"] = True
+            btv_options.append(btv_entry)
         legacy["borrow_to_invest_options"] = btv_options
 
     # Issue #692 (epic #690 bite 1): the couple's NON-principal properties reach

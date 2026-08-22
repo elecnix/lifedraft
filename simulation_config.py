@@ -1897,6 +1897,20 @@ class SimulationConfig:
     # interest). Wiring it there too is defensible but out of scope here.
     capitalize_interest: bool = True
 
+    # Issue #1040: a declared decisions.borrow_to_invest[] option with
+    # hold_draw=true opts its draw OUT of the RRSP-refund HELOC paydown sweep
+    # (simulation_rules.apply_rrsp_refund_heloc_paydown): the drawn balance is
+    # NOT reduced by the year's RRSP refund -- the refund stays in the
+    # household's cash and flows to the usual allocation instead -- while the
+    # interest is still priced, deducted, and serviced/capitalized per
+    # capitalize_interest. Mapped from property.borrow_to_invest_hold_draw
+    # (set per exploration cell by optimize.run_borrow_to_invest_exploration
+    # for options that declare hold_draw). The internal-config default (absent
+    # key, e.g. every test that builds the internal dict directly, and the
+    # golden fixture) is False -- the pre-#1040 debt-sweep behaviour,
+    # byte-identical (DP#32: absence is the fallback, never a coercion).
+    hold_borrow_to_invest_draw: bool = False
+
     # Issue #823: per-account expected_return / locked_until overrides,
     # pot-keyed (rrsp/tfsa/non_reg/lira/lif/fhsa). Both default to empty --
     # a household that declares neither gets today's global-rate, fully-
@@ -2124,6 +2138,11 @@ class SimulationConfig:
             # exploration (the optimizer, not the simulator, DP#22); it is NOT
             # lifted onto a SimulationConfig field (a dead surface -- D7).
             capitalize_interest=prop.get('capitalize_interest', True),
+            # Issue #1040: hold_draw defaults False when absent (the pre-#1040
+            # RRSP-refund paydown sweep) so every internal-config test built
+            # directly stays byte-identical (DP#32: absence is the fallback,
+            # never a coercion of a supplied value).
+            hold_borrow_to_invest_draw=prop.get('borrow_to_invest_hold_draw', False),
             account_return_overrides=accounts.get('return_overrides', {}) if isinstance(accounts, dict) else {},
             account_locked=accounts.get('locked', {}) if isinstance(accounts, dict) else {},
             account_mer_drag=accounts.get('mer_drag', {}) if isinstance(accounts, dict) else {},
@@ -2288,6 +2307,12 @@ class SimulationConfig:
                 # load->modify->save cycle (DP#32).
                 **({'capitalize_interest': self.capitalize_interest}
                    if self.capitalize_interest is not True else {}),
+                # Issue #1040 (DP#24): only re-emit when declared True --
+                # False round-trips to 'absent' (the pre-#1040 paydown sweep,
+                # byte-identical), True is a real declared 'hold the draw
+                # flat' that must survive a load->modify->save cycle (DP#32).
+                **({'borrow_to_invest_hold_draw': self.hold_borrow_to_invest_draw}
+                   if self.hold_borrow_to_invest_draw else {}),
                 # issue #689: only re-emitted when actually declared -- None
                 # means "never declared" (DP#32), same convention as
                 # heloc_rate above.
