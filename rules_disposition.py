@@ -17,7 +17,7 @@ Split out of ``simulation_rules.py``; the rule bodies are unchanged.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from rule_registry import RuleContext, YearWorkingState, rule
 

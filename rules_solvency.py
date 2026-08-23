@@ -16,7 +16,7 @@ Split out of ``simulation_rules.py``; the rule body is unchanged.
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from liquidation_waterfall import months_covered, reserve_target
 from rule_registry import RuleContext, YearWorkingState, rule
