@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/people.json",
+  "title": "lifedraft input contract — universal $defs: the people[] block",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Everything reachable from a `people[]` entry: the person record itself, its relationships, incomes (and the employment contract behind one), benefit claims/entitlements and study periods.",
+
+  "$defs": {
+
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "person"],
+      "properties": {
+        "type": { "type": "string", "enum": ["spouse_of", "parent_of"], "description": "Minimal generative set: 'child_of'/generation/household membership are all DERIVED by traversing these edges from any person, at the as_of date — never separately declared. Declare each relationship ONCE (e.g. only the parent declares parent_of the child); a loader-level check (#582) rejects a graph where both directions are declared inconsistently or a cycle exists." },
+        "person": { "$ref": "#/$defs/person_id" },
+        "from": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "Marriage date for spouse_of; null = unknown." },
+        "to": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "Divorce/dissolution date for spouse_of; null = ongoing or unknown. Not used for parent_of." }
+      }
+    },
+
+    "study_period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["institution", "program", "start_date", "end_date"],
+      "properties": {
+        "institution": { "type": "string" },
+        "program": { "type": "string" },
+        "start_date": { "$ref": "#/$defs/date" },
+        "end_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "null = ongoing/unknown end." },
+        "tuition": {
+          "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
+          "description": "Issue #764: the ELIGIBLE tuition the person PAID for this study period, per calendar year it is in session (the same amount is paid in each year the window covers). null/absent = no tuition declared (the engine applies no tuition credit). The federal 15% non-refundable tuition credit (ITA s.118.5) is modelled on this leaf; the Quebec provincial portion (#783), carry-forward of unused amounts (#784), and transfer to a supporting spouse/parent (#785, federal $5,000 limit) are modelled. See engine issues #764/#783/#784/#785."
+        },
+        "transfer_to": {
+          "anyOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }],
+          "description": "Issue #785: the person (spouse/parent) to whom the student TRANSFERS their unused federal tuition credit (ITA s.118.8, $5,000 annual limit). null/absent = no transfer declared; the student uses the credit against their own tax first, then carries forward the remainder (#784). For a CHILD student (#701), the child has no own tax, so the entire credit (up to $5,000) transfers to this person, reducing THEIR federal tax."
+        }
+      }
+    },
+
+    "income_kind": {
+      "type": "string",
+      "enum": ["employment", "self_employment", "rental", "investment", "ei", "other"],
+      "description": "Issue #674: shared by both `income` and `income_override` so a job-loss scenario and a currently-in-pay income declare the same vocabulary, never two spellings of the same fact (DP#9). Deliberately excludes 'pension' and 'government_benefit' — CPP, OAS and employer-pension facts belong ONLY in the structured `person.benefits` object, never duplicated here as a second, less precise income line (#595). 'ei' (Employment Insurance) is included here, not in `person.benefits`, because unlike CPP/OAS it is not an elected, ongoing claim — it is exactly the kind of temporary, dated income a job-loss `income_override` exists to express. `kind` is not decoration: it decides whether an amount is 'earned income' for RRSP room accrual (ITA s.146(1) excludes EI benefits — see EARNED_INCOME_KINDS in simulation.py), how it is taxed, and whether CPP/QPP contributions apply." },
+
+    "income": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "amount", "from", "to"],
+      "properties": {
+        "id": { "$ref": "#/$defs/income_id" },
+        "kind": { "$ref": "#/$defs/income_kind" },
+        "amount": { "$ref": "#/$defs/money", "description": "Annual gross amount in effect over [from, to).",
+          "x-uncertainty": {
+            "resolvability": "document",
+            "plausible_range": [40000, 250000],
+            "resolved_by": "Your latest pay stub, T4, or notice of assessment.",
+            "question": "What is this person's actual annual gross income?"
+          } },
+        "expenses_annual": {
+          "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
+          "description": "Issue #980 (T2125): for kind=self_employment, the total annual PROFESSIONAL EXPENSES deductible against gross fees to derive NET business income (home-office business-use-%, professional dues + mandatory liability insurance, professional development, meals/entertainment at 50% inclusion, other). The engine taxes, charges the self-employed contribution stack (#978 QPP both halves + QPIP + individual HSF), and accrues RRSP room (ITA s.146(1)) on (amount - expenses_annual), NOT on gross. Enter the expenses the SAME way the T2125 does: meals/entertainment already at the 50% inclusion amount the CRA admits, since the engine models the net total, not per-category inclusion (DP#2 -- the per-category breakdown is your record-keeping, not engine logic; DP#7 -- model the mechanism, the net-income deduction, not the branded T2125 form's line items). A single scalar matches the established convention for the structurally identical rental case ($defs/property[kind=rental].expenses_annual, CRA T776 -- one spelling of the 'net = gross - expenses' fact, DP#9, not two). Absent/null ONLY for a self-employment income with NO deductible expenses; the engine then taxes the full `amount` (byte-identical to pre-#980, DP#32 absence-safe -- a missing block is not silently zeroed expenses, it is 'no expenses declared'). Has NO effect for any other kind (employment/rental/investment/ei/other) -- the engine reads it only on a self_employment segment."
+        },
+        "from": { "$ref": "#/$defs/date" },
+        "to": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "null = ongoing/no known end." },
+        "employer_rrsp_match": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["into_account", "pct", "max"],
+              "properties": {
+                "into_account": { "$ref": "#/$defs/account_id" },
+                "pct": { "$ref": "#/$defs/percent0to1" },
+                "max": { "$ref": "#/$defs/money" }
+              }
+            }
+          ],
+          "description": "The single surviving spelling of an employer's matched-retirement-account contribution (#595E collapsed employer_benefits.members[].rrsp_match_pct, family.members[].employer_rrsp_match_pct, and employer_match_pct into this one path, attached to the income it is a term of). Jurisdiction-agnostic: 'into_account' just needs to resolve to an account id, whatever kind that account is in the active jurisdiction."
+        },
+        "employment": {
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/employment_contract" }],
+          "description": "Issue #767: employment-contract terms that constrain re-employment AFTER this income ends (a job-loss recovery income_override cannot start before the contract/law allows). Present only when kind=employment; null/absent means no contract terms are declared (modelled, not guessed — DP#32). A non_compete with a scope but no months is a PARTIAL declaration and is rejected at load (the schema requires all three of months/scope/geography when non_compete is present), never silently defaulted."
+        }
+      }
+    },
+
+    "employment_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["non_compete", "probation_end", "notice_days"],
+      "properties": {
+        "non_compete": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["months", "scope", "geography"],
+              "properties": {
+                "months": { "type": "integer", "minimum": 0, "description": "Duration of the non-competition covenant in months. Bars re-employment in the person's own specialty (the `scope`) for this window after the employment ends. A recovery income_override for this income whose `from` is earlier than termination_date + months is clamped forward to that date (issue #767), so runway is not overstated. 0 = no non-compete (explicit, not absent)." },
+                "scope": { "type": "string", "minLength": 1, "description": "The employer's line of business the covenant covers. Free text. Required alongside months — a non-compete with a duration but no scope is a partial declaration DP#32 forbids (it would silently narrow or widen what re-employment is barred)." },
+                "geography": { "type": "string", "minLength": 1, "description": "The geographic area the covenant covers. Free text. Required alongside months for the same reason as scope." }
+              },
+              "description": "A non-competition covenant. All three fields are required when the block is present: a partial declaration (e.g. months with no scope) must FAIL LOUDLY, never default the missing piece (DP#32, issue #767 acceptance)."
+            }
+          ],
+          "description": "null = no non-competition covenant (explicit). Present = the covenant's terms, all three required."
+        },
+        "probation_end": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "The date the probationary period ends. A 'now' income shock inside probation is the highest-probability termination case (flagged, not enforced). null = not on probation / past probation / unknown."
+        },
+        "notice_days": { "type": "integer", "minimum": 0, "description": "Contractual pay-in-lieu-of-notice entitlement in days. Modelled as employment income continuing for this many days past the termination date (extends runway), with kind=employment so RRSP-room accrual is unchanged. 0 = no contractual notice entitlement (explicit, not absent)."
+        }
+      },
+      "description": "Issue #767: the employment-contract terms that bound when and how income can recover after a job loss. Attached to the employment income (not the person) because the constraint travels with the income_id an income_override targets — the recovery segment for THIS income cannot precede the non-compete window."
+    },
+
+    "benefit_claim": {
+      "description": "An already-elected or already-in-pay employer/government retirement benefit. A person who has NOT yet started a benefit omits the corresponding key entirely (not null, not zero) — candidate start ages to sweep belong in decisions.retirement_age, not here. The Canada overlay adds 'cpp' and 'oas' properties to this object (CPP/OAS are Canada-specific programs); this file only defines the jurisdiction-agnostic 'employer_pension'.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "employer_pension": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start_date", "annual_amount", "indexed"],
+          "properties": {
+            "start_date": { "$ref": "#/$defs/date" },
+            "annual_amount": { "$ref": "#/$defs/money" },
+            "indexed": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "benefit_entitlement": {
+      "description": "Issue #650: a person's FUTURE, pre-claim government/employer retirement entitlement — the number off a statement they have NOT started drawing yet (e.g. a Service Canada CPP Statement of Contributions projecting a monthly amount at 65). Distinct from `benefit_claim`, which is a benefit ALREADY IN PAY (a committed start_date + amount). An entitlement is a dated BELIEF, not a fact: it carries the estimate and the date it was produced (estimates age), and it lets the retirement-income model begin the benefit at a MODELED claim age instead of a hardcoded start_date — which is exactly what makes the CPP/OAS claiming-age question (#291) expressible. A person who is already in pay uses `benefits`; a person with neither omits both. The Canada overlay adds 'cpp' and 'oas' properties (CPP/OAS are Canada-specific programs); this file only defines the empty jurisdiction-agnostic shell.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "birth_date", "death_date", "residency", "relationships", "incomes", "room"],
+      "properties": {
+        "id": { "$ref": "#/$defs/person_id" },
+        "label": { "type": "string", "minLength": 1, "description": "Human-friendly, non-PII display identifier (e.g. 'primary', 'spouse', 'child_a', 'grandparent_paternal'). DP#4-style role text as a HINT, never as the join key — id is the join key." },
+        "legal_name": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Optional real name for the user's own copy of the document. null in any fixture/example (DP#15: no personal data in the repo)." },
+        "birth_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "null = unknown (e.g. a deceased ancestor whose exact DOB was never recorded). Replaces birth_year everywhere (#597); every age-gated rule (RRIF@71, CPP/OAS by month, FHSA 15y window) computes from this, never from a stored age." },
+        "room": { "$ref": "#/$defs/person_room", "description": "$defs/person_room is supplied entirely by the Canada overlay (its keys are Canada account-kind names: rrsp/tfsa/fhsa/resp). A jurisdiction with different registered-account vocabulary supplies its own person_room shape." },
+        "death_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "A FACT: non-null only if this person has already died as of the document's as_of. null does not mean 'assumed immortal' — projected mortality for living people is a BELIEF, see assumptions.mortality." },
+        "residency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["province", "since"],
+          "properties": {
+            "province": { "$ref": "#/$defs/province" },
+            "since": { "$ref": "#/$defs/date" }
+          },
+          "description": "Per-person, because a 4-generation family can span provinces (e.g. a grandparent who retired to another province). The document-level jurisdiction.province is the study default, not an assumption that every person shares it."
+        },
+        "relationships": { "type": "array", "items": { "$ref": "#/$defs/relationship" } },
+        "incomes": { "type": "array", "items": { "$ref": "#/$defs/income" } },
+        "benefits": { "$ref": "#/$defs/benefit_claim" },
+        "entitlements": { "$ref": "#/$defs/benefit_entitlement" },
+        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } }
+      }
+    }
+
+  }
+}

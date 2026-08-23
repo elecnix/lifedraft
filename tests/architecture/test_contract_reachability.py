@@ -658,8 +658,7 @@ class OracleIsActuallyLookingTest(unittest.TestCase):
 # engine OR refused loudly -- never silently dropped.
 # ═══════════════════════════════════════════════════════════════════════════
 
-_SCHEMA_ENUM = json.loads(ic.UNIVERSAL_SCHEMA_PATH.read_text())[
-    "$defs"]["liability_kind"]["enum"]
+_SCHEMA_ENUM = ic.load_universal_schema()["$defs"]["liability_kind"]["enum"]
 
 # Kinds whose material facts reach the engine through the property block
 # (wired before #763). Their reachability is already measured by the oracle
