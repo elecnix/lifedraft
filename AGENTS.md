@@ -41,15 +41,21 @@ the loud failure. Always.
 ## Running the tests
 
 ```sh
-VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q        # ~8 min, 4144 tests
+VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q        # ~6 min, 6433 tests
 ```
 
 Run it in the **foreground and read the output yourself.** Do not background it and then report a
 success you never saw.
 
-**The CI runners live on the maintainer's own workstation.** A full local suite run competes with
-them (and with him) for the same 16 cores — load has hit 24, and a CI job has been SIGTERM-killed by
-the contention. Prefer a **targeted** run of the tests you touched, and let CI run the full suite.
+**CI does not run on the maintainer's workstation.** `tests.yml`, `secret-scan.yml` and
+`clone-detection.yml` all declare `runs-on: arc-runners` and execute on Kubernetes ARC runner pods
+hosted at Hetzner; only `cite.yml` uses `ubuntu-latest`. The self-hosted runners registered on the
+workstation serve other repositories, not this one — `gh api repos/elecnix/lifedraft/actions/runners`
+returns nothing.
+
+So a local full-suite run costs you wall-clock and nothing else: it cannot starve or SIGTERM a CI
+job. Still prefer a **targeted** run while you iterate — six minutes per edit is its own tax, and
+several agents sharing the box will thrash — then run the full suite once before you push.
 
 ### Coverage (`tools/coverage_gate.py`)
 
