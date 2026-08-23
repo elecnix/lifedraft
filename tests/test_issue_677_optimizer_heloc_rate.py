@@ -245,7 +245,7 @@ class ResolveHelocRateTest(unittest.TestCase):
         contract can never reach this branch (input_contract.py always
         declares both together)."""
         cfg = {'property': {'mortgage_rate': 0.045, 'margin_available': 50000}}
-        with self.assertLogs('simulation_config', level='WARNING') as caught:
+        with self.assertLogs('config_access', level='WARNING') as caught:
             rate = resolve_heloc_rate(cfg)
         self.assertEqual(rate, 0.045)
         self.assertTrue(
