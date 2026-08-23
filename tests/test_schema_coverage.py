@@ -758,7 +758,7 @@ CONSUMED = {
     # ── decisions.mortgage.structure_options[] -- issue #687. Mapped by
     # input_contract.py onto property.structure_options; the actual charge
     # split (revolving_share -> mortgage_balance/margin_available) is real
-    # decision logic in simulation_config.apply_structure_overlay (excluded
+    # decision logic in property_structure.apply_structure_overlay (excluded
     # from citation here as the pure-loader file, same as every other
     # leaf), so these citations point at the two REAL consumers instead:
     # input_contract.py's own mapping/refusal logic (a genuine decision --
@@ -1320,7 +1320,11 @@ class SchemaCoverageTest(unittest.TestCase):
         (see module docstring): its selection/mapping logic (choosing the
         primary/spouse couple, computing ages from dates, matching income
         overrides to people) is a real decision, not a copy."""
-        excluded = {"simulation_config.py"}
+        # ``config_serde.py`` holds the field-by-field from_dict/to_dict
+        # mapping split out of ``simulation_config.py``; the exclusion
+        # travels with the code, otherwise a citation into the parser
+        # would start passing simply because the parser moved file.
+        excluded = {"simulation_config.py", "config_serde.py"}
         offenders = [
             leaf for leaf, (rel_path, _kw) in CONSUMED.items()
             if Path(rel_path).name in excluded

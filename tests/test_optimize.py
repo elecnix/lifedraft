@@ -302,7 +302,7 @@ class TestUnifiedConfigPath(unittest.TestCase):
         """Cross-engine: optimize headline == simulate.py (same scenario+strategy)."""
         from optimize import _scenario_overlay, _cashout_for_ltv
         from simulate import evaluate_overlay
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         cfg = _make_test_cfg(house_value=500000, mortgage_balance=100000)
 

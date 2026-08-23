@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import input_contract as ic
 from scenario_discovery import discover_property_funding_cells
-from simulation_config import apply_property_funding_overlay
+from property_structure import apply_property_funding_overlay
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
 

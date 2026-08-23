@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from objective import (
     MAX_AFTER_TAX_ESTATE, MIN_AFTER_TAX_ESTATE, compute_after_tax_estate,
 )
-from simulation_config import YearResult
+from year_result import YearResult
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

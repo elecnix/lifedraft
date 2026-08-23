@@ -34,9 +34,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import input_contract as ic
-from simulation_config import (
-    SimulationConfig, ScenarioOverlay, apply_overlay,
-)
+from scenario_overlay import ScenarioOverlay, apply_overlay
+from simulation_config import SimulationConfig
 from simulation_state import SimState, simulate_year_pure
 from simulation_rules import (
     RULES, RULE_ORDER, RuleContext, YearWorkingState,

@@ -182,7 +182,11 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # from the reader set because a key the adapter writes and only the adapter
 # names is, by definition, a dead write.
 _WRITER = {"input_contract.py"}
-_PURE_LOADER = {"simulation_config.py"}
+# ``config_serde.py`` is the other half of the same pure loader: the
+# field-by-field ``from_dict``/``to_dict`` mapping was split out of
+# ``simulation_config.py`` and must carry the exclusion with it, or a key
+# named only by the parser would start reading as "the engine names it".
+_PURE_LOADER = {"simulation_config.py", "config_serde.py"}
 
 
 def _mutations(value: Any) -> List[Any]:

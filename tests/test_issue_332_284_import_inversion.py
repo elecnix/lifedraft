@@ -63,7 +63,8 @@ class TestObjectiveImportsCanonicalSource(unittest.TestCase):
         # Behaviour-preserving: the symbols objective uses are the same objects
         # defined in simulation_config, not look-alikes.
         import simulation_config
-        self.assertIs(objective.YearResult, simulation_config.YearResult)
+        import year_result
+        self.assertIs(objective.YearResult, year_result.YearResult)
         self.assertIs(objective.SimulationConfig, simulation_config.SimulationConfig)
 
 

@@ -278,7 +278,7 @@ class CppShareThroughTheFold(unittest.TestCase):
 # Class D — the elections are a swept CONTRACT dimension (DP#22/#24)
 # ============================================================================
 
-from simulation_config import ScenarioOverlay, apply_overlay
+from scenario_overlay import ScenarioOverlay, apply_overlay
 
 
 class SweepDimension(unittest.TestCase):

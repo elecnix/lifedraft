@@ -71,7 +71,9 @@ import pytest
 
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import SimulationConfig, ScenarioOverlay, apply_overlay, YearResult
+from scenario_overlay import ScenarioOverlay, apply_overlay
+from simulation_config import SimulationConfig
+from year_result import YearResult
 
 from trajectory_invariants import assert_invariant, run_invariant
 
@@ -339,7 +341,7 @@ def test_sm_investment_has_tax_drag(sm_results):
 # lump sum via simulate.py's apply_overlay path (simulate.py:103:
 # ``lump_sum = config.margin_available + overlay.cash_out``). The GridOptimizer
 # / ScipyOptimizer path applies the identical rule through
-# ``simulation_config.apply_ltv_overlay`` (#619: they used to each carry a
+# ``scenario_overlay.apply_ltv_overlay`` (#619: they used to each carry a
 # private copy that inflated ``margin_available`` by ``cash_out`` -- deleted,
 # DP#9). Fabricated round numbers, role-based names (DP#4/DP#15).
 # ============================================================================

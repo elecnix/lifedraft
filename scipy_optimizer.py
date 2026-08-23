@@ -28,9 +28,8 @@ import math
 
 from optimizer import Optimizer, RankedScenario, RiskMeasures
 from simulation import SimulationConfig, YearResult
-from simulation_config import (
-    apply_ltv_overlay, ChargeLimitExceededError, MissingRefinanceAmortizationError,
-)
+from charge_limits import ChargeLimitExceededError, MissingRefinanceAmortizationError
+from scenario_overlay import apply_ltv_overlay
 from simulation_state import SimState, simulate_year_pure
 from return_model import ReturnModel, FixedReturn
 from objective import ObjectiveFunction, MAX_NET_BENEFIT

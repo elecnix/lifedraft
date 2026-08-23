@@ -148,7 +148,7 @@ class TestObjectiveNoCanadaImports(unittest.TestCase):
         and the canonical estate math behind it.
         """
         from objective import MAX_AFTER_TAX_ESTATE, MAX_TERMINAL_WEALTH
-        from simulation_config import YearResult
+        from year_result import YearResult
 
         def _yr(**kwargs) -> YearResult:
             defaults = dict(
@@ -489,7 +489,8 @@ class TestCoreModulesImportWithoutCanada(unittest.TestCase):
     
     def test_simulation_config_imports_without_canada(self):
         """simulation_config.py imports cleanly (it has no Canada imports)."""
-        from simulation_config import SimulationConfig, YearResult
+        from simulation_config import SimulationConfig
+        from year_result import YearResult
         config = SimulationConfig()
         self.assertIsNotNone(config)
     

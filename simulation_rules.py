@@ -72,10 +72,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
-from simulation_config import (
-    SimulationConfig, charge_room_for_readvance,
-    ReadvanceableWithoutPropertyError,
-)
+from charge_limits import charge_room_for_readvance, ReadvanceableWithoutPropertyError
+from simulation_config import SimulationConfig
 # Issue #688/#679: pure, jurisdiction-agnostic reserve sizing (DP#25 -- this
 # module imports no jurisdiction code at module level, and
 # liquidation_waterfall imports none of ours).

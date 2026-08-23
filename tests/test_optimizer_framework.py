@@ -111,7 +111,7 @@ class TestDeterministicRisk(unittest.TestCase):
     def test_compute_deterministic_risk_positive_score(self):
         """Positive score → probability_of_loss = 0, risk measures computed."""
         from optimizer import Optimizer, RiskMeasures
-        from simulation_config import YearResult
+        from year_result import YearResult
         results = [
             YearResult(year=0, total_assets=500000, total_debt=200000),  # net=300k
             YearResult(year=1, total_assets=550000, total_debt=220000),  # net=330k
@@ -126,7 +126,7 @@ class TestDeterministicRisk(unittest.TestCase):
     def test_compute_deterministic_risk_negative_score(self):
         """Negative score → probability_of_loss = 1.0."""
         from optimizer import Optimizer, RiskMeasures
-        from simulation_config import YearResult
+        from year_result import YearResult
         results = [
             YearResult(year=0, total_assets=500000, total_debt=600000),
             YearResult(year=1, total_assets=480000, total_debt=580000),

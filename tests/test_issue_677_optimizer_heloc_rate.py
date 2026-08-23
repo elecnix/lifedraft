@@ -41,7 +41,8 @@ import unittest
 
 from optimizer import Optimizer
 from optimize import run_optimization
-from simulation_config import SimulationConfig, resolve_heloc_rate
+from config_access import resolve_heloc_rate
+from simulation_config import SimulationConfig
 from countries.canada.rate_model import build_rate_path
 from countries.canada.adapter import CanadaAdapter
 
@@ -208,7 +209,7 @@ class RunOptimizationHelocRateTest(unittest.TestCase):
 
 
 class ResolveHelocRateTest(unittest.TestCase):
-    """simulation_config.resolve_heloc_rate() -- the one canonical resolver
+    """config_access.resolve_heloc_rate() -- the one canonical resolver
     every #677 call site now uses."""
 
     def test_declared_property_heloc_rate_wins_over_mortgage_rate(self):

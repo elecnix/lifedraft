@@ -1526,7 +1526,7 @@ def _aggregate_mortgage_facility(
 #
 # Before #685 the belief SILENTLY WON at year zero: `to_internal_config` mapped
 # `rate_paths.heloc.rate` onto `assumptions.heloc_rate`, which is
-# `simulation_config.resolve_heloc_rate`'s FIRST tier — so every optimizer,
+# `config_access.resolve_heloc_rate`'s FIRST tier — so every optimizer,
 # ranking and reporting consumer priced the household's Smith-Manoeuvre spread
 # off the belief, while `simulation.py`'s engine charged the declared
 # `property.heloc_rate` (#654). One run, two different HELOC rates, no warning.
@@ -3368,9 +3368,12 @@ def to_internal_config(doc: Dict) -> Dict:
         # whether an LTV overlay is ever applied downstream
         # (apply_ltv_overlay/apply_overlay re-check after any overlay that
         # grows the mortgage further, per their own docstrings).
-        from simulation_config import (
-            charge_limit as _charge_limit, heloc_revolving_limit as _heloc_revolving_limit,
-            OSFI_B20_CHARGE_LTV_MAX, OSFI_B20_REVOLVING_LTV_MAX, _CHARGE_TOLERANCE,
+        from charge_limits import (
+            charge_limit as _charge_limit,
+            heloc_revolving_limit as _heloc_revolving_limit,
+            OSFI_B20_CHARGE_LTV_MAX,
+            OSFI_B20_REVOLVING_LTV_MAX,
+            _CHARGE_TOLERANCE,
         )
         house_value = principal["value"]["amount"]
         declared_mortgage = mortgage["balance"]["amount"] if mortgage else 0
@@ -3767,7 +3770,8 @@ def to_internal_config(doc: Dict) -> Dict:
     # exclusive.
     structure_options = mortgage_decisions.get("structure_options", [])
     if structure_options:
-        from simulation_config import apply_structure_overlay, ChargeLimitExceededError
+        from charge_limits import ChargeLimitExceededError
+        from property_structure import apply_structure_overlay
         prop_cfg["structure_options"] = []
         for opt in structure_options:
             readvanceable = opt.get("readvanceable", False)

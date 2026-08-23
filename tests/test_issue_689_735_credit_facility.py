@@ -435,7 +435,7 @@ class TestDrawFractionDefaultsToZero(unittest.TestCase):
         """ScenarioOverlay.draw_fraction (simulate.py's real, consumed
         field -- unlike a bare SimulationConfig, which a household never
         declares this on, DP#9) defaults to 0.0."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
         overlay = ScenarioOverlay(label="test")
         self.assertEqual(overlay.draw_fraction, 0.0)
 

@@ -34,7 +34,8 @@ from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Tuple
 from copy import deepcopy
 
-from simulation_config import SimulationConfig, YearResult
+from simulation_config import SimulationConfig
+from year_result import YearResult
 # Issue #688: reserve sizing is pure, jurisdiction-agnostic arithmetic and
 # lives in the same module as the waterfall that draws it (DP#25: no
 # jurisdiction import; liquidation_waterfall imports nothing of ours).

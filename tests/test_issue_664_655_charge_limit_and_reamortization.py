@@ -32,13 +32,17 @@ import pytest
 import input_contract as ic
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import (
-    SimulationConfig, ScenarioOverlay, YearResult,
-    apply_ltv_overlay, apply_overlay,
-    charge_limit, heloc_revolving_limit,
-    ChargeLimitExceededError, MissingRefinanceAmortizationError,
-    OSFI_B20_CHARGE_LTV_MAX, OSFI_B20_REVOLVING_LTV_MAX,
+from charge_limits import (
+    charge_limit,
+    heloc_revolving_limit,
+    ChargeLimitExceededError,
+    MissingRefinanceAmortizationError,
+    OSFI_B20_CHARGE_LTV_MAX,
+    OSFI_B20_REVOLVING_LTV_MAX,
 )
+from scenario_overlay import ScenarioOverlay, apply_ltv_overlay, apply_overlay
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from trajectory_invariants import assert_invariant, run_invariant
 
 

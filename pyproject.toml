@@ -72,16 +72,20 @@ dev = ["pytest>=7.0", "pytest-cov>=5.0", "pytest-xdist", "pandas>=2.0", "numpy>=
 # top-level -- `py-modules` merely makes that importable post-install too.
 [tool.setuptools]
 py-modules = [
+    "charge_limits", "config_access", "config_serde",
     "decumulation", "dp_optimizer", "input_contract", "jurisdiction",
     "jurisdiction_providers", "liquidation_waterfall", "loop",
     "make_retirement_input", "model_fidelity", "module_registry",
     "monte_carlo_optimizer", "next_action", "objective", "optimize",
-    "optimizer", "output_paths", "output_plugins", "provenance",
+    "optimizer", "output_paths", "output_plugins", "property_structure",
+    "provenance",
     "retirement_analysis", "return_model", "runway", "scenario_discovery",
+    "scenario_overlay",
     "scipy_optimizer", "sensitivity", "session_log", "simulate",
     "simulation", "simulation_config", "simulation_rules",
     "simulation_state", "strategy", "stress_scenarios", "sweep",
     "tax_calculator", "tax_data", "trajectory_invariants", "voi",
+    "year_result",
 ]
 
 [tool.setuptools.packages.find]
