@@ -92,7 +92,7 @@ def _oas_for_year(cfg_dict, sim_year):
     fixture here -- birth_year = start_year - retirement_age - 5) and call
     the rule directly, reading `ws.oas_income`.
     """
-    from simulation_rules import RuleContext, YearWorkingState, RULES
+    from rule_registry import RuleContext, YearWorkingState, RULES
     cfg = SimulationConfig.from_dict(cfg_dict)
     sim = FamilySimulation(cfg)
     start_year = sim.start_year

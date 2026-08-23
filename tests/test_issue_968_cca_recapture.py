@@ -56,7 +56,7 @@ import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
 from countries.canada.cca import recapture_on_disposition
-from simulation_rules import _disposition_cca_recapture_tax
+from rules_disposition import _disposition_cca_recapture_tax
 from tax_data import default_tax_provider
 
 from test_input_contract import _load_example, _two_generation_subset

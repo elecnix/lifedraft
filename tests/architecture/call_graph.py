@@ -61,11 +61,30 @@ from repo_scan import ROOT, iter_source_files
 # and `simulation_rules.py` the rule fold it dispatches (DP#26 -- `run` is a
 # fold, so the fold's rules are production roots even though nothing calls them
 # by name: `run_rules` dispatches them out of the RULES registry).
+#
+# The `rules_*` modules are that same fold: when `simulation_rules.py` was split
+# by domain, every `apply_*` rule moved into one of them, and they are roots for
+# exactly the reason `simulation_rules` is -- `run_rules` dispatches them out of
+# the registry, so no caller names them. They are listed EXPLICITLY rather than
+# globbed: this guard's whole point is that "reached" must be a claim someone
+# made on purpose, and a pattern would silently adopt any future `rules_*.py`
+# file as a production root without anyone deciding it is one.
 ENTRY_MODULES: Tuple[str, ...] = (
     "optimize",
     "simulate",
     "simulation",
     "simulation_rules",
+    "rules_amt",
+    "rules_contributions",
+    "rules_debt",
+    "rules_disposition",
+    "rules_drawdown",
+    "rules_growth",
+    "rules_leverage",
+    "rules_registered_plans",
+    "rules_retirement_income",
+    "rules_solvency",
+    "rules_tuition_credit",
 )
 
 MODULE_BODY = "<module>"
