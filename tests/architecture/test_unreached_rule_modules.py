@@ -213,7 +213,7 @@ KNOWN_UNREACHED: dict[str, str] = {
         "boc_data."
     ),
     # #917: countries.canada.product_registry is NO LONGER unreached -- the
-    # contract adapter (input_contract._registered_composition_accounts) now
+    # contract adapter (contract_accounts._registered_composition_accounts) now
     # resolves declared registered-account product holdings into a composition
     # via ProductRegistry, so it is reached from a real `--input` run. Its
     # allowlist row is deleted rather than kept (the guard's own instruction).

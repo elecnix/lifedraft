@@ -53,6 +53,8 @@ from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
+import contract_errors
+import contract_schema
 
 # The example's principal: house 650,000 -> 80% charge = 520,000; the
 # baseline mortgage (340,000) + HELOC limit (150,000) leave 30,000 of charge
@@ -62,7 +64,7 @@ CHARGE_HEADROOM = 30_000
 
 
 def _load_doc():
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         return _two_generation_subset(json.load(fh))
 
 
@@ -352,7 +354,7 @@ class TestLoudRefusals(unittest.TestCase):
         doc = _load_doc()
         doc["liabilities"] = doc["liabilities"] + [
             _tranche(_mortgage(doc), "too_big", 200_000, 0.05)]
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("charge", msg)
@@ -371,7 +373,7 @@ class TestLoudRefusals(unittest.TestCase):
             _tranche(template, "m_rental_b", 50_000, 0.05,
                      collateral="cottage"),
         ]
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         self.assertIn("DIFFERENT collaterals", str(ctx.exception))
 
@@ -392,7 +394,7 @@ class TestLoudRefusals(unittest.TestCase):
             _tranche(template, "rental_tranche_b", 50_000, 0.05,
                      collateral="rental_duplex"),
         ]
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("rental_tranche_a", msg)
@@ -407,7 +409,7 @@ class TestLoudRefusals(unittest.TestCase):
         mortgage["balance"]["amount"] = 0
         doc["liabilities"] = [mortgage] + [
             _tranche(mortgage, "also_zero", 0, 0.05)]
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         self.assertIn("balance-weighted average rate is undefined",
                       str(ctx.exception))
@@ -461,34 +463,34 @@ class TestSchemaShape(unittest.TestCase):
         heloc = next(l for l in doc["liabilities"] if l["kind"] == "heloc")
         heloc["cash_back"] = {"amount": 100.0, "clawback_rate": 0.5,
                               "term_years": 3}
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_deductible_is_rejected_on_a_heloc(self):
         doc = _load_doc()
         heloc = next(l for l in doc["liabilities"] if l["kind"] == "heloc")
         heloc["deductible"] = True
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_cash_back_requires_all_three_fields(self):
         doc = _load_doc()
         _mortgage(doc)["cash_back"] = {"amount": 1200.0}  # no clawback_rate/term_years
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_cash_back_clawback_rate_must_be_a_fraction(self):
         doc = _load_doc()
         _mortgage(doc)["cash_back"] = {"amount": 1200.0, "clawback_rate": 1.5,
                                        "term_years": 5}
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_deductible_must_be_a_boolean(self):
         doc = _load_doc()
         _mortgage(doc)["deductible"] = "yes"
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
 
 if __name__ == "__main__":

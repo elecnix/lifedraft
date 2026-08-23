@@ -67,6 +67,10 @@ dev = ["pytest>=7.0", "pytest-cov>=5.0", "pytest-xdist", "pandas>=2.0", "numpy>=
 # top-level -- `py-modules` merely makes that importable post-install too.
 [tool.setuptools]
 py-modules = [
+    "contract_accounts", "contract_assumptions", "contract_decisions",
+    "contract_errors", "contract_estate", "contract_liabilities",
+    "contract_people", "contract_principal", "contract_property",
+    "contract_schema", "contract_transfers",
     "decumulation", "dp_optimizer", "input_contract", "jurisdiction",
     "jurisdiction_providers", "liquidation_waterfall", "loop",
     "make_retirement_input", "model_fidelity", "module_registry",

@@ -35,7 +35,7 @@ def _load_example_doc():
     import copy
     import json
 
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = json.load(f)
     doc = copy.deepcopy(doc)
     keep = {"p1", "p2", "ca", "cb"}
@@ -221,7 +221,7 @@ class TestContractMapping(unittest.TestCase):
         rrsp = next(a for a in doc["accounts"]
                     if a["kind"] == "rrsp" and a["owner"] == "p1")
         rrsp["mer"] = 0.0116
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cfg = SimulationConfig.from_dict(legacy)
         self.assertIn("rrsp", cfg.account_mer_drag)
@@ -245,7 +245,7 @@ class TestContractMapping(unittest.TestCase):
         rrsp = next(a for a in doc["accounts"]
                     if a["kind"] == "rrsp" and a["owner"] == "p1")
         rrsp["mer"] = None
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cfg = SimulationConfig.from_dict(legacy)
         self.assertNotIn("rrsp", cfg.account_mer_drag)
@@ -258,7 +258,7 @@ class TestContractMapping(unittest.TestCase):
         rrsp = next(a for a in doc["accounts"]
                     if a["kind"] == "rrsp" and a["owner"] == "p1")
         rrsp["mer"] = 0.0
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cfg = SimulationConfig.from_dict(legacy)
         self.assertIn("rrsp", cfg.account_mer_drag)
@@ -280,6 +280,7 @@ import copy
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from test_golden_trajectory_581 import golden_household_config
+import contract_schema
 
 
 def _run(cfg: dict):

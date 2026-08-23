@@ -40,7 +40,7 @@ def _load_example_doc():
     import copy
     import json
 
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = json.load(f)
     doc = copy.deepcopy(doc)
     keep = {"p1", "p2", "ca", "cb"}
@@ -346,7 +346,7 @@ class TestContractMapping(unittest.TestCase):
                     if a["kind"] == "rrsp" and a["owner"] == "p1")
         rrsp["expected_return"] = 0.073
         rrsp["locked_until"] = {"age": 65}
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cfg = SimulationConfig.from_dict(legacy)
         # The rrsp override pot is populated.
@@ -384,9 +384,8 @@ class TestContractMapping(unittest.TestCase):
         # birth_date is schema-required on people, so we cannot drop it and
         # still pass validate_contract; instead exercise the helper directly
         # with a synthetic doc whose owner is absent from people.
-        import input_contract as _ic
-        with self.assertRaises(_ic.ContractAdaptationError):
-            _ic._map_account_overrides(
+        with self.assertRaises(contract_errors.ContractAdaptationError):
+            contract_accounts._map_account_overrides(
                 {"accounts": [{"id": "x", "kind": "rrsp", "owner": "ghost",
                                "balance": {"amount": 1000},
                                "locked_until": {"age": 65}}],
@@ -400,7 +399,7 @@ class TestContractMapping(unittest.TestCase):
         rrsp = next(a for a in doc["accounts"]
                     if a["kind"] == "rrsp" and a["owner"] == "p1")
         rrsp["locked_until"] = {"date": "2055-06-01"}
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cfg = SimulationConfig.from_dict(legacy)
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
@@ -409,9 +408,8 @@ class TestContractMapping(unittest.TestCase):
                          expected_age)
 
     def test_locked_until_neither_age_nor_date_is_rejected(self):
-        import input_contract as _ic
-        with self.assertRaises(_ic.ContractAdaptationError):
-            _ic._map_account_overrides(
+        with self.assertRaises(contract_errors.ContractAdaptationError):
+            contract_accounts._map_account_overrides(
                 {"accounts": [{"id": "x", "kind": "rrsp", "owner": "p1",
                                "balance": {"amount": 1000},
                                "locked_until": {}}],
@@ -420,9 +418,8 @@ class TestContractMapping(unittest.TestCase):
     def test_locked_until_owner_without_birth_date_is_rejected(self):
         """The owner IS in people but has no birth_date -- the unlock AGE
         still cannot be computed (DP#1/DP#32)."""
-        import input_contract as _ic
-        with self.assertRaises(_ic.ContractAdaptationError):
-            _ic._map_account_overrides(
+        with self.assertRaises(contract_errors.ContractAdaptationError):
+            contract_accounts._map_account_overrides(
                 {"accounts": [{"id": "x", "kind": "rrsp", "owner": "p1",
                                "balance": {"amount": 1000},
                                "locked_until": {"age": 65}}],
@@ -435,7 +432,7 @@ class TestContractMapping(unittest.TestCase):
         rrsp = next(a for a in doc["accounts"]
                     if a["kind"] == "rrsp" and a["owner"] == "p1")
         rrsp["expected_return"] = None
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cfg = SimulationConfig.from_dict(legacy)
         # No override recorded for rrsp -- null is absent, not zero.
@@ -458,6 +455,9 @@ import copy
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from test_golden_trajectory_581 import golden_household_config
+import contract_accounts
+import contract_errors
+import contract_schema
 
 
 def _run(cfg: dict):

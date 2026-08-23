@@ -2407,6 +2407,7 @@ _LIQUIDATION_SOURCE_LABELS = {
 # Issue #758: the runway rendering is ONE spelling (DP#9), in runway.py, so
 # the console report and the TXT/HTML reports say the same thing.
 from runway import format_runway as _format_runway  # noqa: E402
+import contract_schema
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3824,8 +3825,7 @@ def main():
         # input_schema.json was an example-instance file of the retired
         # legacy shape, not the contract itself (DP#9).
         import shutil
-        import input_contract
-        schema_path = input_contract.EXAMPLE_PATH
+        schema_path = contract_schema.EXAMPLE_PATH
         if args.template == '-':
             with open(schema_path) as f:
                 print(f.read())

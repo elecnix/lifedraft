@@ -37,10 +37,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import input_contract as ic
 from simulation_state import _property_equity_for_year
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_property
 
 
 def _doc_with_cottage(sale=None, appreciation_rate=None, acb=500000):
@@ -85,7 +85,7 @@ def _doc_with_cottage(sale=None, appreciation_rate=None, acb=500000):
 class MapperEmitsSale(unittest.TestCase):
     def test_sale_maps_year_and_selling_costs(self):
         sale = {"date": "2031-06-30", "selling_costs": 25000}
-        entry = ic._map_owned_properties(_doc_with_cottage(sale=sale), "p1", "p2")[0]
+        entry = contract_property._map_owned_properties(_doc_with_cottage(sale=sale), "p1", "p2")[0]
         # Couple owns 100% -> selling costs pass through undivided. The per-owner
         # role split (owner_roles) is carried so the disposition rule can price
         # the gain per owner (Canada has no joint filing); the couple owns the
@@ -101,7 +101,7 @@ class MapperEmitsSale(unittest.TestCase):
         """DP#32: a null selling_costs is a real $0 in disposition costs, not an
         unknown -- the mapper carries 0.0, never silently dropping the key."""
         sale = {"date": "2031-06-30", "selling_costs": None}
-        entry = ic._map_owned_properties(_doc_with_cottage(sale=sale), "p1", "p2")[0]
+        entry = contract_property._map_owned_properties(_doc_with_cottage(sale=sale), "p1", "p2")[0]
         self.assertEqual(entry["sale"], {"year": 2031, "selling_costs": 0.0,
                                           "owner_roles": {"primary": 0.5,
                                                           "spouse": 0.5},
@@ -117,7 +117,7 @@ class MapperEmitsSale(unittest.TestCase):
                       {"person": "p2", "pct": 0.25},
                       {"person": "ca", "pct": 0.5}]}
         doc["liabilities"][0]["owner"] = doc["properties"][0]["owner"]
-        owned = ic._map_owned_properties(doc, "p1", "p2")
+        owned = contract_property._map_owned_properties(doc, "p1", "p2")
         # Couple owns 50% (p1+p2 each 25%); the other 50% is the child's. The
         # couple's share of selling costs is 10000 (half of 20000), and the
         # per-owner role split is each spouse's own 25%.
@@ -135,7 +135,7 @@ class MapperCarriesSharesWhenSaleDeclared(unittest.TestCase):
 
     def test_shares_emitted_when_sale_declared_no_rate(self):
         sale = {"date": "2031-06-30", "selling_costs": 0}
-        entry = ic._map_owned_properties(_doc_with_cottage(sale=sale), "p1", "p2")[0]
+        entry = contract_property._map_owned_properties(_doc_with_cottage(sale=sale), "p1", "p2")[0]
         self.assertNotIn("appreciation_rate", entry)      # no rate declared
         self.assertEqual(entry["value_share"], 500000)    # couple owns 100%
         self.assertEqual(entry["secured_share"], 300000)
@@ -147,7 +147,7 @@ class MapperCarriesSharesWhenSaleDeclared(unittest.TestCase):
         """acb 400k against a 500k value -> a 100k accrued gain the tax layer
         will price. acb_share is the couple's share of the bare-number acb."""
         sale = {"date": "2031-06-30"}
-        entry = ic._map_owned_properties(
+        entry = contract_property._map_owned_properties(
             _doc_with_cottage(sale=sale, acb=400000), "p1", "p2")[0]
         self.assertEqual(entry["value_share"], 500000)
         self.assertEqual(entry["acb_share"], 400000)
@@ -158,7 +158,7 @@ class MapperCarriesSharesWhenSaleDeclared(unittest.TestCase):
         value_share - value_share == 0, the correct disposition gain for a
         just-acquired property -- never 0.0 as the cost base."""
         sale = {"date": "2031-06-30"}
-        entry = ic._map_owned_properties(
+        entry = contract_property._map_owned_properties(
             _doc_with_cottage(sale=sale, acb=None), "p1", "p2")[0]
         self.assertEqual(entry["acb_share"], entry["value_share"])
         self.assertEqual(entry["acb_share"], 500000)
@@ -172,7 +172,7 @@ class MapperCarriesSharesWhenSaleDeclared(unittest.TestCase):
                       {"person": "p2", "pct": 0.25},
                       {"person": "ca", "pct": 0.5}]}
         doc["liabilities"][0]["owner"] = doc["properties"][0]["owner"]
-        entry = ic._map_owned_properties(doc, "p1", "p2")[0]
+        entry = contract_property._map_owned_properties(doc, "p1", "p2")[0]
         self.assertEqual(entry["value_share"], 250000)    # half of 500k
         self.assertEqual(entry["secured_share"], 150000)  # half of 300k
         self.assertEqual(entry["acb_share"], 200000)      # half of 400k
@@ -184,7 +184,7 @@ class MapperBiteAStillCarriesShares(unittest.TestCase):
     that appreciates but is never sold has its gain inputs available."""
 
     def test_rate_alone_carries_all_three_shares(self):
-        entry = ic._map_owned_properties(
+        entry = contract_property._map_owned_properties(
             _doc_with_cottage(appreciation_rate=0.03, acb=400000), "p1", "p2")[0]
         self.assertEqual(entry["appreciation_rate"], 0.03)
         self.assertEqual(entry["value_share"], 500000)
@@ -199,7 +199,7 @@ class MapperByteIdenticalWhenNeitherDeclared(unittest.TestCase):
     #692/#696. This is the round-trip the golden fixture depends on."""
 
     def test_no_rate_no_sale_carries_nothing(self):
-        entry = ic._map_owned_properties(_doc_with_cottage(), "p1", "p2")[0]
+        entry = contract_property._map_owned_properties(_doc_with_cottage(), "p1", "p2")[0]
         self.assertNotIn("appreciation_rate", entry)
         self.assertNotIn("value_share", entry)
         self.assertNotIn("secured_share", entry)

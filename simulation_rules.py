@@ -2708,7 +2708,7 @@ def _property_carrying_cost_in_year(prop: Dict[str, Any],
         # The couple's share of the CURRENT gross value, appreciating from the
         # ownership year (the SAME compounding _property_disposition_for uses
         # for a sale's P_gross). value_share is carried by the adapter whenever
-        # fraction_of_value is non-null (input_contract._map_owned_properties),
+        # fraction_of_value is non-null (contract_property._map_owned_properties),
         # so it is present here by construction.
         value_share = prop['value_share']
         rate = prop.get('appreciation_rate')
@@ -4167,7 +4167,7 @@ def _disposition_gain_tax(
     one-property household, or no designation declared anywhere) the
     property's OWN designation span is the denominator -- byte-identical to
     the single-property path (DP#9: one spelling of the family window, shared
-    with ``input_contract._family_pre_window``).
+    with ``contract_estate._family_pre_window``).
 
     Canada has no joint filing, so a jointly-owned property's gain is split
     per owner (``owner_roles`` -- each role's fraction is its declared % of
@@ -4192,7 +4192,7 @@ def _disposition_gain_tax(
     else:
         # Issue #969: the FAMILY window (span across all the couple's
         # designated properties) is the denominator when the sale carries it
-        # -- the same family horizon `input_contract._family_pre_window`
+        # -- the same family horizon `contract_estate._family_pre_window`
         # computes and the estate path prices against. Absent it (a single-
         # property household, or no designation anywhere) the property's OWN
         # designation span is the denominator -- byte-identical to the prior
@@ -5152,7 +5152,7 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # and would let a down payment larger than the year's savings vanish,
     # inventing net worth). The outflow is the couple's DOWN PAYMENT (net_equity
     # = value less the mortgage originated against it) plus the couple's share
-    # of CLOSING COSTS (both mapped by input_contract._map_owned_properties).
+    # of CLOSING COSTS (both mapped by contract_property._map_owned_properties).
     # Money is conserved (DP#18): the whole outflow is charged to the identity
     # and sourced from real inflows/assets, never clamped away -- the same
     # discipline the mortgage payment and #760's dated expense segments already

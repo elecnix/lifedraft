@@ -29,12 +29,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import input_contract as ic
 from simulation import _income_components_for_year
+import contract_people
+import contract_schema
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load_example():
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         return json.load(f)
 
 
@@ -53,7 +55,7 @@ def _single_earner_doc(income_from: str, amount: float = 200_000.0,
             inc["amount"] = amount
             inc["from"] = income_from
             inc["to"] = None
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -111,12 +113,12 @@ class TestFutureSegmentsHelper(unittest.TestCase):
             {"id": "future_other", "kind": "self_employment", "amount": 50_000,
              "from": "2030-01-01", "to": None},           # not employment -> skipped
         ]}
-        segments = ic._future_employment_segments(person, "2026-01-01")
+        segments = contract_people._future_employment_segments(person, "2026-01-01")
         self.assertEqual([s["from"] for s in segments], ["2029-01-01"])
         self.assertEqual(segments[0]["amount"], 200_000)
 
     def test_no_incomes_yields_no_segments(self):
-        self.assertEqual(ic._future_employment_segments({"incomes": []}, "2026-01-01"), [])
+        self.assertEqual(contract_people._future_employment_segments({"incomes": []}, "2026-01-01"), [])
 
 
 class TestActiveIncomeIsUnchanged(unittest.TestCase):

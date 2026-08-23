@@ -448,7 +448,7 @@ def _after_tax_estate_objective_active(ctx: FidelityContext) -> bool:
 # expresses every one of them (spousal_rollover, per-account
 # beneficiary/successor_holder, the real non-registered ownership split, the
 # per-property principal-residence designation, life_insurance[], per-person
-# mortality), `input_contract._map_estate` maps them, and
+# mortality), `contract_estate._map_estate` maps them, and
 # `estate.EstatePlan`/`compute_estate` consume them. A caveat that describes a
 # limitation that no longer exists is a FALSE disclosure — exactly what
 # TestNoStaleCaveats exists to catch, and exactly as corrosive as a missing one.
@@ -707,7 +707,7 @@ register(Approximation(
                    "the after-tax Smith-Manoeuvre spread, and every ranking that "
                    "depends on them"),
     direction=Direction.UNKNOWN,
-    detail=("input_contract.py, _reconcile_rate_paths(): the run uses the rate declared "
+    detail=("contract_liabilities.py, _reconcile_rate_paths(): the run uses the rate declared "
             "on the liability, so the figures are computed from the FACT, not the "
             "belief. Direction is UNKNOWN because it names an inconsistency in the "
             "input, not a bias in the code: the belief may sit either side of the "
@@ -732,7 +732,7 @@ register(Approximation(
 # guessed retirement target silently outranks a measured living-cost figure
 # and the decumulation shortfall it produces is an artifact of the guess. Same
 # defect class as #685 (a belief silently outranking a fact) in a different
-# costume. Recorded by input_contract._reconcile_spending_figures() (the only
+# costume. Recorded by contract_assumptions._reconcile_spending_figures() (the only
 # place both figures are visible at once) and read here so every surface that
 # prints a decumulation number also names the two spending figures that
 # disagree.
@@ -779,7 +779,7 @@ register(Approximation(
     biased_figure=("the decumulation drawdown amount, the shortfall year, and the "
                   "total net spending reported unfunded"),
     direction=Direction.UNKNOWN,
-    detail=("input_contract.py, _reconcile_spending_figures(): the two figures "
+    detail=("contract_assumptions.py, _reconcile_spending_figures(): the two figures "
             "are consumed by different subsystems (solvency #679 vs. decumulation "
             "#707) and never compared. They are not the same quantity (working-life "
             "vs. retirement), so a small gap is legitimate; the defect is a MATERIAL "

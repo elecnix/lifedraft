@@ -177,7 +177,7 @@ def _dict_to_json(data: Dict, path: str = None, indent: int = 2) -> str:
 # NOTE what this is and is not (epic #603 Track C Phase 2b): this is NOT the
 # input contract's wire-format validation -- that is real, full
 # ``additionalProperties: false`` JSON Schema validation, done once, at the
-# ONE loading boundary (``input_contract.validate_contract``, called from
+# ONE loading boundary (``contract_schema.validate_contract``, called from
 # ``SimulationConfig.from_json`` / every CLI script's ``--input`` flag via
 # ``input_contract.load_and_map``). This guard covers a DIFFERENT, narrower
 # thing: ``SimulationConfig.from_dict`` also doubles as the internal
@@ -1604,7 +1604,7 @@ class SimulationConfig:
 
     # Issue #956 bite E (principal-residence disposition): a declared
     # mid-horizon SALE of the principal residence, mapped by
-    # `input_contract._map_principal_sale` onto `cfg['property']['principal_sale']`.
+    # `contract_principal._map_principal_sale` onto `cfg['property']['principal_sale']`.
     # None / absent = the principal is held to the horizon -> a strict no-op
     # (DP#32): the golden invariant is unchanged by construction (the golden
     # household builds SimulationConfig.from_dict straight from a legacy dict
@@ -1745,7 +1745,7 @@ class SimulationConfig:
 
     # Issue #692 (epic #690 bite 1): the couple's NON-principal real properties
     # -- a cottage, a rental -- each a dict of static facts {id, kind,
-    # net_equity} produced by input_contract._map_owned_properties. Their net
+    # net_equity} produced by contract_property._map_owned_properties. Their net
     # equity (value - mortgage secured against that property, at the couple's
     # ownership share) is added to the annual balance sheet: SimState.initial
     # seeds SimState.property_equities from this list and total_assets() sums
@@ -1853,7 +1853,7 @@ class SimulationConfig:
         ``path`` must be a document conforming to the input contract
         (``schema/input_schema.json`` + ``schema/countries/canada/
         input_schema.json``, composed and validated by
-        ``input_contract.validate_contract``). ``input_contract.load_and_map``
+        ``contract_schema.validate_contract``). ``input_contract.load_and_map``
         does the load + validate + map-to-internal-shape in one mandatory
         step (DP#32: not a bypassable adapter a caller could skip) and hands
         the result to the UNCHANGED ``from_dict`` below. There is no more
@@ -1894,7 +1894,7 @@ class SimulationConfig:
         for m in members:
             m.setdefault('retirement_age', 65)
             # Issue #699: every member carries a stable entity id. The contract
-            # loader (input_contract._map_member) already sets the schema
+            # loader (contract_people._map_member) already sets the schema
             # person_id; a config authored directly (tests, ScenarioOverlay)
             # falls back to its role label, which is a stable identity in the
             # two-adult world. member_by_id / the #643 rewrite key off this.
@@ -3163,7 +3163,7 @@ def apply_property_funding_overlay(cfg: dict, assignment: Dict[str, Dict]) -> di
     financing block is built from the SAME ``_annual_amortization_schedule``
     the fixed-``financing`` mapper uses (DP#9: one schedule spelling), and
     the deductibility follows the property's ``kind`` -- exactly the rule
-    ``input_contract._map_owned_properties`` applies to a fixed ``financing``.
+    ``contract_property._map_owned_properties`` applies to a fixed ``financing``.
 
     The recompute inputs (``value_share``, the non-financing ``secured_base``,
     ``owner_roles``, ``deductible``, ``projection_years``) are carried on the
@@ -3177,7 +3177,7 @@ def apply_property_funding_overlay(cfg: dict, assignment: Dict[str, Dict]) -> di
     passed through here -- the exploration is gated on a declaration, so the
     golden trajectory never reaches this function.
     """
-    from input_contract import _annual_amortization_schedule
+    from contract_property import _annual_amortization_schedule
 
     cfg = deepcopy(cfg)
     props = cfg.get('properties', [])

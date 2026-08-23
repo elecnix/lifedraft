@@ -1554,7 +1554,7 @@ def _property_equity_for_year(prop: Dict, cal_year: int, start_year: int) -> flo
     contribution to the balance sheet in calendar ``cal_year``.
 
     A property with a dated mid-horizon purchase (``prop['purchase']['year']``,
-    mapped by ``input_contract._map_owned_properties``) is NOT yet owned before
+    mapped by ``contract_property._map_owned_properties``) is NOT yet owned before
     that year, so it contributes ZERO equity until then and its full
     ``net_equity`` from the purchase year onward -- the mortgage originates and
     the equity enters the sheet in the same year the down payment leaves cash.
@@ -1577,7 +1577,7 @@ def _property_equity_for_year(prop: Dict, cal_year: int, start_year: int) -> flo
     real-estate TIMING -- is what bite A adds.
 
     Issue #956 bite B -- SALE: a property with a dated mid-horizon sale
-    (``prop['sale']['year']``, mapped by ``input_contract._map_owned_properties``)
+    (``prop['sale']['year']``, mapped by ``contract_property._map_owned_properties``)
     contributes ZERO equity from its sale year ONWARD (``cal_year >= sale_year``);
     in the sale year the property leaves the balance sheet and its net proceeds
     replace it in the portfolio (invested by the sale-year handler in the tax +

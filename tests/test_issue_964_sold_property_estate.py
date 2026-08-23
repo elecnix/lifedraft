@@ -4,7 +4,7 @@ EXCLUDED from the estate -- its economics reach the heirs ONLY through the
 reinvested sale proceeds (already in the portfolio via the disposition rule),
 never as a second helping of its death-year deemed-disposition value.
 
-The bug (see `gh issue view 964`): ``input_contract._map_pre_property_gains``
+The bug (see `gh issue view 964`): ``contract_estate._map_pre_property_gains``
 and the sibling estate consumers (``_map_estate``'s ``principal_fmv`` /
 ``other_fmv`` / ``house_equity``, ``objective._estate_call_args``'s
 ``house_value`` / ``house_equity``, ``objective._cca_recapture_for``)
@@ -64,6 +64,7 @@ from test_issue_956_bite_e_principal_sale import (
     _add_principal_sale, _SALE_2031,
 )
 from test_issue_694_cca_recapture import _add_owned_rental, _CCA as _RENTAL_CCA
+import contract_schema
 
 
 # The shipped example projects 50 years from start_year 2026, so results[i]
@@ -78,13 +79,13 @@ def _base_doc():
     """The shipped two-generation example, validated (the sub-family the
     adapter can honestly map onto the two-adults-plus-children engine)."""
     doc = _two_generation_subset(_load_example())
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
 def _run(doc):
     """Validate -> map to internal config -> run the real engine."""
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run(), legacy
@@ -124,7 +125,7 @@ class SoldNonPrincipalPropertyExcludedFromEstate(unittest.TestCase):
             if p["id"] == "couple_cottage":
                 p["designated_principal_residence_years"] = [
                     {"from": "2023-09-01", "to": None}]
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         return doc
 
     def test_sold_cottage_absent_from_property_gains(self):
@@ -204,7 +205,7 @@ class SoldPrincipalResidenceExcludedFromEstate(unittest.TestCase):
         for p in d["properties"]:
             if p["kind"] == "principal":
                 p["appreciation_rate"] = rate
-        ic.validate_contract(d)
+        contract_schema.validate_contract(d)
         return d
 
     def test_sold_principal_house_equity_is_zero(self):
@@ -273,7 +274,7 @@ class SaleBeyondHorizonKeepsPropertyInEstate(unittest.TestCase):
             if p["id"] == "couple_cottage":
                 p["designated_principal_residence_years"] = [
                     {"from": "2023-09-01", "to": None}]
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         results, legacy = _run(doc)
         plan = _estate_call_args(results, legacy)['plan']
         self.assertIsNotNone(plan.property_gains)
@@ -306,7 +307,7 @@ class SoldRentalNotRecapturedAtDeath(unittest.TestCase):
             for p in doc["properties"]:
                 if p["id"] == "couple_rental":
                     p["sale"] = sale
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         return doc
 
     def test_sold_rental_has_zero_recapture_tax(self):

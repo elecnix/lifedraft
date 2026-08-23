@@ -52,6 +52,7 @@ from simulation_rules import _property_disposition_for
 from simulation_state import _property_equity_for_year
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_schema
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -76,7 +77,7 @@ def _base_doc():
     """The shipped two-generation example, validated (the sub-family the
     adapter can honestly map onto the two-adults-plus-children engine)."""
     doc = _two_generation_subset(_load_example())
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -97,7 +98,7 @@ def _base_doc_no_pr_designation():
         if p["id"] == "principal_residence":
             p["designated_principal_residence_years"] = []
             p["acb"] = p["value"]["amount"]   # bought at value: no accrued gain
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -141,7 +142,7 @@ def _add_cottage(doc, sale=None, appreciation_rate=None, mortgage_balance=0):
 def _run(doc):
     """Validate -> map to internal config -> run the real engine (which
     enforces the money-conservation invariant suite on every run)."""
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run()

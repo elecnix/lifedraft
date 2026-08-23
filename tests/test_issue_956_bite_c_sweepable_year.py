@@ -36,10 +36,12 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import input_contract as ic
 import sweep
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_errors
+import contract_property
+import contract_schema
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -112,14 +114,14 @@ class MapperUsesYearWhenPresent(unittest.TestCase):
     date), for BOTH purchase and sale."""
 
     def test_purchase_year_used_directly(self):
-        entry = ic._map_owned_properties(
+        entry = contract_property._map_owned_properties(
             _doc_with_cottage(purchase={"year": 2030, "closing_costs": 10000}),
             "p1", "p2")[0]
         self.assertEqual(entry["purchase"],
                          {"year": 2030, "closing_costs": 10000.0})
 
     def test_sale_year_used_directly(self):
-        entry = ic._map_owned_properties(
+        entry = contract_property._map_owned_properties(
             _doc_with_cottage(sale={"year": 2031, "selling_costs": 25000}),
             "p1", "p2")[0]
         self.assertEqual(entry["sale"]["year"], 2031)
@@ -132,7 +134,7 @@ class MapperDerivesFromDateWhenYearAbsent(unittest.TestCase):
     never ``x or DEFAULT``."""
 
     def test_purchase_derives_year_from_date(self):
-        entry = ic._map_owned_properties(
+        entry = contract_property._map_owned_properties(
             _doc_with_cottage(purchase={"date": "2030-06-30",
                                         "closing_costs": 10000}),
             "p1", "p2")[0]
@@ -140,7 +142,7 @@ class MapperDerivesFromDateWhenYearAbsent(unittest.TestCase):
                          {"year": 2030, "closing_costs": 10000.0})
 
     def test_sale_derives_year_from_date(self):
-        entry = ic._map_owned_properties(
+        entry = contract_property._map_owned_properties(
             _doc_with_cottage(sale={"date": "2031-06-30", "selling_costs": 25000}),
             "p1", "p2")[0]
         self.assertEqual(entry["sale"]["year"], 2031)
@@ -152,20 +154,20 @@ class YearAndEquivalentDateProduceSameEntry(unittest.TestCase):
     over ``year`` is a faithful stand-in for the dated declaration."""
 
     def test_purchase_equivalence(self):
-        by_year = ic._map_owned_properties(
+        by_year = contract_property._map_owned_properties(
             _doc_with_cottage(purchase={"year": 2030, "closing_costs": 10000}),
             "p1", "p2")[0]["purchase"]
-        by_date = ic._map_owned_properties(
+        by_date = contract_property._map_owned_properties(
             _doc_with_cottage(purchase={"date": "2030-06-30",
                                         "closing_costs": 10000}),
             "p1", "p2")[0]["purchase"]
         self.assertEqual(by_year, by_date)
 
     def test_sale_equivalence(self):
-        by_year = ic._map_owned_properties(
+        by_year = contract_property._map_owned_properties(
             _doc_with_cottage(sale={"year": 2031, "selling_costs": 25000}),
             "p1", "p2")[0]["sale"]
-        by_date = ic._map_owned_properties(
+        by_date = contract_property._map_owned_properties(
             _doc_with_cottage(sale={"date": "2031-06-30", "selling_costs": 25000}),
             "p1", "p2")[0]["sale"]
         self.assertEqual(by_year, by_date)
@@ -213,42 +215,42 @@ class SchemaOneOfDateXorYear(unittest.TestCase):
     and ``year``, or NEITHER -- the ``oneOf`` enforces exactly one."""
 
     def test_purchase_year_only_is_valid(self):
-        ic.validate_contract(
+        contract_schema.validate_contract(
             _full_doc_with_cottage(purchase={"year": 2030,
                                               "closing_costs": 10000}))
 
     def test_sale_year_only_is_valid(self):
-        ic.validate_contract(_full_doc_with_cottage(sale={"year": 2030}))
+        contract_schema.validate_contract(_full_doc_with_cottage(sale={"year": 2030}))
 
     def test_purchase_both_date_and_year_is_rejected(self):
         doc = _full_doc_with_cottage(
             purchase={"date": "2030-06-30", "year": 2030, "closing_costs": 10000})
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_purchase_neither_date_nor_year_is_rejected(self):
         doc = _full_doc_with_cottage(purchase={"closing_costs": 10000})
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_sale_both_date_and_year_is_rejected(self):
         doc = _full_doc_with_cottage(sale={"date": "2030-06-30", "year": 2030})
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_sale_neither_date_nor_year_is_rejected(self):
         doc = _full_doc_with_cottage(sale={})
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_purchase_date_only_still_valid(self):
         """Round-trip: the existing dated declaration still validates."""
-        ic.validate_contract(
+        contract_schema.validate_contract(
             _full_doc_with_cottage(purchase={"date": "2030-06-30",
                                               "closing_costs": 10000}))
 
     def test_sale_date_only_still_valid(self):
-        ic.validate_contract(_full_doc_with_cottage(sale={"date": "2030-06-30"}))
+        contract_schema.validate_contract(_full_doc_with_cottage(sale={"date": "2030-06-30"}))
 
 
 class SchemaCarriesYearLeaf(unittest.TestCase):

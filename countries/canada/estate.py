@@ -188,7 +188,7 @@ class EstatePlan:
     principal_residence_acb: float = 0.0
     # Issue #963 (epic #956 bite F): the principal residence's REAL annual
     # appreciation rate, carried from the contract's principal property by
-    # ``input_contract._map_estate`` so this plan is self-describing (the
+    # ``contract_estate._map_estate`` so this plan is self-describing (the
     # estate's property data carries its own appreciation, not a pointer to
     # the ``property`` block). The estate's deemed-disposition
     # (``objective._estate_call_args``) compounds ``principal_residence_fmv``
