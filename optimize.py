@@ -12,6 +12,7 @@ removed. Use evaluate_strategy_with_simulation() and discover_strategies()
 from strategy.py instead.
 """
 
+import contract_schema
 from tax_data import default_tax_provider
 import json
 import argparse
@@ -2407,7 +2408,6 @@ _LIQUIDATION_SOURCE_LABELS = {
 # Issue #758: the runway rendering is ONE spelling (DP#9), in runway.py, so
 # the console report and the TXT/HTML reports say the same thing.
 from runway import format_runway as _format_runway  # noqa: E402
-import contract_schema
 
 
 # ═══════════════════════════════════════════════════════════════════════════

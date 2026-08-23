@@ -36,6 +36,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+import contract_schema  # noqa: E402
 from countries.canada.adapter import CanadaAdapter  # noqa: E402
 from countries.canada.strategies import STRATEGIES  # noqa: E402
 from simulation import FamilySimulation  # noqa: E402
@@ -298,7 +299,6 @@ import copy  # noqa: E402
 from test_input_contract import _load_example, _two_generation_subset  # noqa: E402
 
 import input_contract as ic  # noqa: E402
-import contract_schema
 
 
 def _example_doc_with_first_refinance_declaring_split(amount: float) -> dict:

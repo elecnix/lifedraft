@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
 
+import contract_schema
 import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation_rules import RULES, RuleContext, YearWorkingState, _blended_pot_rate
@@ -280,7 +281,6 @@ import copy
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from test_golden_trajectory_581 import golden_household_config
-import contract_schema
 
 
 def _run(cfg: dict):
