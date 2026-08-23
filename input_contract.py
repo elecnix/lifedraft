@@ -173,7 +173,7 @@ def to_internal_config(doc: Dict) -> Dict:
     # fails before any sale or the estate prices a gain.
     couple_list = [pid for pid in (primary_id, spouse_id) if pid is not None]
     family_pre_window = _family_pre_window(doc, couple_list, start_year)
-    prop_cfg = map_property_config(doc, principal, mortgage, heloc,
+    prop_cfg = map_property_config(principal, mortgage, heloc,
                                    credit_facility, primary_id, spouse_id,
                                    family_pre_window)
 

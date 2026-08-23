@@ -145,7 +145,7 @@ def _map_principal_sale(principal: Optional[Dict], mortgage: Optional[Dict],
     return sale_entry
 
 
-def map_property_config(doc: Dict, principal: Optional[Dict], mortgage: Optional[Dict],
+def map_property_config(principal: Optional[Dict], mortgage: Optional[Dict],
                         heloc: Optional[Dict], credit_facility: Optional[Dict],
                         primary_id: str, spouse_id: Optional[str],
                         family_pre_window: Optional[int]) -> Dict[str, Any]:
