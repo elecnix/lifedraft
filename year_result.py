@@ -8,7 +8,7 @@ behaviour and no dependencies on anything else in the config layer.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 @dataclass
 class YearResult:

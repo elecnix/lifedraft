@@ -21,8 +21,8 @@ key the ENGINE reads, or it evaporates silently.
 
 import logging
 from copy import deepcopy
-from dataclasses import dataclass, field, replace
-from typing import Dict, List, Optional
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Dict, Optional
 
 from charge_limits import (
     _CHARGE_TOLERANCE,
@@ -34,6 +34,11 @@ from charge_limits import (
 from config_access import _dict_to_json, resolve_return_rate, set_return_rate
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:  # annotation-only: apply_ltv_overlay and from_overlay_diff
+    # take a SimulationConfig but never import one -- they read attributes off
+    # it, so there is no runtime dependency and no import cycle.
+    from simulation_config import SimulationConfig
 
 @dataclass
 class ScenarioOverlay:
