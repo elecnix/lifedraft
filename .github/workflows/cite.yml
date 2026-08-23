@@ -34,8 +34,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cite review
-        uses: elecnix/cite@v0.1.4
+        uses: elecnix/cite@v0.2.0
         with:
           model_api_key: ${{ secrets.MODEL_API_KEY }}
           model_base_url: https://openrouter.ai/api/v1
           model_id: deepseek/deepseek-v4-flash-0731
+          # The v0.2.0 action.yml still defaults `version` to v0.1.3 (the binary
+          # it downloads). Pin it explicitly so this workflow actually runs the
+          # v0.2.0 release binary rather than the stale default.
+          version: v0.2.0
