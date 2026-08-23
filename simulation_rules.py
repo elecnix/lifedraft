@@ -212,9 +212,22 @@ RULE_ORDER: tuple = (
     'second_property_mortgage',
     'margin_heloc_interest',
     'sm_readvance',
-    'sm_interest',
     'sm_investment_growth',
     'heloc_interest_servicing',
+    # Issue #1036 D4/N2: 'sm_interest' runs AFTER 'heloc_interest_servicing' so
+    # the Leg 3 (drawn-margin) deduction can EXCLUDE the unfunded interest --
+    # the portion that was neither paid (serviced from pots) nor capitalized
+    # (added to the balance). A s.20(1)(c) deduction requires interest paid or
+    # payable; the unfunded is neither (it evaporates from the balance sheet),
+    # so it must not be deducted. sm_interest's outputs (readvance_interest,
+    # tax_savings, qc_*, carry-forward) are read only at the year-end snapshot,
+    # so moving it later is safe; its inputs (new_sm_investment, new_nonreg_bal)
+    # are now post-growth/post-servicing, which changes the QC investment-income
+    # cap base for drawn-margin households (a correction -- the cap is on the
+    # investment income the grown pot earns). The golden household hits the
+    # `if not sm_active and traced_deductible <= 0` early return (no draw,
+    # personal mortgage), so it is byte-identical (DP#32).
+    'sm_interest',
     # Issue #956 bite E (principal-residence disposition): a declared
     # mid-horizon SALE of the PRINCIPAL residence settles in its sale year.
     # The principal flows via house_value/mortgage_balance/heloc_balance/

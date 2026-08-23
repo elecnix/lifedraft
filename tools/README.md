@@ -337,3 +337,36 @@ not a replacement. It addresses the specific failure mode DP#11/DP#18 flag:
 a test that claims to verify an engine behaviour but skips the engine.
 
 ---
+
+# `clone_delivery.py` — clone-detection findings delivery (#1093)
+
+```sh
+# what CI runs (see .github/workflows/clone-detection.yml, "Deliver findings" step)
+python tools/clone_delivery.py \
+  --annotations-file "$RUNNER_TEMP/dupdelta-stdout.txt" \
+  --findings-file "$RUNNER_TEMP/dupdelta-findings" \
+  --summary "$GITHUB_STEP_SUMMARY" \
+  --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER"
+```
+
+The clone-detection job is advisory — it never fails the build. Advisory must
+not mean unread: the #1093 retrospective found real clone findings that had
+merged unnoticed (#1027, #1013, #1032) because a green check plus inline
+annotations was everything a reviewer saw. This tool is the delivery layer for
+a `dupdelta ci` run whose stdout was captured to a file:
+
+- re-emits at most **10 annotations** (GitHub's per-step render cap), and when
+  findings are truncated appends one final annotation: "K more — see the job
+  summary". GitHub's own cap is silent; ours never is.
+- appends a count+cap note to the job summary, so "I read the annotations" is
+  never mistaken for "I saw all of the findings".
+- posts or updates **one** PR comment (found by a hidden marker,
+  `<!-- clone-detection-report -->`) carrying the finding count in the
+  conversation a reviewer already reads. A later push that scans clean
+  **deletes** the stale comment rather than leaving it reporting duplication
+  that no longer exists.
+
+The job stays warn-only: the tool exits nonzero only when it cannot deliver
+(e.g. missing token while a comment is owed), never on findings.
+
+Tests: `tests/test_clone_delivery.py`.

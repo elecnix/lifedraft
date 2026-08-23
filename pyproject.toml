@@ -37,6 +37,11 @@ classifiers = [
 # time, not degrade validation into a no-op.
 dependencies = ["numpy>=1.24", "jsonschema>=4.18"]
 
+# Discoverability: PyPI surfaces these links on the project page.
+[project.urls]
+Homepage = "https://github.com/elecnix/lifedraft"
+Issues = "https://github.com/elecnix/lifedraft/issues"
+
 [project.optional-dependencies]
 # pytest-cov>=5 pulls coverage>=7.4, which is the first release able to use
 # CPython 3.12's `sys.monitoring` backend (COVERAGE_CORE=sysmon). That is what

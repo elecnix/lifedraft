@@ -744,19 +744,19 @@
       "owner": "p1",
       "kind": "heloc",
       "balance": {
-        "amount": 65000,
+        "amount": 0,
         "as_of": "2026-06-30"
       },
       "limit": 150000,
       "rate": 0.0545,
       "rate_type": "variable",
-      "deductibility": {
-        "investment_portion": 0.6,
-        "personal_portion": 0.4
-      },
       "collateral": "principal_residence",
       "readvanceable": true,
-      "capitalize_interest": false
+      "capitalize_interest": false,
+      "deductibility": {
+        "investment_portion": 0.0,
+        "personal_portion": 1.0
+      }
     },
     {
       "id": "personal_loc",
@@ -918,6 +918,12 @@
     "return_model": {
       "type": "fixed",
       "rate": 0.06
+    },
+    "return_beliefs": {
+      "equity_mean": 0.068,
+      "equity_sigma": 0.16,
+      "fixed_income_mean": 0.03,
+      "fixed_income_sigma": 0.05
     },
     "inflation": 0.02,
     "salary_growth": 0.02,
@@ -1161,7 +1167,9 @@
           "cash_out": 50000,
           "ltv": 0.55,
           "amortization_years": 25,
-          "advance_split": { "deductible_non_reg": 25000 }
+          "advance_split": {
+            "deductible_non_reg": 25000
+          }
         }
       ],
       "renewal_options": [

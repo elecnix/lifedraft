@@ -499,7 +499,16 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
                      # after-tax income). 0.0 for a household that declares
                      # no tuition (the golden path) -- a strict no-op.
                      + ws.tuition_credit_applied_primary
-                     + ws.tuition_credit_applied_spouse)
+                     + ws.tuition_credit_applied_spouse
+                     # Issue #1083: the s.20(1)(c) deduction's statutory saving
+                     # on the primary's prologue-taxed rental/loan slice -- the
+                     # tax the prologue already embedded in
+                     # ``ctx.after_tax_income`` is lower by this amount, so it
+                     # is added back here (the tuition_credit booking path).
+                     # 0.0 unless the primary is retired AND the deduction
+                     # exceeds the cpp+pension drawdown base (the golden
+                     # household and every accumulation year: strict no-op).
+                     + ws.sm_interest_nondrawdown_tax_saving)
         discretionary_compressed = seg_discretionary_compressed
     else:
         # Issue #761: under a dated INCOME SHOCK a household cuts DISCRETIONARY
@@ -557,7 +566,13 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.solvency_after_tax_income = (
         ctx.after_tax_income
         + ws.tuition_credit_applied_primary
-        + ws.tuition_credit_applied_spouse)
+        + ws.tuition_credit_applied_spouse
+        # Issue #1083: the s.20(1)(c) nondrawdown routing's saving is a tax
+        # reduction on income already inside ``ctx.after_tax_income`` -- report
+        # the POST-saving figure, exactly as the tuition credits above report
+        # the POST-credit one. 0.0 for every household/phase the routing does
+        # not reach (the golden invariant is untouched).
+        + ws.sm_interest_nondrawdown_tax_saving)
     # The reported `living_costs` field stays the declared working-phase
     # budget (what the household declared); only the identity's `required`
     # uses `spending_outflow` (the retirement target in retirement years, or

@@ -74,6 +74,9 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
     Writes: ``amt_surcharge`` / ``qc_imr_surcharge`` / ``amt_taxable_income``,
     the recovered-credit and closing-balance fields, and charges the NET tax
     (new surcharges minus recovered credits) against the non-registered pot.
+    Issue #1082: whatever slice of that net charge the pot cannot fund is
+    recorded on ``amt_unfunded`` (surfaced on YearResult alongside the gross
+    ``amt_net_charge``) -- reported, never silently absorbed (DP#32).
 
     Returns True whenever a minimum tax is assessed OR a carried credit is
     recovered, so the #584 coverage sweep sees it fire and stay a no-op for a
@@ -138,10 +141,14 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
         + ws.oas_income
         + ws.pension_income
     )
-    # The regular-inclusion (50%) slice of the realized gain -- already in
+    # The regular-inclusion slice of the realized gain -- already in
     # taxable_income -- that total_tax_with_amt grosses up to the AMT's 100%
-    # inclusion (s.127.52(1)(d)).
-    taxable_capital_gains = 0.5 * realized_gain
+    # inclusion (s.127.52(1)(d)). Issue #1082: the inclusion rate is the
+    # household's declared assumption (ctx.config.capital_gains_inclusion),
+    # the same one every other disposition in the fold prices with -- not a
+    # hardcoded 0.5 that diverges silently if the input declares otherwise.
+    inclusion = ctx.config.capital_gains_inclusion
+    taxable_capital_gains = inclusion * realized_gain
 
     # Regular FEDERAL tax after the Quebec abatement and federal non-refundable
     # credits -- the figure the minimum amount is measured against (CRA T691).
@@ -163,7 +170,7 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
         regular_tax=federal_after_credits,
         taxable_income=taxable_income,
         taxable_capital_gains=taxable_capital_gains,
-        capital_gains_inclusion=0.5,
+        capital_gains_inclusion=inclusion,
         nonrefundable_credits=nr_credits,
         params=AMTParameters.for_year(year, provider),
     )
@@ -216,10 +223,19 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
     new_charge = surcharge + qc_surcharge
     recovered = fed_recovered + qc_recovered
     net_charge = new_charge - recovered
+    # Issue #1082: surface the assessed net charge and whatever slice of it the
+    # non-reg pot cannot fund. A household realizing a large gain while its
+    # non-reg pot is already drained (the #1043 servicing rule empties it
+    # first) owes a minimum tax on money it no longer holds -- discarding that
+    # remainder understated tax and overstated leveraged net worth. Reported,
+    # never absorbed (DP#32), mirroring heloc_interest_unfunded (#681).
+    ws.amt_net_charge = max(0.0, net_charge)
+    ws.amt_unfunded = 0.0
     if net_charge > 0:
         # ACB is floored to the reduced balance so acb <= fmv holds (paying the
         # tax is a cash draw at book value, not a further taxable disposition).
         funded = min(net_charge, ws.new_nonreg_bal)
+        ws.amt_unfunded = net_charge - funded
         ws.new_nonreg_bal -= funded
         if ws.new_nonreg_acb > ws.new_nonreg_bal:
             ws.new_nonreg_acb = ws.new_nonreg_bal

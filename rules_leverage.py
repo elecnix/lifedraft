@@ -16,12 +16,17 @@ Split out of ``simulation_rules.py``; the rule bodies are unchanged.
 
 from __future__ import annotations
 
+import logging
+
 from simulation_config import (
     SimulationConfig, charge_room_for_readvance,
     ReadvanceableWithoutPropertyError,
 )
+from tax_data import default_tax_provider
 
 from rule_registry import RuleContext, YearWorkingState, rule
+
+logger = logging.getLogger(__name__)
 
 
 def _principal_value_for_year(config: SimulationConfig, cal_year: int) -> float:
@@ -112,6 +117,10 @@ def apply_borrowing_purpose(ws: YearWorkingState, ctx: RuleContext) -> bool:
         # advance itself). Read off the OPENING balance, before this year's
         # amortization -- the proportion is fixed at the moment of borrowing.
         mortgage_balance=ws.opening_mortgage_balance,
+        # Issue #1039: ADD the new draw to a declared opening drawn balance's
+        # trace instead of clobbering it -- the historical position's purpose
+        # is a carried-in fact, not something a year-0 decision overwrites.
+        opening_margin_tracing=ws.opening_margin_tracing,
     )
     return True
 
@@ -221,6 +230,74 @@ def apply_sm_readvance(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.sm_interest_deduction = 0.0
     return fired
 
+def _sm_schedule_l_income(ctx: RuleContext, pot_balances) -> float:
+    """The year's TP-1 Schedule L net investment income (lines 2-6 total) of
+    the non-reg pots the traced borrowings bought (#1035).
+
+    Per pot: eligible + non-eligible dividends + interest/other + foreign
+    (line 4's "other"), plus HALF the declared capital-gain yield component
+    (line 5: only REALIZED taxable capital gains count, at the inclusion
+    rate). The per-type rates come from the config's declared non-reg portfolio
+    yield (DP#2/DP#27); when none is declared every component falls back to the
+    configurable ``non_reg_yield_rate`` as interest -- reproducing the pre-
+    #1035 ``balance * yield_rate`` base exactly (DP#32).
+
+    Pure function of config + balances (DP#3): no fold state is read.
+    """
+    from countries.canada.portfolio import compute_investment_income
+    yield_data = None
+    portfolio_block = None if ctx.config is None else ctx.config.portfolio_data
+    if isinstance(portfolio_block, dict):
+        accounts = portfolio_block.get('accounts')
+        if isinstance(accounts, dict):
+            non_reg_acct = accounts.get('non_reg')
+            if isinstance(non_reg_acct, dict):
+                declared = non_reg_acct.get('yield')
+                if isinstance(declared, dict):
+                    yield_data = declared
+    fallback_rate = 0.02 if ctx.config is None else ctx.config.non_reg_yield_rate
+    total = 0.0
+    for balance in pot_balances:
+        if balance > 0:
+            breakdown = compute_investment_income(
+                balance, yield_data=yield_data,
+                default_yield_rate=fallback_rate)
+            # Schedule L line 5: capital gains enter at the inclusion rate.
+            total += (breakdown['eligible_dividends']
+                      + breakdown['non_eligible_dividends']
+                      + breakdown['interest']
+                      + breakdown['foreign_income']
+                      + _CAPITAL_GAINS_INCLUSION * breakdown['capital_gains'])
+    return total
+
+
+_CAPITAL_GAINS_INCLUSION = 0.5  # Schedule L line 5 / ITA s.38 inclusion rate
+
+
+def _year_split_brackets_for(ctx: RuleContext) -> tuple:
+    """``(federal_slice, provincial_slice)`` brackets for this year, or
+    ``(None, None)`` when the provider has no split for it -- the same
+    warn-and-fallback contract ``simulation._year_brackets_for`` applies to
+    the combined list (DP#20). Frozen-bracket runs resolve the split at the
+    frozen start year, matching the combined list's year (DP#5).
+    """
+    if ctx.config is None:
+        return None, None
+    provider = (ctx.tax_provider if ctx.tax_provider is not None
+                else default_tax_provider())
+    cal_year = (ctx.config.start_year if ctx.config.frozen_brackets
+                else ctx.calendar_year)
+    try:
+        return provider.get_split_brackets(cal_year,
+                                           province=ctx.config.province)
+    except ValueError:
+        logger.warning(
+            "No split tax bracket data for %s/%s; valuing the s.20(1)(c) "
+            "deduction on the combined brackets (pre-#1035 behaviour).",
+            cal_year, ctx.config.province)
+        return None, None
+
+
 @rule('sm_interest')
 def apply_sm_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     """The §20(1)(c)-qualifying, QC-carry-forward-limited deductible interest
@@ -321,9 +398,20 @@ def apply_sm_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # ── Leg 3: the drawn revolving margin (#850). Its deductible balance does
     # not amortize -- apply_margin_heloc_interest capitalizes it, never
     # repays it.
+    # Issue #1036 D4/N2: deduct only interest that was PAID (serviced from pots)
+    # or PAYABLE (capitalized into the balance) -- NOT the `heloc_interest_
+    # unfunded` portion that was neither (it evaporated because the pots could
+    # not service it and the charge had no room to capitalize it). A s.20(1)(c)
+    # deduction requires interest paid or payable; the unfunded is neither, so
+    # deducting it was a confident wrong number in the tax computation (and the
+    # dollar-exact engine of the D2 inverted incentive). This runs AFTER
+    # heloc_interest_servicing (see the rule order), so ws.heloc_interest_unfunded
+    # is final here. 0.0 when there is no drawn margin or it is fully paid /
+    # capitalized (the byte-identical path, incl. the golden household).
     margin_proportion = compute_heloc_deductible_proportion(
         ws.new_margin_tracing, yield_rate=yield_rate)
-    ws.margin_deductible_interest = ws.margin_heloc_interest * margin_proportion
+    paid_or_payable_margin_interest = ws.margin_heloc_interest - ws.heloc_interest_unfunded
+    ws.margin_deductible_interest = paid_or_payable_margin_interest * margin_proportion
     ws.margin_deductible_balance = ws.new_heloc_balance * margin_proportion
 
     traced_deductible = ws.advance_deductible_interest + ws.margin_deductible_interest
@@ -347,22 +435,39 @@ def apply_sm_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # landed. Whether QC's pool should ALWAYS have counted the plain non-reg
     # account's income is a real question, and a separate one from this issue.
     #
-    # Issue #1033: the cap math itself is delegated to
-    # ``cap_qc_investment_interest`` (DP#10: the Quebec module owns the Quebec
-    # cap) so #1035 can later reconcile the federal (uncapped) deduction with
-    # this Quebec-capped slice -- and split the flat combined-rate valuation the
-    # pre-#1033 code applied to the capped amount -- without touching the
-    # deduction-routing path that lives below.
-    qc_income_base = ws.new_sm_investment
+    # ── The shared QC investment-expense cap (QUEBEC households only) ──
+    # The income base is the SCHEDULE L net investment income of the pots the
+    # traced borrowings actually bought (#1035): eligible + non-eligible
+    # dividends, interest/other, and HALF the realized capital-gain component
+    # of the declared yield (Schedule L line 5) -- NOT a flat
+    # ``balance * yield_rate`` product, which could not tell a dividend
+    # portfolio from a growth one and permanently under-used the cap for
+    # growth-tilted households. The SM leg's proceeds are `new_sm_investment`
+    # (its own pot), while the advance's and the drawn line's proceeds were
+    # allocated by `fill_room` into the plain non-registered account. The
+    # non-reg pot is therefore added ONLY when one of those two legs is present
+    # -- an SM-only household's cap must not silently widen because #850
+    # landed. Whether QC's pool should ALWAYS have counted the plain non-reg
+    # account's income is a real question, and a separate one from this issue.
+    #
+    # The cap itself is QUEBEC-ONLY (TA s.336.0.1): a household whose tax
+    # province is not Quebec faces no investment-income limitation in any
+    # statute, so it deducts the full traced interest provincially too, and
+    # any carry-forward it somehow carries simply carries (#1035).
+    qc_income_pots = [ws.new_sm_investment]
     if traced_deductible > 0:
-        qc_income_base += ws.new_nonreg_bal
+        qc_income_pots.append(ws.new_nonreg_bal)
     from countries.canada.provinces.quebec.quebec_deduction import (
         cap_qc_investment_interest)
-    qc_deductible, new_qc_carry_forward = cap_qc_investment_interest(
-        total_deductible=total_deductible,
-        qc_income_base=qc_income_base,
-        yield_rate=yield_rate,
-        opening_carry_forward=ws.opening_qc_carry_forward)
+    province = '' if ctx.config is None else str(ctx.config.province)
+    if province.strip().lower() in ('qc', 'quebec', 'québec'):
+        qc_deductible, new_qc_carry_forward = cap_qc_investment_interest(
+            total_deductible=total_deductible,
+            investment_income=_sm_schedule_l_income(ctx, qc_income_pots),
+            opening_carry_forward=ws.opening_qc_carry_forward)
+    else:
+        qc_deductible = total_deductible
+        new_qc_carry_forward = ws.opening_qc_carry_forward
 
     # Issue #1033: the deduction is routed through taxable income by TWO
     # mechanisms, gated so exactly ONE fires per phase (Blocker 1: the
@@ -395,19 +500,38 @@ def apply_sm_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # base) -- an edge case (retiree with rental/loan income AND a leveraged
     # margin), documented as a known limit, not double-counted.
     #
-    # The side-credit is valued on ``qc_deductible`` (the QC-CAPPED slice) at
-    # the COMBINED rate -- the #850 valuation conflation #1035 will split into
-    # a federal (``total_deductible``, uncapped) + Quebec (``qc_deductible``)
-    # pair. That conflation is inherited (#850 named it); it is NOT the same
-    # as Major 3's routing leak (routing ``qc_deductible`` into the FEDERAL
-    # clawback base), which this PR fixes by routing ``total_deductible``.
+    # The side-credit is valued as a FEDERAL + QUEBEC pair (#1035): the federal
+    # slice on ``total_deductible`` (uncapped -- no federal limit), the Quebec
+    # slice on ``qc_deductible``, each on its own bracket set. Pre-#1035 the
+    # single capped amount was valued at the blended COMBINED rate, which
+    # suppressed the federal deduction whenever the cap bound. That conflation
+    # is NOT the same as Major 3's routing leak (routing ``qc_deductible`` into
+    # the FEDERAL clawback base), which #1033 fixed by routing
+    # ``total_deductible``.
     # Direct unit-test callers that pass ``primary_marginal_rate`` but not
     # ``year_brackets`` keep the pre-#1033 flat-rate valuation byte-for-byte
     # (the live fold always passes ``year_brackets``).
     from tax_calculator import deduction_value
     if ctx.year_brackets is not None:
-        tax_savings = deduction_value(
-            ctx.primary_taxable_income, qc_deductible, ctx.year_brackets)
+        fed_brackets, prov_brackets = _year_split_brackets_for(ctx)
+        if fed_brackets is not None:
+            # Issue #1035: the FEDERAL s.20(1)(c) deduction has no
+            # investment-income limit, so its slice is valued on the UNCAPPED
+            # ``total_deductible``; only the QUEBEC slice is valued on the
+            # capped ``qc_deductible``. One blended combined-rate valuation of
+            # the capped amount (the pre-#1035 conflation) suppressed the
+            # federal deduction whenever the cap bound.
+            tax_savings = (
+                deduction_value(
+                    ctx.primary_taxable_income, total_deductible, fed_brackets)
+                + deduction_value(
+                    ctx.primary_taxable_income, qc_deductible, prov_brackets))
+        else:
+            # Split unavailable for this year (no tax data): value the capped
+            # amount at the combined brackets -- the pre-#1035 spelling --
+            # rather than fabricate a split (DP#32).
+            tax_savings = deduction_value(
+                ctx.primary_taxable_income, qc_deductible, ctx.year_brackets)
     else:
         tax_savings = qc_deductible * ctx.primary_marginal_rate
     if ctx.primary_retired:
@@ -471,13 +595,15 @@ def apply_margin_heloc_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ``heloc_interest_servicing`` rule below, which runs once the SM balances
     it is paid out of are final.
 
-    NOTE (honest scope limit): the contract declares
-    ``liabilities[kind=heloc].capitalize_interest`` and the engine still does
-    not read it -- a household that says "I pay my HELOC interest in cash"
-    is modelled here as capitalizing up to the charge anyway. Wiring that
-    declared fact is real, separate work (it is still listed in
-    tests/architecture/test_contract_reachability.py); this rule fixes the
-    unboundedness, not the declaration gap.
+    NOTE (issue #1036): the contract declares
+    ``liabilities[kind=heloc].capitalize_interest`` and the engine now READS
+    it (mapped to ``property.capitalize_interest`` -> ``SimulationConfig
+    .capitalize_interest``). When False, the drawn-margin interest is serviced
+    in cash -- none of it capitalizes, regardless of charge room. When True
+    (the default when the contract omits the field, and the pre-#1036
+    behaviour), capitalize up to the charge and service the rest. The
+    capitalized-vs-serviced split is honoured below. This closes the
+    declaration gap this NOTE used to record.
     """
     margin_heloc_interest = ws.opening_heloc_balance * ctx.heloc_rate
 
@@ -496,6 +622,20 @@ def apply_margin_heloc_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
         heloc_ltv_limit=ctx.config.heloc_ltv_limit,
     )
     capitalized = min(margin_heloc_interest, room)
+    # Issue #1036: honour liabilities[kind=heloc].capitalize_interest. When
+    # False, the household pays the drawn-margin interest in CASH -- none of
+    # it capitalizes into the balance, regardless of how much charge room is
+    # left (a retiree servicing their HELOC interest in cash is no longer
+    # modelled as capitalizing it up to the charge anyway). When True (the
+    # default when the contract omits the field, and the pre-#1036 behaviour),
+    # capitalize up to the charge and service the rest in cash. The serviced
+    # portion is booked by the ``heloc_interest_servicing`` rule below, which
+    # runs once the SM balances it is paid out of are final -- so wiring this
+    # here is money-conserving (the interest leaves the balance sheet via the
+    # pots, never silently absorbed) and DP#32-honest (when the pots cannot
+    # cover it, ``heloc_interest_unfunded`` reports it).
+    if not ctx.config.capitalize_interest:
+        capitalized = 0.0
 
     ws.margin_heloc_interest = margin_heloc_interest
     ws.margin_heloc_interest_capitalized = capitalized
@@ -539,6 +679,7 @@ def apply_heloc_interest_servicing(ws: YearWorkingState, ctx: RuleContext) -> bo
     unfunded = ws.margin_heloc_interest_serviced
     if unfunded <= 0:
         ws.heloc_interest_unfunded = 0.0
+        ws.heloc_servicing_funded = 0.0
         return False
 
     # The household's already-recognized taxable income this year: employment
@@ -601,6 +742,7 @@ def apply_heloc_interest_servicing(ws: YearWorkingState, ctx: RuleContext) -> bo
         ws.new_nonreg_bal, ws.new_nonreg_acb, gain, tax, delivered = (
             _service_from_pot(ws.new_nonreg_bal, ws.new_nonreg_acb, from_nonreg))
         unfunded -= delivered
+        ws.heloc_servicing_funded += delivered
         ws.heloc_servicing_realized_gain += gain
         ws.heloc_servicing_tax += tax
         ws.heloc_servicing_taxable += gain * inclusion
@@ -612,6 +754,7 @@ def apply_heloc_interest_servicing(ws: YearWorkingState, ctx: RuleContext) -> bo
             _service_from_pot(ws.new_sm_investment, ws.new_sm_cost_basis,
                               from_sm))
         unfunded -= delivered
+        ws.heloc_servicing_funded += delivered
         ws.heloc_servicing_realized_gain += gain
         ws.heloc_servicing_tax += tax
         ws.heloc_servicing_taxable += gain * inclusion
@@ -632,7 +775,17 @@ def apply_rrsp_refund_heloc_paydown(ws: YearWorkingState, ctx: RuleContext) -> b
     ws.rrsp_refund = rrsp_refund
 
     heloc_paydown = 0.0
-    if rrsp_refund > 0 and ws.new_heloc_balance > 0:
+    # Issue #1040: a borrow_to_invest option declared hold_draw=true opts its
+    # draw OUT of this sweep (SimulationConfig.hold_borrow_to_invest_draw,
+    # set per exploration cell by optimize.run_borrow_to_invest_exploration).
+    # The drawn balance is NOT reduced by the refund -- the refund stays in
+    # the household's cash and flows to the usual allocation instead -- while
+    # apply_margin_heloc_interest still prices/capitalizes (or cash-services,
+    # per capitalize_interest) the interest exactly as before. Default False
+    # = the pre-#1040 debt-sweep behaviour, byte-identical (DP#32: absence is
+    # the fallback, never a coercion).
+    if (rrsp_refund > 0 and ws.new_heloc_balance > 0
+            and not ctx.config.hold_borrow_to_invest_draw):
         heloc_paydown = min(rrsp_refund, ws.new_heloc_balance)
         ws.new_heloc_balance -= heloc_paydown
     ws.heloc_paydown = heloc_paydown

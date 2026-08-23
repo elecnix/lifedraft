@@ -284,6 +284,14 @@ class EstateResult:
     # on the same property). 0.0 with no CCA election.
     cca_recapture_tax: float = 0.0
 
+    # Issue #1035: the Quebec investment-expense carry-forward (TA s.336.0.1)
+    # RELEASED at the deemed disposition -- the terminal return's investment
+    # income (taxable gains on the non-reg + SM pots) absorbs what the annual
+    # cap stranded, reducing the QUEBEC slice of the death tax. A tax RELIEF
+    # (>= 0): subtracted in ``total_tax``. 0.0 for households with no
+    # carry-forward -> byte-identical (DP#32).
+    qc_carryforward_relief: float = 0.0
+
     # The elections that produced these numbers, carried on the result so an
     # output surface can STATE them rather than leave the reader to assume
     # (DP#32 / #585: an assumption that moves the headline must be surfaced).
@@ -302,7 +310,8 @@ class EstateResult:
     def total_tax(self) -> float:
         return (self.registered_tax + self.non_reg_tax
                 + self.sm_investment_tax
-                + self.taxable_property_tax + self.cca_recapture_tax)
+                + self.taxable_property_tax + self.cca_recapture_tax
+                - self.qc_carryforward_relief)
 
     @property
     def net_estate(self) -> float:
@@ -322,6 +331,42 @@ class EstateResult:
         sheet is telling the truth, and the objective must not launder it.
         """
         return self.gross_estate - self.total_tax
+
+    @property
+    def drawable_after_tax(self) -> float:
+        """After-tax value of every estate pot EXCEPT the designated principal
+        residence -- the spend-down surface the die-with-zero objective ranks
+        on (issue #1081).
+
+        "Die with zero" means the household's SPENDABLE savings are consumed,
+        not that the balance-sheet residual is minimised. Two consequences,
+        both load-bearing for ``objective._neg_after_tax_estate``:
+
+        - The residence is OUTSIDE the spend-down target: it is consumed by
+          living in it, so keeping it is not failing to spend down. A home-
+          sale strategy that converts the residence into portfolio cash (and
+          then spends it) is modelled by #956/#964 -- a sold principal
+          contributes neither value nor debt here, so it drops out of this
+          quantity naturally, with no special-casing.
+        - DEBT must never cancel ASSETS in the score. ``net_estate`` nets
+          them dollar-for-dollar, which let a strategy that borrows and does
+          not repay buy one point of score per borrowed dollar while total
+          assets stayed flat (#1081's central gradient). This property ADDS
+          the debt back onto the asset side (``net_estate + debts``), so the
+          score can price debt SEPARATELY as a pure penalty; the mortgage is
+          already netted inside ``house_equity`` and therefore outside the
+          spend-down surface with the residence itself.
+
+        Identity (one spelling -- derived, never recomputed by callers):
+
+            drawable_after_tax == net_estate + debts - house_equity
+
+        Every non-residence pot enters after its own deemed-disposition tax
+        (registered as ordinary income, non-reg/SM/taxable property at the
+        capital-gains inclusion, CCA recapture stacked); the residence is
+        PRE-exempt so no residence tax term exists to subtract.
+        """
+        return self.net_estate + self.debts - self.house_equity
 
     @property
     def insolvent(self) -> bool:
@@ -537,7 +582,9 @@ def compute_estate(*, members: Sequence[TerminalReturn],
                    brackets: list, plan: EstatePlan,
                    inclusion_rate: float = 0.5,
                    sm_investment_fmv: float = 0.0,
-                   sm_investment_acb: float = 0.0) -> EstateResult:
+                   sm_investment_acb: float = 0.0,
+                   qc_carry_forward: float = 0.0,
+                   qc_provincial_brackets: Optional[list] = None) -> EstateResult:
     """After-tax estate under a deemed disposition, per the DECLARED ``plan``.
 
     ``plan`` is MANDATORY (epic #603 Track C Phase 2c, issue #600): there is no
@@ -578,6 +625,18 @@ def compute_estate(*, members: Sequence[TerminalReturn],
         brackets: combined federal+provincial brackets.
         plan: the declared elections/designations. Mandatory.
         inclusion_rate: capital-gains inclusion rate.
+        qc_carry_forward: unused Quebec investment-expense carry-forward (TA
+            s.336.0.1) at death -- the amount ``apply_sm_interest`` stranded in
+            prior years because the annual investment income could not absorb
+            it. The terminal deemed disposition IS an investment-income event
+            (the taxable capital gains on the non-reg + SM pots), so the
+            carry-forward is applied against it here, in death order, up to
+            each return's investment income (#1035). 0.0 -> byte-identical.
+        qc_provincial_brackets: the PROVINCIAL slice of ``brackets``
+            (``TaxDataProvider.get_split_brackets``). Required when
+            ``qc_carry_forward > 0`` -- the carry-forward is a QUEBEC-only
+            deduction and must not be valued on the combined federal+
+            provincial brackets.
 
     Returns:
         EstateResult with the gross/tax/net breakdown, carrying the elections
@@ -598,6 +657,16 @@ def compute_estate(*, members: Sequence[TerminalReturn],
             "Build the list via couple_terminal_returns for a couple, or one "
             "TerminalReturn per member for a multi-generation estate (#705)."
         )
+    # Issue #1035: a stranded QC investment-expense carry-forward is released
+    # against the deemed disposition's investment income. A Quebec-only
+    # deduction cannot be valued on the combined brackets -- demand the
+    # provincial slice explicitly rather than guess (DP#32).
+    if qc_carry_forward > 0 and qc_provincial_brackets is None:
+        raise EstateInputError(
+            "compute_estate with qc_carry_forward > 0 requires "
+            "qc_provincial_brackets (TaxDataProvider.get_split_brackets' "
+            "provincial slice): TA s.336.0.1 is a QUEBEC-ONLY deduction and "
+            "must not be valued on combined federal+provincial brackets.")
 
     # Real property whose GAIN is taxed, beyond the non-registered pot, as a list
     # of (fmv, acb, taxable_fraction). The taxable_fraction is the share of the
@@ -636,7 +705,9 @@ def compute_estate(*, members: Sequence[TerminalReturn],
         is priced at the marginal band it actually lands in.
 
         Returns (registered_tax, non_reg_tax, sm_tax, property_tax,
-        cca_recapture_tax) for this return.
+        cca_recapture_tax, qc_carryforward_relief) for this return. The relief
+        consumes the household's remaining QC carry-forward (single-element
+        list so the closure can mutate it across returns).
         """
         from tax_calculator import tax_on_income
         reg_tax = tax_on_registered_at_death(registered_on_return, brackets)
@@ -685,7 +756,27 @@ def compute_estate(*, members: Sequence[TerminalReturn],
             running += (max(0.0, (fmv - acb) * prop_share)
                         * taxable_fraction * inclusion_rate)
 
-        return reg_tax, nr_tax, sm_tax, prop_tax, recapture_tax
+        # Issue #1035: release the QC investment-expense carry-forward against
+        # THIS return's investment income -- the taxable capital gains on the
+        # financial pots (non-reg + SM sleeve; the same pots the annual cap's
+        # Schedule L base counts). Applied in death order, up to each return's
+        # income; valued on the QUEBEC provincial brackets only (the federal
+        # deduction was never capped), at the marginal band of the return's
+        # full income stack. 0.0 when nothing is carried forward -> every
+        # pre-existing figure byte-identical (DP#32).
+        qc_relief = 0.0
+        if qc_remaining[0] > 0:
+            investment_income_this_return = (
+                max(0.0, (non_reg_fmv - non_reg_acb) * nr_share) * inclusion_rate
+                + max(0.0, (sm_investment_fmv - sm_investment_acb) * nr_share)
+                * inclusion_rate)
+            allowed = min(qc_remaining[0], investment_income_this_return)
+            if allowed > 0:
+                from tax_calculator import deduction_value as _dv
+                qc_relief = _dv(running, allowed, qc_provincial_brackets)
+                qc_remaining[0] -= allowed
+
+        return reg_tax, nr_tax, sm_tax, prop_tax, recapture_tax, qc_relief
 
     # Roll each first-to-die's assets forward onto the NEXT member's return, in
     # death order (the two-member case reduces to the old first->second roll).
@@ -704,6 +795,8 @@ def compute_estate(*, members: Sequence[TerminalReturn],
     sm_tax = 0.0
     property_tax = 0.0
     cca_recapture_tax = 0.0
+    qc_carryforward_relief = 0.0
+    qc_remaining = [qc_carry_forward]  # mutated across returns (death order)
     for i in range(n):
         if i < n - 1:
             reg_rolled = reg_carried * plan.registered_rolled_fraction
@@ -722,13 +815,14 @@ def compute_estate(*, members: Sequence[TerminalReturn],
             nr_share_on_return = nr_share_carried
             prop_share_on_return = prop_share_carried
 
-        r, nr, sm, p, rec = _return_tax(reg_on_return, nr_share_on_return,
-                                    prop_share_on_return)
+        r, nr, sm, p, rec, relief = _return_tax(
+            reg_on_return, nr_share_on_return, prop_share_on_return)
         registered_tax += r
         non_reg_tax += nr
         sm_tax += sm
         property_tax += p
         cca_recapture_tax += rec
+        qc_carryforward_relief += relief
 
     registered_gross = sum(m.registered for m in members)
 
@@ -746,6 +840,7 @@ def compute_estate(*, members: Sequence[TerminalReturn],
         taxable_property_gross=taxable_property_gross,
         taxable_property_tax=property_tax,
         cca_recapture_tax=cca_recapture_tax,
+        qc_carryforward_relief=qc_carryforward_relief,
         spousal_rollover=plan.spousal_rollover,
         tfsa_shelter_ends=not plan.tfsa_successor_holder,
     )

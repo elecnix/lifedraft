@@ -123,9 +123,17 @@ KNOWN_UNREACHED: dict[str, str] = {
     # attribution.check_attribution(TransferType.MINOR_CHILD, ...) instead of
     # re-spelling the < 18 threshold itself (DP#9/DP#10). A minor lender's interest
     # is thus attributed back to the borrower via the rule module, so attribution.py
-    # is reached from production. The TOSI / spousal-property / prescribed-rate-loan
-    # entry points still await a contract leaf that can express an inter-spousal or
-    # capital transfer (#703/#726) before they can bite.
+    # is reached from production. The spousal-property (s.74.1) and
+    # below-market/prescribed-rate (s.74.5(1)) entry points were wired the
+    # same way for #702's detection summary: simulation._attribution_checks_for
+    # (run each year over the declared private_loans, surfaced on
+    # YearResult.attribution_summary) calls attribution.check_attribution(
+    # TransferType.PROPERTY_TRANSFER / MINOR_CHILD) and
+    # check_below_market_loan_attribution when their trigger data is present.
+    # check_tosi and check_separation_transfer_exception remain unwired BY
+    # SCOPE HONESTY (DP#16/#32): the contract declares no trigger data for a
+    # TOSI source or a separation, and inventing declarations would be
+    # exactly the trap those principles name.
     # #473 (asset_location) was REMOVED from this allowlist when it was wired
     # into the live optimize flow: asset_location_optimize.recommend_asset_location
     # (called by optimize.main on every run) reuses asset_location.light_vs_ludicrous

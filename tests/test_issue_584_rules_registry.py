@@ -81,10 +81,10 @@ EXPECTED_RULE_NAMES = frozenset({
     'installments',                # issue #759: service fixed-term 0%-interest installment plans (date-scheduled payment) into debt service
     'second_property_mortgage',   # issue #967: service mid-horizon mortgages originated by properties' purchase.financing (originate + amortize to payoff, interest deductible for a rental) into debt service
     'sm_readvance',                # Smith Manoeuvre: readvance principal paydown, BOUNDED by the charge (#681)
-    'sm_interest',                 # SM HELOC interest + QC-carry-forward-limited deduction
     'sm_investment_growth',        # SM investment grows at after-tax rate (issue #576)
     'margin_heloc_interest',       # interest on the drawn HELOC, capitalized only as far as the charge allows (#577/#681)
     'heloc_interest_servicing',    # issue #681: interest the charge can't absorb is PAID IN CASH from non-reg/SM
+    'sm_interest',                 # issue #1036 D4/N2: SM HELOC interest + QC-carry-forward-limited deduction -- runs AFTER heloc_interest_servicing so the drawn-margin (Leg 3) deduction EXCLUDES heloc_interest_unfunded (interest neither paid nor payable; a deduction requires paid-or-payable)
     'principal_disposition',        # issue #956 bite E: a declared mid-horizon SALE of the PRINCIPAL residence settles in its sale year (net proceeds invested post-growth, gain taxed + PRE-apportioned ≈ 0 for a fully-designated home, secured debt discharged, conservation identity on net_assets Δnet_assets = V - selling_costs - T)
     'rrsp_refund_heloc_paydown',   # apply RRSP refund to HELOC paydown
     'fhsa',                        # FHSA contribution + growth + annual room (issue #124)
@@ -166,9 +166,9 @@ EXPECTED_RULE_ORDER = (
     'second_property_mortgage',
     'margin_heloc_interest',
     'sm_readvance',
-    'sm_interest',
     'sm_investment_growth',
     'heloc_interest_servicing',
+    'sm_interest',
     # issue #956 bite E: a declared mid-horizon SALE of the PRINCIPAL residence
     # settles in its sale year -- the home + its mortgage + any HELOC/SM
     # secured against it leave the balance sheet, net proceeds invested into

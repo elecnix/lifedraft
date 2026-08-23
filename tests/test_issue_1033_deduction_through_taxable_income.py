@@ -518,17 +518,23 @@ class TestBracketFillValuation:
 
 class TestQcCapIsolatedHelper:
     """``cap_qc_investment_interest`` (``quebec_deduction.py``) is the Quebec
-    investment-expense cap (TA s.336.0.1) extracted from ``apply_sm_interest``
-    so #1035 can later reconcile the federal (uncapped) deduction with this
-    Quebec-capped slice. A unit test of a pure function (DP#11 allows this):
-    it must reproduce the carry-forward-on-the-available-side semantics."""
+    investment-expense cap (TA s.336.0.1) applied by ``apply_sm_interest``.
+    #1035 changed its income base from ``balance * yield_rate`` to the year's
+    SCHEDULE L net investment income supplied by the caller. A unit test of a
+    pure function (DP#11 allows this): it must reproduce the carry-forward-
+    on-the-available-side semantics.
+
+    (The old ``yield_rate=0.02, qc_income_base=150_000`` fixtures become
+    ``investment_income=3_000`` -- the same dollars, now the caller's Schedule
+    L total.)
+    """
 
     def test_caps_at_investment_income_when_no_carry_forward(self):
         from countries.canada.provinces.quebec.quebec_deduction import (
             cap_qc_investment_interest)
         qc_deductible, carry = cap_qc_investment_interest(
-            total_deductible=10_000.0, qc_income_base=150_000.0,
-            yield_rate=0.02, opening_carry_forward=0.0)
+            total_deductible=10_000.0, investment_income=3_000.0,
+            opening_carry_forward=0.0)
         assert qc_deductible == pytest.approx(3_000.0)
         assert carry == pytest.approx(7_000.0)
 
@@ -536,8 +542,8 @@ class TestQcCapIsolatedHelper:
         from countries.canada.provinces.quebec.quebec_deduction import (
             cap_qc_investment_interest)
         qc_deductible, carry = cap_qc_investment_interest(
-            total_deductible=0.0, qc_income_base=0.0,
-            yield_rate=0.02, opening_carry_forward=7_000.0)
+            total_deductible=0.0, investment_income=0.0,
+            opening_carry_forward=7_000.0)
         assert qc_deductible == pytest.approx(0.0)
         assert carry == pytest.approx(7_000.0)
 
@@ -545,8 +551,8 @@ class TestQcCapIsolatedHelper:
         from countries.canada.provinces.quebec.quebec_deduction import (
             cap_qc_investment_interest)
         qc_deductible, carry = cap_qc_investment_interest(
-            total_deductible=4_000.0, qc_income_base=250_000.0,
-            yield_rate=0.02, opening_carry_forward=3_000.0)
+            total_deductible=4_000.0, investment_income=5_000.0,
+            opening_carry_forward=3_000.0)
         assert qc_deductible == pytest.approx(5_000.0)
         assert carry == pytest.approx(2_000.0)
 
@@ -554,8 +560,8 @@ class TestQcCapIsolatedHelper:
         from countries.canada.provinces.quebec.quebec_deduction import (
             cap_qc_investment_interest)
         qc_deductible, carry = cap_qc_investment_interest(
-            total_deductible=0.0, qc_income_base=0.0,
-            yield_rate=0.02, opening_carry_forward=0.0)
+            total_deductible=0.0, investment_income=0.0,
+            opening_carry_forward=0.0)
         assert qc_deductible == 0.0
         assert carry == 0.0
 

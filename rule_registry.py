@@ -424,6 +424,19 @@ class YearWorkingState:
     # that borrowed nothing (the golden path) -> the drawdown base is
     # unchanged (the routing is gated and floored, DP#32).
     sm_interest_deduction: float = 0.0
+    # Issue #1083: the STATUTORY tax saving from routing the part of the
+    # s.20(1)(c) deduction the drawdown base cannot absorb (the remainder after
+    # ``apply_retirement_drawdown`` floors the cpp+pension base at 0) against
+    # the PRIMARY's prologue-taxed slice (``ctx.primary_taxable_income`` --
+    # rental operating + private-loan interest income, which survive
+    # retirement). Valued at bracket-fill via ``tax_calculator.deduction_value``
+    # -- the same ``tax_on_income`` / year-brackets path that taxed the slice
+    # (DP#9), not a flat rate. Booked as REAL CASH by ``apply_solvency`` (the
+    # tuition_credit precedent: a tax reduction on income already inside
+    # ``ctx.after_tax_income`` is added back to `available`). 0.0 unless the
+    # primary is retired AND the deduction exceeds the drawdown base; 0.0 for
+    # the golden household (no borrowing) -> byte-exact.
+    sm_interest_nondrawdown_tax_saving: float = 0.0
 
     # ── borrowing_purpose / sm_interest rules (issue #850) ──
     # The purpose tracing of the mortgage ADVANCE and the DRAWN revolving
@@ -465,6 +478,12 @@ class YearWorkingState:
     margin_heloc_interest_capitalized: float = 0.0
     margin_heloc_interest_serviced: float = 0.0
     heloc_interest_unfunded: float = 0.0
+    # Issue #1069: the slice of the serviced interest the pots ACTUALLY
+    # delivered (net of the gross-up tax), accumulated independently by each
+    # disposition leg. Together with ``heloc_interest_unfunded`` (the
+    # remainder) it closes the conservation identity the trajectory invariant
+    # checks every year: charged = capitalized + funded + unfunded.
+    heloc_servicing_funded: float = 0.0
     # Issue #1034: forced dispositions of the non-reg and SM pots to service
     # HELOC interest realize a capital gain (taxed) and reduce the cost basis
     # PROPORTIONALLY to the units sold -- mirroring sm_unwind (which reuses
@@ -719,6 +738,19 @@ class YearWorkingState:
     qc_imr_credit_recovered: float = 0.0
     amt_credit_closing: tuple = ()
     qc_imr_credit_closing: tuple = ()
+    # Issue #1082: the NET minimum-tax charge actually assessed this year
+    # (new surcharges minus recovered credits, floored at 0 -- a net refund is
+    # not a charge) and the slice of it the household could NOT fund from the
+    # non-registered pot it is charged against. Before #1082 the unfunded
+    # remainder was silently discarded -- $380k of assessed minimum tax
+    # vanished in the issue's reported case (fabricated round figures,
+    # DP#4/DP#15) -- understating tax and overstating
+    # leveraged net worth. Reported, never absorbed (DP#32), mirroring the
+    # #681 heloc_interest_unfunded treatment. 0.0 in every year no minimum tax
+    # is assessed or the pot fully funds it (the golden household, all 46
+    # years -- DP#32).
+    amt_net_charge: float = 0.0
+    amt_unfunded: float = 0.0
 
     # ── tuition_credit rule (epic #795 bite 3, DP#26) ──
     # The federal (+ QC provincial) tuition tax credit -- own-credit application

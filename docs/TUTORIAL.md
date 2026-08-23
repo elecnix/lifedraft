@@ -842,6 +842,22 @@ must not move). A few concrete triggers in this codebase:
   (1 strategy skipped)` — as Examples 1–4 did. Add the facility and the
   SM-strategy variants enter the ranking automatically (DP#7: model the
   mechanism, not the branded product).
+- **Standalone borrow-to-invest (issue #1036)** — a *mortgage-free* household
+  that wants to borrow against home equity and invest the proceeds in a
+  non-registered account (deductible under ITA s.20(1)(c)) declares
+  `decisions.borrow_to_invest[]`: an amount ladder (`source` = a declared
+  `kind: "heloc"` liability, `amount`, `target_account: "non_reg"`). The
+  optimizer sweeps the ladder plus the implicit no-draw baseline and ranks
+  under the household's objective — no readvanceable facility required. The
+  `kind: "heloc"` liability's `capitalize_interest` (false = service the
+  interest in cash, true = capitalize up to the charge) and `balance` (must
+  be 0 — the engine starts a HELOC undrawn; a draw is a simulation decision,
+  not an opening fact) are now read / refused loudly rather than silently
+  dropped. **Caveat:** `borrow_to_invest` is refused when
+  `retirement.liquidate_to_target` is true — that combination is an inverted
+  incentive (the drawdown spends the borrowed pot while the HELOC is never
+  repaid) until the asset-liability unwind coupling (#1037) / net_estate floor
+  (#1065) lands.
 - **Cash-flow solvency** — `household_budget.annual_living_costs` is optional
   and deliberately *not* in the top-level `required` list. A document that
   omits it simply cannot express the solvency constraint; a document that

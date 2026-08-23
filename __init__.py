@@ -53,7 +53,7 @@ from stress_scenarios import StressPath, run_stress_test
 from output_plugins import TextReport, JsonReport, HtmlReport
 from module_registry import CountryRegistry, default_registry, discover_country_packages
 from simulate import (
-    load_inputs, build_all_overlays, evaluate_overlay, enumerate_overlays,
+    build_all_overlays, evaluate_overlay, enumerate_overlays,
     print_discovery, run_scipy_optimization, print_scipy_report,
 )
 
@@ -89,6 +89,6 @@ __all__ = [
     # Module registry
     "CountryRegistry", "default_registry", "discover_country_packages",
     # Simulate entry point
-    "load_inputs", "build_all_overlays", "evaluate_overlay", "enumerate_overlays",
+    "build_all_overlays", "evaluate_overlay", "enumerate_overlays",
     "print_discovery", "run_scipy_optimization", "print_scipy_report",
 ]

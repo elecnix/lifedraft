@@ -3,7 +3,7 @@ name: Clone detection
 # Epic #603. Runs dupdelta (https://github.com/elecnix/dupdelta) on every PR.
 # dupdelta scans the PR head and its merge-base and warns ONLY about
 # duplication this PR adds or worsens — never about pre-existing,
-# already-triaged duplication such as #634/#635. It replaces the two bespoke
+# already-triaged duplication such as #634/#635. It replaced the two bespoke
 # AST clone detectors (tools/clone_scan.py, tools/module_vocab_scan.py) plus
 # the jscpd advisory step; its three detectors map onto the old trio
 # (function clones / module vocabulary / literal blocks — see .dupdelta.toml).
@@ -11,16 +11,30 @@ name: Clone detection
 # WARN, never FAIL: dupdelta always exits 0, and this job is not wired into
 # required-status-checks branch protection, so it can never block a merge.
 #
-# NOTE on cost: there are THREE self-hosted runners
-# (`gh api repos/:owner/:repo/actions/runners` -> total_count 3), so this job
-# does fan out in parallel with the `Tests` leg rather than queueing behind
-# it, and it does not lengthen the critical path by its full runtime.
+# DELIVERY (#1093): advisory must not mean unread. The retrospective this
+# issue ordered found real findings that had merged unnoticed (#1027, #1013,
+# #1032) because a green check plus inline annotations was everything a
+# reviewer saw. So this job no longer lets dupdelta emit its own annotations
+# (uncapped — GitHub renders at most 10 per step and says nothing when it
+# drops the rest). Instead the raw annotation lines are captured to a file and
+# tools/clone_delivery.py re-emits at most 10 of them, announces any
+# truncation with a "K more" pointer at the job summary, appends a count+cap
+# note to the summary itself, and posts or updates ONE PR-conversation
+# comment (found by hidden marker) carrying the finding count. A later push
+# that scans clean deletes the stale comment.
 #
-# But "parallel" is not "free" here the way it was on GitHub-hosted VMs: all
-# three runners live on the MAINTAINER'S WORKSTATION and share its 16 cores,
-# so a job that runs concurrently is a job competing with him and with the
-# other CI jobs, not one running somewhere else on GitHub's dime. Keep it
-# fast for that reason. dupdelta is a single compiled binary (downloaded from
+# NOTE on cost: this job runs on the same ephemeral autoscaling cloud pods
+# (Actions Runner Controller on Hetzner) as every other workflow here —
+# `runs-on: arc-runners` below; the pods register as runners named
+# `arc-runners-*` (`gh api repos/:owner/:repo/actions/runners`). The single
+# persistent registered runner (`vandenberg-lifedraft`, labels
+# self-hosted/Linux/X64) lacks the `arc-runners` label and never serves these
+# jobs. Because pods scale from zero on demand, this job CAN fan out in
+# parallel with the `Tests` leg rather than queueing behind it — but a cold
+# cluster pays a pod-startup delay before either leg begins, so a second
+# concurrent job does lengthen wall-clock time somewhat.
+#
+# Keep it fast anyway: dupdelta is a single compiled binary (downloaded from
 # its GitHub release, no pip/npm install step) and a full-tree scan of this
 # repo takes seconds, so this job is far cheaper than the old one (~2-4 min
 # of O(n^2) SequenceMatcher scans + a Node/jscpd cold start).
@@ -28,6 +42,17 @@ name: Clone detection
 on:
   pull_request:
     branches: [main]
+    # Only opine when the PR touches something this job can opine on: Python
+    # source (the duplication detectors' input), the dupdelta config that
+    # tunes them, or this workflow itself (so a change to the filter
+    # self-tests). A docs-only PR skips the job entirely instead of paying
+    # for a fetch-depth:0 checkout and a full-tree scan that can only ever
+    # come back clean. Skipped is safe: the job is advisory (WARN, never
+    # FAIL) and main has no required status checks.
+    paths:
+      - '**/*.py'
+      - '.dupdelta.toml'
+      - '.github/workflows/clone-detection.yml'
 
 # Supersede an in-flight run on the same PR -- the older one is scanning a
 # commit nobody will merge. (Observed: duplicate runs racing to completion.)
@@ -35,20 +60,22 @@ on:
 # `cancel-in-progress` is already PR-scoped; the `Tests` workflow, which also
 # runs on pushes to `main`, has to gate it on the event name instead.
 #
-# This also matters more than it used to: the three runners all live on the
-# maintainer's workstation, so a superseded run is not merely wasted minutes
-# -- it is a share of the CPU he is trying to work on, and a runner nobody
-# else can use until it finishes.
+# This matters even on ephemeral cloud pods: a superseded run is wasted
+# pod-minutes and occupies autoscaler capacity that an in-flight run of a
+# newer commit could otherwise use.
 concurrency:
   group: clones-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   clone-detection:
-    # Self-hosted: GitHub-hosted minutes are exhausted.
+    # Self-hosted ARC (ephemeral autoscaling pods on Hetzner cloud), like every
+    # other workflow in this repo.
     runs-on: arc-runners
     permissions:
       contents: read
+      # Posting/updating/deleting the findings comment on the PR conversation.
+      pull-requests: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
@@ -58,11 +85,56 @@ jobs:
           # fails loudly on a shallow checkout rather than doing that).
           fetch-depth: 0
 
-      # Pinned by commit SHA (repo convention) with the binary version
-      # passed explicitly, so the action code and the tool it installs are
-      # both pinned. The action resolves the merge-base of `base` and HEAD,
-      # scans both trees, and annotates the PR inline with anything new.
-      - uses: elecnix/dupdelta@0d24393b4589aebdd6ecc101e5668f55f08b6f2b  # v0.1.0
-        with:
-          base: ${{ github.event.pull_request.base.sha }}
-          version: v0.1.0
+      # We run the dupdelta BINARY directly rather than through the composite
+      # action: the action emits its annotations itself, unbounded, which is
+      # exactly the silent-truncation defect #1093 closes. Same release, same
+      # pin discipline — the version tag names the release asset downloaded
+      # below, matching how the action resolved `version: v0.1.0`.
+      - name: Install dupdelta (pinned v0.1.0)
+        run: |
+          set -euo pipefail
+          VERSION=v0.1.0
+          TARGET=x86_64-unknown-linux-gnu
+          mkdir -p "$RUNNER_TEMP/dupdelta-bin"
+          curl -fsSL "https://github.com/elecnix/dupdelta/releases/download/${VERSION}/dupdelta-${TARGET}.tar.gz" \
+            -o "$RUNNER_TEMP/dupdelta.tar.gz"
+          tar -xzf "$RUNNER_TEMP/dupdelta.tar.gz" -C "$RUNNER_TEMP/dupdelta-bin"
+          echo "$RUNNER_TEMP/dupdelta-bin" >> "$GITHUB_PATH"
+
+      - name: Scan for duplication this PR adds
+        run: |
+          set -euo pipefail
+          # dupdelta needs the merge-base reachable; a shallow clone would make
+          # it report every pre-existing duplicate as new. It refuses loudly on
+          # a shallow checkout rather than doing that -- but saying why here
+          # saves the trip to its docs.
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            echo "::error::dupdelta needs the merge-base, but this checkout is shallow." >&2
+            exit 1
+          fi
+          # Annotation lines are CAPTURED, not printed: printed here they would
+          # render uncapped, silently truncated by GitHub's 10-per-step limit.
+          # tools/clone_delivery.py re-emits them capped, with the truncation
+          # announced. dupdelta itself exits 0 on findings (warn-only); with
+          # `set -e`, only a genuine tool failure can fail this step.
+          dupdelta ci \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --github-annotations \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --findings-out "$RUNNER_TEMP/dupdelta-findings" \
+            > "$RUNNER_TEMP/dupdelta-stdout.txt"
+
+      - name: Deliver findings where reviewers look (#1093)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # `python3`, not `python`: the ARC pod image ships no unversioned
+          # `python` shim, and unlike the Tests leg this job does not run
+          # setup-python (which is what puts `python` on PATH there).
+          python3 tools/clone_delivery.py \
+            --annotations-file "$RUNNER_TEMP/dupdelta-stdout.txt" \
+            --findings-file "$RUNNER_TEMP/dupdelta-findings" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

@@ -49,6 +49,13 @@ logger = logging.getLogger(__name__)
 OSFI_B20_CHARGE_LTV_MAX = 0.80
 OSFI_B20_REVOLVING_LTV_MAX = 0.65
 
+# Issue #1075 (optimizer half): the DEFAULT floor for the house tranche's
+# sweep -- 60% of the registered charge -- when the structure declares no
+# ``min_house_floor``. DP#13: a fallback for ABSENT input, never an opinion
+# that overrides a declared floor (``_tranche_house_floor`` prefers the
+# declared value, and the sweep's floor is not the cash-back threshold).
+_HOUSE_SWEEP_FLOOR_FRACTION = 0.6
+
 # Dollar tolerance for charge-limit comparisons (floating-point rounding, not
 # a policy margin).
 _CHARGE_TOLERANCE = 0.01
@@ -242,6 +249,11 @@ _INTERNAL_ROOT_ALLOWED_KEYS = {
     # writes onto a scenario's config for the engine (SimState.initial carve +
     # simulation_rules.apply_deposit_product_growth). Both absence-safe (DP#32).
     'deposit_products', 'deposit_product',
+    # Issue #1036: the DECLARED borrow-to-invest options, read directly by
+    # optimize.run_borrow_to_invest_exploration (the optimizer, not the
+    # simulator, DP#22). Not lifted onto a SimulationConfig field (a dead
+    # surface -- D7); the raw key is the one spelling. Absence-safe (DP#32).
+    'borrow_to_invest_options',
     # Issue #692 (epic #690 bite 1): the couple's NON-principal real properties
     # (a cottage, a rental) as a first-class {id, kind, net_equity} list. Their
     # net equity reaches the annual balance sheet (SimulationConfig.properties
@@ -599,6 +611,15 @@ class YearResult:
     deduction_advantage_vs_now: float = 0.0
     readvance_interest: float = 0.0
     readvance_tax_savings: float = 0.0
+    # Issue #1083: the s.20(1)(c) deduction's statutory (bracket-fill) tax
+    # saving on the retired primary's PROLOGUE-taxed slice (rental/loan
+    # income), for the share of the deduction the cpp+pension drawdown base
+    # could not absorb. Booked as cash by ``apply_solvency`` (the
+    # tuition_credit path); 0.0 in every accumulation year and for any
+    # household whose deduction fits inside the drawdown base. The flat
+    # objective side-credit (``readvance_tax_savings``) stays 0 in retirement
+    # -- this is the taxable-income routing, not its return.
+    sm_interest_nondrawdown_tax_saving: float = 0.0
     sm_qc_deductible: float = 0.0
     sm_qc_carry_forward: float = 0.0
     sm_deductible_proportion: float = 0.0  # From HELOC tracing
@@ -658,6 +679,18 @@ class YearResult:
     str_business_income: float = 0.0
     gst_hst_registration_required: bool = False
 
+    # Issue #702: the year's attribution-rule DETECTION over the declared
+    # private loans -- ITA s.74.1 (spousal property transfer), s.74.2 (minor
+    # child) and s.74.5(1) (below-market / prescribed-rate-loan escape) -- one
+    # dict per loan, computed by simulation._attribution_checks_for from the
+    # rule functions in countries.canada.attribution (DP#10). DETECTION ONLY:
+    # it changes no tax number (the one attribution flow the engine PRICES --
+    # a minor LENDER's interest attributed to the borrower under s.74.2 -- is
+    # #929's wiring in private_loan_interest.classify_private_loan_interest).
+    # Empty for a household that declares no private loans (the golden path,
+    # DP#32: no trigger data -> no entries, zero overhead).
+    attribution_summary: List[Dict] = field(default_factory=list)
+
     # Mortgage details
     mortgage_payment: float = 0.0
     mortgage_interest: float = 0.0
@@ -682,6 +715,12 @@ class YearResult:
     heloc_interest_capitalized: float = 0.0
     heloc_interest_serviced: float = 0.0
     heloc_interest_unfunded: float = 0.0
+    # Issue #1069: the year's TOTAL margin interest charged (opening drawn
+    # balance x rate), surfaced so the split below is CHECKABLE rather than
+    # taken on faith: capitalized + serviced must equal it, and serviced must
+    # equal funded + unfunded -- the identity
+    # 'heloc_interest_fully_accounted' asserts every year in the fold (DP#18).
+    heloc_interest_charged: float = 0.0
     # Issue #1034: forced dispositions of the non-reg and SM pots to service
     # HELOC interest realize a taxed capital gain and reduce the cost basis
     # proportionally (matching sm_unwind, which reuses price_sm_unwind).
@@ -695,6 +734,12 @@ class YearResult:
     # byte-identical (DP#32).
     heloc_servicing_realized_gain: float = 0.0
     heloc_servicing_tax: float = 0.0
+    # Issue #1069: what the pots actually DELIVERED toward the serviced
+    # interest (net of the gross-up tax), accumulated leg by leg. With
+    # ``heloc_interest_unfunded`` it closes the serviced-slice identity:
+    # heloc_interest_serviced == heloc_servicing_funded +
+    # heloc_interest_unfunded, asserted every year by the run-path invariant.
+    heloc_servicing_funded: float = 0.0
     # Issue #1031: the Smith-Manoeuvre investment SLEEVE -- the leveraged
     # non-registered portfolio that lives in jurisdiction_state['canada']
     # (NOT the top-level non_reg_balance), tracked separately because it was
@@ -775,6 +820,15 @@ class YearResult:
     amt_credit_recovered: float = 0.0
     qc_imr_credit_recovered: float = 0.0
     amt_credit_balance: float = 0.0
+    # Issue #1082: the net minimum-tax charge assessed this year (new
+    # surcharges minus recovered credits, floored at 0) and the slice of it the
+    # non-registered pot could not fund -- reported, never silently absorbed
+    # (DP#32; before #1082 an unfunded remainder simply vanished, understating
+    # tax by up to $380k in the issue's reported case -- fabricated round
+    # figures, DP#4/DP#15). Both 0.0 whenever no minimum
+    # tax is assessed or the pot fully funds it (the golden household).
+    amt_net_charge: float = 0.0
+    amt_unfunded: float = 0.0
 
     # CRI/LIRA and LIF (issue #230)
     lira_balance: float = 0.0          # CRI/LIRA balance (accumulation phase)
@@ -1471,6 +1525,24 @@ class SimulationConfig:
     # added to the invested lump sum. margin_available is NOT inflated by this.
     cash_out: float = 0.0
 
+    # issue #1039: the OPENING DRAWN position of the mortgage-paired HELOC
+    # (liabilities[kind=heloc].balance.amount), mapped by from_dict() off
+    # property.heloc_opening_balance. 0.0 is #577's documented undrawn state.
+    # input_contract.py writes the key only when the contract declares a drawn
+    # balance WITH its deductibility, so absence here means "no opening draw"
+    # -- never a coerced zero (DP#32). Seeded into SimState.heloc_balance by
+    # SimState.initial() and carried by the fold; margin_available has already
+    # been reduced by the same draw upstream (undrawn room = limit - drawn).
+    heloc_opening_balance: float = 0.0
+    # issue #1039: the declared deductible proportion
+    # (deductibility.investment_portion) of that OPENING drawn balance. The
+    # original borrowing's purpose is a historical fact that predates the
+    # snapshot, so it is carried in as a declared ratio -- not re-derived from
+    # a simulation decision (#577 governs draws the engine makes). Consumed by
+    # SimState.initial() to seed canada.margin_tracing; only meaningful with
+    # heloc_opening_balance > 0.
+    heloc_opening_investment_portion: float = 0.0
+
     # issue #735: what FRACTION of margin_available is drawn and invested at
     # year 0. 0.0 is the DP#32-correct default -- a declared facility that is
     # simply left UNDRAWN, not a fabricated draw the household never made.
@@ -1823,6 +1895,40 @@ class SimulationConfig:
     deposit_products: List[Dict] = field(default_factory=list)
     deposit_product: Optional[Dict] = None
 
+    # Issue #1036: `capitalize_interest` is the HELOC's declared interest-
+    # handling mode, mapped from liabilities[kind=heloc].capitalize_interest by
+    # input_contract. True (the default when the key is absent, e.g. every
+    # internal-config test built directly) = capitalize the drawn-margin
+    # interest up to the charge, servicing the rest in cash (the pre-#1036
+    # behaviour, byte-identical). False = service ALL the drawn-margin interest
+    # in cash (a retiree paying HELOC interest in cash is no longer modelled as
+    # capitalizing it). Read by simulation_rules.apply_margin_heloc_interest.
+    # The internal-config default (absent key) is True so every test that
+    # builds the internal dict directly stays byte-identical (DP#32: absence is
+    # the fallback, never a coercion).
+    #
+    # NOTE: `capitalize_interest` is a FACILITY-level fact wired only to the
+    # drawn-MARGIN leg (apply_margin_heloc_interest / new_heloc_balance). The
+    # SM readvance leg (new_sm_heloc) is untouched -- its interest is priced
+    # and deducted by apply_sm_interest, never capitalized into the balance
+    # (the readvance grows the line by principal paydown, not by capitalized
+    # interest). Wiring it there too is defensible but out of scope here.
+    capitalize_interest: bool = True
+
+    # Issue #1040: a declared decisions.borrow_to_invest[] option with
+    # hold_draw=true opts its draw OUT of the RRSP-refund HELOC paydown sweep
+    # (simulation_rules.apply_rrsp_refund_heloc_paydown): the drawn balance is
+    # NOT reduced by the year's RRSP refund -- the refund stays in the
+    # household's cash and flows to the usual allocation instead -- while the
+    # interest is still priced, deducted, and serviced/capitalized per
+    # capitalize_interest. Mapped from property.borrow_to_invest_hold_draw
+    # (set per exploration cell by optimize.run_borrow_to_invest_exploration
+    # for options that declare hold_draw). The internal-config default (absent
+    # key, e.g. every test that builds the internal dict directly, and the
+    # golden fixture) is False -- the pre-#1040 debt-sweep behaviour,
+    # byte-identical (DP#32: absence is the fallback, never a coercion).
+    hold_borrow_to_invest_draw: bool = False
+
     # Issue #823: per-account expected_return / locked_until overrides,
     # pot-keyed (rrsp/tfsa/non_reg/lira/lif/fhsa). Both default to empty --
     # a household that declares neither gets today's global-rate, fully-
@@ -1942,6 +2048,13 @@ class SimulationConfig:
             ltv_max=prop.get('ltv_max', 0.80),
             amortization_years=prop.get('amortization_years', 13),
             margin_available=prop.get('margin_available', 0),
+            # issue #1039: absence-safe -- input_contract writes these keys
+            # only when an opening drawn balance is declared, so a legacy
+            # dict never carries them and 0.0 is the documented undrawn state
+            # (#577), never a coerced zero (DP#32).
+            heloc_opening_balance=prop.get('heloc_opening_balance', 0.0),
+            heloc_opening_investment_portion=prop.get(
+                'heloc_opening_investment_portion', 0.0),
             has_heloc=has_readvanceable_facility(cfg),
             # issue #654: absence-safe -- .get(key) with no default returns
             # None on a genuinely absent key, never coerces it (DP#32).
@@ -2041,6 +2154,20 @@ class SimulationConfig:
             # (DP#24/DP#32).
             deposit_products=list(cfg.get('deposit_products', [])),
             deposit_product=cfg.get('deposit_product'),
+            # Issue #1036: capitalize_interest defaults True when absent
+            # (property.capitalize_interest key absent) so every internal-
+            # config test built directly stays byte-identical to the pre-#1036
+            # capitalization path (DP#32: absence is the fallback, never a
+            # coercion of a supplied value). The raw cfg['borrow_to_invest_
+            # options'] key is read directly by optimize.run_borrow_to_invest_
+            # exploration (the optimizer, not the simulator, DP#22); it is NOT
+            # lifted onto a SimulationConfig field (a dead surface -- D7).
+            capitalize_interest=prop.get('capitalize_interest', True),
+            # Issue #1040: hold_draw defaults False when absent (the pre-#1040
+            # RRSP-refund paydown sweep) so every internal-config test built
+            # directly stays byte-identical (DP#32: absence is the fallback,
+            # never a coercion of a supplied value).
+            hold_borrow_to_invest_draw=prop.get('borrow_to_invest_hold_draw', False),
             account_return_overrides=accounts.get('return_overrides', {}) if isinstance(accounts, dict) else {},
             account_locked=accounts.get('locked', {}) if isinstance(accounts, dict) else {},
             account_mer_drag=accounts.get('mer_drag', {}) if isinstance(accounts, dict) else {},
@@ -2177,6 +2304,16 @@ class SimulationConfig:
                 # re-emitted it, so any saved config lost the cash-out leg of
                 # its refinance on the next load.
                 **({'cash_out': self.cash_out} if self.cash_out else {}),
+                # Issue #1039 (DP#24): re-emit a declared opening drawn HELOC
+                # position so a load->modify->save cycle does not silently
+                # drop it. Emitted only when non-zero -- 0.0 round-trips to
+                # 'absent' (undrawn, #577), the same absence-safe convention
+                # cash_out uses above.
+                **({'heloc_opening_balance': self.heloc_opening_balance}
+                   if self.heloc_opening_balance else {}),
+                **({'heloc_opening_investment_portion':
+                    self.heloc_opening_investment_portion}
+                   if self.heloc_opening_investment_portion else {}),
                 'heloc_readvance': self.heloc_readvance,
                 'charge_ltv_limit': self.charge_ltv_limit,
                 'heloc_ltv_limit': self.heloc_ltv_limit,
@@ -2198,6 +2335,19 @@ class SimulationConfig:
                 # round-trip as an explicit null.
                 **({'heloc_rate': self.heloc_rate} if self.heloc_rate is not None else {}),
                 **({'heloc_rate_type': self.heloc_rate_type} if self.heloc_rate_type is not None else {}),
+                # Issue #1036 (DP#24): only re-emit capitalize_interest when
+                # it is NOT the default (True) -- True round-trips to 'absent'
+                # (the pre-#1036 capitalization path, byte-identical), False is
+                # a real declared 'service in cash' that must survive a
+                # load->modify->save cycle (DP#32).
+                **({'capitalize_interest': self.capitalize_interest}
+                   if self.capitalize_interest is not True else {}),
+                # Issue #1040 (DP#24): only re-emit when declared True --
+                # False round-trips to 'absent' (the pre-#1040 paydown sweep,
+                # byte-identical), True is a real declared 'hold the draw
+                # flat' that must survive a load->modify->save cycle (DP#32).
+                **({'borrow_to_invest_hold_draw': self.hold_borrow_to_invest_draw}
+                   if self.hold_borrow_to_invest_draw else {}),
                 # issue #689: only re-emitted when actually declared -- None
                 # means "never declared" (DP#32), same convention as
                 # heloc_rate above.
@@ -2408,7 +2558,16 @@ def apply_overlay(base_cfg: dict, overlay: ScenarioOverlay) -> dict:
 
     # Property values
     house_value = cfg['property']['house_value']
-    orig_mortgage = cfg['property']['mortgage_balance']
+    # Issue #1036: a mortgage-free household (no kind=mortgage liability) has
+    # no `mortgage_balance` key in its internal property block --
+    # input_contract.py omits it rather than writing 0 (DP#32: a missing
+    # mortgage is a first-class state, not a zero mortgage). This overlay path
+    # used to index the key directly and crash with KeyError on every overlay
+    # (the LTV/cash-out exploration), so a mortgage-free household could not
+    # run through main() at all. Treat the absent key as a $0 incumbent mortgage
+    # -- the explicit-absence-test the rest of this function already uses for
+    # margin_available (#663), never a truthiness coercion (DP#32).
+    orig_mortgage = cfg['property']['mortgage_balance'] if 'mortgage_balance' in cfg['property'] else 0
     cash_out = overlay.cash_out
 
     # Money-flow model (issue #257): a cash-out refinance is a MORTGAGE increase.
@@ -2637,6 +2796,14 @@ def _validate_tranche_spec(structure: Dict) -> Dict:
                 f"programs price); the investment and line amounts are swept "
                 f"from the charge (issue #1075)."
             )
+        if 'min_house_floor' in t and kind != 'house':
+            raise ValueError(
+                f"structure {label!r} tranche {kind!r} declares a "
+                f"min_house_floor -- only the 'house' tranche carries a sweep "
+                f"floor (its amount is the household's house mortgage, which is "
+                f"what a lender's cash-back programs price); the investment and "
+                f"line amounts are swept from the charge (issue #1075)."
+            )
         if t.get('deductible') and kind != 'investment':
             raise ValueError(
                 f"structure {label!r} tranche {kind!r} declares deductible: true "
@@ -2652,6 +2819,35 @@ def _validate_tranche_spec(structure: Dict) -> Dict:
             )
         by_kind[kind] = t
     return by_kind
+
+
+def _tranche_house_floor(by_kind: Dict, charge: float) -> float:
+    """Issue #1075 (optimizer half): the house tranche amount's SWEEP FLOOR.
+
+    ``min_house_floor`` when the house tranche declares one, else 60% of the
+    registered charge (``_HOUSE_SWEEP_FLOOR_FRACTION`` -- DP#13: a fallback
+    for absent input, never an opinion). This is NOT the ``min_amount``:
+    that is the CASH-BACK THRESHOLD (the point the sweep reports the
+    incentive at), and the whole point of this sweep is that the house
+    mortgage may go BELOW it, forgoing the cash-back. The sweep enumerates
+    house amounts from this floor UP to the charge (``_tranche_sweep_points``
+    in optimize.py); ``_apply_tranched_structure`` refuses a split below it
+    loudly (DP#32: never clamp, never silently no-op).
+
+    A structure that declares no house tranche at all has no house mortgage
+    to floor -- the sweep is over the investment/line split alone, house
+    pinned at 0, exactly as before this dimension existed.
+    """
+    house_tranche = by_kind.get('house')
+    if house_tranche is None:
+        return 0.0
+    declared_floor = house_tranche.get('min_house_floor')
+    # DP#32: explicit presence test -- a declared floor of exactly 0 is a
+    # real value (sweep the whole charge's worth of house room), never
+    # shadowed by the fallback.
+    if declared_floor is not None:
+        return declared_floor
+    return charge * _HOUSE_SWEEP_FLOOR_FRACTION
 
 
 def _tranche_line_rate(structure: Dict, by_kind: Dict) -> tuple:
@@ -2691,27 +2887,32 @@ def _apply_tranched_structure(property_cfg: dict, structure: Dict) -> dict:
     / line) to a ``property`` dict, returning a derived copy.
 
     The tranche spec declares the KINDS and the FIXED facts (the house
-    tranche's floor, the investment tranche's deductibility, each tranche's
-    own rate); the AMOUNTS come from ``structure['tranche_amounts']`` -- a
-    concrete ``{house, investment, line}`` split summing to the registered
-    charge, as the optimizer's sweep enumerates. The amounts are the OPENING
-    POSITION, not a re-split of a carried-through drawn balance (#851's
-    invariant applies to the share form): the household's drawn mortgage IS
-    house + investment (the investment tranche was borrowed to invest), the
-    undrawn room IS the line, and the deductible investment tranche's EXACT
-    interest (balance x its OWN rate -- never the blended-rate product, which
-    drags the house tranche's cheaper rate in) is carried on
+    tranche's SWEEP FLOOR -- ``min_house_floor``, defaulting to 60% of the
+    charge, NOT the cash-back threshold, which the sweep may go below -- the
+    investment tranche's deductibility, each tranche's own rate); the
+    AMOUNTS come from ``structure['tranche_amounts']`` -- a concrete
+    ``{house, investment, line}`` split summing to the registered charge, as
+    the optimizer's sweep enumerates. The amounts are the OPENING POSITION,
+    not a re-split of a carried-through drawn balance (#851's invariant
+    applies to the share form): the household's drawn mortgage IS house +
+    investment (the investment tranche was borrowed to invest), the undrawn
+    room IS the line, and the deductible investment tranche's EXACT interest
+    (balance x its OWN rate -- never the blended-rate product, which drags
+    the house tranche's cheaper rate in) is carried on
     ``deductible_mortgage_balance``/``deductible_mortgage_interest`` for the
     s.20(1)(c) pricing.
 
     Without ``tranche_amounts`` (the contract-load check's call), the
-    MINIMUM point is applied instead -- house at its floor, investment 0, the
-    whole rest of the charge as the line. That is the binding point for both
-    OSFI B-20 ceilings (the largest possible revolving segment; the combined
-    cap cannot bind since the split sums to the charge by construction), so a
-    structure that passes it passes every sweep point -- and one whose floor
-    exceeds the charge fails loudly here, at contract load, rather than when
-    a sweep happens to reach it (DP#32).
+    MINIMUM point is applied instead -- house at its SWEEP FLOOR (the
+    smallest amount the sweep will ever enumerate; ``min_amount`` is NOT
+    consulted -- it is the cash-back threshold, and going below it is the
+    point of the sweep), investment 0, the whole rest of the charge as the
+    line. That is the binding point for both OSFI B-20 ceilings (the
+    largest possible revolving segment; the combined cap cannot bind since
+    the split sums to the charge by construction), so a structure that
+    passes it passes every sweep point -- and one whose floor exceeds the
+    charge fails loudly here, at contract load, rather than when a sweep
+    happens to reach it (DP#32).
 
     Money is conserved by construction: the three amounts partition the
     charge exactly, and the engine books mortgage debt for house + investment
@@ -2740,33 +2941,37 @@ def _apply_tranched_structure(property_cfg: dict, structure: Dict) -> dict:
 
     house_tranche = by_kind.get('house')
     investment_tranche = by_kind.get('investment')
-    house_min = house_tranche.get('min_amount', 0.0) if house_tranche else 0.0
+    house_floor = _tranche_house_floor(by_kind, charge)
 
     amounts = structure.get('tranche_amounts')
     if amounts is None:
         # Contract-load feasibility check: the minimum point (house at its
-        # floor, no investment, the whole remainder as the line -- the
-        # binding revolving-cap case).
-        if house_min > charge + _CHARGE_TOLERANCE:
+        # SWEEP FLOOR -- the smallest amount the sweep will ever enumerate;
+        # ``min_amount`` is the cash-back threshold and is NOT a floor, see
+        # ``_tranche_house_floor`` -- no investment, the whole remainder as
+        # the line: the binding revolving-cap case).
+        if house_floor > charge + _CHARGE_TOLERANCE:
             raise ChargeLimitExceededError(
-                f"structure {label!r}: its house tranche floor of "
-                f"${house_min:,.0f} exceeds the ${charge:,.0f} registered charge "
-                f"-- there is no room for the house mortgage at its declared "
-                f"minimum, so no 3-tranche split exists to sweep (issue #1075)."
+                f"structure {label!r}: its house sweep floor of "
+                f"${house_floor:,.0f} exceeds the ${charge:,.0f} registered charge "
+                f"-- there is no house amount between the floor and the charge, "
+                f"so no 3-tranche split exists to sweep (issue #1075)."
             )
-        amounts = {'house': house_min, 'investment': 0.0,
-                   'line': max(0.0, charge - house_min)}
+        amounts = {'house': house_floor, 'investment': 0.0,
+                   'line': max(0.0, charge - house_floor)}
 
     house = amounts['house']
     investment = amounts['investment']
     line = amounts['line']
 
-    if house < house_min - _CHARGE_TOLERANCE:
+    if house < house_floor - _CHARGE_TOLERANCE:
         raise ChargeLimitExceededError(
             f"structure {label!r}: its house tranche amount of ${house:,.0f} "
-            f"is below the declared ${house_min:,.0f} minimum -- the cash-back "
-            f"programs price a house mortgage of at least that size, so a "
-            f"split that undercuts it is not a candidate (issue #1075)."
+            f"is below the ${house_floor:,.0f} sweep floor (the declared "
+            f"min_house_floor, defaulting to 60% of the registered charge) -- "
+            f"the sweep varies the house mortgage from its floor up to the "
+            f"charge, and a split below the floor is not a candidate (issue "
+            f"#1075)."
         )
     if abs((house + investment + line) - charge) > _CHARGE_TOLERANCE:
         raise ChargeLimitExceededError(

@@ -459,6 +459,17 @@ def _generate_planning_notes(spousal_result, child_results) -> List[str]:
 # =============================================================================
 # Below-Market Interest Loan Attribution — ITA s.74.5(1)  (issue #311)
 # =============================================================================
+
+# DP#13: dated benchmark FALLBACK for the s.74.5(2)(a) rate test, used only
+# when no config leaf or real data provider supplies the CRA prescribed rate
+# actually in effect when a loan was made (the contract carries no such leaf
+# -- #703's resolution routes intergenerational loans through private_loans[],
+# which declares the loan's own rate but not the statutory benchmark). It is
+# the same clearly-dated planning default debt.PrescribedRateLoan documents
+# ("Current prescribed rate (2026 Q1): 2% -- round number for default"), kept
+# here because THIS module owns the s.74.5 rule (DP#10). Every summary entry
+# built against it carries it explicitly, so a reader never silently assumes.
+PRESCRIBED_RATE_FALLBACK = 0.02
 #
 # ITA s.74.5(1) sets out the conditions under which a LOAN (as opposed to an
 # outright transfer) escapes the spousal/related-minor attribution rules of

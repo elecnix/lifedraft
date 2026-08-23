@@ -49,12 +49,6 @@ from countries.canada.resp_rules import RESPCalculator
 from tax_calculator import marginal_rate
 
 
-def load_inputs(path: str = "input.json") -> dict:
-    """Load input configuration from JSON file."""
-    with open(path) as f:
-        return json.load(f)
-
-
 def evaluate_overlay(base_cfg: dict, overlay: ScenarioOverlay, strategy_alloc: dict = None) -> Dict:
     """Evaluate a single overlay using the existing simulation modules.
     

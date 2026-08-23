@@ -52,25 +52,40 @@ def apply_retirement_drawdown(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # capture (clawback relief + draw re-bracketing, both on the balance sheet
     # via ``ws.oas_income`` / retained assets); in accumulation the routing is
     # a no-op (primary not retired -> gate off) and the side-credit handles it.
+    # Issue #1083 (the #1033 over-correction): the routing now reaches the
+    # PRIMARY's OTHER retirement taxable income too. #1033's known limit (c) --
+    # the deduction never offset the rental/loan slice the prologue's
+    # ``_income_tax_by_adult`` taxes (employment is zeroed at retirement;
+    # rental operating + private-loan interest income survive it), and where
+    # the base floored at 0 the whole deduction was stranded -- is fixed here:
+    # the share of the deduction the cpp+pension base cannot absorb (the
+    # remainder after the floor) is routed against ``ctx.primary_taxable_
+    # income`` and its statutory saving booked via
+    # ``ws.sm_interest_nondrawdown_tax_saving`` -> ``apply_solvency`` (the
+    # tuition_credit precedent: real cash, not an objective side-credit -- the
+    # flat side-credit stays gated OFF in retirement, so #1033's double-count
+    # does not return). The split is disjoint by construction (absorbed +
+    # remainder == D), so no dollar of the deduction is captured twice.
     # Known limits, NOT fixed here: (a) the PRELIMINARY OAS clawback
     # ``member_retirement_income`` books in ``retirement_income`` (BEFORE
     # ``sm_interest`` in RULE_ORDER) on the un-reduced CPP+pension base, so it
     # does not see this deduction; (b) ``drawdown_net_target`` was sized in
     # ``retirement_income`` against the un-reduced base, so the deduction's
     # cash benefit (lower tax -> smaller shortfall) is not fed back into the
-    # shortfall; (c) the statutory saving on the NON-drawdown income slice
-    # (rental/loan) in retirement is not captured -- the routing reaches only
-    # the cpp+pension+draw base, and the QC-capped slice (and its carry-forward)
-    # is worth $0 once the primary retires. This (c) is a measurable UNDER-count
-    # vs origin/main (which banked the rental/loan statutory saving via the flat
-    # side-credit) in a direction the old code got closer to -- tracked as the
-    # over-correction follow-up #1083 (NOT fixed here; this PR's scope is the
-    # double-count, which the phase-gate closes); (d) the leveraged portfolio's
-    # DISTRIBUTED income still never ENTERS the base (the deferred
+    # shortfall; (c) the QC-CAPPED slice (``qc_deductible``) and its
+    # carry-forward are still worth $0 once the primary retires -- the
+    # provincial cap's release is #1035, out of scope here; (d) the leveraged
+    # portfolio's DISTRIBUTED income still never ENTERS the base (the deferred
     # income-flowing half).
     if ctx.primary_retired and ws.sm_interest_deduction > 0.0:
         _D = ws.sm_interest_deduction
         from tax_calculator import bracket_ceiling
+        # Issue #1083: how much of D the PRIMARY's cpp+pension base can absorb
+        # (read BEFORE the floor below). The excess is the retiree's
+        # rental/loan slice's share -- routed further down.
+        _base_primary_pre = ws.drawdown_other_taxable_income_primary
+        _absorbed = min(_D, _base_primary_pre)
+        _remainder = _D - _absorbed
         ws.drawdown_other_taxable_income = max(
             0.0, ws.drawdown_other_taxable_income - _D)
         ws.drawdown_other_taxable_income_primary = max(
@@ -97,6 +112,34 @@ def apply_retirement_drawdown(ws: YearWorkingState, ctx: RuleContext) -> bool:
                 ws.drawdown_bracket_fill_base, ctx.year_brackets)
             ws.drawdown_bracket_target_primary = bracket_ceiling(
                 ws.drawdown_bracket_fill_base_primary, ctx.year_brackets)
+        # Issue #1083: route the REMAINDER against the primary's prologue-taxed
+        # slice. ``ctx.primary_taxable_income`` is exactly the base the
+        # prologue's ``_income_tax_by_adult`` taxed (employment zeroed at
+        # retirement; rental operating + private-loan interest income survive),
+        # and its tax already sits inside ``ctx.after_tax_income`` -- so the
+        # statutory saving is booked as cash by ``apply_solvency``, the same
+        # path the tuition_credit rule's reduction takes (one booking spelling,
+        # DP#9). Valued at bracket-fill via ``deduction_value`` -- the SAME
+        # ``tax_on_income`` / year-brackets path that taxed the slice, so a
+        # deduction crossing a bracket boundary is worth its actual marginal
+        # dollars, never a flat top rate (the pre-#1033 mechanism that is NOT
+        # returning here: the objective's side-credit fields stay gated off).
+        # Disjoint from the drawdown-base capture by construction
+        # (``_absorbed + _remainder == _D``): no dollar offsets two incomes.
+        # A remainder beyond this slice is a non-capital loss / carry-forward
+        # (not modeled -- same follow-up family as Major 4's floor).
+        if _remainder > 0.0 and ctx.primary_taxable_income > 0.0:
+            from tax_calculator import deduction_value
+            if ctx.year_brackets is not None:
+                ws.sm_interest_nondrawdown_tax_saving = deduction_value(
+                    ctx.primary_taxable_income, _remainder, ctx.year_brackets)
+            else:
+                # Direct unit-test callers without brackets keep the flat-rate
+                # valuation, byte-for-byte the side-credit's own fallback
+                # pattern in ``apply_sm_interest`` (the live fold always
+                # passes ``year_brackets``).
+                ws.sm_interest_nondrawdown_tax_saving = (
+                    _remainder * ctx.primary_marginal_rate)
     if ws.drawdown_net_target <= 0:
         return False
 
