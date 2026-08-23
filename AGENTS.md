@@ -41,11 +41,20 @@ the loud failure. Always.
 ## Running the tests
 
 ```sh
-VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q        # ~6 min, 6433 tests
+VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q        # ~6 min, ~6,600 tests
 ```
 
 Run it in the **foreground and read the output yourself.** Do not background it and then report a
 success you never saw.
+
+Both numbers above are deliberately **approximate**, and this line has been wrong four times: it
+read `4144`, then `6433`, then `6359`, against an actual `6579` on `669f911`. An exact count goes
+stale on the next merge that adds a test, and a reader who trusts it then has to decide whether
+their own run is broken or the doc is. The figure is here for one purpose — to tell you at a glance
+whether your run collected roughly the whole suite or silently collected a fraction of it — and an
+order of magnitude serves that. If you want the exact number for your tree, run the suite; that is
+the only source that cannot go stale. The ~6 min is just as soft: it was 6m06s on an idle
+workstation and 25m15s on one running three suites at once.
 
 **CI does not run on the maintainer's workstation.** `tests.yml`, `secret-scan.yml` and
 `clone-detection.yml` all declare `runs-on: arc-runners` and execute on Kubernetes ARC runner pods
