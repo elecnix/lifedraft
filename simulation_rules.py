@@ -89,8 +89,10 @@ convention.
     rules_amt                 the year-end minimum-tax assessment
 
 Splitting the file moved NO rule and reordered NOTHING: ``RULE_ORDER`` below is
-byte-identical to what it was, and it remains the single declaration of the
-sequence rules fire in.
+byte-identical to the one on ``main``, and it remains the single declaration of
+the sequence rules fire in. (The one reorder it carries -- #1036 moving
+'sm_interest' after 'heloc_interest_servicing' -- came from ``main``, not from
+the split.)
 """
 
 from __future__ import annotations
