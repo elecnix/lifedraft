@@ -1911,7 +1911,13 @@ class SimState:
         # See the docstring above — booking it here unconditionally is the
         # bug. Debt is only booked once a draw is actually decided (see
         # FamilySimulation.__init__'s lump_sum handling).
-        initial_heloc = 0.0
+        # Issue #1039: EXCEPT the declared OPENING DRAWN position --
+        # liabilities[kind=heloc].balance.amount honoured as the true starting
+        # heloc_balance, so a household already mid-strategy starts from its
+        # real position. input_contract.py maps the key only when the contract
+        # declares a drawn balance WITH its deductibility, so 0.0 here is the
+        # documented undrawn state (#577), never a coerced zero (DP#32).
+        initial_heloc = config.heloc_opening_balance
 
         # FHSA room calculation. DP#9/#606: `fhsa_room` (bare) was a
         # legacy member-input alias for the canonical `fhsa_room_accumulated`
@@ -2212,6 +2218,24 @@ class SimState:
                     (non_reg_after_carve - deposit_product_opening) / non_reg_after_carve)
             non_reg_after_carve = non_reg_after_carve - deposit_product_opening
 
+        # Issue #1039: seed the opening margin trace from the DECLARED
+        # deductibility of the opening drawn balance -- the original
+        # borrowing's purpose is a historical fact carried in by the
+        # snapshot, not a simulation decision, so the trace is derived from
+        # the declared ratio (investment_portion = p) and carried forward by
+        # the 'borrowing_purpose' rule's no-lump-sum path exactly like a
+        # year-0 trace would be. Inert (untouched, all-zero) for a household
+        # with no opening draw -- the golden path, byte-identical (DP#32).
+        if config.heloc_opening_balance > 0:
+            _opening_portion = config.heloc_opening_investment_portion
+            canada_state['margin_tracing'] = {
+                'total_advances': config.heloc_opening_balance,
+                'investment_advances': config.heloc_opening_balance * _opening_portion,
+                'rrsp_advances': 0.0,
+                'tfsa_advances': 0.0,
+                'personal_draws': config.heloc_opening_balance * (1.0 - _opening_portion),
+            }
+
         return cls(
             mortgage_balance=config.mortgage_balance,
             heloc_balance=initial_heloc,
@@ -2380,10 +2404,15 @@ def initial_state_for_run(config: SimulationConfig, lump_sum: float = 0.0) -> 'S
     Returns:
         The opening SimState, with heloc_balance set to the drawn portion
         of lump_sum (capped at margin_available; see
-        margin_draw_for_lump_sum).
+        margin_draw_for_lump_sum) PLUS any declared opening drawn position
+        (issue #1039: config.heloc_opening_balance, a fact the contract
+        carries -- margin_available has already been reduced by that draw
+        upstream, so the cap applies to the room that genuinely remains).
     """
     state = SimState.initial(config)
-    state.heloc_balance = margin_draw_for_lump_sum(lump_sum, config.margin_available)
+    state.heloc_balance = (
+        config.heloc_opening_balance
+        + margin_draw_for_lump_sum(lump_sum, config.margin_available))
     return state
 
 
@@ -2464,6 +2493,7 @@ def borrowing_purpose_tracings(
     lump_non_reg: float,
     margin_available: float,
     mortgage_balance: float,
+    opening_margin_tracing: dict | None = None,
 ) -> tuple:
     """Trace the year-0 leveraged lump sum's TWO borrowings to purpose --
     ITA s.20(1)(c) -- returning ``(advance_tracing, margin_tracing)`` (#850).
@@ -2540,9 +2570,22 @@ def borrowing_purpose_tracings(
         deductible proportion, hence inert) when nothing was borrowed and
         invested. DP#32: a household that took no lump sum gets a hard zero,
         never a fabricated advance.
+
+        ``opening_margin_tracing`` (issue #1039): the trace of a DECLARED
+        opening drawn HELOC balance, when the contract carries one. The new
+        draw's amounts are ADDED to it rather than replacing it -- a year-0
+        lump sum must not silently clobber the historical position's trace
+        (DP#32: dropping a declared fact is the founding defect). None (the
+        default) means no opening position; the trace is then exactly the
+        pre-#1039 all-zero-plus-new-draw dict.
     """
     advance_tracing = _default_heloc_tracing()
-    margin_tracing = _default_heloc_tracing()
+    if opening_margin_tracing is None:
+        opening_margin_tracing = _default_heloc_tracing()
+    # Start from the opening trace so a run with an opening drawn balance but
+    # no new margin draw (all of the lump sum went to the advance) carries the
+    # historical trace forward unchanged.
+    margin_tracing = dict(opening_margin_tracing)
     if lump_sum <= 0:
         return advance_tracing, margin_tracing
 
@@ -2555,9 +2598,13 @@ def borrowing_purpose_tracings(
     if margin_draw > 0:
         margin_tracing = _new_heloc_tracing(
             margin_tracing,
-            total_advances=margin_draw,
-            investment_advances=margin_draw * investment_share,
-            personal_draws=margin_draw * registered_share,
+            total_advances=(opening_margin_tracing.get('total_advances', 0.0)
+                            + margin_draw),
+            investment_advances=(
+                opening_margin_tracing.get('investment_advances', 0.0)
+                + margin_draw * investment_share),
+            personal_draws=(opening_margin_tracing.get('personal_draws', 0.0)
+                            + margin_draw * registered_share),
         )
     if advance > 0 and mortgage_balance > 0:
         advance_tracing = _new_heloc_tracing(
@@ -3359,6 +3406,10 @@ def simulate_year_pure(
         amt_credit_recovered=ws.amt_credit_recovered,
         qc_imr_credit_recovered=ws.qc_imr_credit_recovered,
         amt_credit_balance=sum(c.amount for c in ws.amt_credit_closing),
+        # Issue #1082: the assessed net minimum-tax charge and the slice of it
+        # the non-reg pot could not fund -- reported, never absorbed (DP#32).
+        amt_net_charge=ws.amt_net_charge,
+        amt_unfunded=ws.amt_unfunded,
         lira_balance=ws.new_lira_balance,
         lif_balance=ws.new_lif_balance,
         lif_withdrawal=ws.lif_withdrawal,
@@ -3419,6 +3470,10 @@ def simulate_year_pure(
         deduction_advantage_vs_now=ws.deduction_advantage_vs_now,
         readvance_interest=ws.readvance_interest,
         readvance_tax_savings=ws.readvance_tax_savings,
+        # Issue #1083: the deduction's statutory saving on the retired
+        # primary's prologue-taxed rental/loan slice (0.0 in accumulation and
+        # whenever the deduction fits inside the drawdown base).
+        sm_interest_nondrawdown_tax_saving=ws.sm_interest_nondrawdown_tax_saving,
         sm_qc_deductible=ws.qc_deductible,
         sm_qc_carry_forward=ws.new_qc_carry_forward,
         sm_deductible_proportion=ws.deductible_proportion,
@@ -3448,6 +3503,12 @@ def simulate_year_pure(
         heloc_interest_capitalized=ws.margin_heloc_interest_capitalized,
         heloc_interest_serviced=ws.margin_heloc_interest_serviced,
         heloc_interest_unfunded=ws.heloc_interest_unfunded,
+        # Issue #1069: the charged total and the funded slice, so the
+        # conservation identity (charged = capitalized + serviced =
+        # capitalized + funded + unfunded) is checkable from the outside by
+        # the run-path invariant instead of being taken on faith (DP#32).
+        heloc_interest_charged=ws.margin_heloc_interest,
+        heloc_servicing_funded=ws.heloc_servicing_funded,
         heloc_servicing_realized_gain=ws.heloc_servicing_realized_gain,
         heloc_servicing_tax=ws.heloc_servicing_tax,
         # Issue #679: solvency identity + forced-liquidation waterfall.

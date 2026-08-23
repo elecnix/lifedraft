@@ -253,11 +253,24 @@ def map_cash_flows(doc: Dict, mortgage: Optional[Dict],
     ]
     origination_cash_back = mortgage.get("cash_back_total", 0.0) if mortgage else 0.0
     if origination_cash_back > 0:
-        legacy_cash_flows.append({
+        origination_flow = {
             "year": start_year,
             "amount": origination_cash_back,
             "tax_treatment": "non-taxable",
-        })
+        }
+        # Issue #1075 (optimizer half): a cash-back that declares
+        # ``min_house_amount`` is CONDITIONAL on the swept house tranche
+        # amount -- the key rides ON the flow, so the sweep's cell
+        # composition (optimize.py) withholds the inflow for a sweep point
+        # whose house amount is below it, and a household that never
+        # declares the condition keeps today's unconditional credit
+        # byte-for-byte (DP#13/DP#32: the key's absence is the marker, and
+        # no other cash_flow can carry it -- the schema forbids the key on
+        # user-declared flows, so the adapter's flow is the only one gated).
+        min_house = mortgage.get("cash_back_min_house_amount") if mortgage else None
+        if min_house is not None:
+            origination_flow["min_house_amount"] = min_house
+        legacy_cash_flows.append(origination_flow)
     return legacy_cash_flows
 
 

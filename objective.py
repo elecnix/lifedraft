@@ -353,6 +353,25 @@ def _terminal_calendar_year(results: List[YearResult], cfg: Dict) -> int:
     return 2026
 
 
+def _qc_provincial_brackets(terminal_cal_year: int, cfg: Dict) -> Optional[list]:
+    """The PROVINCIAL slice of the terminal-year brackets (#1035).
+
+    The QC investment-expense carry-forward released at death is a Quebec-only
+    deduction, so it is valued on the provincial brackets alone -- never on the
+    combined federal+provincial list. ``None`` when the provider has no data
+    for the year (compute_estate then refuses loudly if a carry-forward is
+    actually present, DP#32; a zero carry-forward never needs it).
+    """
+    tax_cfg = cfg.get('tax', {}) or {}
+    province = tax_cfg.get('province', 'quebec')
+    try:
+        _, provincial = default_tax_provider().get_split_brackets(
+            terminal_cal_year, province=province)
+        return provincial
+    except ValueError:
+        return None
+
+
 def _terminal_brackets(results: List[YearResult], cfg: Dict) -> list:
     """The combined federal+provincial brackets for the projection's terminal
     year, derived identically for the estate and the per-member family net
@@ -593,6 +612,17 @@ def _estate_call_args(results: List[YearResult], cfg: Dict) -> Optional[Dict]:
         # sleeve (the golden household) -> byte-identical (DP#32).
         'sm_investment_fmv': final.sm_investment_balance,
         'sm_investment_acb': final.sm_investment_cost_basis,
+        # Issue #1035: the QC investment-expense carry-forward the annual cap
+        # stranded (TA s.336.0.1 allows applying it in a later year INCLUDING
+        # the year of death). The terminal deemed disposition's taxable gains
+        # on the non-reg + SM pots are investment income, so compute_estate
+        # releases it there -- valued on the PROVINCIAL slice of the same
+        # terminal-year brackets (a Quebec-only deduction must not be valued
+        # on the combined list). 0.0 for households that never stranded
+        # anything -> byte-identical estate (DP#32).
+        'qc_carry_forward': final.sm_qc_carry_forward,
+        'qc_provincial_brackets': _qc_provincial_brackets(
+            terminal_cal_year, cfg),
     }
 
 
@@ -1002,87 +1032,95 @@ MAX_AFTER_TAX_ESTATE = ObjectiveFunction(
 )
 
 def _neg_after_tax_estate(results: List[YearResult], cfg: Dict) -> float:
-    """The mirror of ``_after_tax_estate`` for ``min_after_tax_estate`` (issue
-    #1009): the NEGATED after-tax estate, so a SMALLER estate scores HIGHER
-    under the ObjectiveFunction.evaluate contract ("higher is better"). A
-    household optimising toward "die with ≈$0" ranks the strategy that leaves
-    the least after-tax estate first. Reuses ``compute_after_tax_estate`` -- no
-    second spelling of the death-tax math (DP#3/DP#9) -- and is exactly the
-    negative of ``max_after_tax_estate`` for any SOLVENT trajectory, so the
-    two objectives are provable mirrors on the solvent set. A trajectory
-    that already spent down to zero scores 0.0 -- the best achievable under
-    this objective, the unique maximum, never a fabricated bonus.
+    """The die-with-zero score for ``min_after_tax_estate`` (issues #1009,
+    #1065, #1081), under the ObjectiveFunction.evaluate contract ("higher is
+    better"):
 
-    Issue #1065: the simple ``-net_estate`` arithmetic FABRICATES A BONUS for
-    an INSOLVENT death (``net_estate < 0`` -- financial assets spent to zero
-    with a debt still outstanding): ``-net_estate`` goes POSITIVE and grows
-    with the depth of insolvency, so a household dying owing $200k would
-    outrank one dying cleanly at $0. That inverts the "never a fabricated
-    bonus" claim above, which is the load-bearing reason the objective is
-    considered safe. The bug is LIVE on main, not latent: a schema-valid
-    contract -- an unsecured ``personal_loan`` (#763, not bounded by any LTV
-    cap) + a principal sale (#956/#964, which removes the house from the
-    estate) + ``liquidate_to_target`` (#1009) -- terminates at
-    ``net_estate = -50,000`` and a PRE-fix score of ``+50,000`` (the
-    fabricated bonus). The fix is a CORRECTION, not a precaution. It prices
-    the insolvency:
+        score = -drawable_after_tax - debts - insolvency
 
-      - SOLVENT (``net_estate >= 0``): ``score = -net_estate``. Unchanged --
-        closer to zero is better, clean $0 is the unique best (0.0), and
-        every solvent household (incl. the golden household) ranks byte-
-        identically to pre-#1065.
-      - INSOLVENT (``net_estate < 0``): ``score = -|net_estate| -
-        insolvency`` where ``insolvency = |net_estate|`` (a named field on
-        ``EstateResult``). The score is ``-2|net_estate|`` -- strictly below
-        clean $0 (0.0) AND strictly below a solvent trajectory that left the
-        SAME |net_estate| on the table (``-|net_estate|``), with the score
-        growing strictly more negative as insolvency deepens. Insolvency is
-        PRICED, not hidden: ``-$1``-insolvent is distinguishable from
-        ``-$1M``-insolvent (the gradient a ``-inf`` infeasibility sentinel
-        would collapse -- the #850 trap: "``except Exception: score = -inf``
-        makes a crashing strategy indistinguishable from a bad one").
+    where ``drawable_after_tax`` is ``EstateResult``'s named spend-down
+    surface -- every estate pot EXCEPT the designated principal residence,
+    after its own deemed-disposition tax (= ``net_estate + debts -
+    house_equity``) -- and ``debts``/``insolvency`` are the named terminal-
+    debt and #1065 insolvency fields. Reuses ``compute_after_tax_estate`` --
+    no second spelling of the death-tax math (DP#3/DP#9) -- and no second
+    spelling of the decomposition either: every term is read off a NAMED
+    ``EstateResult`` field, not magic arithmetic.
 
-    Residual crossover (DISCLOSED, not hidden): the 2:1 penalty MOVES (not
-    eliminates) the tie that rejects ``-abs(net_estate)``. An insolvency of $X
-    ties a solvent surplus of $2X and OUTRANKS any solvent surplus above $2X.
-    This meets the issue's stated acceptance (clean $0 strictly outranks any
-    insolvency -- ``0.0 > -2|net|``) and the issue sanctioned option (A),
-    which has the same class of behaviour. The crossover is pinned by
-    ``tests/test_issue_1065_*.py::TestInsolvencyCrossover`` so a future
-    switch to option (C) (infeasibility) is a deliberate, visible decision.
-    This fix does NOT unblock #1042, whose reproduction is entirely
-    solvent-regime (every row's ``net_estate`` positive, so the ``net >= 0``
-    branch fires and the penalty never executes); #1042 needs #1037 plus the
-    solvent-regime inversion filed as #1081.
+    Issue #1081 -- why the score is NOT ``-net_estate``: ``net_estate`` nets
+    debt against assets dollar-for-dollar, so under a ``-net_estate`` score a
+    strategy that BORROWS and does not repay buys exactly one point of score
+    per borrowed dollar while total assets stay flat. "Minimise the estate"
+    is not "die with zero": die-with-zero means ASSETS are consumed, and
+    converting assets into debt must never improve the score. The fix is
+    structural, not a patched branch:
+
+      - The score ranks the SPEND-DOWN surface (``drawable_after_tax``), not
+        the balance-sheet residual. The residence is outside it -- consumed
+        by living in it, so KEEP-the-home is not failing to spend down; a
+        sold principal already contributes neither value nor debt (#956/#964)
+        and drops out naturally.
+      - Debt enters ONLY as a penalty (coefficient -1 via ``- debts``), never
+        as a netting term against assets. For any two otherwise-identical
+        trajectories, the one with more terminal debt scores strictly lower
+        -- borrowing buys zero score, with the gradient preserved (a $1 debt
+        is distinguishable from a $1M debt; the #850 trap forbids collapsing
+        them to a sentinel).
+      - Insolvency is priced AGAIN on top (``- insolvency``, the #1065 term):
+        dying owing $X stays strictly worse than dying solvent with $X left
+        unspent, and clean $0 (of the spend-down surface) remains the unique
+        best achievable score at 0.0 for a residence-free balance sheet.
+        Without this term an insolvent death would tie the equivalent
+        unspent surplus.
+
+    Disclosed consequence (not hidden): because the residence is outside the
+    spend-down surface, a death holding residence equity scores ABOVE 0.0 by
+    exactly that equity -- 0.0 is the unique best only among residence-free
+    balance sheets. This is correct within the optimizer's use (DP#22:
+    ranking STRATEGIES for the SAME household, whose residence is fixed or
+    explicitly sold by the strategy being ranked -- that sale is precisely
+    reproduction (2) of #1081, where KEEP-home now outranks SELL-and-die-
+    owing). It also means ``min_after_tax_estate`` and
+    ``max_after_tax_estate`` are exact mirrors ONLY on the debt-free,
+    residence-free slice of balance sheets; wherever debt or residence
+    equity exists, the min objective deliberately diverges from the negated
+    estate (that divergence IS the fix).
+
+    Residual crossover (DISCLOSED, carried over from #1065): on the
+    residence-free slice, an insolvency of $X still ties a solvent unspent
+    surplus of $2X and outranks any larger surplus (``-2X`` vs ``-S``).
+    Pinned by ``tests/test_issue_1065_*.py::TestInsolvencyCrossover`` so a
+    future switch to infeasibility semantics is a deliberate, visible
+    decision.
     """
     estate = compute_after_tax_estate(results, cfg)
-    net = estate.net_estate
-    if net >= 0.0:
-        return -net
-    # Insolvent: a plan that ends owing money is not a plan. The signed
-    # ``-net`` would be POSITIVE -- fabricating a bonus for dying deeper in
-    # debt (the #1065 bug, live on main). Price the insolvency as the
-    # distance from zero (``-|net|``) PLUS a named insolvency penalty
-    # (``estate.insolvency`` = ``|net|``), scoring ``-2|net|``: strictly below
-    # clean $0 and strictly below a solvent trajectory that left the same
-    # |net| on the table, deeper = strictly worse. The penalty is read off
-    # the NAMED ``insolvency`` field on EstateResult -- not magic arithmetic.
-    # See the docstring above for the 2:1 crossover this leaves behind.
-    return -abs(net) - estate.insolvency
+    # Every term is a NAMED EstateResult field (DP#32: no magic arithmetic):
+    #   - drawable_after_tax: the spend-down surface (all pots but the
+    #     residence, after tax) -- what "die with zero" asks to consume;
+    #   - debts: terminal non-mortgage debt, priced dollar-for-dollar as a
+    #     PURE penalty -- never netted against assets (the #1081 inversion);
+    #   - insolvency: the #1065 depth-of-insolvency penalty, kept so dying
+    #     owing $X stays strictly worse than leaving $X unspent.
+    return (-estate.drawable_after_tax
+            - estate.debts
+            - estate.insolvency)
 
 MIN_AFTER_TAX_ESTATE = ObjectiveFunction(
     name="min_after_tax_estate",
     fn=_neg_after_tax_estate,
     description=(
-        "MINIMIZE AFTER-TAX estate value -- the mirror of "
-        "max_after_tax_estate (issue #1009, a die-with-near-zero goal). "
-        "Ranks strategies toward the SMALLEST terminal after-tax estate: a "
-        "household that wants to burn through its savings by death (retire, "
-        "then deliberately spend the nest egg down) optimises toward near-zero "
-        "here, opposite to max_after_tax_estate's preserve-wealth ranking. "
-        "Uses the SAME deemed-disposition estate math "
-        "(compute_after_tax_estate) negated, so the two are provable mirrors "
-        "and no death tax is re-spelled. Pair with "
+        "DIE WITH ZERO (issues #1009/#1065/#1081): rank strategies toward "
+        "consuming the household's SPEND-DOWN savings by death. Scores "
+        "-(terminal drawable assets after deemed-disposition tax) with "
+        "terminal debt priced dollar-for-dollar as a PURE penalty and "
+        "terminal insolvency priced again on top -- debt is NEVER netted "
+        "against assets, so borrowing and not repaying buys zero score. The "
+        "designated principal residence sits OUTSIDE the spend-down target "
+        "(it is consumed by living in it); a strategy that sells it (#956/#964) "
+        "moves its proceeds into the spend-down pots naturally. Uses the SAME "
+        "deemed-disposition estate math (compute_after_tax_estate) -- no "
+        "death tax is re-spelled; see _neg_after_tax_estate for the exact "
+        "decomposition and its disclosed properties. Pair with "
         "retirement.liquidate_to_target so the drawdown actually liquidates "
         "residual drawable financial savings to meet the target before a "
         "shortfall is reported; a max-sustainable-spend / earliest-feasible-"

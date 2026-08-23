@@ -50,7 +50,10 @@ from countries.canada.rate_model import (
     amortization_schedule, annual_summary, monthly_payment,
 )
 from countries.canada.cashout_optimizer import compute_min_extraction, print_cashout_report
-from countries.canada.retirement import DrawdownOptimizer, RetirementState, project_retirement
+from countries.canada.retirement import (
+    DrawdownOptimizer, RetirementState, project_retirement,
+    get_oas_annual_max,  # DP#20 year-versioned (#1029)
+)
 from countries.canada.lsif_credit import compute_lsif_credit, lsif_from_config, LSIFPurchase
 # Issue #732 (DP#25): objective.py resolves the estate math through the
 # jurisdiction provider seam and cannot import countries.canada.estate. The
@@ -85,23 +88,38 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 
-# DP#13: fallback OAS annual amount used by compute_net_benefit() when the
-# household's config supplies no ``assumptions.oas_annual``. This is a named
-# fallback for ABSENT input only -- an explicit ``0`` is honoured (the
-# ``dict.get`` call below uses this as the default, NOT ``x or DEFAULT``, so
-# DP#32 is respected: a configured zero stays zero).
+# DP#13/DP#20: fallback OAS annual amount used by compute_net_benefit() when
+# the household's config supplies no ``assumptions.oas_annual``. This is a
+# named fallback for ABSENT input only -- an explicit ``0`` is honoured (the
+# ``dict.get`` calls below use it as the dict.get default, NOT
+# ``x or DEFAULT``, so DP#32 is respected: a configured zero stays zero).
 #
-# Provenance / divergence note: the year-versioned table
-# ``countries.canada.retirement.get_oas_annual_max(year)`` returns the
-# *actual* government-set OAS maximum per tax year (e.g. 8908 for 2026), and
-# that is the convention-consistent source used elsewhere (pension_split_optimizer
-# via #331, simulation_rules, retirement). Switching this fallback to
-# ``get_oas_annual_max(year)`` would CHANGE the value (8500 -> 8908 for 2026)
-# and therefore move optimizer results -- a behaviour change that is out of
-# scope for the byte-exact naming fix in #986 and must be a separate, deliberate
-# decision. The literal 8500 is preserved here so nothing moves until that
-# decision is made explicitly. See issue #986.
-_DEFAULT_OAS_ANNUAL = 8500
+# Issue #1029 (the deliberate decision #986 deferred): the fallback AMOUNT is
+# read live from the year-versioned government table
+# ``countries.canada.retirement.get_oas_annual_max(year)`` -- the same source
+# every other consumer uses (pension_split_optimizer via #331,
+# simulation_rules, retirement) -- instead of a frozen literal. The relevant
+# year is the household's simulation start year (``cfg['tax']['start_year']``,
+# which run_optimization always writes into the objective cfg); a hand-built
+# config without that block falls back to ``_CURRENT_YEAR``, the same
+# current-year convention compute_net_benefit already uses for its age and
+# LSIF math. For 2026 this reads 8908 (pre-#1029 it was the stale frozen
+# 8500), so optimizer net-benefit numbers MOVE for households omitting
+# ``assumptions.oas_annual`` -- that delta is the intended correctness fix.
+_CURRENT_YEAR = 2026
+
+
+def _default_oas_annual(cfg: Dict) -> float:
+    """Year-versioned OAS maximum for ABSENT ``assumptions.oas_annual`` (#1029).
+
+    Reads the live government table for the household's simulation start year;
+    an unknown year raises ValueError from ``get_oas_annual_max`` rather than
+    silently coercing (DP#32).
+    """
+    start_year = cfg.get('tax', {}).get('start_year')
+    if start_year is None:
+        start_year = _CURRENT_YEAR
+    return get_oas_annual_max(start_year)
 
 
 # ── Scenario-sweep parallelism (perf) ────────────────────────────────────────
@@ -359,7 +377,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
             # Compute CPP annual from monthly estimate
             cpp_annual = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
             # Compute OAS annual from config or defaults
-            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _DEFAULT_OAS_ANNUAL)
+            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
             # LIF withdrawal from simulation results (issue #230)
             lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
             ret_state = RetirementState(
@@ -383,7 +401,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
             # Compute actual retirement income from CPP + OAS + pension + LIF.
             cpp_monthly_estimated = primary.get('cpp_monthly_estimated', 0)
             cpp_annual_income = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
-            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _DEFAULT_OAS_ANNUAL)
+            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
             pension_income_annual = primary.get('pension_income_annual', 0)
             lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
             retirement_income = cpp_annual_income + oas_annual + pension_income_annual + lif_withdrawal
@@ -404,7 +422,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     # rate applied to capital gains. Use actual CPP/OAS/pension data from config.
     cpp_monthly_for_cg = primary.get('cpp_monthly_estimated', 0)
     cpp_annual_for_cg = cpp_monthly_for_cg * 12 if cpp_monthly_for_cg > 0 else 0
-    oas_annual_for_cg = cfg.get('assumptions', {}).get('oas_annual', _DEFAULT_OAS_ANNUAL)
+    oas_annual_for_cg = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
     pension_income_for_cg = primary.get('pension_income_annual', 0)
     lif_withdrawal_for_cg = getattr(final, 'lif_withdrawal', 0)
     retirement_income = cpp_annual_for_cg + oas_annual_for_cg + pension_income_for_cg + lif_withdrawal_for_cg
@@ -1732,51 +1750,170 @@ def _tranche_sweep_points(cfg: Dict, structure: Dict) -> List[Dict]:
     """Issue #1075: enumerate the concrete 3-tranche splits the optimizer
     sweeps for ONE tranches-declared structure at ONE refinance basis.
 
-    The split is of the basis's POST-REFINANCE charge: the house tranche is
-    pinned at its declared minimum (the household's house mortgage -- the
-    sweep decides what to do with the SURPLUS, it does not re-ask how big the
-    house mortgage is), and the surplus (charge - house minimum) is split
-    between the deductible investment tranche and the line at 0/25/50/75/100%
-    -- the same 5-point ladder ``_discover_draw_fraction_options`` uses
-    (#735), so the two sweeps speak the same granularity. Each point's
-    amounts SUM to the charge by construction (a partition, DP#18); the
-    overlay's own sum check is the backstop.
+    The split is of the basis's POST-REFINANCE charge, and BOTH axes move:
+
+      - the HOUSE amount is swept from its floor up to the charge: the
+        floor is the house tranche's declared ``min_house_floor``, defaulting
+        to 60% of the charge (``simulation_config._tranche_house_floor``),
+        and the steps are fixed 25k increments (coarsened to 50k/100k while
+        the house x split product would exceed ``_TRANCHE_SWEEP_CELL_CAP``
+        cells -- the optimizer stays fast, and a range that cannot fit
+        refuses loudly instead of silently dropping points, DP#32). The
+        charge and the cash-back threshold are always ON the grid, so the
+        incentive-boundary point is evaluated. The house tranche's
+        ``min_amount`` is NOT the floor anymore: it is the CASH-BACK
+        THRESHOLD, and putting the house mortgage below it -- FORGOING the
+        incentive -- is exactly the trade-off this sweep prices;
+      - the SURPLUS (charge - house) is split between the deductible
+        investment tranche and the line at 10% steps (0..100%, 11 points --
+        the finer grid replacing the old 5-point 25% ladder, so a 10% step
+        is reachable).
+
+    Each point's amounts SUM to the charge by construction (a partition,
+    DP#18); the overlay's own sum check is the backstop. Each point also
+    carries the cash-back facts it was scored at -- ``cash_back_amount`` /
+    ``cash_back_threshold`` (read off the declared origination cash-back
+    flow, when one is CONDITIONAL on the house amount; None otherwise) and
+    ``cash_back_credited`` (house >= the threshold) -- the cell composition
+    withholds the inflow when the credit is forgone, and the report states
+    the verdict beside the winning split (DP#9: the printed verdict is the
+    condition the printed net benefit was scored under).
 
     Returns one dict per point, each a copy of ``structure`` carrying its
     concrete ``tranche_amounts`` and the derived ``revolving_share`` (the
     line's share of the charge -- the #687 tag other machinery reads), or an
-    empty list when the basis's charge leaves no feasible split (the house
-    minimum alone exceeds the charge) -- the caller records the refusal.
+    empty list when the basis's charge leaves no feasible split (the sweep
+    FLOOR alone exceeds the charge) -- the caller records the refusal.
 
     Raises:
         ValueError: the structure's ``tranches`` spec is invalid
             (``simulation_config._validate_tranche_spec``: unknown kind,
-            overlapping kinds, ``min_amount`` on a non-house tranche,
-            ``deductible`` on a non-investment tranche, ``rate_type`` without
-            a rate) -- validated HERE, before any point is enumerated, so an
-            invalid template form is refused ONCE, as one named cell, never
-            per-sweep-point (DP#32, issue #1075).
+            overlapping kinds, ``min_amount``/``min_house_floor`` on a
+            non-house tranche, ``deductible`` on a non-investment tranche,
+            ``rate_type`` without a rate) -- validated HERE, before any
+            point is enumerated, so an invalid template form is refused
+            ONCE, as one named cell, never per-sweep-point (DP#32, issue
+            #1075).
+        ChargeLimitExceededError: the house sweep floor exceeds the charge,
+            or the house range cannot fit inside ``_TRANCHE_SWEEP_CELL_CAP``
+            cells even at the coarsest step -- refused loudly, naming the
+            remedy (a declared ``min_house_floor`` narrowing the range),
+            never silently dropping sweep points (DP#32).
     """
-    from simulation_config import _CHARGE_TOLERANCE, _validate_tranche_spec
+    from simulation_config import (
+        _CHARGE_TOLERANCE,
+        _structure_label,
+        _tranche_house_floor,
+        _validate_tranche_spec,
+    )
     prop = cfg.get('property', {})
     charge = prop.get('mortgage_balance', 0.0) + prop.get('margin_available', 0.0)
     by_kind = _validate_tranche_spec(structure)
-    house_tranche = by_kind.get('house')
-    house_min = house_tranche.get('min_amount', 0.0) if house_tranche else 0.0
-    surplus = charge - house_min
-    if surplus < -_CHARGE_TOLERANCE:
+    floor = _tranche_house_floor(by_kind, charge)
+    if floor > charge + _CHARGE_TOLERANCE:
         return []
-    surplus = max(0.0, surplus)
+    label = _structure_label(structure)
+    house_tranche = by_kind.get('house')
+    # The sweep's cash-back facts (issue #1075, optimizer half): the
+    # declared origination inflow's amount and condition, when the flow is
+    # CONDITIONAL (carries ``min_house_amount``). Presence-based (DP#32):
+    # no conditional cash-back -> both stay None -> every point carries
+    # ``cash_back_credited`` None (nothing to credit, forgo, or gate) and
+    # the report prints no note -- byte-identical to pre-#1075.
+    cash_back_amount = None
+    cash_back_threshold = None
+    if house_tranche is None:
+        # A structure with no house tranche has no house mortgage to sweep
+        # -- house pinned at 0, the surplus split between investment and
+        # line, exactly as before the house dimension existed.
+        house_amounts = [0.0]
+        anchor_threshold = None
+    else:
+        # The cash-back threshold the grid anchors on: the strictest of the
+        # structure's declared ``min_amount`` and the declared origination
+        # cash-back's ``min_house_amount`` (carried on the flow -- the
+        # sweep's credit condition), when either lies inside the swept range.
+        anchor_threshold = house_tranche.get('min_amount')
+        for cf in cfg.get('cash_flows', []):
+            condition = cf.get('min_house_amount')
+            if condition is not None:
+                cash_back_amount = cf['amount']
+                cash_back_threshold = condition
+                if anchor_threshold is None or condition > anchor_threshold:
+                    anchor_threshold = condition
+        house_amounts = _tranche_house_amounts(
+            charge, floor, anchor_threshold, label)
     points = []
-    for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
-        investment = surplus * fraction
-        line = surplus - investment
-        amounts = {'house': house_min, 'investment': investment, 'line': line}
-        point = dict(structure)
-        point['tranche_amounts'] = amounts
-        point['revolving_share'] = (line / charge) if charge > 0 else 0.0
-        points.append(point)
+    for house in house_amounts:
+        surplus = charge - house
+        for fraction in _TRANCHE_SPLIT_FRACTIONS:
+            investment = surplus * fraction
+            line = surplus - investment
+            point = dict(structure)
+            point['tranche_amounts'] = {
+                'house': house, 'investment': investment, 'line': line}
+            point['revolving_share'] = (line / charge) if charge > 0 else 0.0
+            # DP#32: presence-based, never a fabricated boolean -- a sweep
+            # with no conditional cash-back carries None (nothing to credit
+            # or forgo, nothing to gate). ``cash_back_amount`` and
+            # ``cash_back_threshold`` are set TOGETHER (one flow carries
+            # both), so a declared condition always has its threshold.
+            if cash_back_amount is None:
+                point['cash_back_credited'] = None
+            else:
+                point['cash_back_credited'] = (
+                    house >= cash_back_threshold - 1e-6)
+            point['cash_back_amount'] = cash_back_amount
+            point['cash_back_threshold'] = cash_back_threshold
+            points.append(point)
     return points
+
+
+def _tranche_house_amounts(charge: float, floor: float,
+                           threshold: Optional[float], label: str) -> List[float]:
+    """The house amounts ONE 3-tranche sweep enumerates (issue #1075,
+    optimizer half): from ``floor`` up to the ``charge`` in fixed
+    ``_TRANCHE_HOUSE_STEPS`` increments, with the charge always included as
+    the top and the cash-back ``threshold`` (when it lies inside the range)
+    included as an anchor -- the boundary where the incentive flips is
+    exactly what this sweep exists to price, so it must be evaluated, not
+    merely straddled. The step coarsens (25k -> 50k -> 100k) while the
+    house count x split count would exceed ``_TRANCHE_SWEEP_CELL_CAP``; a
+    range that still cannot fit refuses loudly (DP#32 -- never silently
+    drop sweep points, and never hand the user a surprise 30-minute sweep).
+    """
+    from simulation_config import _CHARGE_TOLERANCE
+    split_count = len(_TRANCHE_SPLIT_FRACTIONS)
+    for step in _TRANCHE_HOUSE_STEPS:
+        amounts = {floor}
+        h = floor
+        while h <= charge - _CHARGE_TOLERANCE:
+            amounts.add(round(h))
+            h += step
+        if threshold is not None and floor - _CHARGE_TOLERANCE <= threshold <= charge:
+            amounts.add(threshold)
+        amounts.add(charge)
+        amounts = sorted(amounts)
+        if len(amounts) * split_count <= _TRANCHE_SWEEP_CELL_CAP:
+            return amounts
+    raise ChargeLimitExceededError(
+        f"structure {label!r}: its house sweep range of "
+        f"${floor:,.0f}..${charge:,.0f} cannot fit inside the "
+        f"{_TRANCHE_SWEEP_CELL_CAP}-cell sweep cap even at the coarsest "
+        f"step -- declare a min_house_floor nearer the charge (or a smaller "
+        f"charge) to narrow the range, or the sweep would silently drop "
+        f"candidate splits (issue #1075)."
+    )
+
+
+# Issue #1075 (optimizer half): the sweep's fixed axes -- the house-amount
+# steps (coarsened while the cell product exceeds the cap) and the
+# investment/line split ladder (10% steps, the finer grid replacing the old
+# 5-point 25% ladder), and the per-structure cell cap that keeps the
+# optimizer fast (house grid x split grid).
+_TRANCHE_HOUSE_STEPS = (25_000, 50_000, 100_000)
+_TRANCHE_SPLIT_FRACTIONS = tuple(i / 10 for i in range(11))
+_TRANCHE_SWEEP_CELL_CAP = 150
 
 
 def _compose_structure_cell(cfg: Dict, basis: Dict, structure: Dict) -> List[Dict]:
@@ -1823,9 +1960,10 @@ def _compose_structure_cell(cfg: Dict, basis: Dict, structure: Dict) -> List[Dic
         if not points:
             return [{'basis': basis, 'structure': structure, 'cfg': None,
                      'refusal': "ChargeLimitExceededError: the house tranche's "
-                                "minimum alone exceeds this basis's registered "
-                                "charge -- no 3-tranche split exists to sweep "
-                                "(issue #1075)."}]
+                                "sweep floor (the declared min_house_floor, "
+                                "defaulting to 60% of the charge) exceeds this "
+                                "basis's registered charge -- no 3-tranche "
+                                "split exists to sweep (issue #1075)."}]
         for point in points:
             cells.extend(_compose_structure_cell(cfg, basis, point))
         return cells
@@ -1841,6 +1979,21 @@ def _compose_structure_cell(cfg: Dict, basis: Dict, structure: Dict) -> List[Dic
             else:
                 cfg_basis = cfg
             cell['cfg'] = _apply_structure_scenario(cfg_basis, structure)
+            # Issue #1075 (optimizer half): a CONDITIONAL origination
+            # cash-back (the flow carries its ``min_house_amount`` -- see
+            # input_contract.py) is withheld when this point's house tranche
+            # is below the threshold. The sweep point's own
+            # ``cash_back_credited`` flag -- computed by
+            # ``_tranche_sweep_points`` from the SAME threshold -- is the
+            # single source of truth, so the verdict the report prints and
+            # the config the engine was scored at cannot disagree (DP#9). A
+            # flow with no condition is never touched (byte-identical for
+            # the unconditional and pre-#1075 paths); ``cell['cfg']`` is a
+            # fresh deep copy, so stripping is local to this cell.
+            if structure.get('cash_back_credited') is False:
+                cell['cfg']['cash_flows'] = [
+                    cf for cf in cell['cfg']['cash_flows']
+                    if cf.get('min_house_amount') is None]
         elif basis['cash_out'] > 0:
             cfg_basis = build_overlay_config(cfg, _candidate_overlay(cfg, basis))
             cell['cfg'] = _apply_sourcing_scenario(cfg_basis, structure)
@@ -1997,8 +2150,14 @@ def run_mortgage_structure_exploration(cfg: Dict, input_path: str = "input.json"
             # Issue #1075: the sweep point this row was scored at, carried ON
             # the row -- so the winning row's OWN tranche amounts are what the
             # report prints (DP#9: the printed optimal split cannot disagree
-            # with the row that produced it).
+            # with the row that produced it) -- and the point's cash-back
+            # verdict (whether the conditional origination cash-back was
+            # credited under this house amount), which the report states
+            # beside the split.
             r['structure_tranche_amounts'] = structure.get('tranche_amounts')
+            r['structure_cash_back_amount'] = structure.get('cash_back_amount')
+            r['structure_cash_back_threshold'] = structure.get('cash_back_threshold')
+            r['structure_cash_back_credited'] = structure.get('cash_back_credited')
             r['income_scenario_id'] = inc['id']
             r['income_scenario_label'] = inc['label']
             # Issue #845: the refinance option -- and the leverage -- this
@@ -2070,8 +2229,12 @@ def winners_by_structure_scenario(results: List[Dict]) -> List[Dict]:
             'draw_fraction': best.get('draw_fraction', 0.0),
             # issue #1075: the 3-tranche sweep point that won for THIS
             # structure -- the optimal {house, investment, line} split, read
-            # off the row that produced it (None for a share-form structure).
+            # off the row that produced it (None for a share-form structure)
+            # -- and the cash-back verdict the split was scored under.
             'tranche_amounts': best.get('structure_tranche_amounts'),
+            'cash_back_amount': best.get('structure_cash_back_amount'),
+            'cash_back_threshold': best.get('structure_cash_back_threshold'),
+            'cash_back_credited': best.get('structure_cash_back_credited'),
             'net_benefit': best.get('net_benefit', 0),
             'ruined': bool(solvency.get('ruined', False)),
             'solvency': solvency,
@@ -2387,6 +2550,24 @@ def _print_structure_report_for_basis(results: List[Dict]) -> None:
                   f" (deductible)  +  line ${a['line']:,.0f}  =  ${total:,.0f} charge")
             print(f"          net benefit ${w['net_benefit']:,.0f}"
                   f" (strategy {w['strategy']})")
+            # Issue #1075 (optimizer half): state the cash-back verdict the
+            # winning split was scored under -- credited (house >= the
+            # threshold) or FORGONE (house below it, the trade-off this
+            # sweep exists to price). Only a CONDITIONAL cash-back prints
+            # anything (``cash_back_amount`` is carried only when the
+            # declared origination inflow is conditional): a household with
+            # no such declaration sees the exact pre-#1075 report.
+            if w.get('cash_back_amount') is not None:
+                thresh = w.get('cash_back_threshold')
+                if w.get('cash_back_credited'):
+                    verdict = (f"cash-back ${w['cash_back_amount']:,.0f} CREDITED "
+                               f"(house ${a['house']:,.0f} >= the "
+                               f"${thresh:,.0f} threshold)")
+                else:
+                    verdict = (f"cash-back ${w['cash_back_amount']:,.0f} FORGONE "
+                               f"(house ${a['house']:,.0f} below the "
+                               f"${thresh:,.0f} threshold)")
+                print(f"          {verdict}")
             if basis_cash_out > 0:
                 line_draw = min(basis_cash_out, a['line'])
                 advance = basis_cash_out - line_draw
@@ -2567,6 +2748,247 @@ def _print_property_funding_report(results: List[Dict]) -> None:
               f"${w['net_benefit']/1000:>7.0f}k")
     print(f"\n  The objective-winner is row 1. Each funding method is a real")
     print(f"  re-optimisation, not a restated input (DP#22).")
+
+
+def run_borrow_to_invest_exploration(cfg: Dict, input_path: str = "input.json",
+                                     objective: ObjectiveFunction = None
+                                     ) -> List[Dict]:
+    """Run the full optimizer once per (borrow-to-invest amount rung x income
+    scenario) cell -- issue #1036.
+
+    ``decisions.borrow_to_invest`` exists so a mortgage-free household (or any
+    household with a declared HELOC) can ask the tool to RANK drawing $X
+    against home equity and investing it in non-reg -- a one-shot, non-
+    readvanceable leverage decision independent of any mortgage -- rather than
+    hand-authoring one contract document per draw amount and diffing the
+    outputs. The amount ladder is the declared options array; the optimizer
+    also runs the implicit amount=0 (no-draw) baseline so 'do nothing' is
+    always the frame of reference (DP#33: a declaration is a lens, not a
+    blindfold -- the sweep is not replaced by the declared set, it is
+    annotated by it).
+
+    The draw reuses the year-0 margin-draw machinery already built for the
+    ``draw_fraction`` axis: each declared amount becomes a
+    ``draw_fraction = amount / margin_available`` rung, and ``run_optimization``
+    books ``lump_sum = margin_available * draw_fraction`` via
+    ``initial_state_for_run`` -> ``heloc_balance``, invests it in non-reg, and
+    the existing ``apply_margin_heloc_interest`` + ``sm_interest`` Leg 3 price
+    the interest and deduct it under ITA s.20(1)(c) (traced 100% investment --
+    a borrow-to-invest draw has no personal portion). No readvanceable
+    facility is required: a mortgage-free household with a HELOC gets a
+    leveraged trajectory without any SM readvance.
+
+    Crossed with EVERY declared income scenario (``decisions.income[]``,
+    #665) so the household can see whether the answer *changes* under job
+    loss -- a leverage choice that is optimal at full income and ruinous on
+    EI is precisely what this composition must surface (DP#5: anchor
+    decisions, overlay sensitivities; DP#22: the optimizer ranks, it doesn't
+    choose).
+
+    Returns the UNION of every (amount rung, income scenario) cell's ranked
+    results, each tagged with ``borrow_to_invest_id``/``borrow_to_invest_label``
+    /``borrow_to_invest_amount`` and ``income_scenario_id``/
+    ``income_scenario_label``. When the household declares NO
+    ``borrow_to_invest`` this is never called -- ``main`` gates it on a
+    declaration, so the golden trajectory is byte-identical (DP#32).
+    """
+    from scenario_discovery import discover_anchors
+    options = list(cfg.get('borrow_to_invest_options', []))
+    if not options:
+        return []
+    # D2 / #1081 / #1037: REFUSE borrow-to-invest under any regime where
+    # outstanding HELOC debt distorts the ranking toward 'borrow the most and
+    # die owing it', until the asset-liability coupling (#1037) and/or the
+    # objective's debt-floor (#1081) land. The root cause is NOT
+    # liquidate_to_target -- it is that `min_after_tax_estate` scores
+    # `-net_estate`, and outstanding debt reduces net_estate 1:1, so 'borrow
+    # the maximum and die owing it' ranks highest (proven dollar-exact: every
+    # borrowed dollar left outstanding buys exactly one dollar of objective
+    # score, terminal assets identical across rungs). #1068 (the #1065
+    # insolvency floor) does NOT cover this: every net_estate here is positive,
+    # so its branch never fires (verified by transplant). This refusal is at
+    # the EXPLORATION INVOCATION point (not at load-time contract mapping) so
+    # it sees the RESOLVED objective -- including a `--objective
+    # min_after_tax_estate` CLI override, which a load-time check cannot catch
+    # (the objective is resolved per-run, not per-document). Borrow-to-invest
+    # stays available under the accumulation / wealth-maximising objectives
+    # (e.g. the default max_net_benefit, max_after_tax_estate), never shipping
+    # a ranked table that rewards dying in debt (DP#32: refuse loudly, never
+    # silently wrong).
+    _obj_name = getattr(objective, 'name', None)
+    _liq = cfg.get('retirement', {}).get('liquidate_to_target') is True
+    _d2_reasons = []
+    if _obj_name == 'min_after_tax_estate':
+        _d2_reasons.append(
+            "the run is scored under min_after_tax_estate, which scores "
+            "-net_estate; outstanding borrow-to-invest HELOC debt reduces "
+            "net_estate dollar-for-dollar, so 'borrow the maximum and die "
+            "owing it' ranks highest (the inverted incentive filed as "
+            "#1081). This fires whether or not liquidate_to_target is set.")
+    if _liq:
+        _d2_reasons.append(
+            "retirement.liquidate_to_target is true: the die-with-zero "
+            "drawdown liquidates the borrowed non-reg pot to fund spending "
+            "while the matching HELOC is never repaid in decumulation "
+            "(apply_sm_unwind is gated on the SM sleeve, which this draw "
+            "does not touch), so the household spends the borrowed proceeds "
+            "and dies owing the HELOC (the unwind coupling is #1037).")
+    if _d2_reasons:
+        raise ValueError(
+            "decisions.borrow_to_invest is declared but the run is scored "
+            "under a regime where outstanding borrow-to-invest debt distorts "
+            "the ranking toward 'borrow the most and die owing it'. Refusing "
+            "rather than shipping that table (DP#32). Reason(s):\n  - "
+            + "\n  - ".join(_d2_reasons)
+            + "\n\nborrow-to-invest remains available under the accumulation "
+            "/ wealth-maximising objectives (e.g. max_net_benefit, "
+            "max_after_tax_estate). Track #1081 (the min_after_tax_estate debt "
+            "floor) and #1037 (the asset-liability unwind coupling) for when "
+            "this refusal can lift.")
+    margin_available = cfg.get('property', {}).get('margin_available', 0)
+    income_scenarios = discover_anchors(cfg)['income']
+    # The amount ladder: the implicit no-draw baseline + one rung per declared
+    # option. The baseline is the frame of reference every draw is read
+    # against (DP#33); without it, a declared $50k draw that beats a $100k draw
+    # would also silently beat 'do nothing', and the household would never see
+    # that the better answer was to not borrow at all.
+    cells = [{'id': 'no_draw', 'label': 'No draw (baseline)',
+              'amount': 0.0, 'draw_fraction': 0.0}]
+    for opt in options:
+        cells.append({
+            'id': opt['id'], 'label': opt['label'],
+            'amount': opt['amount'],
+            'draw_fraction': opt['amount'] / margin_available,
+            # Issue #1040: hold_draw=true opts this rung's draw OUT of the
+            # RRSP-refund HELOC paydown sweep. Carried on the cell so the
+            # per-cell cfg_variant below can set the engine-facing flag.
+            'hold_draw': opt.get('hold_draw', False),
+        })
+
+    scenarios = []
+    for cell in cells:
+        for inc in income_scenarios:
+            cfg_variant = _apply_income_scenario(cfg, inc)
+            # D3 / #1036: honour target_account=non_reg. fill_room
+            # (strategy.py) is a registered-first waterfall, so by default a
+            # borrow-to-invest draw would land ~75% in RRSP/TFSA -- the exact
+            # s.18(11) landing the schema refuses. Reuse the EXISTING
+            # borrowed-money-to-deductible-non-reg mechanism
+            # (property.refinance_advance_deductible_non_reg -> fill_room's
+            # deductible_non_reg_first) to front-load the WHOLE draw into
+            # non_reg before the registered waterfall runs, so the declared
+            # target_account is actually executed (DP#32: a declared decision
+            # the engine does not execute is the defect class this PR closes).
+            # The no-draw baseline (amount=0) sets 0 -- a no-op (there is no
+            # lump_sum to route). This is the ONE place borrow-to-invest
+            # diverges from a plain draw_fraction sweep.
+            # N1: ADD to any declared #792 refinance advance split rather than
+            # clobbering it -- a declared household decision must not be
+            # silently overwritten (DP#32). fill_room caps deductible_non_reg_
+            # first at the year-0 lump sum, and this exploration's lump sum is
+            # the borrow-to-invest draw (no refinance cash-out here), so the
+            # additive value still routes the whole draw to non_reg; the
+            # declared #792 split is preserved (added to), not discarded.
+            existing_split = cfg_variant['property'].get('refinance_advance_deductible_non_reg')
+            if existing_split is None:
+                existing_split = 0
+            cfg_variant['property']['refinance_advance_deductible_non_reg'] = existing_split + cell['amount']
+            # Issue #1040: a hold_draw option books its draw through the same
+            # initial_state_for_run -> heloc_balance machinery, but opts OUT
+            # of the rrsp_refund_heloc_paydown sweep: set the engine-facing
+            # flag this cell's runs read (property.borrow_to_invest_hold_draw
+            # -> SimulationConfig.hold_borrow_to_invest_draw -> the paydown
+            # rule). The no-draw baseline and non-hold-draw rungs never set
+            # it -- absent stays False, the pre-#1040 sweep behaviour,
+            # byte-identical (DP#18: the decision modifies a key the engine
+            # actually reads; DP#32: absence is the fallback).
+            if cell.get('hold_draw'):
+                cfg_variant['property']['borrow_to_invest_hold_draw'] = True
+            scenarios.append((cell, inc, {'kwargs': dict(
+                cfg=cfg_variant, input_path=input_path, objective=objective,
+                draw_fraction_options=[cell['draw_fraction']])}))
+
+    all_results: List[Dict] = []
+    for (cell, inc, _payload), results in zip(
+            scenarios, _map_scenarios([s[2] for s in scenarios])):
+        for r in results:
+            r['borrow_to_invest_id'] = cell['id']
+            r['borrow_to_invest_label'] = cell['label']
+            r['borrow_to_invest_amount'] = cell['amount']
+            r['income_scenario_id'] = inc['id']
+            r['income_scenario_label'] = inc['label']
+        all_results.extend(results)
+
+    all_results.sort(
+        key=lambda r: ranking_key(r, r.get('objective_score', r.get('net_benefit', 0))),
+        reverse=True)
+    return all_results
+
+
+def winners_by_borrow_to_invest(results: List[Dict]) -> List[Dict]:
+    """Pure logic half of the borrow-to-invest ranking report (issue #1036):
+    for each amount rung present in ``results`` (in SCORE order -- best first,
+    because ``run_borrow_to_invest_exploration`` sorts by objective before
+    ``dict.fromkeys``; the no-draw baseline is NOT necessarily row 1, it is the
+    frame of reference ranked on its merits, DP#33), find the winning strategy
+    and record it. Split out from ``_print_borrow_to_invest_report`` so 'which
+    draw amount does the objective prefer' is a directly testable fact, not
+    something only observable by parsing printed text (mirrors
+    ``winners_by_property_funding``).
+
+    Returns one dict per amount rung:
+        {id, label, amount, strategy, net_benefit, objective_score}
+    The winner is selected by the RESOLVED objective's score (defaulting to
+    net_benefit), so a non-default ``decisions.objective`` reorders the
+    borrow-to-invest ranking exactly as it reorders the headline (DP#22).
+    """
+    seen = list(dict.fromkeys(r['borrow_to_invest_id'] for r in results))
+    winners = []
+    for bid in seen:
+        rows = [r for r in results if r['borrow_to_invest_id'] == bid]
+        best = max(rows, key=lambda r: r.get(
+            'objective_score', r.get('net_benefit', 0)))
+        winners.append({
+            'id': bid,
+            'label': rows[0]['borrow_to_invest_label'],
+            'amount': rows[0]['borrow_to_invest_amount'],
+            'strategy': best.get('strategy', '?'),
+            'net_benefit': best.get('net_benefit', 0),
+            'objective_score': best.get(
+                'objective_score', best.get('net_benefit', 0)),
+        })
+    return winners
+
+
+def _print_borrow_to_invest_report(results: List[Dict]) -> None:
+    """Issue #1036: print the borrow-to-invest ranking -- one row per amount
+    rung in SCORE order (best first; the no-draw baseline is ranked on its
+    merits, not pinned to row 1, DP#33), naming the winning strategy each
+    rung produces. The objective-winner is the top row (DP#22: the optimizer
+    ranks, the user reads the winner).
+
+    D9: the numeric column shown is the RESOLVED objective's score
+    (``objective_score`` -- the value that drove the order), not ``net_benefit``.
+    Under ``min_after_tax_estate`` the score is the negated after-tax estate
+    and ``net_benefit`` decreases monotonically down the ranking, so showing
+    ``net_benefit`` would contradict the order; showing the score makes the
+    table self-consistent. Under ``max_net_benefit`` the two are equal."""
+    winners = winners_by_borrow_to_invest(results)
+    if not winners:
+        return
+    obj_name = _objective_name_for_results(results) or 'max_net_benefit'
+    print(f"\n  🏦  BORROW-TO-INVEST RANKING (decisions.borrow_to_invest -- issue #1036)")
+    print(f"      objective: {obj_name}")
+    print(f"\n  {'#':<3} {'Draw':<36} {'Amount':>10} {'Strategy':<28} {'Score':>12}")
+    print(f"  {'-'*92}")
+    for i, w in enumerate(winners):
+        amt = f"${w['amount']/1000:.0f}k" if w['amount'] else '—'
+        score = w.get('objective_score', w.get('net_benefit', 0))
+        print(f"  {i+1:<3} {w['label']:<36} {amt:>10} {w['strategy']:<28} "
+              f"{score:>12,.0f}")
+    print(f"\n  The objective-winner is row 1. The no-draw baseline (—) is the")
+    print(f"  frame of reference every draw is read against (DP#33); each draw")
+    print(f"  amount is a real re-optimisation, not a restated input (DP#22).")
 
 
 def _print_decumulation_shortfall_report(results: List[Dict], cfg: Dict) -> None:
@@ -4167,6 +4589,19 @@ def main():
         funding_results = run_property_funding_exploration(
             cfg, args.input, objective=objective)
         _print_property_funding_report(funding_results)
+
+    # Issue #1036: borrow-to-invest ranking (draw $X against a declared HELOC
+    # at year 0, invest in non-reg, deduct the interest under ITA s.20(1)(c)).
+    # DP#16: gated on the household actually having declared
+    # ``decisions.borrow_to_invest`` -- no CLI flag, no opt-in, and no extra
+    # optimizer pass for the households that have not asked this question yet.
+    # A mortgage-free household with a HELOC can express leverage this way; a
+    # household that declares none never reaches the exploration and the golden
+    # trajectory is byte-identical (DP#32).
+    if cfg.get('borrow_to_invest_options'):
+        btv_results = run_borrow_to_invest_exploration(
+            cfg, args.input, objective=objective)
+        _print_borrow_to_invest_report(btv_results)
 
     # ── Export ── (DP#15: output files go to ~/.cache, not repo root)
     if args.export_csv:

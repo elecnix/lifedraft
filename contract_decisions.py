@@ -16,6 +16,9 @@ sweeps. This module maps every one of them:
 * ``decisions.resp_action`` and ``decisions.objective`` -- the RESP wind-down
   scenarios, and the objective the optimizer ranks under (#862), validated
   against ``objective.OBJECTIVES`` at this single ingestion boundary.
+* ``decisions.borrow_to_invest`` -- the one-shot leverage decision (#1036),
+  resolved against the declared kind=heloc facility and refused loudly on any
+  source/amount/target the engine cannot honour.
 """
 from __future__ import annotations
 
@@ -626,3 +629,142 @@ def map_declared_objective(doc: Dict) -> Optional[str]:
                 f"(DP#32). Valid objectives: {sorted(OBJECTIVES)}."
             )
     return declared_objective
+
+
+def map_borrow_to_invest(doc: Dict, heloc: Optional[Dict]) -> List[Dict[str, Any]]:
+    """``decisions.borrow_to_invest[]`` -> ``legacy['borrow_to_invest_options']``.
+
+    Issue #1036: a first-class, swept, objective-ranked one-shot
+    borrow-to-invest decision (draw $X against a declared HELOC at year 0,
+    invest the proceeds in non-reg, deduct the interest under ITA s.20(1)(c)).
+    Mirrors ``decisions.mortgage.structure_options[]`` /
+    ``refinance_options[]``: each declared option is a rung on the amount
+    ladder, and the optimizer also runs the implicit amount=0 (no-draw)
+    baseline so 'do nothing' is always the frame of reference (DP#33: a
+    declaration is a lens, not a blindfold -- the sweep is not replaced by the
+    declared set, it is annotated by it). The draw reuses the year-0
+    margin-draw machinery (initial_state_for_run); the interest is priced and
+    deducted by the existing drawn-margin rules, traced 100% investment. No
+    readvanceable facility is required -- a mortgage-free household with a
+    HELOC can express leverage this way.
+
+    DP#32 boundary refusals (a partial/unsupported declaration must FAIL
+    LOUDLY, never silently coerce to the supported value):
+
+    * ``source`` must resolve to a declared kind=heloc liability. A typo or a
+      reference to a non-heloc liability (a margin account, an unsecured
+      line_of_credit) is refused loudly -- the engine draws against a
+      property-secured HELOC in this slice; other sources are follow-up.
+    * ``amount`` must be > 0 and <= the source HELOC's limit. A draw larger
+      than the limit is refused (it would silently cap, hiding the over-limit
+      declaration); a zero/negative amount is refused (it is not a
+      borrow-to-invest candidate, it is the no-draw baseline the sweep already
+      runs implicitly).
+    * ``target_account`` must be ``non_reg``. Registered targets (RRSP/TFSA)
+      are non-deductible under s.18(11) and are refused loudly until a
+      separate slice models them.
+
+    Returns ``[]`` when the household declares none: an empty list is a
+    household with no borrow-to-invest question (the golden path), and the
+    caller keeps the key out of the internal shape entirely so a
+    no-borrow-to-invest household round-trips byte-identically, matching every
+    other optional block (DP#24/DP#32). The unwind trigger (#1017 decumulation
+    lever) is NOT modelled in this slice.
+    """
+    borrow_to_invest = list(doc["decisions"].get("borrow_to_invest", []))
+    if not borrow_to_invest:
+        return []
+
+    # The set of declared kind=heloc liability ids + their limits, for
+    # source resolution and the amount<=limit check. The engine supports a
+    # single HELOC facility today (_find_liability returns one), but the
+    # schema permits more than one, so resolve by id across all of them.
+    heloc_limits = {
+        liab["id"]: liab["limit"]
+        for liab in doc.get("liabilities", [])
+        if liab["kind"] == "heloc"
+    }
+    # The engine models ONE HELOC facility today: `heloc` (found by
+    # contract_liabilities.resolve_liability_facilities, scoped to the
+    # principal residence then any heloc) is that facility, and
+    # `property.margin_available` is ITS limit. The single-facility charge
+    # check refuses two helocs on the PRINCIPAL residence, but a SECOND heloc
+    # on a non-principal (recreational/rental) property passes it -- so
+    # `heloc_limits` can hold more than one entry (D5). A borrow-to-invest
+    # source must be the FACILITY heloc (`heloc`): the draw is booked on
+    # `new_heloc_balance` (the engine's one drawn margin), at the facility's
+    # rate and charge room. A source naming any other heloc (e.g. a
+    # recreational-property line) would pass the amount<=limit check against
+    # THAT line's limit while the draw actually hits the principal facility --
+    # silently aliasing another liability, exactly the DP#32 defect. Refuse
+    # unless source == the facility.
+    facility_heloc_id = heloc["id"] if heloc else None
+    btv_options: List[Dict[str, Any]] = []
+    for opt in borrow_to_invest:
+        source_id = opt["source"]
+        if source_id not in heloc_limits:
+            raise ContractAdaptationError(
+                f"decisions.borrow_to_invest[id={opt['id']!r}] declares "
+                f"source={source_id!r}, but no kind=heloc liability with "
+                f"that id is declared (declared heloc ids: "
+                f"{sorted(heloc_limits)}). This slice draws against a "
+                f"property-secured HELOC only; a margin account or an "
+                f"unsecured line_of_credit source is follow-up. Refusing "
+                f"loudly rather than silently drawing against nothing or "
+                f"silently aliasing another liability (DP#32)."
+            )
+        if facility_heloc_id is None or source_id != facility_heloc_id:
+            raise ContractAdaptationError(
+                f"decisions.borrow_to_invest[id={opt['id']!r}] declares "
+                f"source={source_id!r}, but the engine's single drawn "
+                f"HELOC facility is {facility_heloc_id!r} (whose limit is "
+                f"property.margin_available). A draw against any other "
+                f"heloc -- e.g. a non-principal-property line -- would pass "
+                f"the amount<=limit check against THAT line while the draw "
+                f"actually books on the principal facility, silently "
+                f"aliasing another liability (D5/DP#32). Refusing loudly; "
+                f"multi-facility support is follow-up."
+            )
+        amount = opt["amount"]
+        if amount <= 0:
+            raise ContractAdaptationError(
+                f"decisions.borrow_to_invest[id={opt['id']!r}] declares "
+                f"amount={amount}, which is not a borrow-to-invest draw. "
+                f"The no-draw baseline is the implicit amount=0 rung the "
+                f"sweep already includes; a declared option must be a real "
+                f"draw > 0. Refusing loudly (DP#32)."
+            )
+        source_limit = heloc_limits[source_id]
+        if amount > source_limit:
+            raise ContractAdaptationError(
+                f"decisions.borrow_to_invest[id={opt['id']!r}] declares "
+                f"amount={amount:,.0f} > source {source_id!r}'s limit "
+                f"({source_limit:,.0f}). The draw is capped at the HELOC's "
+                f"limit at runtime; declaring an over-limit amount would "
+                f"silently cap, hiding the over-limit declaration. Refusing "
+                f"loudly rather than silently drawing less than declared "
+                f"(DP#32)."
+            )
+        # target_account is enforced by the schema's enum ("non_reg" only)
+        # -- a registered target (RRSP/TFSA) is non-deductible under s.18(11)
+        # and is refused loudly at schema validation, never silently coerced.
+        # No duplicate check here (DP#9: validate_contract enforces the enum
+        # before this loop runs).
+        btv_entry = {
+            "id": opt["id"],
+            "label": opt["label"],
+            "source": source_id,
+            "amount": amount,
+            "target_account": opt["target_account"],
+        }
+        # Issue #1040: hold_draw is OPTIONAL (the schema does not require
+        # it and declares no default), so absence and false are the SAME
+        # value here -- both mean 'run the existing RRSP-refund paydown
+        # sweep' (DP#32: the fallback is for absent input, and the schema
+        # does not distinguish absent from false). Emitted only when
+        # declared true so a config that omits it round-trips byte-
+        # identically (DP#24) -- the pre-#1040 internal shape is unchanged.
+        if opt.get("hold_draw"):
+            btv_entry["hold_draw"] = True
+        btv_options.append(btv_entry)
+    return btv_options

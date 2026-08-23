@@ -440,6 +440,44 @@ class TaxDataProvider:
             for b in brackets
         ]
 
+    def get_split_brackets(self, year: int = 2026,
+                           province: str = "quebec") -> tuple:
+        """The combined bracket list SPLIT into its two jurisdiction slices.
+
+        Returns ``(federal_slice, provincial_slice)`` in the same dict format
+        ``get_combined_brackets`` returns. The federal slice carries the
+        provincial-abatement reduction (exactly as ``_combine_brackets``
+        applies it), so valuing amount A federally and amount B provincially
+        sums to the combined valuation of ``A + B`` when the slices' amounts
+        partition it — which is what lets a deduction with a FEDERAL-only
+        limit be priced without a blended rate (issue #1035: s.20(1)(c)
+        investment interest has no federal investment-income limit; only TA
+        s.336.0.1 caps the Quebec slice).
+
+        Raises ValueError when no tax data exists for the year/province — the
+        same loud failure ``get_combined_brackets`` produces (DP#32).
+        """
+        data = self._load_year(year, "canada", province)
+        federal_source = data.federal_brackets
+        if not federal_source:
+            federal_source = self._load_year(
+                year, "canada", "federal").federal_brackets
+        abatement = data.provincial_abatement
+        # Scale the federal brackets by the abatement exactly as
+        # _combine_brackets does, so fed-slice + prov-slice reproduces the
+        # combined list's piecewise rates when summed (DP#9: one spelling).
+        federal_scaled = [
+            TaxBracket(min_income=b.min_income, max_income=b.max_income,
+                       rate=round(b.rate * (1 - abatement), 4), label=b.label)
+            for b in federal_source]
+
+        def _fmt(merged):
+            return [{"min": b.min_income, "max": b.max_income, "rate": b.rate,
+                     "label": b.label} for b in merged]
+
+        return (_fmt(self._merge_overlapping(federal_scaled)),
+                _fmt(self._merge_overlapping(list(data.provincial_brackets))))
+
     def get_rrsp_limit(self, year: int, country: str = "canada") -> float:
         """Get the RRSP dollar limit for a year."""
         data = self._load_year(year, country, "federal")

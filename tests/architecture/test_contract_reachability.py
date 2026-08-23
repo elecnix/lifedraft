@@ -704,6 +704,11 @@ def _valid_liability_for_kind(kind: str) -> Dict:
     if kind == "heloc":
         liab["readvanceable"] = False
         liab["capitalize_interest"] = False
+        # Issue #1036: the engine refuses a heloc opening balance > 0 loudly
+        # (a draw is a simulation decision, #577); balance = 0 (undrawn) is the
+        # documented accepted state, so the gate still tests heloc CONSUMPTION
+        # (its rate reaches the property block) rather than the refusal path.
+        liab["balance"] = {"amount": 0, "as_of": "2026-01-01"}
     if kind == "mortgage":
         liab["collateral"] = "principal_residence"
         liab["amortization"] = {"years": 20, "payment_monthly": 800}

@@ -313,6 +313,56 @@ class TestCashBack(unittest.TestCase):
               else "post-tax"}
              for cf in doc.get("cash_flows", [])])
 
+    def test_a_conditional_cash_back_carries_its_house_condition_on_the_flow(self):
+        """Issue #1075 (optimizer half): a cash_back declaring
+        ``min_house_amount`` is CONDITIONAL on the swept house tranche -- the
+        threshold rides ON the origination cash-flow (the sweep's cell
+        composition withholds the inflow below it), and a cash_back that
+        declares none carries NO such key (DP#13/DP#32: absence of the key
+        IS the marker -- the credit stays unconditional, byte-identical to
+        pre-#1075)."""
+        doc = _load_doc()
+        _mortgage(doc)["cash_back"] = {"amount": 1200.0, "clawback_rate": 0.5,
+                                       "term_years": 5,
+                                       "min_house_amount": 600_000}
+        cfg = ic.to_internal_config(doc)
+        start_year = int(doc["as_of"][:4])
+        flow = next(cf for cf in cfg["cash_flows"]
+                    if cf["year"] == start_year and cf["amount"] == 1200.0)
+        self.assertEqual(flow["min_house_amount"], 600_000)
+
+        # Absent condition -> no key on the flow (unconditional credit).
+        doc2 = _load_doc()
+        _mortgage(doc2)["cash_back"] = {"amount": 1200.0, "clawback_rate": 0.5,
+                                        "term_years": 5}
+        cfg2 = ic.to_internal_config(doc2)
+        flow2 = next(cf for cf in cfg2["cash_flows"]
+                     if cf["year"] == start_year and cf["amount"] == 1200.0)
+        self.assertNotIn("min_house_amount", flow2)
+
+    def test_the_summed_credit_uses_the_strictest_house_condition(self):
+        """The aggregated origination inflow is ONE credit, so its condition
+        is the STRICTEST declared one: a $600k-threshold house tranche plus a
+        $650k-threshold investment tranche yields one $1,450 inflow that is
+        credited only for a house at/above $650k -- the whole credit is
+        withheld below it, never a partial credit (DP#32: the sweep reports
+        one verdict, so the condition must be one threshold)."""
+        doc = _load_doc()
+        _mortgage(doc)["cash_back"] = {"amount": 1200.0, "clawback_rate": 0.5,
+                                       "term_years": 5,
+                                       "min_house_amount": 600_000}
+        doc["liabilities"] = doc["liabilities"] + [
+            _tranche(_mortgage(doc), "invest_tranche", 10_000, 0.065,
+                     cash_back={"amount": 250.0, "clawback_rate": 0.0,
+                                "term_years": 3,
+                                "min_house_amount": 650_000}),
+        ]
+        cfg = ic.to_internal_config(doc)
+        start_year = int(doc["as_of"][:4])
+        flow = next(cf for cf in cfg["cash_flows"]
+                    if cf["year"] == start_year and cf["amount"] == 1450.0)
+        self.assertEqual(flow["min_house_amount"], 650_000)
+
     def test_the_inflow_reaches_the_engine_at_year_zero(self):
         """The credited cash-back is not config-only prose: running the
         engine, year-0 annual_savings rises by exactly the inflow (the

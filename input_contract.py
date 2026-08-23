@@ -84,8 +84,8 @@ from contract_assumptions import (
     map_retirement,
 )
 from contract_decisions import (
-    map_contribution_strategies, map_declared_objective, map_income_scenarios,
-    map_mortgage_decisions, map_resp_action_scenarios,
+    map_borrow_to_invest, map_contribution_strategies, map_declared_objective,
+    map_income_scenarios, map_mortgage_decisions, map_resp_action_scenarios,
 )
 from contract_estate import _family_pre_window, _map_estate
 from contract_liabilities import map_consumer_loans, resolve_liability_facilities
@@ -317,6 +317,19 @@ def to_internal_config(doc: Dict) -> Dict:
     deposit_products = list(doc["decisions"].get("deposit_products", []))
     if deposit_products:
         legacy["deposit_products"] = deposit_products
+
+    # Issue #1036: decisions.borrow_to_invest -- the one-shot, swept,
+    # objective-ranked leverage decision (draw against the declared HELOC at
+    # year 0, invest in non-reg, deduct the interest under ITA s.20(1)(c)).
+    # Mapped (and its DP#32 boundary refusals raised) by
+    # contract_decisions.map_borrow_to_invest, which needs the resolved HELOC
+    # facility to reject a source naming any other heloc. Emitted only when
+    # the household declares some: an empty list is a household with no
+    # borrow-to-invest question (the golden path), so a no-borrow-to-invest
+    # household round-trips byte-identically (DP#24/DP#32).
+    btv_options = map_borrow_to_invest(doc, heloc)
+    if btv_options:
+        legacy["borrow_to_invest_options"] = btv_options
 
     # Issue #692 (epic #690 bite 1): the couple's NON-principal properties reach
     # the annual balance sheet as a first-class `properties` list

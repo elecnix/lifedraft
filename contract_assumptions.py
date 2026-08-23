@@ -140,6 +140,19 @@ def map_assumptions(doc: Dict, start_year: int) -> tuple:
         resp_account_settings["resp_study_start_age"] = resp_beliefs["study_start_age"]
         resp_account_settings["resp_study_duration_years"] = resp_beliefs["study_duration_years"]
         resp_account_settings["resp_used_for_education"] = resp_beliefs["used_for_education"]
+
+    # Issue #993 (DP#21): the household's sleeve return beliefs pass through
+    # VERBATIM into the internal shape, where risk_allocation's
+    # `_resolve_return_beliefs` reads them to price the recommended mix's
+    # MC risk metrics. Not flattened key-by-key here: a PARTIAL declaration
+    # is legitimate input -- risk_allocation merges it over its documented
+    # defaults, so flattening (or defaulting missing keys) HERE would
+    # duplicate that merge and freeze this file's spelling of the defaults
+    # (DP#9: one spelling of each belief). Absent block = absent key; an
+    # explicit 0.0 survives (`is not None`, never `or` -- DP#32).
+    return_beliefs = assumptions.get("return_beliefs")
+    if return_beliefs is not None:
+        assumptions_cfg["return_beliefs"] = dict(return_beliefs)
     return assumptions_cfg, resp_account_settings
 
 

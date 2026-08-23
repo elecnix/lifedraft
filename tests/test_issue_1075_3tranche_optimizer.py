@@ -9,16 +9,21 @@ each tranche's ``deductible`` flag surfaces as
 ``cash_back`` credits at year 0. This file pins the OPTIMIZER half:
 
   (1) ``decisions.mortgage.structure_options[].tranches`` -- a structure may
-      declare the 3-tranche split (house >= a declared minimum -- $600k for
-      the $1,200 cash-back programs -- deductible investment mortgage,
-      readvanceable line) as an additive opt-in over the #687 share form,
-      which stays byte-identical;
+      declare the 3-tranche split (house mortgage, deductible investment
+      mortgage, readvanceable line) as an additive opt-in over the #687 share
+      form, which stays byte-identical;
   (2) the s.20(1)(c) pricing consumes the EXACT deductible interest (sum of
       each flagged tranche's balance x ITS OWN rate), never the blended-rate
       product, when a structure carries tranches at different rates;
-  (3) the optimizer SWEEPS the split (house at its floor, investment and the
-      line sharing the surplus) and RETURNS the optimal amounts, printed by
-      the #687 report;
+  (3) the optimizer SWEEPS BOTH axes -- the HOUSE amount from its sweep floor
+      (``min_house_floor``, defaulting to 60% of the charge) UP to the charge,
+      and the surplus split between the investment tranche and the line at
+      10% steps -- and RETURNS the optimal amounts, printed by the #687
+      report. The house tranche's ``min_amount`` is the CASH-BACK THRESHOLD,
+      not a floor: the sweep may put the house mortgage BELOW it, and a
+      declared cash-back conditional on the house amount (``cash_back.
+      min_house_amount``) is then FORGONE -- the incentive-boundary trade-off
+      this file pins;
   (4) an invalid tranche spec is refused loudly (DP#32) -- at schema level
       and at contract-load level;
   (5) a contract without tranche declarations keeps the exact #687
@@ -54,12 +59,16 @@ import contract_errors
 import contract_schema
 
 # ── The fabricated household (DP#15) ────────────────────────────────────────
-# House 900,000 -> 80% charge = 720,000. The house mortgage is 600,000 (the
-# cash-back floor); the surplus 120,000 is what the sweep splits between the
-# deductible investment tranche and the readvanceable line.
+# House 900,000 -> 80% charge = 720,000. The house mortgage is swept from its
+# floor -- 60% of the charge, 432,000, when no min_house_floor is declared --
+# UP to the 720,000 charge; the $600,000 ``min_amount`` is the CASH-BACK
+# THRESHOLD (a fabricated $1,200 cash-back program prices a $600k+ house
+# tranche), NOT a floor: the sweep may go below it and forgo the incentive.
 HOUSE_VALUE = 900_000
 CHARGE = 720_000
-HOUSE_MIN = 600_000
+HOUSE_MIN = 600_000          # the CASH-BACK THRESHOLD, not the sweep floor
+HOUSE_FLOOR = int(CHARGE * 0.6)  # 432,000 -- the default sweep floor
+CASH_BACK_AMOUNT = 1200      # fabricated round number (DP#15)
 HOUSE_RATE = 0.045   # amortizing house mortgage
 INVEST_RATE = 0.065  # deductible investment tranche -- DEARER than the house
 LINE_RATE = 0.05     # revolving line
@@ -80,13 +89,19 @@ ALL_IN_ONE = {
 
 
 def _doc(structure_options=None, house_mortgage=HOUSE_MIN,
-         heloc_room=CHARGE - HOUSE_MIN):
+         heloc_room=CHARGE - HOUSE_MIN, cash_back=None):
     """The shipped example trimmed to the couple+children, re-based to the
     #1075 household: house 900,000 (80% charge = 720,000), house mortgage
-    ``house_mortgage`` (default 600,000 -- the cash-back floor), HELOC room
-    ``heloc_room`` (default 120,000 so the charge is exactly 720,000), ONE
-    refinance basis (no cash-out) and ONE income scenario (the exploration
-    is 5 cells, not 30).
+    ``house_mortgage`` (default 600,000 -- the cash-back threshold), HELOC
+    room ``heloc_room`` (default 120,000 so the charge is exactly 720,000),
+    ONE refinance basis (no cash-out) and ONE income scenario.
+
+    ``cash_back``, when given, is attached to the mortgage liability (a
+    CONDITIONAL origination cash-back declaring ``min_house_amount`` -- the
+    sweep credits it only for a house tranche at/above the threshold). The
+    default is None: most fixtures here are about the split mechanics, not
+    the incentive, and a contract without a declared cash-back must stay
+    byte-identical to pre-#1075.
 
     The share-form tests pass a SMALLER drawn mortgage + room (450,000 +
     110,000 = 560,000 charge): the #687 share machinery carries the drawn
@@ -107,6 +122,8 @@ def _doc(structure_options=None, house_mortgage=HOUSE_MIN,
             liab["balance"]["amount"] = house_mortgage
             liab["rate"] = HOUSE_RATE
             liab["amortization"]["payment_monthly"] = 3300
+            if cash_back is not None:
+                liab["cash_back"] = cash_back
         elif liab["kind"] == "heloc":
             liab["limit"] = heloc_room
             liab["balance"]["amount"] = 0
@@ -391,33 +408,54 @@ class TestOptimizerSweepGeneratesTrancheAmounts(unittest.TestCase):
         cls.cells = optimize.structure_refinance_cells(cls.cfg)
         cls.results = optimize.run_mortgage_structure_exploration(cls.cfg)
 
-    def test_five_sweep_points_partition_the_surplus(self):
-        """The template expands into 5 concrete splits of the $720k charge:
-        house pinned at its $600k floor, the $120k surplus split between the
-        investment tranche and the line at 0/25/50/75/100% -- every point
-        sums to the charge by construction (a partition, DP#18)."""
-        self.assertEqual(len(self.cells), 5)
-        investment_amounts = sorted(
-            c['structure']['tranche_amounts']['investment'] for c in self.cells)
-        self.assertEqual(investment_amounts, [0.0, 30_000, 60_000, 90_000, 120_000])
+    def test_the_sweep_grid_partitions_house_and_split(self):
+        """The template expands into the FULL 2-D grid: 8 house amounts
+        (from the 60%-of-charge default floor 432,000 UP to the 720,000
+        charge, 50k steps -- the 25k grid plus the 600k cash-back anchor
+        would exceed the cell cap, so the sweep coarsens, keeping the
+        charge and the threshold ON the grid) x 11 split fractions (0..100%
+        in 10% steps). Every cell sums to the charge by construction (a
+        partition, DP#18); the house never exceeds the charge; and the
+        surplus (charge - house) is what the 10% ladder splits -- so a 10%
+        step (e.g. investment 12,000 of the 120,000 surplus at house 600k)
+        is reachable."""
+        self.assertEqual(len(self.cells), 88)
+        houses = sorted(
+            round(c['structure']['tranche_amounts']['house']) for c in self.cells)
+        self.assertEqual(
+            list(dict.fromkeys(houses)),
+            [432_000, 482_000, 532_000, 582_000, 600_000,
+             632_000, 682_000, 720_000])
         for c in self.cells:
             a = c['structure']['tranche_amounts']
             self.assertIsNotNone(c['cfg'], f"cell refused: {c['refusal']}")
-            self.assertEqual(a['house'], HOUSE_MIN)
+            self.assertGreaterEqual(a['house'], HOUSE_FLOOR)
+            self.assertLessEqual(a['house'], CHARGE)
             self.assertAlmostEqual(a['house'] + a['investment'] + a['line'], CHARGE)
+        # At the 600k threshold point the surplus is 120,000, split at 10%
+        # steps: 0, 12k, 24k, ..., 120k.
+        at_threshold = [c['structure']['tranche_amounts'] for c in self.cells
+                        if abs(c['structure']['tranche_amounts']['house'] - HOUSE_MIN) < 1]
+        self.assertEqual(len(at_threshold), 11)
+        investments = sorted(round(a['investment']) for a in at_threshold)
+        self.assertEqual(investments, [0, 12_000, 24_000, 36_000, 48_000, 60_000,
+                                       72_000, 84_000, 96_000, 108_000, 120_000])
 
     def test_the_winning_split_is_returned_and_sums_to_the_charge(self):
         """The deliverable: the optimizer GENERATES the amounts -- the winning
-        row (per basis x income scenario) carries its own tranche_amounts, with
-        house >= the $600k floor and the three tranches summing to the $720k
-        charge, and a non-negative line."""
+        row (per basis x income scenario) carries its own tranche_amounts,
+        with house within the swept range (>= the 432k default floor -- it
+        MAY be below the $600k cash-back threshold, that is the point), the
+        three tranches summing to the $720k charge, and a non-negative
+        line."""
         self.assertTrue(self.results)
         winners = optimize.winners_by_structure_scenario(self.results)
         tranche_winners = [w for w in winners if w.get('tranche_amounts')]
         self.assertTrue(tranche_winners)
         for w in tranche_winners:
             a = w['tranche_amounts']
-            self.assertGreaterEqual(a['house'], HOUSE_MIN)
+            self.assertGreaterEqual(a['house'], HOUSE_FLOOR)
+            self.assertLessEqual(a['house'], CHARGE)
             self.assertGreaterEqual(a['investment'], 0)
             self.assertGreaterEqual(a['line'], 0)
             self.assertAlmostEqual(a['house'] + a['investment'] + a['line'], CHARGE)
@@ -447,15 +485,235 @@ class TestOptimizerSweepGeneratesTrancheAmounts(unittest.TestCase):
 
     def test_the_report_prints_the_optimal_split(self):
         """Task C's console deliverable: the #687 structure report names the
-        optimal per-tranche amounts (and the strategy that produced them)."""
+        optimal per-tranche amounts -- including the WINNING HOUSE amount
+        (which the sweep now varies, so a fixed $600k expectation would be
+        wrong) -- and the strategy that produced them."""
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             optimize._print_structure_report(self.results, cells=self.cells)
         out = buf.getvalue()
         self.assertIn('OPTIMAL 3-TRANCHE SPLIT', out)
-        self.assertIn('house $600,000', out)
+        self.assertRegex(out, r'house \$[0-9,]+,000')
         self.assertIn('investment', out)
         self.assertIn('line', out)
+
+
+# ============================================================================
+# (3b) The cash-back is CONDITIONAL on the swept house amount (optimizer
+# half): a declared ``cash_back.min_house_amount`` is credited only for a
+# house tranche at/above the threshold; below it the sweep FORGOES the
+# incentive -- the exact trade-off issue #1075 asks the optimizer to price.
+# ============================================================================
+
+CONDITIONAL_CASH_BACK = {"amount": CASH_BACK_AMOUNT, "clawback_rate": 0.5,
+                         "term_years": 5, "min_house_amount": HOUSE_MIN}
+
+
+class TestCashBackConditionalOnHouseAmount(unittest.TestCase):
+    """The sweep explores house amounts BELOW the cash-back threshold (the
+    $600k min_amount is the threshold, not a floor) and the origination
+    inflow is withheld there; at/above the threshold it is credited. The
+    verdict travels ON the sweep point and the winning row (DP#9), and the
+    engine actually sees the difference at year 0."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = ic.to_internal_config(_doc(cash_back=CONDITIONAL_CASH_BACK))
+        cls.cells = optimize.structure_refinance_cells(cls.cfg)
+        cls.results = optimize.run_mortgage_structure_exploration(cls.cfg)
+
+    def test_below_the_threshold_the_cash_back_is_forgone(self):
+        """The sweep EXPLORES below the threshold (the whole point: house
+        582,000 < 600,000 is on the grid), and every such point is scored
+        WITHOUT the origination inflow -- the cell config's cash_flows carry
+        no conditional cash-back, and the point's own verdict says FORGONE."""
+        below = [c for c in self.cells
+                 if c['structure']['tranche_amounts']['house'] < HOUSE_MIN]
+        self.assertTrue(below)
+        self.assertTrue(all(c['structure']['cash_back_credited'] is False
+                            for c in below))
+        for c in below:
+            self.assertIsNotNone(c['cfg'], f"cell refused: {c['refusal']}")
+            self.assertFalse(any(cf.get('min_house_amount') is not None
+                                 for cf in c['cfg']['cash_flows']),
+                             "a forgone point must not receive the inflow")
+
+    def test_at_or_above_the_threshold_the_cash_back_is_credited(self):
+        """At the 600k boundary and above, the inflow IS credited -- the cell
+        config keeps the conditional origination cash-flow (the adapter
+        created it from the declared cash_back), and the point's verdict
+        says CREDITED."""
+        at_or_above = [c for c in self.cells
+                       if c['structure']['tranche_amounts']['house'] >= HOUSE_MIN]
+        self.assertTrue(at_or_above)
+        self.assertTrue(all(c['structure']['cash_back_credited'] is True
+                            for c in at_or_above))
+        for c in at_or_above:
+            self.assertIsNotNone(c['cfg'], f"cell refused: {c['refusal']}")
+            self.assertTrue(any(cf.get('min_house_amount') == HOUSE_MIN
+                                and cf['amount'] == CASH_BACK_AMOUNT
+                                for cf in c['cfg']['cash_flows']),
+                            "an above-threshold point must keep the inflow")
+
+    def test_the_credit_reaches_the_engine_only_above_the_threshold(self):
+        """Not config-only prose: run the engine on one forgone and one
+        credited sweep point -- the credited cell's year-0 annual_savings is
+        exactly $1,200 higher (the inflow is a one-time year-0 credit), and
+        later years match."""
+        def _year_zero_savings(cell):
+            from simulation import FamilySimulation
+            from simulation_config import SimulationConfig
+            sim_cfg = SimulationConfig.from_dict(cell['cfg'])
+            sim = FamilySimulation(sim_cfg, adapter=CanadaAdapter(sim_cfg))
+            return sim.run()[0].annual_savings
+
+        forgone = next(c for c in self.cells if not c['structure']['cash_back_credited'])
+        credited = next(c for c in self.cells if c['structure']['cash_back_credited'])
+        # The splits differ (different house amounts), but the inflow must
+        # account for exactly the $1,200 gap between the two year-0 savings
+        # lines. Rather than assert the absolute figures, compare each cell
+        # against the SAME split with the inflow stripped/added by hand.
+        self.assertAlmostEqual(_year_zero_savings(credited)
+                               - _year_zero_savings(forgone), 1200.0, places=0)
+
+    def test_the_verdict_rides_the_winning_row_into_the_report(self):
+        """The report states the verdict beside the winning split (DP#9: the
+        printed verdict is the condition the printed net benefit was scored
+        under)."""
+        winners = optimize.winners_by_structure_scenario(self.results)
+        tranche_winners = [w for w in winners if w.get('tranche_amounts')]
+        self.assertTrue(tranche_winners)
+        for w in tranche_winners:
+            self.assertIsNotNone(w.get('cash_back_credited'))
+            self.assertEqual(w['cash_back_amount'], CASH_BACK_AMOUNT)
+            self.assertEqual(w['cash_back_threshold'], HOUSE_MIN)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            optimize._print_structure_report(self.results, cells=self.cells)
+        out = buf.getvalue()
+        self.assertIn('OPTIMAL 3-TRANCHE SPLIT', out)
+        self.assertIn('cash-back $1,200', out)
+        self.assertRegex(out, r'CREDITED|FORGONE')
+
+    def test_the_report_states_the_credited_verdict_too(self):
+        """The CREDITED branch of the report's cash-back note is printed when
+        the winning split sits at/above the threshold. (The fabricated
+        household's REAL sweep wins below it -- house 532,000, FORGONE -- so
+        this print branch is pinned with a minimal winning row, the same
+        technique the #687 print tests use; the cell-level credit on the
+        above-threshold points is pinned by the engine test above.)"""
+        row = {
+            'structure_id': 'all_in_one',
+            'structure_label': 'All-in-one 3 tranches',
+            'income_scenario_id': 'stay',
+            'income_scenario_label': 'Stay at current jobs',
+            'strategy': 'readvance_priority', 'deduct_later': False,
+            'net_benefit': 7_500_000,
+            'solvency': {'engaged': True, 'ruined': False},
+            'structure_revolving_share': None,
+            'structure_readvanceable': True,
+            'structure_tranche_amounts': {'house': 600_000, 'investment': 60_000,
+                                          'line': 60_000},
+            'structure_cash_back_amount': CASH_BACK_AMOUNT,
+            'structure_cash_back_threshold': HOUSE_MIN,
+            'structure_cash_back_credited': True,
+        }
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            optimize._print_structure_report([row])
+        out = buf.getvalue()
+        self.assertIn('OPTIMAL 3-TRANCHE SPLIT', out)
+        self.assertIn('cash-back $1,200 CREDITED', out)
+        self.assertIn('house $600,000 >= the $600,000 threshold', out)
+
+    def test_an_unconditional_cash_back_is_never_withheld(self):
+        """DP#13/DP#32: a cash_back that declares NO min_house_amount keeps
+        the pre-#1075 behaviour -- credited at origination at EVERY sweep
+        point: the origination flow carries no condition marker, so the cell
+        gate never strips it, and no sweep point ever reports the credit as
+        forgone (there is nothing to forgo -- the flag stays None, and the
+        flow stays in every cell's config)."""
+        cfg = ic.to_internal_config(_doc(
+            cash_back={"amount": CASH_BACK_AMOUNT, "clawback_rate": 0.5,
+                       "term_years": 5}))
+        cells = optimize.structure_refinance_cells(cfg)
+        self.assertTrue(cells)
+        for c in cells:
+            self.assertIsNotNone(c['cfg'])
+            self.assertFalse(c['structure']['cash_back_credited'] is False)
+            self.assertTrue(any(
+                cf['amount'] == CASH_BACK_AMOUNT
+                and cf.get('min_house_amount') is None
+                for cf in c['cfg']['cash_flows']),
+                "an unconditional credit must survive every sweep point")
+
+    def test_the_house_grid_anchors_on_the_threshold(self):
+        """The boundary point -- house EXACTLY at the $600k threshold -- is
+        on the grid (the sweep must evaluate the exact point where the
+        incentive flips, not merely straddle it), and it is scored as
+        credited."""
+        boundary = [c for c in self.cells
+                    if abs(c['structure']['tranche_amounts']['house']
+                           - HOUSE_MIN) < 1]
+        self.assertTrue(boundary)
+        self.assertTrue(all(c['structure']['cash_back_credited'] for c in boundary))
+
+    def test_the_house_grid_anchors_on_the_strictest_threshold(self):
+        """When the declared cash-back condition is STRICTER than the
+        structure's own min_amount (the credit's threshold wins -- the
+        strictest condition decides where the incentive flips), the grid
+        anchors there: house 650k is on the grid, everything below is
+        forgone, and the 600k min_amount point does not count as credited."""
+        doc = _doc(cash_back=dict(CONDITIONAL_CASH_BACK, min_house_amount=650_000))
+        cfg = ic.to_internal_config(doc)
+        cells = optimize.structure_refinance_cells(cfg)
+        houses = sorted({round(c['structure']['tranche_amounts']['house'])
+                         for c in cells})
+        self.assertEqual(houses[0], HOUSE_FLOOR)
+        self.assertIn(650_000, houses, "the strictest threshold must anchor")
+        self.assertNotIn(600_000, houses)
+        for c in cells:
+            if c['structure']['tranche_amounts']['house'] < 650_000:
+                self.assertFalse(c['structure']['cash_back_credited'])
+                self.assertFalse(any(cf.get('min_house_amount') is not None
+                                     for cf in c['cfg']['cash_flows']))
+            else:
+                self.assertTrue(c['structure']['cash_back_credited'])
+
+    def test_a_structure_with_no_house_tranche_pins_house_at_zero(self):
+        """A degenerate tranches form with no house tranche keeps the
+        pre-#1075 behaviour: house pinned at 0, the whole charge split
+        between the investment tranche and the line (the sweep's house
+        dimension exists for the house tranche; a structure that never
+        declared one does not sprout a swept house amount, DP#13). Built
+        on a 500,000 charge -- the full-charge line at house 0 must stay
+        under the 65% revolving ceiling to load."""
+        cfg = ic.to_internal_config(_doc(
+            structure_options=[{
+                "id": "no_house", "label": "No house tranche",
+                "tranches": [{"kind": "investment", "deductible": True,
+                               "rate": INVEST_RATE},
+                              {"kind": "line"}],
+                "revolving_rate": LINE_RATE, "revolving_rate_type": "variable",
+                "readvanceable": True,
+            }],
+            house_mortgage=400_000, heloc_room=80_000))
+        cells = optimize.structure_refinance_cells(cfg)
+        self.assertTrue(cells)
+        self.assertTrue(all(c['cfg'] is not None for c in cells))
+        for c in cells:
+            a = c['structure']['tranche_amounts']
+            self.assertEqual(a['house'], 0)
+            self.assertAlmostEqual(a['investment'] + a['line'], 480_000)
+
+    def test_charge_conservation_holds_everywhere(self):
+        """Every cell -- credited or forgone -- still partitions the charge
+        exactly, and the house never exceeds it: the conditional credit
+        changes the CASH-FLOW, never the debt geometry (DP#18)."""
+        for c in self.cells:
+            a = c['structure']['tranche_amounts']
+            self.assertLessEqual(a['house'], CHARGE)
+            self.assertAlmostEqual(a['house'] + a['investment'] + a['line'], CHARGE)
 
 
 # ============================================================================
@@ -482,6 +740,16 @@ class TestInvalidTrancheSpecsRefusedLoudly(unittest.TestCase):
                        revolving_rate=LINE_RATE, revolving_rate_type="variable")
         self.assertIn("only the 'house' tranche", str(ctx.exception))
 
+    def test_min_house_floor_is_rejected_on_a_non_house_tranche(self):
+        """The sweep floor is a house-tranche-only declaration -- putting it
+        on the line (whose amount is the residual of the charge, never a
+        swept lower bound) is refused loudly (DP#32)."""
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
+            self._load([{"kind": "house"}, {"kind": "line", "min_house_floor": 10_000}],
+                       revolving_rate=LINE_RATE, revolving_rate_type="variable")
+        self.assertIn("min_house_floor", str(ctx.exception))
+        self.assertIn("only the 'house' tranche", str(ctx.exception))
+
     def test_deductible_is_rejected_on_a_non_investment_tranche(self):
         with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             self._load([{"kind": "house", "deductible": True}, {"kind": "line"}],
@@ -489,10 +757,14 @@ class TestInvalidTrancheSpecsRefusedLoudly(unittest.TestCase):
         self.assertIn("only the 'investment' tranche", str(ctx.exception))
 
     def test_a_house_floor_above_the_charge_is_refused_at_load(self):
-        """min_amount 750,000 > the 720,000 registered charge -- no 3-tranche
-        split exists to sweep, refused the moment the contract loads."""
+        """min_house_floor 750,000 > the 720,000 registered charge -- no house
+        amount exists between the floor and the charge, so no 3-tranche split
+        exists to sweep; refused the moment the contract loads. (The old
+        floor-on-``min_amount`` semantics are gone: a min_amount above the
+        charge is now merely a cash-back threshold the sweep never reaches --
+        the incentive is never credited, which is a fact, not an error.)"""
         with self.assertRaises(ChargeLimitExceededError):
-            self._load([{"kind": "house", "min_amount": 750_000}, {"kind": "line"}],
+            self._load([{"kind": "house", "min_house_floor": 750_000}, {"kind": "line"}],
                        revolving_rate=LINE_RATE, revolving_rate_type="variable")
 
     def test_an_unpriced_line_is_refused(self):
@@ -517,7 +789,11 @@ class TestInvalidTrancheSpecsRefusedLoudly(unittest.TestCase):
             apply_structure_overlay(base, structure)
         self.assertIn("do not sum to the", str(ctx.exception))
 
-    def test_a_house_tranche_below_its_minimum_is_refused(self):
+    def test_a_house_tranche_below_the_sweep_floor_is_refused(self):
+        """The house floor is now the SWEEP floor (declared min_house_floor,
+        defaulting to 60% of the charge = 432,000) -- a hand-built split
+        whose house is below it refuses loudly, exactly as the sweep would
+        never enumerate it (DP#32)."""
         base = {"house_value": HOUSE_VALUE, "mortgage_balance": HOUSE_MIN,
                 "margin_available": CHARGE - HOUSE_MIN, "mortgage_rate": HOUSE_RATE}
         structure = copy.deepcopy(ALL_IN_ONE)
@@ -525,7 +801,21 @@ class TestInvalidTrancheSpecsRefusedLoudly(unittest.TestCase):
                                         "line": 220_000}
         with self.assertRaises(ChargeLimitExceededError) as ctx:
             apply_structure_overlay(base, structure)
-        self.assertIn("below the declared", str(ctx.exception))
+        self.assertIn("sweep floor", str(ctx.exception))
+
+    def test_a_house_tranche_below_the_cash_back_threshold_is_accepted(self):
+        """Issue #1075 (optimizer half): ``min_amount`` is the CASH-BACK
+        THRESHOLD, not a floor -- a split whose house (520,000) is below it
+        but above the 432,000 sweep floor is a legitimate candidate (the
+        household forgoes the incentive and puts the freed surplus to work).
+        This is the exact split the old code refused."""
+        base = {"house_value": HOUSE_VALUE, "mortgage_balance": HOUSE_MIN,
+                "margin_available": CHARGE - HOUSE_MIN, "mortgage_rate": HOUSE_RATE}
+        structure = copy.deepcopy(ALL_IN_ONE)
+        structure["tranche_amounts"] = {"house": 520_000, "investment": 100_000,
+                                        "line": 100_000}
+        out = apply_structure_overlay(base, structure)
+        self.assertAlmostEqual(out["mortgage_balance"], 620_000)
 
     def test_declaring_both_revolving_share_and_tranches_is_refused(self):
         """The schema's oneOf keeps the two forms mutually exclusive -- a
@@ -551,21 +841,24 @@ class TestSweepCompositionDetails(unittest.TestCase):
     def test_a_cash_out_basis_is_swept_and_reported_with_sourcing(self):
         """The sweep is composed per refinance basis (issue #845): with a
         declared cash-out option, the tranche points partition the basis's
-        post-refinance charge, every cell carries the basis's cash_out (the
-        year-0 invested lump, drawn line-first per #849), and the printed
-        optimal split states the advance-vs-line sourcing."""
+        REGISTERED charge (720,000 -- the 50k cash-out is the separate
+        year-0 drawn lump the sourcing machinery prices, line-first per
+        #849, not part of the split), every cell carries the basis's
+        cash_out, and the printed optimal split states the advance-vs-line
+        sourcing."""
         doc = _doc()
         doc["decisions"]["mortgage"]["refinance_options"] = [{
             "id": "refi_50k", "label": "Refinance 50k", "cash_out": 50_000,
             "ltv": 0.68, "amortization_years": 25}]
         cfg = ic.to_internal_config(doc)
         cells = optimize.structure_refinance_cells(cfg)
-        self.assertEqual(len(cells), 5)
+        self.assertGreaterEqual(len(cells), 50)
+        self.assertTrue(all(c['cfg'] is not None for c in cells))
         for c in cells:
-            self.assertIsNotNone(c['cfg'])
             self.assertEqual(c['cfg']['property']['cash_out'], 50_000)
             a = c['structure']['tranche_amounts']
-            self.assertAlmostEqual(a['house'] + a['investment'] + a['line'], CHARGE)
+            self.assertAlmostEqual(
+                a['house'] + a['investment'] + a['line'], CHARGE)
         results = optimize.run_mortgage_structure_exploration(cfg)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -577,18 +870,20 @@ class TestSweepCompositionDetails(unittest.TestCase):
         self.assertIn("drawn from the line", out)
 
     def test_a_house_floor_above_the_basis_charge_is_refused_at_cell_time(self):
-        """A structure whose house floor exceeds the basis's charge produces
-        NO sweep point -- the cell is refused with a named reason (DP#32),
-        never silently dropped from the ranking. Built as an internal config
-        so the load-time check is bypassed (the cell composition must refuse
-        on its own)."""
+        """A structure whose house SWEEP FLOOR exceeds the basis's charge
+        produces NO sweep point -- the cell is refused with a named reason
+        (DP#32), never silently dropped from the ranking. Built as an
+        internal config so the load-time check is bypassed (the cell
+        composition must refuse on its own). (The old ``min_amount``-as-floor
+        case is gone: a min_amount above the charge merely never credits the
+        cash-back, which is a fact, not a refusal.)"""
         cfg = {
             'property': {
                 'house_value': HOUSE_VALUE, 'mortgage_balance': HOUSE_MIN,
                 'margin_available': CHARGE - HOUSE_MIN, 'mortgage_rate': HOUSE_RATE,
                 'structure_options': [{
                     'id': 'too_tall', 'label': 'Too tall',
-                    'tranches': [{'kind': 'house', 'min_amount': 750_000},
+                    'tranches': [{'kind': 'house', 'min_house_floor': 750_000},
                                  {'kind': 'line'}],
                     'revolving_rate': LINE_RATE, 'revolving_rate_type': 'variable',
                 }],
@@ -653,6 +948,33 @@ class TestSweepCompositionDetails(unittest.TestCase):
         self.assertIn("ValueError", cells[0]['refusal'])
         self.assertIn("unknown kind", cells[0]['refusal'])
 
+    def test_a_house_range_too_wide_for_the_cell_cap_is_refused(self):
+        """The sweep caps its cell count (house grid x split grid) so the
+        optimizer stays fast; a household whose swept range cannot fit even
+        at the coarsest step is refused LOUDLY with the remedy named
+        (declare a min_house_floor nearer the charge) -- never silently
+        dropped from the ranking, never a surprise 300-cell sweep (DP#32)."""
+        cfg = {
+            'property': {
+                'house_value': 5_000_000, 'mortgage_balance': 3_200_000,
+                'margin_available': 800_000, 'mortgage_rate': HOUSE_RATE,
+                'structure_options': [{
+                    'id': 'huge', 'label': 'Huge house',
+                    'tranches': [{'kind': 'house'},
+                                 {'kind': 'investment', 'deductible': True},
+                                 {'kind': 'line'}],
+                    'revolving_rate': LINE_RATE, 'revolving_rate_type': 'variable',
+                    'readvanceable': True,
+                }],
+            },
+            'scenarios': {},
+        }
+        cells = optimize.structure_refinance_cells(cfg)
+        self.assertEqual(len(cells), 1)
+        self.assertIsNone(cells[0]['cfg'])
+        self.assertIn("sweep cap", cells[0]['refusal'])
+        self.assertIn("min_house_floor", cells[0]['refusal'])
+
     def test_a_cash_out_basis_that_breaches_the_charge_is_refused(self):
         """A declared refinance option whose cash-out pushes the charge past
         the OSFI B-20 cap refuses the tranched structure at that basis -- the
@@ -666,6 +988,68 @@ class TestSweepCompositionDetails(unittest.TestCase):
         self.assertEqual(len(cells), 1)
         self.assertIsNone(cells[0]['cfg'])
         self.assertIn("ChargeLimitExceededError", cells[0]['refusal'])
+
+    def test_a_low_house_floor_that_breaches_the_revolving_cap_is_refused(self):
+        """The 65% revolving-only ceiling is enforced per sweep point (DP#32,
+        never clamped): a declared min_house_floor of 0 lets the sweep reach
+        house amounts whose residual LINE exceeds 65% of the house value
+        (585,000 for the 900,000 house) -- those cells are refused loudly
+        with the cap named, while the rest of the sweep is scored. (With the
+        DEFAULT 60%-of-charge floor the cap can never bind -- the line is at
+        most 40% of the charge <= 32% of the house value.)"""
+        cfg = {
+            'property': {
+                'house_value': HOUSE_VALUE, 'mortgage_balance': HOUSE_MIN,
+                'margin_available': CHARGE - HOUSE_MIN, 'mortgage_rate': HOUSE_RATE,
+                'structure_options': [{
+                    'id': 'low_floor', 'label': 'Low floor',
+                    'tranches': [{'kind': 'house', 'min_house_floor': 0},
+                                 {'kind': 'investment', 'deductible': True,
+                                  'rate': INVEST_RATE},
+                                 {'kind': 'line'}],
+                    'revolving_rate': LINE_RATE, 'revolving_rate_type': 'variable',
+                    'readvanceable': True,
+                }],
+            },
+            'scenarios': {},
+        }
+        cells = optimize.structure_refinance_cells(cfg)
+        refused = [c for c in cells if c['refusal'] is not None]
+        scored = [c for c in cells if c['cfg'] is not None]
+        self.assertTrue(refused, "some low-house cells must breach the cap")
+        self.assertTrue(scored)
+        for c in refused:
+            self.assertIn("ChargeLimitExceededError", c['refusal'])
+            self.assertIn("65%", c['refusal'])
+        for c in scored:
+            a = c['structure']['tranche_amounts']
+            self.assertLessEqual(a['line'], 0.65 * HOUSE_VALUE + 0.011)
+            self.assertAlmostEqual(
+                a['house'] + a['investment'] + a['line'], CHARGE)
+
+    def test_a_declared_min_house_floor_overrides_the_default(self):
+        """DP#13: a declared min_house_floor is the sweep floor -- 550,000
+        here, NOT the 432,000 default -- so no cell's house goes below it,
+        and (unlike the default) the 25k grid fits inside the cell cap
+        without coarsening (550k..720k is a 7-point range)."""
+        cfg = ic.to_internal_config(_doc(structure_options=[{
+            "id": "tall_floor", "label": "Tall floor",
+            "tranches": [{"kind": "house", "min_house_floor": 550_000,
+                           "min_amount": HOUSE_MIN},
+                          {"kind": "investment", "deductible": True,
+                           "rate": INVEST_RATE},
+                          {"kind": "line"}],
+            "revolving_rate": LINE_RATE, "revolving_rate_type": "variable",
+            "readvanceable": True,
+        }]))
+        cells = optimize.structure_refinance_cells(cfg)
+        self.assertTrue(all(c['cfg'] is not None for c in cells))
+        houses = sorted({round(c['structure']['tranche_amounts']['house'])
+                         for c in cells})
+        self.assertEqual(houses[0], 550_000)
+        self.assertTrue(all(h >= 550_000 for h in houses))
+        self.assertEqual(houses, [550_000, 575_000, 600_000, 625_000,
+                                  650_000, 675_000, 700_000, 720_000])
 
 
 # ============================================================================

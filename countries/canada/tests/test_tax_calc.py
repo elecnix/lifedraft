@@ -23,8 +23,10 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
+import inspect
 import unittest
 
+from tax_data import default_tax_provider
 from countries.canada.tax_calc import (
     federal_tax,
     quebec_tax,
@@ -90,11 +92,32 @@ class TestRRSPDeductLaterSavings(unittest.TestCase):
             rrsp_room=50000, annual_income=120000, years=5)
         self.assertGreater(now, 0)
 
-    def test_default_bracket_target(self):
-        """Default bracket target of $117,045."""
-        now, later = rrsp_deduct_later_savings(
+    def test_bracket_target_default_is_not_statutory(self):
+        """Issue #974 (DP#2): the ``bracket_target`` default must be the
+        0-means-auto-detect sentinel shared with
+        ``SimulationConfig.deduct_later_bracket_target``, never the real
+        2026 federal 26% boundary ($117,045) it used to spell inline."""
+        sig = inspect.signature(rrsp_deduct_later_savings)
+        default = sig.parameters['bracket_target'].default
+        self.assertEqual(default, 0.0,
+                         "bracket_target default should be 0.0 "
+                         "(0-means-auto-detect sentinel), got %r" % (default,))
+        self.assertNotEqual(default, 117045,
+                            "bracket_target default must not embed the "
+                            "real 2026 federal 26% boundary")
+
+    def test_default_call_still_prices_from_brackets(self):
+        """Calling without ``bracket_target`` still prices both savings
+        streams purely from the year-versioned combined brackets — the
+        function does not consume ``bracket_target``, so the sentinel
+        default changes nothing (issue #974)."""
+        brackets = default_tax_provider().get_combined_brackets(2026, "quebec")
+        via_default, _ = rrsp_deduct_later_savings(
             rrsp_room=30000, annual_income=150000, years=5)
-        self.assertGreater(now, 0)
+        via_explicit, _ = rrsp_deduct_later_savings(
+            rrsp_room=30000, annual_income=150000, years=5, brackets=brackets)
+        self.assertGreater(via_default, 0)
+        self.assertEqual(via_default, via_explicit)
 
 
 class TestSpousalRRSPBenefit(unittest.TestCase):
