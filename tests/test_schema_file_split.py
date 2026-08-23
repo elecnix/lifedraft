@@ -101,6 +101,24 @@ class PartRegistrationTest(unittest.TestCase):
                     "in .gitignore next to !schema/input_schema.json.")
 
 
+    def test_every_declared_part_ships_in_the_installed_package(self):
+        """A fragment that git tracks but setuptools does not copy is missing
+        from every non-editable install -- the schema composes in the repo and
+        raises FileNotFoundError for anyone who `pip install`ed it."""
+        import tomllib
+        pyproject = SCHEMA_DIR.parent / "pyproject.toml"
+        package_data = tomllib.loads(pyproject.read_text())["tool"]["setuptools"][
+            "package-data"]
+        patterns = set(package_data.get("schema", [])) | set(package_data.get("*", []))
+        import fnmatch
+        for rel in _root_spine()[ic.UNIVERSAL_PARTS_KEY]:
+            with self.subTest(part=rel):
+                self.assertTrue(
+                    any(fnmatch.fnmatch(rel, pat) for pat in patterns),
+                    f"schema/{rel} matches no package-data pattern in "
+                    f"pyproject.toml's [tool.setuptools.package-data] {sorted(patterns)}")
+
+
 class NoDuplicateDefinitionTest(unittest.TestCase):
     def test_no_def_name_is_declared_by_two_fragments(self):
         home = {}
