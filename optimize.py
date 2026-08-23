@@ -1757,7 +1757,7 @@ def _tranche_sweep_points(cfg: Dict, structure: Dict) -> List[Dict]:
 
       - the HOUSE amount is swept from its floor up to the charge: the
         floor is the house tranche's declared ``min_house_floor``, defaulting
-        to 60% of the charge (``simulation_config._tranche_house_floor``),
+        to 60% of the charge (``property_structure._tranche_house_floor``),
         and the steps are fixed 25k increments (coarsened to 50k/100k while
         the house x split product would exceed ``_TRANCHE_SWEEP_CELL_CAP``
         cells -- the optimizer stays fast, and a range that cannot fit
@@ -1885,7 +1885,7 @@ def _tranche_house_amounts(charge: float, floor: float,
     range that still cannot fit refuses loudly (DP#32 -- never silently
     drop sweep points, and never hand the user a surprise 30-minute sweep).
     """
-    from simulation_config import _CHARGE_TOLERANCE
+    from charge_limits import _CHARGE_TOLERANCE
     split_count = len(_TRANCHE_SPLIT_FRACTIONS)
     for step in _TRANCHE_HOUSE_STEPS:
         amounts = {floor}

@@ -35,7 +35,8 @@ from countries.canada.adapter import CanadaAdapter
 from countries.canada.strategies import STRATEGY_BALANCED
 from optimizer import GridOptimizer
 from simulation import FamilySimulation
-from simulation_config import SimulationConfig, YearResult
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from trajectory_invariants import (
     InvariantBreachedError, RUN_PATH_INVARIANTS, assert_run_invariants,
     run_invariant,
