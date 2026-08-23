@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cite review
-        uses: elecnix/cite@v0.1.4
+        uses: elecnix/cite@v0.2.1
         with:
           model_api_key: ${{ secrets.MODEL_API_KEY }}
           model_base_url: https://openrouter.ai/api/v1
