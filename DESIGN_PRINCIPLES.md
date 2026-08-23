@@ -167,7 +167,9 @@ The directory structure mirrors political hierarchy: `countries/<country>/` for 
 | `countries.canada.rate_model` | Mortgage regulation (amortization, penalties, rate terms) |
 | `countries.canada.family` | Spousal RRSP attribution (ITA s.146(8.3)), family taxation |
 | `countries.canada.retirement` | OAS, CPP/QPP, RRIF, pension splitting |
+| `countries.canada.zev_incentive` | Federal iZEV zero-emission vehicle incentive (opened 2019-05-01, closed 2025-03-31) |
 | `countries.canada.provinces.quebec.quebec_deduction` | Quebec interest deduction limit (TP-1 Schedule L) |
+| `countries.canada.provinces.quebec.roulez_vert` | Quebec Roulez vert new-vehicle rebate (declining schedule, priced through 2026-12-31) |
 
 ## 11. Unit tests verify each module's contract; integration tests verify composition by driving the fold
 
@@ -316,6 +318,8 @@ Expected value alone cannot distinguish a safe strategy from a risky one. The op
 The user provides their asset allocation, risk tolerance, and planned decisions as input data. The simulator computes the tax consequences — deduction amounts, grant eligibility, clawback thresholds, after-tax returns — and ranks candidate decisions by after-tax outcome. What the simulator does not do: choose investments, assess insurance needs, predict market returns, evaluate rental property cash flow, optimize corporate tax structures, or recommend specific financial products. When a scenario requires data that belongs to those domains — rental income for cash damming, margin call risk for leverage, investment return assumptions for break-even analysis — the user provides it as input; the simulator uses it to compute the tax impact. Risk measures (DP#29) report the tax impact of a user-specified stress scenario; they do not predict the probability of that scenario occurring. This boundary keeps `input.json` bounded (describe your situation, not your entire financial life), keeps the module list bounded (one module per government program that affects personal tax), and keeps the output bounded (after-tax numbers, not investment advice).
 
 **In scope**: RRSP/TFSA/RESP/FHSA contribution and withdrawal timing, mortgage interest deductibility, HELOC tracing, OAS clawback, pension splitting, CPP/QPP deferral, dividend tax credits, capital gains inclusion, foreign withholding tax, spousal RRSP attribution, TOSI, Quebec interest deduction limits, registered account contribution room, CESG/QESI grant eligibility.
+
+A **dated government program that attaches to a purchase** is in scope, and the purchase EVENT is modelled only as far as that program's eligibility test reaches. `first_home_purchases[]` earns its place because the FHSA and the HBP attach to buying a first home, not because the engine values houses; `zev_purchases[]` earns its place because the federal iZEV incentive and Quebec's Roulez vert rebate attach to acquiring a zero-emission vehicle. The test is whether a government pays, or forgives, a defined amount on a defined date. Everything else about the asset stays out: the engine does not carry the vehicle on the balance sheet, does not depreciate it, does not price its fuel or insurance, and does not rank buying against keeping. Real estate *valuation* is out of scope and so is vehicle valuation -- adding the program did not widen the boundary, it named a point already on the right side of it.
 
 **Out of scope**: Investment selection, asset allocation advice, insurance needs analysis, real estate valuation, rental property management, corporate tax optimization, business accounting, estate planning (wills, trusts, probate), foreign exchange risk, crypto taxation specifics, product-specific features (DP#7).
 

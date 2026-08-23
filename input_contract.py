@@ -1270,6 +1270,74 @@ def _map_first_home_purchases(doc: Dict, child_ids: set,
     return out
 
 
+def _map_zev_purchases(doc: Dict) -> List[Dict[str, Any]]:
+    """Parse the ``zev_purchases[]`` block into the internal config shape.
+
+    Each entry is a dated zero-emission vehicle acquisition. It is carried
+    verbatim rather than pre-priced: the federal iZEV amount
+    (``countries/canada/zev_incentive.py``) and the Quebec Roulez vert amount
+    (``countries/canada/provinces/quebec/roulez_vert.py``) are both computed in
+    the fold, from the acquisition date, so a projection that crosses a program
+    edge gets the amount that applies on each side of it (DP#20/DP#28).
+
+    Two conditional requirements are enforced here as well as in the schema.
+    The schema's ``allOf`` catches a document loaded through validation; this
+    adapter is what the ENGINE trusts, and a config assembled in code would
+    otherwise reach the fold with a lease term of None and be priced as if it
+    were a purchase (DP#32: the absence must fail, not default).
+
+    Returns a list of entry dicts (empty when none are declared -- the golden
+    household)."""
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for entry in doc.get("zev_purchases", []):
+        pid = entry["id"]
+        if pid in seen:
+            raise ContractAdaptationError(
+                f"zev_purchases declares id={pid!r} more than once. Each acquisition "
+                f"is priced independently against its own dated eligibility test, so "
+                f"a duplicate id is a typo that would silently double-count an "
+                f"incentive; refused rather than deduplicated (DP#32)."
+            )
+        seen.add(pid)
+
+        is_lease = entry["is_lease"]
+        if is_lease and entry.get("lease_term_months") is None:
+            raise ContractAdaptationError(
+                f"zev_purchases[{pid!r}] sets is_lease=true but declares no "
+                f"lease_term_months. The federal incentive is prorated by term "
+                f"(full at 48 months or longer, otherwise term/48); without the term "
+                f"the amount cannot be computed and is refused rather than defaulted "
+                f"to the full purchase incentive (DP#32)."
+            )
+        if entry["propulsion"] == "phev" and entry.get("electric_range_km") is None:
+            raise ContractAdaptationError(
+                f"zev_purchases[{pid!r}] declares propulsion='phev' but no "
+                f"electric_range_km. The federal amount turns on a 50 km "
+                f"electric-only range threshold ($5,000 at or above it, $2,500 below), "
+                f"so the range selects the amount and cannot be inferred (DP#32)."
+            )
+
+        out.append({
+            "id": pid,
+            "acquisition_date": entry["acquisition_date"],
+            "base_msrp": float(entry["base_msrp"]),
+            "trim_msrp": float(entry["trim_msrp"]),
+            "vehicle_class": entry["vehicle_class"],
+            "propulsion": entry["propulsion"],
+            "electric_range_km": (
+                float(entry["electric_range_km"])
+                if entry.get("electric_range_km") is not None else None
+            ),
+            "is_lease": is_lease,
+            "lease_term_months": (
+                int(entry["lease_term_months"])
+                if entry.get("lease_term_months") is not None else None
+            ),
+        })
+    return out
+
+
 def _find_property(doc: Dict, kind: str) -> Optional[Dict]:
     for prop in doc.get("properties", []):
         if prop["kind"] == kind:
@@ -4557,6 +4625,9 @@ def to_internal_config(doc: Dict) -> Dict:
                        doc, {c["id"] for c in children},
                        {m["id"] for m in members})},
         "accounts": accounts_cfg,
+        # A dated zero-emission vehicle acquisition. Household-level, not
+        # member-level: the incentive is paid on the vehicle, not to a person.
+        "zev_purchases": _map_zev_purchases(doc),
         "tax": {"country": doc["jurisdiction"]["country"], "province": doc["jurisdiction"]["province"]},
         "cash_flows": legacy_cash_flows,
     }

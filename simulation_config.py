@@ -268,6 +268,9 @@ _INTERNAL_ROOT_ALLOWED_KEYS = {
     # the contract boundary (input_contract) so a typo is refused loudly.
     'objective',
     'tax', 'house_comparison', 'jurisdiction',
+    # Dated zero-emission vehicle acquisitions. Household-level, not under
+    # 'family': the incentive is paid on the vehicle, not to a member.
+    'zev_purchases',
     # DP#18/DP#24 round-trip metadata (SimulationConfig.to_dict/apply_overlay
     # attach this; a config saved and reloaded must not be rejected for
     # carrying its own provenance).
@@ -1633,6 +1636,8 @@ class SimulationConfig:
     private_loans: List[Dict] = field(default_factory=list)  # issue #813: private loans (lender income + borrower s.20(1)(c) deduction)
     gifts: List[Dict] = field(default_factory=list)  # epic #841 bite 3: parent->child gifts funding a child's registered room
     first_home_purchases: List[Dict] = field(default_factory=list)  # issue #704: a member's first-home purchase -> FHSA qualifying withdrawal + HBP
+    # Dated ZEV acquisitions -> federal iZEV + Quebec Roulez vert incentive inflow.
+    zev_purchases: List[Dict] = field(default_factory=list)
 
     # Accounts
     rrsp_annual_percent: float = 0.18
@@ -2081,6 +2086,7 @@ class SimulationConfig:
             private_loans=family.get('private_loans', []),  # issue #813
             gifts=family.get('gifts', []),  # epic #841 bite 3
             first_home_purchases=family.get('first_home_purchases', []),  # issue #704
+            zev_purchases=cfg.get('zev_purchases', []),
             rrsp_annual_percent=accounts.get('rrsp_annual_percent', 0.18),
             rrsp_annual_max=accounts.get('rrsp_annual_max', 0),  # DP#13: set from TaxDataProvider
             tfsa_annual_room_per_person=accounts.get('tfsa_annual_room_per_person', 7000),
@@ -2373,6 +2379,7 @@ class SimulationConfig:
                 'gifts': self.gifts,
                 'first_home_purchases': self.first_home_purchases,
             },
+            'zev_purchases': self.zev_purchases,
             'accounts': {
                 'rrsp_annual_percent': self.rrsp_annual_percent,
                 'rrsp_annual_max': self.rrsp_annual_max,

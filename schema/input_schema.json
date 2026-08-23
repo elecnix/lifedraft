@@ -73,6 +73,8 @@
 
     "first_home_purchases": { "type": "array", "items": { "$ref": "#/$defs/first_home_purchase" }, "default": [], "description": "Issue #704: a household member (today: a CHILD) becomes a FIRST-TIME HOME BUYER in a given year, using the two instruments Canada provides for a first home. In that year the member's own FHSA is withdrawn TAX-FREE (qualifying withdrawal, the account closes) and up to $60,000 comes out of their own RRSP NON-TAXABLY under the Home Buyers' Plan (HBP), repaid over a 15-year schedule (countries/canada/fhsa.py, hbp_rules.py). Both proceeds fund the down payment (net worth conserved -- the FHSA drains tax-free, the HBP is a loan owed back to the member's own RRSP). Absent/empty = no first-home purchase (the golden household)." },
 
+    "zev_purchases": { "type": "array", "items": { "$ref": "#/$defs/zev_purchase" }, "default": [], "description": "A dated acquisition of a ZERO-EMISSION VEHICLE, modelled ONLY because two dated government programs attach to the event: the federal iZEV incentive (countries/canada/zev_incentive.py, opened 2019-05-01, paused 2025-01-12, CLOSED 2025-03-31) and Quebec's Roulez vert rebate (countries/canada/provinces/quebec/roulez_vert.py, a declining schedule 7000 -> 4000 -> 2000 that stops being priced after 2026-12-31). Same warrant as first_home_purchases (#704): the engine does not value vehicles, it prices the programs that attach to buying one (DP#30). Only the incentive INFLOW is booked -- the vehicle is not an asset, the purchase outflow is not modelled, and nothing here ranks buying against keeping (that is the decision dimension, a follow-up). Absent/empty = no vehicle acquisition (the golden household)." },
+
     "sensitivity": { "$ref": "#/$defs/sensitivity", "description": "QUESTIONS (uncertainty dimension): named overlay presets and sweep ranges layered ACROSS every decision comparison, not decisions themselves (DP#5)." },
 
     "provenance": {
@@ -1387,6 +1389,29 @@
       }
     },
 
+    "zev_purchase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "acquisition_date", "base_msrp", "trim_msrp", "vehicle_class", "propulsion", "is_lease"],
+      "description": "One dated zero-emission vehicle acquisition. Every field here is a term a government program TESTS -- DP#7: no field names a make or a model, because no statute does. The federal and provincial programs are independent: a household may receive both, one, or neither, and each reports its own reasons when it pays nothing (DP#32).",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Stable identifier for this acquisition." },
+        "acquisition_date": { "$ref": "#/$defs/date", "description": "The date the vehicle was registered. DP#1: the ACTUAL date, never a year -- both programs have eligibility edges that fall mid-year (the iZEV pause on 2025-01-12 and close on 2025-03-31; the Roulez vert suspension from 2025-02-01 to 2025-03-31), so a year alone cannot resolve eligibility." },
+        "base_msrp": { "type": "number", "minimum": 0, "description": "MSRP of the model's BASE trim, in dollars. iZEV caps the base trim (< $55,000 for a car, < $60,000 for a larger vehicle); a model whose base trim is over its cap is ineligible in EVERY trim, so this cannot be inferred from what was actually paid." },
+        "trim_msrp": { "type": "number", "minimum": 0, "description": "MSRP of the trim actually acquired, in dollars. Tested against the higher-trim iZEV ceiling ($65,000 car / $70,000 larger) and against the $65,000 Roulez vert cap. Must be >= base_msrp." },
+        "vehicle_class": { "type": "string", "enum": ["car", "larger"], "description": "The statutory iZEV class that selects the MSRP caps: 'car', or 'larger' for an SUV, van or truck. A marketing segment is not a class (DP#7)." },
+        "propulsion": { "type": "string", "enum": ["battery_electric", "hydrogen", "phev"], "description": "Propulsion type, which selects the federal amount and gates the Quebec one. Quebec's new-vehicle rebate is priced here ONLY for battery_electric; hydrogen and phev are refused BY NAME rather than paid the battery-electric amount." },
+        "electric_range_km": { "type": "number", "minimum": 0, "description": "Electric-only range in km. REQUIRED for a phev, where it selects between the $5,000 and $2,500 federal amount at a 50 km threshold and therefore cannot be defaulted (DP#32). Ignored for battery_electric and hydrogen." },
+        "is_lease": { "type": "boolean", "description": "Whether the vehicle was leased rather than purchased. A lease prorates the federal incentive by term." },
+        "lease_term_months": { "type": "integer", "minimum": 1, "description": "Lease term in months. REQUIRED when is_lease is true: it prorates the federal incentive (full at 48 months or longer, otherwise term/48) and cannot be inferred." }
+      },
+      "allOf": [
+        { "if": { "properties": { "is_lease": { "const": true } }, "required": ["is_lease"] },
+          "then": { "required": ["lease_term_months"] } },
+        { "if": { "properties": { "propulsion": { "const": "phev" } }, "required": ["propulsion"] },
+          "then": { "required": ["electric_range_km"] } }
+      ]
+    },
     "first_home_purchase": {
       "type": "object",
       "additionalProperties": false,
