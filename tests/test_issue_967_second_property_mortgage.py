@@ -46,7 +46,6 @@ from simulation_config import SimulationConfig
 from simulation import FamilySimulation
 
 from test_input_contract import _load_example, _two_generation_subset
-import contract_people
 import contract_schema
 
 
@@ -547,12 +546,18 @@ class ProjectionYearsFallbackTest(unittest.TestCase):
         doc = _add_rental(_two_generation_subset(_load_example()),
                          financing=_FINANCING)
         import input_contract as ic_mod
-        orig = contract_people._horizon_end_year
-        contract_people._horizon_end_year = lambda d, pid: None
+        # Patch the binding `to_internal_config` actually looks up. The helper
+        # is DEFINED in contract_people, but input_contract imported it by name
+        # (`from contract_people import _horizon_end_year`), so rebinding
+        # contract_people's attribute would leave the orchestrator calling the
+        # original -- a patch that silently does nothing, and a test that
+        # verifies nothing while staying green (DP#32).
+        orig = ic_mod._horizon_end_year
+        ic_mod._horizon_end_year = lambda d, pid: None
         try:
             legacy = ic_mod.to_internal_config(doc)
         finally:
-            contract_people._horizon_end_year = orig
+            ic_mod._horizon_end_year = orig
         sched = legacy["properties"][0]["purchase"]["financing"]["schedule"]
         self.assertTrue(sched, "the fallback cap must not truncate the "
                          "schedule -- the mortgage's own term bounds it")
