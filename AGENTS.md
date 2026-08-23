@@ -41,7 +41,7 @@ the loud failure. Always.
 ## Running the tests
 
 ```sh
-VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q        # ~6 min, 6433 tests
+VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q        # ~6 min, 6359 tests
 ```
 
 Run it in the **foreground and read the output yourself.** Do not background it and then report a
