@@ -3611,6 +3611,9 @@ def simulate_year_pure(
         # "what is each month of waiting costing me" headline). 0.0 except in
         # year 0 with a declared lag (DP#32).
         deployment_lag_cost=allocations.get('_deployment_lag_cost', 0.0),
+        # Issue #143: surface the year's trading friction (0.0 absent a
+        # declared model, DP#32).
+        trading_friction_cost=allocations.get('_trading_friction_cost', 0.0),
     )
 
     return result, new_state

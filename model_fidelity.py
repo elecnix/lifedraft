@@ -1171,3 +1171,43 @@ register(Approximation(
     applies=_superficial_losses_declared,
     findings=_superficial_loss_findings,
 ))
+
+
+# ── Issue #143: per-transaction trading friction, priced at the step scale ────
+#
+# A household that declares `trading_friction` pays its bid/ask spread (and,
+# at the year-0 lump deployment, one countable flat fee) on the dollars the
+# engine turns over. Two step-scale abstractions apply, in opposite
+# directions; both are disclosed rather than silently netted:
+
+def _trading_friction_declared(ctx: FidelityContext) -> bool:
+    """Fires only when this run's config actually declares a friction block —
+    a frictionless run must not carry a caveat that does not apply to it."""
+    cfg = {} if ctx.cfg is None else ctx.cfg
+    portfolio = cfg.get('portfolio')
+    if not isinstance(portfolio, dict):
+        return False
+    return bool(portfolio.get('trading_friction'))
+
+
+register(Approximation(
+    id='trading_friction_annual_step',
+    summary=("Declared trading friction is priced at the ANNUAL step scale: "
+             "the year's savings deployment and the year-0 lump deployment are "
+             "charged their spread once each, not per real-world ticket, and "
+             "sale-side trades (retirement drawdowns, forced liquidations) are "
+             "not yet charged at all"),
+    biased_figure="terminal wealth / net benefit for high-turnover strategies",
+    direction=Direction.UNKNOWN,
+    detail=("The engine moves money at pot level -- there is no order ledger -- "
+            "so the buy side is priced as one proportional haircut per year "
+            "(exact when registered room does not bind; when room caps bind, "
+            "less deploys than the charged base and friction is slightly "
+            "OVERCHARGED). The sell side (drawdown waterfall gross draws) is "
+            "NOT yet priced, which UNDERSTATES friction. Direction UNKNOWN: "
+            "the two biases oppose. Property dispositions already carry their "
+            "own declared selling_costs and are deliberately not double-"
+            "charged."),
+    issue='#143',
+    applies=_trading_friction_declared,
+))

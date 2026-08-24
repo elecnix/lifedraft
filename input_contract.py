@@ -289,6 +289,18 @@ def to_internal_config(doc: Dict) -> Dict:
 
     if portfolio_cfg:
         legacy["portfolio"] = portfolio_cfg
+    # Issue #143: the declared per-transaction trading friction rides the
+    # household `portfolio` block (the ONE internal dict that round-trips
+    # wholesale through config_serde -- config_serde itself is untouched,
+    # DP#24 -- and reaches the engine as SimulationConfig.portfolio_data).
+    # The engine's friction model reads it off that block; a document that
+    # declares no trading_friction adds no key and runs byte-identical
+    # (DP#32). An empty declared block is carried as-is: an explicitly
+    # frictionless venue is a fact, not an absence to collapse.
+    _friction_decl = doc.get("trading_friction")
+    if _friction_decl is not None:
+        _friction_target = legacy.setdefault("portfolio", {})
+        _friction_target["trading_friction"] = dict(_friction_decl)
     if retirement_out:
         legacy["retirement"] = retirement_out
     if "return_model" in assumptions:

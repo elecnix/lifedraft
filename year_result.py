@@ -546,3 +546,10 @@ class YearResult:
     # lag (golden byte-identical, DP#32). The cost itself feeds the balances
     # through the year-0 fill_room reduction; this field only REPORTS it.
     deployment_lag_cost: float = 0.0
+
+    # Issue #143: the trading friction charged THIS year — the bid/ask spread
+    # plus (year 0, one countable event) flat commission on the dollars the
+    # engine turned over. 0.0 for any run that declares no `trading_friction`
+    # block (golden byte-identical, DP#32). The cost itself feeds the balances
+    # through the pre-allocation netting; this field only REPORTS it.
+    trading_friction_cost: float = 0.0

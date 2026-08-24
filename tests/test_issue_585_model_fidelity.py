@@ -491,6 +491,11 @@ _CODE_ANCHORS = {
     # that books the denial -- delete the rule and the caveat can never fire.
     'superficial_loss_window_is_declarable': (
         'rules_superficial_loss.py', 'ws.superficial_loss_denied'),
+    # Issue #143: the step-scale friction disclosure is anchored to the annual
+    # deployment seam -- delete the seam and no friction is ever charged, so
+    # the caveat would be a false disclosure.
+    'trading_friction_annual_step': (
+        'simulation.py', "Issue #143: turning the year's savings over is not free"),
 }
 
 _NO_CODE_ANCHOR = {'unlabeled_dollar_basis'}
