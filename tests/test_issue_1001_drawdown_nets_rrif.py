@@ -187,7 +187,7 @@ def test_golden_terminal_rose_above_pre_fix_value():
     terminal_1001_OFF` is robust: it checks that #1001's netting still
     produces its intended wealth gain regardless of other baseline moves."""
     from unittest.mock import patch
-    from simulation_rules import RULES
+    from rule_registry import RULES
     from test_golden_trajectory_581 import golden_household_config, _run
 
     # #1001-ON: current code

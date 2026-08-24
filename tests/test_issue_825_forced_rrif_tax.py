@@ -185,7 +185,7 @@ _RETIRED_SPOUSE = {'role': 'spouse', 'gross_income': 0,
 def _run_spouse_only_retired_fold():
     """Drive retirement_income + retirement_drawdown for one year with the
     spouse as the sole retiree, and return the populated working state."""
-    from simulation_rules import RULES, RuleContext, YearWorkingState
+    from rule_registry import RULES, RuleContext, YearWorkingState
     cfg = SimulationConfig.from_dict({
         'assumptions': {'start_year': _SPLIT_START, 'investment_return': 0.05,
                         'inflation': 0.02, 'horizon_age': 95},

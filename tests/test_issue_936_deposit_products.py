@@ -38,9 +38,11 @@ from simulation_config import (
     SimulationConfig, ScenarioOverlay, apply_overlay,
 )
 from simulation_state import SimState, simulate_year_pure
-from simulation_rules import (
-    RULES, RULE_ORDER, RuleContext, YearWorkingState,
-    apply_deposit_product_growth, _deposit_product_after_tax_rate,
+from rule_registry import RULES, RuleContext, YearWorkingState
+from simulation_rules import RULE_ORDER
+from rules_growth import (
+    apply_deposit_product_growth,
+    _deposit_product_after_tax_rate,
     _deposit_rate_at,
 )
 from scenario_discovery import discover_anchors

@@ -83,7 +83,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
-from simulation_rules import _principal_disposition_for
+from rules_disposition import _principal_disposition_for
 
 from test_input_contract import _load_example, _two_generation_subset
 import contract_errors
@@ -588,7 +588,7 @@ class ConservationHoldsAcrossBothLegs(unittest.TestCase):
         the mapper never produces, but the helper must handle without dividing
         by zero). A sale with empty owner_roles -> couple_share = 0 -> 0 tax,
         regardless of the gain."""
-        from simulation_rules import _disposition_gain_tax
+        from rules_disposition import _disposition_gain_tax
         sale = {
             'year': 2026, 'selling_costs': 30_000.0,
             'owner_roles': {},   # no owners -> couple_share = 0
@@ -632,7 +632,7 @@ class ConservationHoldsAcrossBothLegs(unittest.TestCase):
         to band the gain -- the rule raises loudly rather than silently
         under-taxing the gain. The no-sale / pre-sale / post-sale paths do NOT
         need brackets and do not raise."""
-        from simulation_rules import RuleContext, YearWorkingState, RULES
+        from rule_registry import RuleContext, YearWorkingState, RULES
         from simulation_state import SimState, _default_canada_state
         sale = {
             'year': 2026, 'selling_costs': 30_000.0,
@@ -694,20 +694,20 @@ class RuleFiresAndIsRegistered(unittest.TestCase):
         sale household's sale-year total_assets WITHOUT the invested proceeds
         -- a money-LOSING path the rule exists to prevent. This is the
         output-depends-on-it test the spec requires (DP#18)."""
-        import simulation_rules
+        import rule_registry
         base = _base_doc()
         sell = _run(_add_principal_sale(base, _SALE_2031))
         n = _SALE_YEAR_INDEX
-        original = simulation_rules.RULES['principal_disposition']
+        original = rule_registry.RULES['principal_disposition']
         try:
             # Disable the rule -> the sale's proceeds are NOT invested and
             # the mortgage/HELOC are NOT discharged (the amortization schedule
             # keeps running); the household does NOT realize the home's value.
-            simulation_rules.RULES['principal_disposition'] = (
+            rule_registry.RULES['principal_disposition'] = (
                 lambda ws, ctx: False)
             sell_disabled = _run(_add_principal_sale(base, _SALE_2031))
         finally:
-            simulation_rules.RULES['principal_disposition'] = original
+            rule_registry.RULES['principal_disposition'] = original
         # With the rule: the sale-year total_assets includes the invested
         # P_net (principal_sale_proceeds_invested > 0). Without the rule: no
         # proceeds invested and the mortgage/HELOC stay (the household keeps

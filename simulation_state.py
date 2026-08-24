@@ -1513,7 +1513,7 @@ def _annual_installment_service(config: SimulationConfig) -> float:
     """
     if not config.installments:
         return 0.0
-    from simulation_rules import _installment_payment_in_year
+    from rules_debt import _installment_payment_in_year
     return sum(
         _installment_payment_in_year(plan, config.start_year)
         for plan in config.installments)
@@ -2885,7 +2885,8 @@ def simulate_year_pure(
     # possible: an independently-declared expected rule set must match the
     # registry exactly, and a coverage sweep asserts every rule actually
     # fires somewhere in a representative household's trajectory.
-    from simulation_rules import RuleContext, YearWorkingState, run_rules
+    from rule_registry import RuleContext, YearWorkingState
+    from simulation_rules import run_rules
 
     ws = YearWorkingState.from_state(state, allocations, year)
     # Issue #747/#25: normalize the opening canada state to a dict the SAME way

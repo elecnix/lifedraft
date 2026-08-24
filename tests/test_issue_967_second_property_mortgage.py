@@ -576,8 +576,8 @@ class ServicingRuleEdgeCasesTest(unittest.TestCase):
         """A length mismatch between the config's properties and the SimState's
         second-property-mortgage balances (when financing IS declared) is a
         wiring bug, not a silent truncation -> raise (DP#32)."""
-        from simulation_rules import (apply_second_property_mortgage,
-                                       YearWorkingState, RuleContext)
+        from rules_debt import apply_second_property_mortgage
+        from rule_registry import YearWorkingState, RuleContext
         from simulation_config import SimulationConfig
         doc = _add_rental(self.base, financing=_FINANCING)
         legacy = ic.to_internal_config(doc)

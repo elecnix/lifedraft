@@ -461,7 +461,7 @@ _CODE_ANCHORS = {
     # apply_retirement_drawdown), and this anchor proves that code still
     # exists. If the shortfall recording is removed, this caveat is stale.
     'decumulation_shortfall': (
-        'simulation_rules.py', 'ws.drawdown_shortfall = _gap'),
+        'rules_drawdown.py', 'ws.drawdown_shortfall = _gap'),
     # Issue #766: an input contradiction (two unreconciled spending figures),
     # same class as #685. Anchored to the reconciliation that produces the
     # records; delete it and the caveat can never fire.
@@ -475,7 +475,7 @@ _CODE_ANCHORS = {
     'runway_treats_all_spend_as_rigid': (
         'runway.py', 'def compute_runway('),
     'runway_compresses_discretionary_under_shock': (
-        'simulation_rules.py', 'frac = ctx.config.discretionary_fraction'),
+        'rules_solvency.py', 'frac = ctx.config.discretionary_fraction'),
     'runway_counts_contributions_as_committed': (
         'runway.py', 'def compute_runway('),
     'runway_relies_on_uncollateralized_credit': (
