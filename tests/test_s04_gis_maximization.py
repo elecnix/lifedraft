@@ -153,7 +153,7 @@ class TestGISWiredIntoFold(unittest.TestCase):
 
     def test_yearresult_has_gis_income_field(self):
         """YearResult now carries a gis_income field (was absent before #1020)."""
-        from simulation_config import YearResult
+        from year_result import YearResult
         r = YearResult()
         self.assertTrue(hasattr(r, 'gis_income'))
         self.assertEqual(r.gis_income, 0.0)

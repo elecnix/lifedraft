@@ -5,7 +5,7 @@ a silent no-op whenever the config has a ``return_model`` block (which
 
 Two overlay mechanisms wrote the swept return rate to two different places:
 
-  * ``simulation_config.apply_overlay`` (the ``ScenarioOverlay`` path, fixed
+  * ``scenario_overlay.apply_overlay`` (the ``ScenarioOverlay`` path, fixed
     for issue #260/#249) writes into ``return_model`` -- the place the engine
     (``simulation.py``) actually reads (DP#21).
   * ``optimize.apply_preset``, ``optimize.apply_sensitivity_overlay`` and
@@ -273,7 +273,7 @@ class TestScenarioOverlayExtractReadsReturnModel:
     def test_extract_recovers_return_rate_overlay_applied_to_fixed_model(self):
         """apply_overlay(investment_return=0.05) over a fixed return_model
         base must extract back to investment_return=0.05, not None."""
-        from simulation_config import ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
 
         base = _fixture_cfg_with_fixed_return_model()
         overlay = ScenarioOverlay(
@@ -292,7 +292,7 @@ class TestScenarioOverlayExtractReadsReturnModel:
         """A base carrying only the deprecated scalar (no return_model block)
         still resolves via _materialize_return_model_data; the overlay lands a
         fixed return_model and extract must recover it."""
-        from simulation_config import ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
 
         base = _fixture_cfg_with_fixed_return_model()
         del base["return_model"]  # leave only assumptions.investment_return
@@ -308,7 +308,7 @@ class TestScenarioOverlayExtractReadsReturnModel:
         """An overlay that does not touch the return rate must extract to
         investment_return=None (no spurious detection from the resolve
         fallback default)."""
-        from simulation_config import ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
 
         base = _fixture_cfg_with_fixed_return_model()
         overlay = ScenarioOverlay(label="noop", refinance_amortization_years=25)

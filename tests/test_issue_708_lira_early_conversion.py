@@ -119,6 +119,8 @@ def _run_year(state, year, config, investment_return=0.07):
 sys.path.insert(0, 'tests')
 from test_input_contract import _load_example, _two_generation_subset  # noqa: E402
 import input_contract as ic  # noqa: E402
+import contract_errors
+import contract_schema
 
 
 def _base_doc():
@@ -355,7 +357,7 @@ class TestAdapterConversionDate:
         second["balance"]["amount"] = 2000
         second["lira"]["conversion_date"] = "2050-01-01"  # disagrees
         doc["accounts"].append(second)
-        with pytest.raises(ic.ContractAdaptationError, match="conversion date"):
+        with pytest.raises(contract_errors.ContractAdaptationError, match="conversion date"):
             ic.to_internal_config(doc)
 
     def test_two_lira_accounts_agreeing_on_conversion_date_sum_balances(self):
@@ -381,10 +383,10 @@ class TestSchemaAcceptsConversionDate:
         doc = copy.deepcopy(_base_doc())
         lira = next(a for a in doc["accounts"] if a["kind"] == "lira")
         lira["lira"]["conversion_date"] = "2044-06-01"
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
 
     def test_validates_without_conversion_date(self):
-        ic.validate_contract(copy.deepcopy(_base_doc()))  # optional -> valid
+        contract_schema.validate_contract(copy.deepcopy(_base_doc()))  # optional -> valid
 
 # ---------------------------------------------------------------------------
 # 6. Off-table year falls back to the nearest prescribed rate (not a crash,

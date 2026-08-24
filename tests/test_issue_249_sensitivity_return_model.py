@@ -14,7 +14,8 @@ overlays differing only in ``investment_return`` produce different results.
 All data is fabricated with round numbers — no personal data (DP#4, DP#15).
 """
 
-from simulation_config import apply_overlay, ScenarioOverlay, SimulationConfig
+from scenario_overlay import apply_overlay, ScenarioOverlay
+from simulation_config import SimulationConfig
 from simulate import evaluate_overlay
 
 

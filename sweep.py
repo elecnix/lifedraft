@@ -45,6 +45,7 @@ import voi
 from decumulation import summarize_drawdown_shortfall, shortfall_of
 from objective import ObjectiveFunction
 from optimize import run_optimization
+import contract_schema
 
 
 class SweepPathError(ValueError):
@@ -344,8 +345,8 @@ def _main() -> None:
              "the same resolution as optimize.py (issue #1017).")
     args = parser.parse_args()
 
-    doc = input_contract.load_contract_json(args.input)
-    input_contract.validate_contract(doc)
+    doc = contract_schema.load_contract_json(args.input)
+    contract_schema.validate_contract(doc)
     # ``decisions.objective`` is carried onto the internal config as
     # ``cfg['objective']`` by input_contract (the single ingestion boundary
     # that validates the name); resolve_objective reads it from there, so the

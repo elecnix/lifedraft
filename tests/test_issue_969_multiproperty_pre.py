@@ -16,7 +16,7 @@ over-sheltering the gain.
 The fix applies the FAMILY-level one-property-per-year window to voluntary
 sales: the disposition rule prices the gain against the family designation
 horizon (``family_window_years`` across ALL the couple's designated properties),
-the same denominator the estate path (``input_contract._map_pre_property_gains``)
+the same denominator the estate path (``contract_estate._map_pre_property_gains``)
 uses. The sold property's designated-year count (capped at the sale year) is the
 numerator; the family window is the denominator. A family-year designated by two
 properties at once is rejected loudly at contract loading (DP#32), not silently
@@ -41,12 +41,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
-from simulation_rules import _disposition_gain_tax
+from rules_disposition import _disposition_gain_tax
 from countries.canada.pre_designation import (
     designated_years, family_window_years, family_year_conflict,
     taxable_gain_fraction)
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_errors
+import contract_schema
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -105,7 +107,7 @@ def _run(doc):
     enforces the money-conservation invariant suite on every run). Returns
     ``(results, legacy)`` -- the year-by-year results and the internal config
     (so a test can inspect the carried ``family_pre_window`` / estate block)."""
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     return FamilySimulation(SimulationConfig.from_dict(legacy)).run(), legacy
 
@@ -230,7 +232,7 @@ class SaleCannotExemptTheOtherPropertysYears(unittest.TestCase):
         doc = _two_properties(
             self.base, home_years=[(2007, 2016)],
             cottage_years=[(2017, 2026)], cottage_sale=True)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cottage_sale = next(p["sale"] for p in legacy["properties"]
                             if p["id"] == "couple_cottage")
@@ -308,7 +310,7 @@ class OnePropertyPerFamilyPerYearVoluntarySale(unittest.TestCase):
         doc = _two_properties(
             self.base, home_years=[(2010, 2020)],
             cottage_years=[(2015, 2026)], cottage_sale=True)
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         self.assertIn("one property per family unit per year", str(ctx.exception))
 
@@ -341,8 +343,8 @@ class NullAcbOnTaxablePropertyIsRefused(unittest.TestCase):
         principal = next(p for p in doc["properties"] if p["kind"] == "principal")
         principal["designated_principal_residence_years"] = []
         principal["acb"] = None
-        ic.validate_contract(doc)
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        contract_schema.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         self.assertIn("is a principal residence with NO "
                       "designated_principal_residence_years", str(ctx.exception))
@@ -365,8 +367,8 @@ class NullAcbOnTaxablePropertyIsRefused(unittest.TestCase):
             "acb": None,
             "designated_principal_residence_years": [],
         })
-        ic.validate_contract(doc)
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        contract_schema.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         self.assertIn("is not the principal residence", str(ctx.exception))
         self.assertIn("`acb` is null", str(ctx.exception))
@@ -405,7 +407,7 @@ class SinglePropertySaleIsUnchanged(unittest.TestCase):
             "designated_principal_residence_years": [],
             "sale": copy.deepcopy(_SALE_2031),
         })
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cottage_sale = next(p["sale"] for p in legacy["properties"]
                             if p["id"] == "couple_cottage")
@@ -427,7 +429,7 @@ class SinglePropertySaleIsUnchanged(unittest.TestCase):
         doc = _two_properties(
             self.base, home_years=[], cottage_years=[(2017, 2026)],
             cottage_sale=True)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         cottage_sale = next(p["sale"] for p in legacy["properties"]
                             if p["id"] == "couple_cottage")

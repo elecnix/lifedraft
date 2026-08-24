@@ -34,7 +34,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
-from simulation_config import YearResult
+from year_result import YearResult
 import decumulation
 import model_fidelity
 from trajectory_invariants import run_invariant

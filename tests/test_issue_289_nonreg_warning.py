@@ -68,9 +68,9 @@ class TestNonRegFallbackWarning(unittest.TestCase):
         allocations = _make_allocations(config)
 
         # Capture log output. Issue #584: the non_reg_growth rule (and its
-        # fallback warning) now lives in simulation_rules.py, registered
+        # fallback warning) now lives in rules_growth.py, registered
         # into simulate_year_pure's rule fold -- same warning, moved module.
-        logger = logging.getLogger('simulation_rules')
+        logger = logging.getLogger('rules_growth')
         handler = logging.StreamHandler(StringIO())
         handler.setLevel(logging.WARNING)
         logger.addHandler(handler)
@@ -101,8 +101,8 @@ class TestNonRegFallbackWarning(unittest.TestCase):
         allocations = _make_allocations(config)
 
         # Capture log output. Issue #584: see the other test in this class
-        # for why this targets the 'simulation_rules' logger now.
-        logger = logging.getLogger('simulation_rules')
+        # for why this targets the 'rules_growth' logger now.
+        logger = logging.getLogger('rules_growth')
         handler = logging.StreamHandler(StringIO())
         handler.setLevel(logging.WARNING)
         logger.addHandler(handler)

@@ -717,7 +717,7 @@ class TestReserveTargetIsSweepable(unittest.TestCase):
         return cfg.to_dict()
 
     def _terminal_tfsa_plus_reserve(self, months):
-        from simulation_config import ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
         cfg_dict = apply_overlay(
             self._base_dict(),
             ScenarioOverlay(label=f'{months}mo', emergency_reserve_months=months))
@@ -742,7 +742,7 @@ class TestReserveTargetIsSweepable(unittest.TestCase):
         """DP#32: a reserve swept against an INVENTED rate and location is not
         a sweep of the household's real decision. Refuse rather than fabricate
         the fields the sweep would need."""
-        from simulation_config import ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
         base = _base_config(living_costs=60_000).to_dict()
         with self.assertRaises(ValueError) as ctx:
             apply_overlay(base, ScenarioOverlay(label='12mo', emergency_reserve_months=12))
@@ -750,7 +750,7 @@ class TestReserveTargetIsSweepable(unittest.TestCase):
 
     def test_the_overlay_round_trips(self):
         """DP#24."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
         overlay = ScenarioOverlay(label='12mo', emergency_reserve_months=12)
         self.assertEqual(
             ScenarioOverlay.from_dict(overlay.to_dict()).emergency_reserve_months, 12)

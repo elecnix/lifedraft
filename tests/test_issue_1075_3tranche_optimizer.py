@@ -49,12 +49,14 @@ import input_contract as ic
 import optimize
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import (
-    ChargeLimitExceededError, SimulationConfig, YearResult,
-    apply_sourcing_overlay, apply_structure_overlay,
-)
+from charge_limits import ChargeLimitExceededError
+from property_structure import apply_sourcing_overlay, apply_structure_overlay
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
 from trajectory_invariants import assert_invariant
+import contract_errors
+import contract_schema
 
 # ── The fabricated household (DP#15) ────────────────────────────────────────
 # House 900,000 -> 80% charge = 720,000. The house mortgage is swept from its
@@ -110,7 +112,7 @@ def _doc(structure_options=None, house_mortgage=HOUSE_MIN,
     margin_available). #687's own fixture uses the same headroom technique;
     the tranched form never needs it (its amounts partition the charge by
     construction)."""
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = _two_generation_subset(json.load(fh))
     for prop in doc["properties"]:
         if prop["kind"] == "principal":
@@ -150,7 +152,7 @@ def _point(investment, house=HOUSE_MIN, line=None):
 class TestTranchedStructureLoadsAndApplies(unittest.TestCase):
     def test_the_structure_option_validates_and_maps(self):
         doc = _doc()
-        ic.validate_contract(doc)  # must not raise (schema: oneOf tranches)
+        contract_schema.validate_contract(doc)  # must not raise (schema: oneOf tranches)
         cfg = ic.to_internal_config(doc)
         mapped = cfg["property"]["structure_options"][0]
         self.assertEqual(mapped["id"], "all_in_one")
@@ -280,7 +282,7 @@ def _declared_liabilities_run(investment=80_000, lump_sum=100_000):
     for liab in doc["liabilities"]:
         if liab["kind"] == "heloc":
             liab["limit"] = CHARGE - HOUSE_MIN - investment
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     cfg = ic.to_internal_config(doc)
     sim_cfg = SimulationConfig.from_dict(cfg)
     sim = FamilySimulation(sim_cfg, adapter=CanadaAdapter(sim_cfg),
@@ -726,14 +728,14 @@ class TestInvalidTrancheSpecsRefusedLoudly(unittest.TestCase):
         return ic.to_internal_config(doc)
 
     def test_overlapping_kinds_are_refused(self):
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             self._load([{"kind": "house"}, {"kind": "house", "min_amount": 100},
                         {"kind": "line"}],
                        revolving_rate=LINE_RATE, revolving_rate_type="variable")
         self.assertIn("TWO tranches of kind", str(ctx.exception))
 
     def test_min_amount_is_rejected_on_a_non_house_tranche(self):
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             self._load([{"kind": "house"}, {"kind": "investment", "min_amount": 10_000}],
                        revolving_rate=LINE_RATE, revolving_rate_type="variable")
         self.assertIn("only the 'house' tranche", str(ctx.exception))
@@ -742,14 +744,14 @@ class TestInvalidTrancheSpecsRefusedLoudly(unittest.TestCase):
         """The sweep floor is a house-tranche-only declaration -- putting it
         on the line (whose amount is the residual of the charge, never a
         swept lower bound) is refused loudly (DP#32)."""
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             self._load([{"kind": "house"}, {"kind": "line", "min_house_floor": 10_000}],
                        revolving_rate=LINE_RATE, revolving_rate_type="variable")
         self.assertIn("min_house_floor", str(ctx.exception))
         self.assertIn("only the 'house' tranche", str(ctx.exception))
 
     def test_deductible_is_rejected_on_a_non_investment_tranche(self):
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             self._load([{"kind": "house", "deductible": True}, {"kind": "line"}],
                        revolving_rate=LINE_RATE, revolving_rate_type="variable")
         self.assertIn("only the 'investment' tranche", str(ctx.exception))
@@ -768,7 +770,7 @@ class TestInvalidTrancheSpecsRefusedLoudly(unittest.TestCase):
     def test_an_unpriced_line_is_refused(self):
         """A readvanceable structure with no line rate anywhere (#654): the
         line can draw later via readvance, so it must be priced today."""
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             self._load([{"kind": "house", "min_amount": HOUSE_MIN},
                         {"kind": "investment"}, {"kind": "line"}],
                        readvanceable=True)
@@ -821,14 +823,14 @@ class TestInvalidTrancheSpecsRefusedLoudly(unittest.TestCase):
         into (tranches) is ambiguous and refused at validation."""
         doc = _doc([{"id": "both", "label": "both",
                      "revolving_share": 0.3, "tranches": [{"kind": "house"}]}])
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_an_unknown_tranche_kind_is_refused(self):
         doc = _doc([{"id": "k", "label": "k",
                      "tranches": [{"kind": "cottage"}]}])
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
 
 # ============================================================================

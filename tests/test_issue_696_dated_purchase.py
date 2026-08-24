@@ -41,6 +41,9 @@ from simulation import FamilySimulation
 from simulation_state import SimState, _property_equity_for_year
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_people
+import contract_property
+import contract_schema
 
 
 def _add_cottage(doc, value=300000, mortgage_balance=0, purchase=None,
@@ -99,7 +102,7 @@ def _add_rental(doc, purchase=None):
 
 
 def _run(doc):
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run()
@@ -115,11 +118,11 @@ _PURCHASE_YEAR_INDEX = 5
 class PurchaseReachesInternalConfig(unittest.TestCase):
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_purchase_maps_year_and_closing_costs(self):
         doc = _add_cottage(self.base, purchase=_PURCHASE_2031)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         purchases = [p.get("purchase") for p in legacy["properties"]]
         # Couple owns 100% -> closing costs pass through undivided.
@@ -133,8 +136,8 @@ class PurchaseReachesInternalConfig(unittest.TestCase):
                                 {"person": "p2", "pct": 0.25},
                                 {"person": "ca", "pct": 0.5}]}
         doc = _add_cottage(self.base, purchase=_PURCHASE_2031, owner=half_owner)
-        primary_id, spouse_id = ic._find_primary_and_spouse(doc)
-        owned = ic._map_owned_properties(doc, primary_id, spouse_id)
+        primary_id, spouse_id = contract_people._find_primary_and_spouse(doc)
+        owned = contract_property._map_owned_properties(doc, primary_id, spouse_id)
         self.assertEqual(owned[0]["purchase"],
                          {"year": 2031, "closing_costs": 5000.0})
 
@@ -164,7 +167,7 @@ class PurchasedPropertyIsInertBeforePurchase(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_trajectory_identical_to_absent_before_purchase(self):
         without = _run(self.base)
@@ -195,7 +198,7 @@ class RentalIncomeStartsAtPurchaseYear(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_no_rent_before_purchase_full_rent_after(self):
         results = _run(_add_rental(self.base, purchase=_PURCHASE_2031))
@@ -224,7 +227,7 @@ class DownPaymentAndClosingCostsAreCharged(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_full_outflow_is_charged_in_the_purchase_year_only(self):
         # value 300000, mortgage 240000 -> down payment (net_equity) 60000;
@@ -255,7 +258,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_no_purchase_key_emitted(self):
         doc = _add_cottage(self.base, value=400000, mortgage_balance=250000)

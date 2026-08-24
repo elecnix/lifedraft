@@ -14,7 +14,7 @@ import unittest
 from dataclasses import replace
 
 from simulation import SimulationConfig
-from simulation_config import apply_ltv_overlay, apply_overlay, ScenarioOverlay
+from scenario_overlay import apply_ltv_overlay, apply_overlay, ScenarioOverlay
 from simulation_state import SimState, simulate_year_pure
 from scipy_optimizer import ScipyOptimizer
 from optimizer import GridOptimizer
@@ -47,9 +47,9 @@ class TestBug43ScipyGridConsistency(unittest.TestCase):
     ``_apply_ltv_overlay`` copy, and both inflated ``margin_available`` by
     ``cash_out`` -- the pre-#257 money-flow model. They agreed with each
     other (this test used to assert exactly that) but both disagreed with
-    ``simulation_config.apply_overlay``, the #257-correct rule used by
+    ``scenario_overlay.apply_overlay``, the #257-correct rule used by
     simulate.py. Fixed by deleting both copies (DP#9) and routing both
-    optimizers through the single ``simulation_config.apply_ltv_overlay``.
+    optimizers through the single ``scenario_overlay.apply_ltv_overlay``.
     These tests now assert the *correct* invariant: the optimizer path and
     the simulate.py overlay path size the same overlay identically, and
     money is conserved (invested capital == new debt taken on).

@@ -43,9 +43,9 @@ import pytest
 import input_contract as ic
 import optimize
 import output_paths
-from simulation_config import (
-    SimulationConfig, ScenarioOverlay, apply_overlay, has_readvanceable_facility,
-)
+from config_access import has_readvanceable_facility
+from scenario_overlay import ScenarioOverlay, apply_overlay
+from simulation_config import SimulationConfig
 
 
 def _no_heloc_contract() -> dict:

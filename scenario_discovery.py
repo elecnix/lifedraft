@@ -476,7 +476,7 @@ def _convert_income_scenarios(income_scenarios: List[dict]) -> List[dict]:
     untouched -- ``primary_income``/``spouse_income`` are ``None`` when the
     scenario's ``members`` list has no entry for that role, never coerced to
     0 (DP#32). Every consumer of this list already expects that convention
-    (``simulation_config.apply_overlay``: "if overlay.spouse_income is not
+    (``scenario_overlay.apply_overlay``: "if overlay.spouse_income is not
     None"; ``simulate.py``'s own comments: "None if not set -> keeps base").
     Defaulting to 0 here would silently zero out the unmentioned earner's
     income the moment a household declares a partial override -- exactly the
@@ -672,7 +672,7 @@ def _discover_structure_scenarios(cfg: dict) -> List[dict]:
     as an open decision), this returns a single identity/baseline entry
     (``revolving_share: None``) so callers that cross this dimension with
     every other (income, retirement age, ...) still iterate exactly once,
-    applying no structural change at all (``simulation_config.
+    applying no structural change at all (``property_structure.
     apply_structure_overlay`` treats ``revolving_share is None`` as a no-op
     -- DP#13/DP#32: absence is not an opinion, it is "run the declared
     liabilities[] as-is").

@@ -28,11 +28,14 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Dict, List, Optional, Tuple
 from copy import deepcopy
 
-from simulation_config import (
-    SimulationConfig, YearResult, apply_ltv_overlay,
-    ChargeLimitExceededError, MissingRefinanceAmortizationError,
+from charge_limits import (
+    ChargeLimitExceededError,
+    MissingRefinanceAmortizationError,
     ReadvanceableWithoutPropertyError,
 )
+from scenario_overlay import apply_ltv_overlay
+from simulation_config import SimulationConfig
+from year_result import YearResult
 # Issue #681: the run-path charge guard, asserted by BOTH folds (this one and
 # FamilySimulation.run) -- an invariant wired into only one of them is exactly
 # the half-enforcement #681 is about.
@@ -678,7 +681,7 @@ class GridOptimizer(Optimizer):
 
             for ltv in ltv_levels:
                 # DP#18/#619/#664/#655: compose from base, overlay LTV through
-                # the one authoritative rule (simulation_config.apply_ltv_overlay)
+                # the one authoritative rule (scenario_overlay.apply_ltv_overlay)
                 # -- margin_available is reduced by exactly the cash-out it
                 # books (mortgage + HELOC share ONE registered charge, #664)
                 # and the refinance re-amortizes over its own declared term

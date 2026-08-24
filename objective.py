@@ -39,7 +39,8 @@ from typing import Callable, Dict, List, Optional
 # simulation_config.py and only re-exported through simulation.py. objective.py
 # lives in the optimization layer and must depend inward (on data/config), so
 # it imports directly from simulation_config rather than the simulation engine.
-from simulation_config import YearResult, SimulationConfig
+from simulation_config import SimulationConfig
+from year_result import YearResult
 # DP#25 (issue #732): the estate tax math lives in the jurisdiction package;
 # the optimization layer resolves it through the provider registry seam
 # instead of importing countries.canada.estate directly. objective.py has
@@ -239,7 +240,7 @@ def plan_from_config(cfg: Dict):
     """Build a ``countries.canada.estate.EstatePlan`` from the config's
     ``estate`` block (epic #603 Track C Phase 2c, issue #600).
 
-    ``input_contract._map_estate`` produces that block from the contract's
+    ``contract_estate._map_estate`` produces that block from the contract's
     ``estate`` namespace plus the per-account ``beneficiary``/
     ``successor_holder`` designations, the per-property
     ``designated_principal_residence_years``, the ``life_insurance[]`` list and
@@ -457,7 +458,7 @@ def _estate_call_args(results: List[YearResult], cfg: Dict) -> Optional[Dict]:
     final = results[-1]
     prop = cfg.get('property', {}) or {}
     # DP#32: explicit absence-test, not `or {}` -- the estate block has a
-    # strict loader (`simulation_config._estate_block` raises on an explicit
+    # strict loader (`config_access._estate_block` raises on an explicit
     # null), so here it is either a dict (possibly empty) or absent. An empty
     # dict and an absent key both fall to `_UNDECLARED_ESTATE_DEFAULTS` via
     # `plan_from_config` (symmetric), but reading the rate off it must use the
@@ -480,7 +481,7 @@ def _estate_call_args(results: List[YearResult], cfg: Dict) -> Optional[Dict]:
     # year is NOT owned at death -- the `principal_disposition` rule already
     # converted it to portfolio cash (reinvested proceeds), so the estate must
     # not value it AGAIN at its death-year deemed disposition (the double-count
-    # this issue is about). `input_contract._map_estate` already zeros the
+    # this issue is about). `contract_estate._map_estate` already zeros the
     # estate block's `principal_residence_fmv`/`house_equity` for a sold
     # principal; this layer INDEPENDENTLY re-derives the home's value from
     # `cfg['property']['house_value']` (and compounds it), so it must apply the
@@ -495,7 +496,7 @@ def _estate_call_args(results: List[YearResult], cfg: Dict) -> Optional[Dict]:
     principal_sold = False
     if principal_sale is not None:
         # The internal `principal_sale` block always carries the resolved
-        # calendar `year` (carried by `input_contract._map_principal_sale`,
+        # calendar `year` (carried by `contract_principal._map_principal_sale`,
         # which resolves `date`->`year` at map time) -- read it directly.
         principal_sold = principal_sale['year'] <= terminal_cal_year
     if principal_sold:
@@ -512,7 +513,7 @@ def _estate_call_args(results: List[YearResult], cfg: Dict) -> Optional[Dict]:
     #
     # The rate is read from the ESTATE block
     # (`estate.principal_residence_appreciation_rate`, carried there from the
-    # principal property by `input_contract._map_estate`) so the estate's
+    # principal property by `contract_estate._map_estate`) so the estate's
     # property data is self-describing -- the deemed disposition compounds
     # using the rate the estate block itself carries, not a pointer to the
     # `property` block (DP#9, one spelling the estate consumes). The

@@ -169,7 +169,7 @@ def main():
     # return_model is the only return field it ever emits (Epic #603 Phase
     # 2b: this script now reads a contract document, not the legacy shape,
     # which had investment_return as a commonly-set alternate spelling).
-    from simulation_config import resolve_return_rate
+    from config_access import resolve_return_rate
     real_return = resolve_return_rate(base, year=0)
     print(f"  Real return: {real_return:.0%} | "
           f"Base spending: {money(base_spend)}/yr net | Horizon: age ~95 | Province: {prov.upper()}")

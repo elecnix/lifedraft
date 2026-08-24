@@ -25,8 +25,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import input_contract as ic
-from input_contract import ContractAdaptationError
+from contract_errors import ContractAdaptationError
 from test_input_contract import _load_example, _two_generation_subset
+import contract_schema
 
 
 def _nested_lsif_block(holding_amount):
@@ -65,7 +66,7 @@ class TestLSIFInsideRRSP(unittest.TestCase):
     """The nested LSIF holding reaches the engine's LSIF-credit path."""
 
     def test_nested_block_validates_on_an_rrsp(self):
-        ic.validate_contract(_doc_with_rrsp_lsif())  # raises on any violation
+        contract_schema.validate_contract(_doc_with_rrsp_lsif())  # raises on any violation
 
     def test_credit_is_computed_on_the_holding_amount_not_the_balance(self):
         # The RRSP is $210,000 but only $5,000 of it is LSIF: the credit must
@@ -110,7 +111,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
         self.assertNotIn("lsif", legacy)
 
     def test_an_rrsp_without_the_leaf_still_validates(self):
-        ic.validate_contract(_doc_without_any_lsif())
+        contract_schema.validate_contract(_doc_without_any_lsif())
 
     def test_lsif_block_still_forbidden_on_a_non_wrapper_kind(self):
         # The relaxation is scoped to rrsp/spousal_rrsp: a tfsa carrying an
@@ -119,7 +120,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
         tfsa = next(a for a in doc["accounts"] if a["kind"] == "tfsa")
         tfsa["lsif"] = _nested_lsif_block(5000)
         with self.assertRaises(Exception):
-            ic.validate_contract(doc)
+            contract_schema.validate_contract(doc)
 
     def test_golden_invariant_unchanged(self):
         sys.path.insert(0, os.path.join(os.path.dirname(__file__)))

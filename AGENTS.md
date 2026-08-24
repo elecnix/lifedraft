@@ -41,11 +41,20 @@ the loud failure. Always.
 ## Running the tests
 
 ```sh
-VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q        # ~6 min, 6433 tests
+VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q        # ~6 min, ~6,600 tests
 ```
 
 Run it in the **foreground and read the output yourself.** Do not background it and then report a
 success you never saw.
+
+Both numbers above are deliberately **approximate**, and this line has been wrong four times: it
+read `4144`, then `6433`, then `6359`, against an actual `6579` on `669f911`. An exact count goes
+stale on the next merge that adds a test, and a reader who trusts it then has to decide whether
+their own run is broken or the doc is. The figure is here for one purpose — to tell you at a glance
+whether your run collected roughly the whole suite or silently collected a fraction of it — and an
+order of magnitude serves that. If you want the exact number for your tree, run the suite; that is
+the only source that cannot go stale. The ~6 min is just as soft: it was 6m06s on an idle
+workstation and 25m15s on one running three suites at once.
 
 **CI does not run on the maintainer's workstation.** `tests.yml`, `secret-scan.yml` and
 `clone-detection.yml` all declare `runs-on: arc-runners` and execute on Kubernetes ARC runner pods
@@ -56,6 +65,19 @@ returns nothing.
 So a local full-suite run costs you wall-clock and nothing else: it cannot starve or SIGTERM a CI
 job. Still prefer a **targeted** run while you iterate — six minutes per edit is its own tax, and
 several agents sharing the box will thrash — then run the full suite once before you push.
+
+**Bound the memory a local run may take.** `pytest -n auto` starts one worker per CPU and knows
+nothing about RAM, so on a 16-core workstation it starts 16 — and if several agents each do that,
+the box thrashes. Cap it:
+
+```sh
+PYTEST_MEM_BUDGET_MB=8192 VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q
+```
+
+Measured on this suite: **4 workers peak at 2364 MB** for the whole process tree (~590 MB/worker)
+and finish in 4m15s, so an 8 GB budget leaves a wide margin. `PYTEST_WORKERS=N` overrides the
+computation outright when you want an exact number. The same arithmetic runs in CI
+(`.github/workflows/tests.yml`), where the cgroup limit supplies the ceiling instead.
 
 ### Coverage (`tools/coverage_gate.py`)
 
@@ -153,8 +175,10 @@ follows:
 }
 ```
 
-Schema: `schema/input_schema.json` plus the jurisdiction overlay
-(`schema/countries/canada/input_schema.json`); synthetic example at
+Schema: `schema/input_schema.json` (the spine: root `required`/`allOf` and the top-level
+properties) plus its `$defs` fragments in `schema/defs/*.json` — listed in the spine's
+`x-schema-parts` and folded in by `input_contract.load_universal_schema()` — plus the
+jurisdiction overlay (`schema/countries/canada/input_schema.json`); synthetic example at
 `schema/example.json`. Validate any document with
 `python -c "import input_contract; input_contract.load_and_map('my.json')"` —
 it refuses loudly rather than silently dropping what it cannot model.

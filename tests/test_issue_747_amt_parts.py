@@ -24,7 +24,7 @@ import pytest
 
 from simulation_state import SimState, simulate_year_pure, _default_canada_state
 from simulation_config import SimulationConfig
-from simulation_rules import RULES, RuleContext, YearWorkingState
+from rule_registry import RULES, RuleContext, YearWorkingState
 from countries.canada.amt import AMTCredit
 
 

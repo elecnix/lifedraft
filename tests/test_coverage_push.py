@@ -17,7 +17,7 @@ import unittest
 
 from scipy_optimizer import ScipyOptimizer, ScipyResult
 from optimizer import GridOptimizer
-from simulation_config import apply_ltv_overlay
+from scenario_overlay import apply_ltv_overlay
 
 
 class TestScipyOptimizerSetup(unittest.TestCase):

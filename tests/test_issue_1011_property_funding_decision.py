@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import input_contract as ic
 from scenario_discovery import discover_property_funding_cells
-from simulation_config import apply_property_funding_overlay
+from property_structure import apply_property_funding_overlay
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
 
@@ -50,6 +50,7 @@ from optimize import (
 )
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_schema
 
 
 _VALUE = 400_000
@@ -141,7 +142,7 @@ def _add_year0_cottage(doc):
 def _cfg(doc):
     """Map a contract document to the annual-side internal config the
     optimizer operates on."""
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return ic.to_internal_config(doc)
 
 
@@ -157,7 +158,7 @@ class ContractMappingTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_funding_options_and_recompute_reach_internal_config(self):
         doc = _add_rental(self.base, funding_options=[_ALL_CASH, _MORTGAGE_20])
@@ -191,7 +192,7 @@ class ContractMappingTest(unittest.TestCase):
 
     def test_financing_and_funding_options_are_mutually_exclusive(self):
         with self.assertRaises(Exception):
-            ic.validate_contract(_add_rental(
+            contract_schema.validate_contract(_add_rental(
                 self.base, funding_options=[_ALL_CASH, _MORTGAGE_20],
                 financing=_FIXED_FINANCING))
 
@@ -199,19 +200,19 @@ class ContractMappingTest(unittest.TestCase):
         # A single-option funding_options is not a sweep; it is a (mis-)spelled
         # financing and is refused at load (DP#32).
         with self.assertRaises(Exception):
-            ic.validate_contract(_add_rental(
+            contract_schema.validate_contract(_add_rental(
                 self.base, funding_options=[_ALL_CASH]))
 
     def test_all_cash_with_mortgage_fields_is_refused(self):
         bad = dict(_ALL_CASH, down_pct=0.2)
         with self.assertRaises(Exception):
-            ic.validate_contract(_add_rental(
+            contract_schema.validate_contract(_add_rental(
                 self.base, funding_options=[bad, _MORTGAGE_20]))
 
     def test_mortgage_missing_rate_is_refused(self):
         bad = {k: v for k, v in _MORTGAGE_20.items() if k != "rate"}
         with self.assertRaises(Exception):
-            ic.validate_contract(_add_rental(
+            contract_schema.validate_contract(_add_rental(
                 self.base, funding_options=[_ALL_CASH, bad]))
 
     def test_fixed_financing_does_not_carry_funding_keys(self):
@@ -231,7 +232,7 @@ class DiscoveryTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_absent_returns_empty(self):
         self.assertEqual(discover_property_funding_cells(_cfg(self.base)), [])
@@ -280,7 +281,7 @@ class OverlayTest(unittest.TestCase):
 
     def setUp(self):
         base = _two_generation_subset(_load_example())
-        ic.validate_contract(base)
+        contract_schema.validate_contract(base)
         self.cfg = _cfg(_add_rental(
             base, funding_options=[_ALL_CASH, _MORTGAGE_20, _MORTGAGE_50]))
         self.cells = discover_property_funding_cells(self.cfg)
@@ -337,7 +338,7 @@ class OverlayTest(unittest.TestCase):
         # left byte-identical -- covers the overlay's `pid not in assignment`
         # skip-branch and proves a non-fundable property is not perturbed.
         base = _two_generation_subset(_load_example())
-        ic.validate_contract(base)
+        contract_schema.validate_contract(base)
         doc = _add_year0_cottage(base)
         doc = _add_rental(doc, funding_options=[_ALL_CASH, _MORTGAGE_20])
         cfg = _cfg(doc)
@@ -359,7 +360,7 @@ class OverlayTest(unittest.TestCase):
         # declaring ones), but a direct caller must not lose the sweep to one
         # bad name. Covers the overlay's named-but-not-fundable skip-branch.
         base = _two_generation_subset(_load_example())
-        ic.validate_contract(base)
+        contract_schema.validate_contract(base)
         doc = _add_year0_cottage(base)
         doc = _add_rental(doc, funding_options=[_ALL_CASH, _MORTGAGE_20])
         cfg = _cfg(doc)
@@ -394,7 +395,7 @@ class ExplorationRanksTheFundingTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         base = _two_generation_subset(_load_example())
-        ic.validate_contract(base)
+        contract_schema.validate_contract(base)
         cls.cfg = _cfg(_add_rental(
             base, funding_options=[_ALL_CASH, _MORTGAGE_20, _MORTGAGE_50]))
         with contextlib.redirect_stdout(io.StringIO()):
@@ -482,7 +483,7 @@ class AbsenceIsByteIdenticalTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_fixed_financing_trajectory_matches_fixed_financing(self):
         # Trivially equal, but pins that the mapper's funding_options additions

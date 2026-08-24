@@ -32,14 +32,20 @@ import pytest
 import input_contract as ic
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import (
-    SimulationConfig, ScenarioOverlay, YearResult,
-    apply_ltv_overlay, apply_overlay,
-    charge_limit, heloc_revolving_limit,
-    ChargeLimitExceededError, MissingRefinanceAmortizationError,
-    OSFI_B20_CHARGE_LTV_MAX, OSFI_B20_REVOLVING_LTV_MAX,
+from charge_limits import (
+    charge_limit,
+    heloc_revolving_limit,
+    ChargeLimitExceededError,
+    MissingRefinanceAmortizationError,
+    OSFI_B20_CHARGE_LTV_MAX,
+    OSFI_B20_REVOLVING_LTV_MAX,
 )
+from scenario_overlay import ScenarioOverlay, apply_ltv_overlay, apply_overlay
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from trajectory_invariants import assert_invariant, run_invariant
+import contract_errors
+import contract_schema
 
 
 # ============================================================================
@@ -206,7 +212,7 @@ def _two_generation_subset(doc):
 
 
 def _valid_two_gen_doc():
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         example = json.load(f)
     return _two_generation_subset(example)
 
@@ -251,7 +257,7 @@ class TestContractChargeLimitRefusal:
         doc = _set_house_mortgage_heloc(_valid_two_gen_doc(),
                                          house_value=650_000, mortgage_balance=371_000,
                                          heloc_limit=150_000)  # 371k + 150k = 521k > 520k
-        with pytest.raises(ic.ContractAdaptationError):
+        with pytest.raises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_revolving_limit_at_exactly_65_percent_is_allowed(self):
@@ -271,7 +277,7 @@ class TestContractChargeLimitRefusal:
         doc = _set_house_mortgage_heloc(_valid_two_gen_doc(),
                                          house_value=650_000, mortgage_balance=90_000,
                                          heloc_limit=423_500)  # 65.15% of 650k; combined 513.5k <= 520k
-        with pytest.raises(ic.ContractAdaptationError):
+        with pytest.raises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
 

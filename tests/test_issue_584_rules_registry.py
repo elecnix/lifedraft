@@ -37,7 +37,8 @@ file is the enforcement the refactor exists to make possible:
 import pytest
 
 import simulation_rules
-from simulation_rules import RuleContext, YearWorkingState, RULE_ORDER, RULES, run_rules, trace_firing
+from rule_registry import RuleContext, YearWorkingState, RULES
+from simulation_rules import RULE_ORDER, run_rules, trace_firing
 from simulation_state import SimState, simulate_year_pure, _default_canada_state
 from simulation_config import SimulationConfig
 
@@ -263,7 +264,7 @@ class TestRuleRegistryIsComplete:
             simulation_rules.RULE_ORDER = original_order
 
     def test_registering_the_same_name_twice_to_different_functions_is_an_error(self):
-        from simulation_rules import rule as rule_decorator
+        from rule_registry import rule as rule_decorator
 
         def _fn_a(ws, ctx):
             return False
@@ -834,7 +835,7 @@ def test_every_rule_fires_somewhere_in_representative_households():
     # precomputed annual amortization schedule is built by the same pure
     # helper input_contract uses, so the servicing reads one spelling. Round
     # numbers, role-based names (DP#4/#15).
-    from input_contract import _annual_amortization_schedule
+    from contract_property import _annual_amortization_schedule
     financed_schedule = _annual_amortization_schedule(
         principal=300_000.0, annual_rate=0.05,
         amortization_years=25, origination_year=2026,
@@ -988,7 +989,7 @@ def test_retirement_income_rule_changes_engine_output():
     retirement spending figure -- so terminal total_assets must differ.
     A rule whose firing changes no number is dead weight.
     """
-    from simulation_rules import RULES
+    from rule_registry import RULES
 
     baseline_results = _run_golden(_retiring_household_config())
     baseline_terminal = baseline_results[-1].total_assets
@@ -1027,7 +1028,7 @@ def test_retirement_income_rule_defensive_no_birth_year_branch():
     (primary_retired=True with a member carrying no birth_year). Exercised
     here directly so the coverage ratchet does not loosen on the moved code.
     """
-    from simulation_rules import RuleContext, YearWorkingState, RULES
+    from rule_registry import RuleContext, YearWorkingState, RULES
     from simulation_config import SimulationConfig
     from simulation import FamilySimulation
 
@@ -1142,7 +1143,7 @@ def test_tuition_credit_rule_changes_engine_output():
     shortfall/liquidation the waterfall forces). A rule whose firing changes
     no number is dead weight.
     """
-    from simulation_rules import RULES
+    from rule_registry import RULES
 
     baseline_results = _run_golden(_tuition_household_config())
     baseline_after_tax = baseline_results[0].after_tax_income

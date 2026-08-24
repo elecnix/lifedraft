@@ -10,7 +10,8 @@ The optimizer can still toggle it explicitly for comparison scenarios.
 """
 
 import pytest
-from simulation_config import SimulationConfig, ScenarioOverlay
+from scenario_overlay import ScenarioOverlay
+from simulation_config import SimulationConfig
 
 
 class TestShouldDeductLaterProperty:

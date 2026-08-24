@@ -39,12 +39,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
-from simulation_rules import (
-    _property_carrying_cost_in_year,
-    _total_carrying_cost_in_year,
-)
+from rules_solvency import _property_carrying_cost_in_year, _total_carrying_cost_in_year
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_errors
+import contract_people
+import contract_property
+import contract_schema
 
 
 def _add_cottage(doc, value=300000, carrying_costs=None, purchase=None,
@@ -76,7 +77,7 @@ def _add_cottage(doc, value=300000, carrying_costs=None, purchase=None,
 
 
 def _run(doc):
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run()
@@ -93,7 +94,7 @@ _SALE_YEAR_INDEX = 15             # 2041
 class CarryingCostsReachInternalConfig(unittest.TestCase):
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_both_components_map_at_the_couples_share(self):
         # couple owns 100% -> annual_amount passes undivided; fraction raw.
@@ -119,8 +120,8 @@ class CarryingCostsReachInternalConfig(unittest.TestCase):
                            carrying_costs={"annual_amount": 6000,
                                            "fraction_of_value": 0.01},
                            owner=half_owner)
-        primary_id, spouse_id = ic._find_primary_and_spouse(doc)
-        owned = ic._map_owned_properties(doc, primary_id, spouse_id)
+        primary_id, spouse_id = contract_people._find_primary_and_spouse(doc)
+        owned = contract_property._map_owned_properties(doc, primary_id, spouse_id)
         cc = owned[0]["carrying_costs"]
         self.assertEqual(cc["annual_amount"], 3000.0)   # half of 6000
         self.assertEqual(cc["fraction_of_value"], 0.01)  # raw
@@ -172,8 +173,8 @@ class CarryingCostsReachInternalConfig(unittest.TestCase):
             if p["kind"] == "principal":
                 p["carrying_costs"] = {"annual_amount": 5000,
                                         "fraction_of_value": None}
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_principal_residence_allows_explicit_null(self):
         """A null carrying_costs on the principal is the same as absent -- the
@@ -182,7 +183,7 @@ class CarryingCostsReachInternalConfig(unittest.TestCase):
         for p in doc["properties"]:
             if p["kind"] == "principal":
                 p["carrying_costs"] = None
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
 
 
 class PureHelperTests(unittest.TestCase):
@@ -294,7 +295,7 @@ class CarryingCostOutflowIsCharged(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_flat_annual_outflow_each_year_of_ownership(self):
         # A cottage held from year 0 with a flat 6000/yr carrying cost. The
@@ -417,7 +418,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_no_carrying_costs_key_emitted(self):
         doc = _add_cottage(self.base, value=300000)

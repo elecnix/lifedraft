@@ -7,7 +7,7 @@ A household signs a mortgage at a known contractual rate and declares it, off
 the document, on `liabilities[kind=mortgage].rate`. It also carries an
 `assumptions.rate_paths` block -- a belief about what borrowing costs over the
 horizon. `input_contract.to_internal_config` mapped `rate_paths.heloc.rate`
-onto `assumptions.heloc_rate`, which is `simulation_config.resolve_heloc_rate`'s
+onto `assumptions.heloc_rate`, which is `config_access.resolve_heloc_rate`'s
 FIRST tier -- the DECISION channel, deliberately built to outrank the
 household's own declared rate so that an anchor scenario ("what if the HELOC
 reprices on renewal", DP#5) is not shadowed by it.
@@ -48,9 +48,12 @@ import input_contract as ic
 import model_fidelity
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import SimulationConfig, resolve_heloc_rate
+from config_access import resolve_heloc_rate
+from simulation_config import SimulationConfig
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_liabilities
+import contract_schema
 
 # The signed contract. Fabricated, round, and deliberately NOT equal to each
 # other or to any belief below -- so a rate that leaks from the wrong place is
@@ -77,7 +80,7 @@ def _doc(mortgage_path=None, heloc_path=None,
         "mortgage": mortgage_path or {"type": "fixed", "rate": signed_mortgage},
         "heloc": heloc_path or {"type": "fixed", "rate": signed_heloc},
     }
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -149,7 +152,7 @@ class ContradictionIsNeverSilentTest(unittest.TestCase):
     input, and the run must say so."""
 
     def test_load_warns_naming_the_liability_both_rates_and_the_winner(self):
-        with self.assertLogs("input_contract", level=logging.WARNING) as caught:
+        with self.assertLogs("contract_assumptions", level=logging.WARNING) as caught:
             ic.to_internal_config(
                 _doc(heloc_path={"type": "fixed", "rate": STALE_BELIEF_RATE}))
         blob = "\n".join(caught.output)
@@ -213,7 +216,7 @@ class ContradictionIsNeverSilentTest(unittest.TestCase):
         self.assertEqual(model_fidelity.rate_path_conflicts(cfg), [])
         active = {a.id for a in model_fidelity.active_approximations(cfg)}
         self.assertNotIn("rate_path_contradicts_signed_rate", active)
-        with self.assertNoLogs("input_contract", level=logging.WARNING):
+        with self.assertNoLogs("contract_assumptions", level=logging.WARNING):
             ic.to_internal_config(_doc())
 
 
@@ -238,23 +241,23 @@ class RatePathYearZeroTest(unittest.TestCase):
 
     def test_fixed_asserts_its_rate(self):
         self.assertEqual(
-            ic._rate_path_year0({"type": "fixed", "rate": 0.05}), 0.05)
+            contract_liabilities._rate_path_year0({"type": "fixed", "rate": 0.05}), 0.05)
 
     def test_variable_and_forecast_assert_the_first_element(self):
         self.assertEqual(
-            ic._rate_path_year0({"type": "variable", "path": [0.05, 0.06]}), 0.05)
+            contract_liabilities._rate_path_year0({"type": "variable", "path": [0.05, 0.06]}), 0.05)
         self.assertEqual(
-            ic._rate_path_year0({"type": "forecast", "path": [0.04, 0.06]}), 0.04)
+            contract_liabilities._rate_path_year0({"type": "forecast", "path": [0.04, 0.06]}), 0.04)
 
     def test_an_empty_path_asserts_nothing_and_is_not_zero(self):
         """DP#32: absence is absence. An empty path makes no claim about year
         zero, and must not be read as a claim that the rate is 0%."""
-        self.assertIsNone(ic._rate_path_year0({"type": "variable", "path": []}))
+        self.assertIsNone(contract_liabilities._rate_path_year0({"type": "variable", "path": []}))
 
     def test_a_zero_belief_is_a_real_belief_that_contradicts(self):
         """DP#32 the other way: 0% is a value, not absence. A rate_path
         asserting 0% against a signed 4.70% is a contradiction, not a no-op."""
-        conflicts = ic._reconcile_rate_paths(
+        conflicts = contract_liabilities._reconcile_rate_paths(
             {"heloc": {"type": "fixed", "rate": 0.0}},
             {"heloc": {"id": "heloc_main", "rate": SIGNED_HELOC_RATE}},
         )
@@ -268,7 +271,7 @@ class NoLiabilityToContradictTest(unittest.TestCase):
     liability, and it is not a contradiction."""
 
     def test_no_declared_liability_means_no_conflict(self):
-        conflicts = ic._reconcile_rate_paths(
+        conflicts = contract_liabilities._reconcile_rate_paths(
             {"mortgage": {"type": "fixed", "rate": 0.0495}},
             {"mortgage": None},
         )

@@ -24,7 +24,8 @@ from copy import deepcopy
 from simulation_state import (
     SimState, simulate_year_pure, adult_lira_slot, adult_lif_slot,
 )
-from simulation_config import SimulationConfig, YearResult
+from simulation_config import SimulationConfig
+from year_result import YearResult
 
 
 def _lira_bal(state):

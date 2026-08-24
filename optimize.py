@@ -12,6 +12,7 @@ removed. Use evaluate_strategy_with_simulation() and discover_strategies()
 from strategy.py instead.
 """
 
+import contract_schema
 from tax_data import default_tax_provider
 import json
 import argparse
@@ -32,12 +33,16 @@ from strategy import (
 )
 from countries.canada.strategies import STRATEGIES, discover_strategies
 from simulation import FamilySimulation
-from simulation_config import (
-    SimulationConfig, YearResult, ScenarioOverlay, build_overlay_config,
-    set_return_rate, resolve_return_rate, has_readvanceable_facility,
-    refinance_amortization_fallback, resolve_heloc_rate,
-    ChargeLimitExceededError, MissingRefinanceAmortizationError,
+from charge_limits import ChargeLimitExceededError, MissingRefinanceAmortizationError
+from config_access import (
+    set_return_rate,
+    resolve_return_rate,
+    has_readvanceable_facility,
+    resolve_heloc_rate,
 )
+from scenario_overlay import ScenarioOverlay, build_overlay_config, refinance_amortization_fallback
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from member_config import find_member_by_role  # DP#25 (#998): data-layer helper
 # DP#25 (#998): inject the simulation-layer callables scenario_discovery needs
 # (marginal_rate, strategy types/engine, rate resolvers) so the scenario layer
@@ -1672,10 +1677,10 @@ def _apply_structure_scenario(cfg: Dict, structure: Dict) -> Dict:
 
     ``structure`` is one entry of ``scenario_discovery.discover_anchors
     (cfg)['mortgage_structure']`` -- delegates the actual charge-split math
-    and both OSFI B-20 refusal checks to ``simulation_config.
+    and both OSFI B-20 refusal checks to ``property_structure.
     apply_structure_overlay`` (DP#9: one mechanism, not one per caller).
     """
-    from simulation_config import apply_structure_overlay
+    from property_structure import apply_structure_overlay
     cfg_variant = deepcopy(cfg)
     cfg_variant['property'] = apply_structure_overlay(cfg_variant.get('property', {}), structure)
     return cfg_variant
@@ -1686,12 +1691,12 @@ def _apply_sourcing_scenario(cfg: Dict, structure: Dict) -> Dict:
     overlay has ALREADY been applied -- returns a MODIFIED COPY (#845/#849).
 
     The cash-out counterpart of ``_apply_structure_scenario``: delegates to
-    ``simulation_config.apply_sourcing_overlay``, which splits the surplus the
+    ``property_structure.apply_sourcing_overlay``, which splits the surplus the
     refinance just advanced between an amortizing advance and a revolving
     draw at a FIXED registered charge (DP#9: the math lives in ONE place, next
     to ``apply_structure_overlay``, not here).
     """
-    from simulation_config import apply_sourcing_overlay
+    from property_structure import apply_sourcing_overlay
     cfg_variant = deepcopy(cfg)
     cfg_variant['property'] = apply_sourcing_overlay(cfg_variant.get('property', {}), structure)
     return cfg_variant
@@ -1785,7 +1790,7 @@ def _tranche_sweep_points(cfg: Dict, structure: Dict) -> List[Dict]:
 
       - the HOUSE amount is swept from its floor up to the charge: the
         floor is the house tranche's declared ``min_house_floor``, defaulting
-        to 60% of the charge (``simulation_config._tranche_house_floor``),
+        to 60% of the charge (``property_structure._tranche_house_floor``),
         and the steps are fixed 25k increments (coarsened to 50k/100k while
         the house x split product would exceed ``_TRANCHE_SWEEP_CELL_CAP``
         cells -- the optimizer stays fast, and a range that cannot fit
@@ -1818,7 +1823,7 @@ def _tranche_sweep_points(cfg: Dict, structure: Dict) -> List[Dict]:
 
     Raises:
         ValueError: the structure's ``tranches`` spec is invalid
-            (``simulation_config._validate_tranche_spec``: unknown kind,
+            (``property_structure._validate_tranche_spec``: unknown kind,
             overlapping kinds, ``min_amount``/``min_house_floor`` on a
             non-house tranche, ``deductible`` on a non-investment tranche,
             ``rate_type`` without a rate) -- validated HERE, before any
@@ -1831,8 +1836,8 @@ def _tranche_sweep_points(cfg: Dict, structure: Dict) -> List[Dict]:
             remedy (a declared ``min_house_floor`` narrowing the range),
             never silently dropping sweep points (DP#32).
     """
-    from simulation_config import (
-        _CHARGE_TOLERANCE,
+    from charge_limits import _CHARGE_TOLERANCE
+    from property_structure import (
         _structure_label,
         _tranche_house_floor,
         _validate_tranche_spec,
@@ -1913,7 +1918,7 @@ def _tranche_house_amounts(charge: float, floor: float,
     range that still cannot fit refuses loudly (DP#32 -- never silently
     drop sweep points, and never hand the user a surprise 30-minute sweep).
     """
-    from simulation_config import _CHARGE_TOLERANCE
+    from charge_limits import _CHARGE_TOLERANCE
     split_count = len(_TRANCHE_SPLIT_FRACTIONS)
     for step in _TRANCHE_HOUSE_STEPS:
         amounts = {floor}
@@ -1960,7 +1965,7 @@ def _compose_structure_cell(cfg: Dict, basis: Dict, structure: Dict) -> List[Dic
     question this PR adds does not arise and must not perturb the answer.
 
     Issue #1075: a sweep point carrying ``tranche_amounts`` is applied by the
-    tranche machinery (``simulation_config._apply_tranched_structure`` via
+    tranche machinery (``property_structure._apply_tranched_structure`` via
     ``apply_structure_overlay``) against the basis's post-refinance charge --
     the amounts ARE the drawn/room position, so the share-form sourcing
     re-split does not apply (see ``apply_sourcing_overlay``'s routing
@@ -2663,7 +2668,7 @@ def run_property_funding_exploration(cfg: Dict, input_path: str = "input.json",
     is precisely what this composition must surface (DP#5: anchor decisions,
     overlay sensitivities; DP#22: the optimizer ranks, it doesn't choose).
 
-    Each candidate funding is applied via ``simulation_config.
+    Each candidate funding is applied via ``property_structure.
     apply_property_funding_overlay`` (which rebuilds the property's
     ``purchase.financing`` block and ``net_equity``/``secured_share`` for the
     chosen method), THEN the income overlay -- and the PRODUCT is ranked,
@@ -2721,10 +2726,10 @@ def _apply_property_funding_scenario(cfg: Dict, assignment: Dict[str, Dict]) -> 
     ``assignment`` is one cell's ``assignment`` from
     ``scenario_discovery.discover_property_funding_cells`` -- delegates the
     financing-block rebuild + net_equity/secured_share recompute to
-    ``simulation_config.apply_property_funding_overlay`` (DP#9: one
+    ``property_structure.apply_property_funding_overlay`` (DP#9: one
     mechanism, not one per caller).
     """
-    from simulation_config import apply_property_funding_overlay
+    from property_structure import apply_property_funding_overlay
     return apply_property_funding_overlay(cfg, assignment)
 
 
@@ -3412,7 +3417,7 @@ def run_optimization(cfg: Dict, input_path: str = "input.json",
         # cost by however much the two rates differ, in every scenario this
         # optimizer's own ranking path scores, for the common shape of a
         # cheap legacy fixed mortgage alongside a floating HELOC. Resolved
-        # via the one canonical helper instead (simulation_config.
+        # via the one canonical helper instead (config_access.
         # resolve_heloc_rate): the household's OWN declared property.
         # heloc_rate wins outright; default=0.0 only matters when this
         # household has no readvanceable facility at all, in which case the
@@ -3938,7 +3943,7 @@ def apply_anchor_preset(cfg: Dict, anchor_name: str, discovered_anchors: Dict = 
     # duplicate. heloc.rate had no production reader even before the
     # heloc.* block was deleted outright; assumptions.heloc_rate (below) is
     # the one scenario_discovery.py's strategy-discovery heuristics
-    # actually consume (via simulation_config.resolve_heloc_rate(), issue
+    # actually consume (via config_access.resolve_heloc_rate(), issue
     # #677's canonical resolver -- NOT the same thing as #654's
     # property.heloc_rate, which is the base declared rate the core
     # simulation.py pricing engine reads; resolve_heloc_rate() checks
@@ -4278,8 +4283,7 @@ def main():
         # input_schema.json was an example-instance file of the retired
         # legacy shape, not the contract itself (DP#9).
         import shutil
-        import input_contract
-        schema_path = input_contract.EXAMPLE_PATH
+        schema_path = contract_schema.EXAMPLE_PATH
         if args.template == '-':
             with open(schema_path) as f:
                 print(f.read())

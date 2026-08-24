@@ -33,6 +33,9 @@ from simulation_state import SimState
 from simulation import FamilySimulation
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_people
+import contract_property
+import contract_schema
 
 
 def _add_owned_cottage(doc, value, mortgage_balance):
@@ -75,14 +78,14 @@ def _terminal_total_assets(doc):
 class PropertyEquityReachesNetWorth(unittest.TestCase):
     def setUp(self):
         self.base = _two_generation_subset(_load_example())  # principal only
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_net_equity_is_added_to_terminal_total_assets(self):
         """A cottage worth 400k with a 250k mortgage lifts the household's
         annual net worth by exactly its 150k net equity."""
         with_cottage = _add_owned_cottage(self.base, value=400000,
                                            mortgage_balance=250000)
-        ic.validate_contract(with_cottage)
+        contract_schema.validate_contract(with_cottage)
         delta = _terminal_total_assets(with_cottage) - _terminal_total_assets(self.base)
         self.assertAlmostEqual(delta, 150000.0, places=6)
 
@@ -90,7 +93,7 @@ class PropertyEquityReachesNetWorth(unittest.TestCase):
         """With no mortgage, the whole value is equity."""
         with_cottage = _add_owned_cottage(self.base, value=300000,
                                           mortgage_balance=0)
-        ic.validate_contract(with_cottage)
+        contract_schema.validate_contract(with_cottage)
         delta = _terminal_total_assets(with_cottage) - _terminal_total_assets(self.base)
         self.assertAlmostEqual(delta, 300000.0, places=6)
 
@@ -113,7 +116,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())  # principal only
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_no_properties_block_emitted(self):
         legacy = ic.to_internal_config(self.base)
@@ -131,7 +134,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
         full = _load_example()
         # The full 4-generation doc is refused for other reasons (#901); assert
         # the OWNERSHIP filter directly on the mapper instead.
-        primary_id, spouse_id = ic._find_primary_and_spouse(
+        primary_id, spouse_id = contract_people._find_primary_and_spouse(
             _two_generation_subset(full))
         base = _two_generation_subset(full)
         base["properties"].append({
@@ -143,7 +146,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
             "acb": 180000,
             "designated_principal_residence_years": [],
         })
-        owned = ic._map_owned_properties(base, primary_id, spouse_id)
+        owned = contract_property._map_owned_properties(base, primary_id, spouse_id)
         self.assertEqual(owned, [])
 
 

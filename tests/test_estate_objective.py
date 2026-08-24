@@ -18,7 +18,7 @@ from objective import (
     MAX_AFTER_TAX_ESTATE, MAX_TERMINAL_WEALTH, MAX_NET_BENEFIT,
     compute_after_tax_estate, get_objective,
 )
-from simulation_config import YearResult
+from year_result import YearResult
 from trajectory_invariants import assert_invariant
 
 from test_golden_trajectory_581 import golden_household_config, _run, START_YEAR

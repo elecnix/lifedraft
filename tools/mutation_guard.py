@@ -98,8 +98,9 @@ RESP_AND_COMPOUNDING = RESP_TEST_FILES + COMPOUNDING_TEST_FILES
 # The mutation is undone by the subprocess terminating.
 
 COMPOUNDING_APPLY = textwrap.dedent("""\
-    import simulation_rules as _sr
-    _original = _sr.apply_resp
+    import rule_registry as _reg
+    import rules_registered_plans as _rrp
+    _original = _rrp.apply_resp
     def _patched(ws, ctx):
         original_return = ctx.investment_return
         ctx.investment_return = original_return * 2
@@ -107,8 +108,8 @@ COMPOUNDING_APPLY = textwrap.dedent("""\
             return _original(ws, ctx)
         finally:
             ctx.investment_return = original_return
-    _sr.apply_resp = _patched
-    _sr.RULES['resp'] = _patched
+    _rrp.apply_resp = _patched
+    _reg.RULES['resp'] = _patched
 """)
 
 GRANT_WIRING_APPLY = textwrap.dedent("""\
@@ -139,16 +140,17 @@ ALLOC_RESP_APPLY = textwrap.dedent("""\
 """)
 
 STATE_ADVANCE_APPLY = textwrap.dedent("""\
-    import simulation_rules as _sr
-    _original_apply_resp = _sr.apply_resp
+    import rule_registry as _reg
+    import rules_registered_plans as _rrp
+    _original_apply_resp = _rrp.apply_resp
     def _patched_apply_resp(ws, ctx):
         # Zero the opening CESG accumulation — breaks cross-year CESG carry-forward.
         # This zeroes the cumulative CESG received per child at the start of each
         # year, so the $7,200 lifetime cap can never bind (it never accumulates).
         ws.opening_resp_cesg = [0.0] * len(ws.opening_resp_cesg) if ws.opening_resp_cesg else []
         return _original_apply_resp(ws, ctx)
-    _sr.apply_resp = _patched_apply_resp
-    _sr.RULES['resp'] = _patched_apply_resp
+    _rrp.apply_resp = _patched_apply_resp
+    _reg.RULES['resp'] = _patched_apply_resp
 """)
 
 

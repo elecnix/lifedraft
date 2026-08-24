@@ -233,11 +233,11 @@ class TestOverlayFunctionsReachTheEngine:
         )
 
     def test_apply_overlay_scenario_overlay_dataclass(self):
-        """The ScenarioOverlay path (simulation_config.apply_overlay /
+        """The ScenarioOverlay path (scenario_overlay.apply_overlay /
         simulate.evaluate_overlay) is a different overlay mechanism from the
         dict-returning functions above -- registered separately since it
         takes a dataclass, not overlay-name strings."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
         from simulate import evaluate_overlay
         base = _fixture_cfg()
         low = ScenarioOverlay(label="r=4%", mortgage_rate=0.05, investment_return=0.04, ltv=0.0)

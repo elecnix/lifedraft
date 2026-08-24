@@ -34,7 +34,8 @@ from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Tuple
 from copy import deepcopy
 
-from simulation_config import SimulationConfig, YearResult
+from simulation_config import SimulationConfig
+from year_result import YearResult
 # Issue #688: reserve sizing is pure, jurisdiction-agnostic arithmetic and
 # lives in the same module as the waterfall that draws it (DP#25: no
 # jurisdiction import; liquidation_waterfall imports nothing of ours).
@@ -1513,7 +1514,7 @@ def _annual_installment_service(config: SimulationConfig) -> float:
     """
     if not config.installments:
         return 0.0
-    from simulation_rules import _installment_payment_in_year
+    from rules_debt import _installment_payment_in_year
     return sum(
         _installment_payment_in_year(plan, config.start_year)
         for plan in config.installments)
@@ -1554,7 +1555,7 @@ def _property_equity_for_year(prop: Dict, cal_year: int, start_year: int) -> flo
     contribution to the balance sheet in calendar ``cal_year``.
 
     A property with a dated mid-horizon purchase (``prop['purchase']['year']``,
-    mapped by ``input_contract._map_owned_properties``) is NOT yet owned before
+    mapped by ``contract_property._map_owned_properties``) is NOT yet owned before
     that year, so it contributes ZERO equity until then and its full
     ``net_equity`` from the purchase year onward -- the mortgage originates and
     the equity enters the sheet in the same year the down payment leaves cash.
@@ -1577,7 +1578,7 @@ def _property_equity_for_year(prop: Dict, cal_year: int, start_year: int) -> flo
     real-estate TIMING -- is what bite A adds.
 
     Issue #956 bite B -- SALE: a property with a dated mid-horizon sale
-    (``prop['sale']['year']``, mapped by ``input_contract._map_owned_properties``)
+    (``prop['sale']['year']``, mapped by ``contract_property._map_owned_properties``)
     contributes ZERO equity from its sale year ONWARD (``cal_year >= sale_year``);
     in the sale year the property leaves the balance sheet and its net proceeds
     replace it in the portfolio (invested by the sale-year handler in the tax +
@@ -2885,7 +2886,8 @@ def simulate_year_pure(
     # possible: an independently-declared expected rule set must match the
     # registry exactly, and a coverage sweep asserts every rule actually
     # fires somewhere in a representative household's trajectory.
-    from simulation_rules import RuleContext, YearWorkingState, run_rules
+    from rule_registry import RuleContext, YearWorkingState
+    from simulation_rules import run_rules
 
     ws = YearWorkingState.from_state(state, allocations, year)
     # Issue #747/#25: normalize the opening canada state to a dict the SAME way

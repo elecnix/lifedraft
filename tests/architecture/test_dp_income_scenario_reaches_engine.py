@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import input_contract as ic
 import optimize
+import contract_schema
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -84,7 +85,7 @@ def _two_generation_subset(doc: dict) -> dict:
 
 
 def _load_runnable_cfg() -> dict:
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = json.load(f)
     doc = _two_generation_subset(doc)
     return ic.to_internal_config(doc)
@@ -101,7 +102,7 @@ class TestDecisionsIncomeReachesTheEngine(unittest.TestCase):
         """Sanity check on the fixture itself: schema/example.json's
         decisions.income has more than one entry, or this test proves
         nothing."""
-        with open(ic.EXAMPLE_PATH) as f:
+        with open(contract_schema.EXAMPLE_PATH) as f:
             doc = json.load(f)
         self.assertGreater(len(doc["decisions"]["income"]), 1)
 
@@ -109,7 +110,7 @@ class TestDecisionsIncomeReachesTheEngine(unittest.TestCase):
         """This is #665's exact symptom, inverted: 'a contract declaring
         three income scenarios produced a ranked table containing none of
         them.' Every declared scenario id must now appear."""
-        with open(ic.EXAMPLE_PATH) as f:
+        with open(contract_schema.EXAMPLE_PATH) as f:
             doc = json.load(f)
         declared_ids = {sc["id"] for sc in doc["decisions"]["income"]}
 

@@ -45,6 +45,8 @@ from simulation import FamilySimulation
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
 from test_golden_trajectory_581 import golden_household_config, _run as _run_golden
+import contract_errors
+import contract_schema
 
 
 # ============================================================================
@@ -71,7 +73,7 @@ def _closed_end_liability(kind, *, balance, rate, payment_monthly, years,
 
 
 def _load_example_doc():
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         return _two_generation_subset(json.load(fh))
 
 
@@ -276,7 +278,7 @@ class TestDeductibilityDefaultsNonDeductible(unittest.TestCase):
         car = _closed_end_liability(
             "car_loan", balance=40_000, rate=0.03, payment_monthly=700, years=5,
             deductibility={"investment_portion": 0.5, "personal_portion": 0.5})
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _config_from(_doc_with_liabilities(car))
         self.assertIn("investment_portion", str(cm.exception))
         self.assertIn("#703", str(cm.exception))
@@ -295,7 +297,7 @@ class TestIntergenerationalLoanRefused(unittest.TestCase):
         loan = _closed_end_liability(
             "intergenerational_loan", balance=50_000, rate=0.02,
             payment_monthly=400, years=15)
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _config_from(_doc_with_liabilities(loan))
         self.assertIn("intergenerational_loan", str(cm.exception))
         self.assertIn("#703", str(cm.exception))
@@ -314,7 +316,7 @@ class TestSecuredConsumerLoanRefused(unittest.TestCase):
         car = _closed_end_liability(
             "car_loan", balance=40_000, rate=0.03, payment_monthly=700, years=5,
             collateral=principal_id)
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _config_from(_doc_with_liabilities(car))
         self.assertIn("collateral", str(cm.exception))
 

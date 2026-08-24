@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/accounts.json",
+  "title": "lifedraft input contract — universal $defs: the accounts[] block",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Everything reachable from an `accounts[]` entry: the account record, its holdings, the jurisdiction-agnostic account-kind placeholder (the Canada overlay replaces it with the closed enum), the lock-up shape and the product flag.",
+
+  "$defs": {
+
+    "account_kind": { "type": "string", "minLength": 1, "description": "Jurisdiction-agnostic placeholder — a non-empty string. The Canada overlay replaces this with the closed enum shared by account.kind and retirement drawdown ordering." },
+
+    "holding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "weight"],
+      "properties": {
+        "product": { "type": "string", "description": "Key into assumptions.products (a synthetic/product composition registry), or a bucket name understood by the engine." },
+        "weight": { "$ref": "#/$defs/percent0to1" }
+      }
+    },
+
+    "locked_until": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Issue #823: the unlock condition for an illiquid account balance. Exactly one of `age` or `date` is declared (enforced by minProperties/maxProperties below at the overlay level; this universal def accepts either). `age` is the owner's age at which the balance becomes liquid (e.g. 65 for Fonds FTQ shares); `date` is a calendar date (ISO YYYY-MM-DD). The balance is excluded from the solvency/runway liquidation waterfall until the condition is met, and is liquid thereafter.",
+      "properties": {
+        "age": { "type": "integer", "minimum": 0, "description": "The owner's age at which the balance becomes liquid (DP#1: age is date-computed from the owner's birth_year, never a hardcoded constant)." },
+        "date": { "type": "string", "format": "date", "description": "A calendar date (ISO YYYY-MM-DD) at which the balance becomes liquid." }
+      }
+    },
+
+    "product": {
+      "type": ["string", "null"],
+      "description": "Issue #826: jurisdiction-agnostic placeholder -- a non-empty product id or null. The Canada overlay replaces this $def with the closed product enum (fonds_ftq, ...). See the account.product field description for the product-module resolution rule (DP#7/#10/#12: a product flag triggers a program module that supplies the product's well-known rules; an explicit account.expected_return / account.locked_until overrides the product default, DP#13)."
+    },
+
+    "account": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner", "kind", "balance", "acb", "holdings", "beneficiary", "successor_holder"],
+      "properties": {
+        "id": { "$ref": "#/$defs/account_id" },
+        "owner": { "$ref": "#/$defs/owner_ref", "description": "A single person for registered/individual account kinds (legally required); joint ownership only ever valid for the jurisdiction's non-registered/RESP-style kinds — enforced by the overlay's allOf." },
+        "kind": { "$ref": "#/$defs/account_kind", "description": "$defs/account_kind is a jurisdiction-agnostic placeholder (non-empty string) here. The Canada overlay replaces that $def with the closed account-kind enum (rrsp/tfsa/fhsa/resp/lira/... ) and adds the corresponding kind-specific sub-objects (fhsa/lira/lsif/resp) and allOf conditionals to THIS ($defs/account) object." },
+        "balance": { "$ref": "#/$defs/dated_amount" },
+        "acb": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "Adjusted cost base. null = unknown (must be estimated/obtained, not assumed equal to balance). Meaningful mainly for non-registered/taxable-on-disposition kinds; other kinds carry null." },
+        "holdings": { "type": "array", "items": { "$ref": "#/$defs/holding" } },
+        "beneficiary": { "anyOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }], "description": "Who receives the account's VALUE at death (registered plans lose the shelter unless successor_holder applies instead) (#600)." },
+        "successor_holder": { "anyOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }], "description": "A spouse who inherits the account itself and keeps it tax-sheltered forever — materially different from `beneficiary` (#600). Which account kinds this is legal for is jurisdiction-specific (in Canada: TFSA only); the overlay's allOf enforces null elsewhere." },
+        "contributors": { "type": "array", "items": { "$ref": "#/$defs/person_id" }, "description": "Only meaningful for a spousal-contribution registered account: the annuitant/owner is `owner`; this lists who actually contributes (attribution rules need both). Jurisdiction-specific whether this concept exists at all." },
+        "product": { "$ref": "#/$defs/product", "description": "Issue #826 (DP#7/#10/#12): a branded-product flag that triggers a program module encoding the product's well-known, identical-for-every-holder rules -- so the household does NOT restate them in input. e.g. 'fonds_ftq' resolves to countries/canada/fonds_ftq.py: a 7.3% 10-year-CAR expected return and locked-until-age-65 illiquidity (plus the LSIF credit already modeled in lsif_credit.py). null = a generic account with no product-module rules (the default; today's behaviour). The product supplies expected_return/locked_until DEFAULTS into the same #823 downstream machinery; an explicit account.expected_return / account.locked_until on the same account OVERRIDES the product default (DP#13: a declared value wins over a fallback). $defs/product is a jurisdiction-agnostic placeholder (non-empty string or null) here; the Canada overlay replaces that $def with the closed product enum (fonds_ftq, ...)." },
+        "expected_return": { "type": ["number", "null"], "description": "Issue #823/#826: per-account expected-return override (a real annual rate, e.g. 0.073 for Fonds FTQ's 10-year CAR). null = use the global return_model rate, OR -- when the account declares a `product` whose module supplies a product default (issue #826, e.g. fonds_ftq -> 7.3%) -- use that product default (the default; preserves today's behaviour when no product is declared). When declared, the engine blends this account's balance into its account-kind pot at this rate (balance-weighted with the rest of the pot at the global rate), so a flagged account grows at its own rate while unflagged accounts use the global rate. DP#13: an explicit expected_return here wins over a product-module default. Numerically small for FTQ (7.3% vs 7% global) but makes the holding's own return profile explicit and non-silently-substituted (DP#32)." },
+        "mer": { "type": ["number", "null"], "description": "Issue #691: this account's all-in management-expense-ratio (a real annual fraction, e.g. 0.0116 for a 1.16% fund). Subtracted from the account's GROSS growth rate before compounding, so a declared fee actually reduces the balance (net = gross - mer). The gross rate is the global `return_model` rate, or this account's #823 `expected_return`/product blend when declared -- MER composes on top (net = expected_return - mer). Applied balance-weighted into the account-kind pot the growth rule reads (rrsp/tfsa/fhsa/non_reg/lira/lif), the same seam #823's expected_return rides. 0.0 means fee-free (a declared fact -- reaches the config, distinct from null), NOT 'unknown'; null = no MER declared, the global fee-free rate (today's behaviour; keeps the golden invariant unchanged). This is the ONE canonical fee spelling the engine reads (DP#8): the per-fund `assumptions.products.*.mer` catalog datum is a future per-holding source that aggregates into this account-level fee; the duplicate `asset_location.PortfolioHolding.mer_pct` was deleted.", "$comment": "#691: the engine-consumed MER. Canonical over the two former dead fee fields (DP#8)." },
+        "locked_until": { "anyOf": [{ "$ref": "#/$defs/locked_until" }, { "type": "null" }], "description": "Issue #823/#826: per-account illiquidity. The balance is NOT liquid (excluded from the solvency/runway liquidation waterfall) before the unlock condition is met; it IS liquid after. null = fully liquid, OR -- when the account declares a `product` whose module supplies a product default (issue #826, e.g. fonds_ftq -> locked-until-65) -- use that product default. Modeled on the #768 equity-grant illiquidity concept, but FTQ shares become accessible at age 65 / a qualifying event, so this is 'illiquid-until-65', not 'zero forever'. DP#13: an explicit locked_until here wins over a product-module default. The retirement drawdown rule may draw the balance after the unlock (a read of this flag); before the unlock the runway/solvency waterfall cannot liquidate it." }
+      }
+    }
+
+  }
+}

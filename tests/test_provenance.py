@@ -20,14 +20,14 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import input_contract as ic
 import provenance as prov
+import contract_schema
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load_example():
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         return json.load(f)
 
 
@@ -461,7 +461,7 @@ class ExampleProvenanceTest(unittest.TestCase):
         # composed-schema validation (additionalProperties:false at root
         # would reject an unrecognized key outright).
         doc = _load_example()
-        ic.validate_contract(doc)  # raises on failure
+        contract_schema.validate_contract(doc)  # raises on failure
 
 
 if __name__ == "__main__":

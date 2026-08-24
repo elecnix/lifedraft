@@ -20,7 +20,7 @@ Tests cover:
 import pytest
 from copy import deepcopy
 from optimize import compute_net_benefit
-from simulation_config import YearResult
+from year_result import YearResult
 from countries.canada.lsif_credit import (
     compute_lsif_credit, lsif_from_config, LSIFPurchase,
     FEDERAL_LSIF_RATE, QUEBEC_LSIF_RATE, LSIF_PURCHASE_MAX,

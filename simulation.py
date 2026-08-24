@@ -55,7 +55,9 @@ from jurisdiction import (
 )
 
 # Import config classes from the new module to break cycles
-from simulation_config import SimulationConfig, YearResult, ScenarioOverlay, build_overlay_config
+from scenario_overlay import ScenarioOverlay, build_overlay_config
+from simulation_config import SimulationConfig
+from year_result import YearResult
 # Issue #681: the trajectory invariants are LIBRARY code, asserted from the
 # run path itself -- not a test-only harness that a real household can walk
 # straight past (see trajectory_invariants.py's module docstring).
@@ -907,7 +909,7 @@ def _rental_income_for(
     generic fold is only the household-structure PLUMBING: read each property's
     declared facts off the internal config and split the whole-property figures
     by the couple's declared OWNER->ROLE shares (mapped in
-    ``input_contract._map_owned_properties``).
+    ``contract_property._map_owned_properties``).
 
     Returns ``(primary_operating, spouse_operating, primary_interest_deduction,
     spouse_interest_deduction, primary_cca, spouse_cca, new_ucc_by_prop)`` --
@@ -1015,7 +1017,7 @@ def _short_term_rental_facts(cfg) -> Tuple[float, bool]:
 
     A ``kind=rental`` property whose ``rental`` block carries a ``short_term``
     marker is an STR (already legality-gated at load by
-    ``input_contract._map_owned_properties``; a banned/unregistered STR never
+    ``contract_property._map_owned_properties``; a banned/unregistered STR never
     reaches here). Its net income is ACTIVE business income (ITA s.9), computed by
     the SAME net-income arithmetic as a long-term rental and so ALREADY inside
     ``net_rental_income`` -- this surfaces the STR SUBSET distinctly, it does not
