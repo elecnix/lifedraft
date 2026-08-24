@@ -19,7 +19,9 @@
         "face_amount": { "$ref": "#/$defs/money" },
         "premium_annual": { "$ref": "#/$defs/money" },
         "as_of": { "$ref": "#/$defs/date" },
-        "term_end_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "null for permanent policies." }
+        "term_end_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "null for permanent policies." },
+        "renewal_end_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }],
+          "description": "Issue #138: declared term RENEWAL -- coverage continues past term_end_date to this date (the insurer's renewal premium is set by the insurer at renewal and is NOT modelled; only the declared premium_annual through term_end_date is priced). Must be strictly after term_end_date; null/absent means the policy LAPSES at term_end_date -- the death benefit leaves the estate and the premium stops. Refused on a permanent policy (term_end_date null): a policy with no term does not renew." }
       }
     },
 

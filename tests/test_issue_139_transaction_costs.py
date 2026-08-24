@@ -143,6 +143,9 @@ class TestAdapterFoldsIntoCashFlows(unittest.TestCase):
 
     def test_transaction_costs_append_to_cash_flows(self):
         doc = _load_doc()
+        # Isolate #139's legs: empty the estate's policies so #138's premium
+        # legs (a separate feature's channel contribution) don't shift counts.
+        doc["estate"]["life_insurance"] = []
         doc["transaction_costs"] = [
             _txn(txn_id="orig", label="lender origination fee", kind="cost",
                  date="2026-06-30", amount=2000.0),
@@ -164,6 +167,9 @@ class TestAdapterFoldsIntoCashFlows(unittest.TestCase):
         """DP#32 at the adapter: a document without transaction_costs[] maps
         cash_flows EXACTLY as it did before the feature."""
         doc = _load_doc()
+        # Policy-free household (#138's premium legs are a different block's
+        # contribution -- this test scopes the absent-transaction_costs claim).
+        doc["estate"]["life_insurance"] = []
         cfg = ic.to_internal_config(doc)
         baseline = [{"year": int(cf["date"][:4]), "amount": cf["amount"],
                      "tax_treatment": "non-taxable" if cf["tax_treatment"] == "tax_free"

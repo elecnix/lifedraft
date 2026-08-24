@@ -16,6 +16,19 @@ read by the estate's deemed disposition AND by every voluntary sale, and
 family-year to two properties -- loudly, at the contract boundary, before any
 gain is priced.
 
+Issue #138 completes the policy's LIVING economics: ``map_insurance_premiums``
+turns each declared ``premium_annual`` into dated negative cash-flow legs (one
+per in-force year, folded into the engine's existing dated cash-flow channel by
+``input_contract.to_internal_config``), a term policy stops charging at its
+``term_end_date`` cliff unless a ``renewal_end_date`` keeps the COVERAGE alive
+(the insurer-set renewal premium itself is deliberately not invented), and the
+death-benefit lapse check reads the renewed coverage end.
+
+Tracked follow-up (deliberately NOT modelled here): DISABILITY riders -- waiting
+period, benefit %, duration -- are unmodellable; the natural host is the existing
+``decisions.income[]`` income-shock machinery (a multi-year disability is an
+income shock with a partial offset). See issue #138's proposed direction.
+
 The Canada tax arithmetic itself lives in ``countries.canada.pre_designation``
 and is imported lazily (DP#25: this jurisdiction-agnostic mapper does not
 depend on the Canada package at import time).
@@ -408,21 +421,26 @@ def _map_estate(doc: Dict, primary_id: str, spouse_id: Optional[str]) -> Dict[st
 
     # ── (6) Life insurance: a tax-free death benefit (ITA s.148(1)), absent
     # from the model entirely until now. Only policies INSURING a member of the
-    # couple pay into THIS estate, and a TERM policy that has already lapsed by
-    # the projection horizon pays nothing -- a term policy is not a permanent
-    # one, and treating it as such would inflate the estate by its full face.
+    # couple pay into THIS estate, and a TERM policy whose coverage has ended
+    # by the projection horizon pays nothing -- a lapsed term policy is not a
+    # permanent one, and treating it as such would inflate the estate by its
+    # full face. Issue #138 adds the ONE renewal distinction: coverage ends at
+    # ``renewal_end_date`` when a renewal is declared, else at
+    # ``term_end_date`` -- so a renewed policy keeps its benefit past the old
+    # cliff, and an un-renewed one lapses exactly as before (byte-identical
+    # for documents that declare no renewals, DP#32).
     horizon_date = _horizon_date(doc, primary_id)
     death_benefit = 0.0
     for pol in estate["life_insurance"]:
         if pol["insured"] not in couple:
             continue
-        term_end = pol.get("term_end_date")
-        if term_end is not None and horizon_date is not None and term_end < horizon_date:
+        coverage_end = _policy_coverage_end(pol)
+        if coverage_end is not None and horizon_date is not None and coverage_end < horizon_date:
             logger.info(
                 "Life-insurance policy %r (term, face $%s) expires %s, before the "
                 "projection horizon %s -- it pays no death benefit into the "
                 "terminal estate and is excluded.",
-                pol["id"], f"{pol['face_amount']:,.0f}", term_end, horizon_date)
+                pol["id"], f"{pol['face_amount']:,.0f}", coverage_end, horizon_date)
             continue
         death_benefit += pol["face_amount"]
 
@@ -471,6 +489,126 @@ def _map_estate(doc: Dict, primary_id: str, spouse_id: Optional[str]) -> Dict[st
         estate_block["principal_residence_appreciation_rate"] = (
             principal_appreciation_rate)
     return estate_block
+
+
+def _policy_coverage_end(pol: Dict) -> Optional[str]:
+    """The date a policy's coverage ends (ISO string), or ``None`` for a
+    permanent policy (issue #138).
+
+    A declared ``renewal_end_date`` extends a term policy's coverage past its
+    original cliff; without one the policy lapses at ``term_end_date``. DP#32:
+    explicit presence tests, never ``or`` -- a policy that declares a renewal
+    and one that does not are different facts even when both carry a null
+    somewhere, and a declared date must never be swallowed by truthiness."""
+    renewal_end = pol.get("renewal_end_date")
+    return (renewal_end if renewal_end is not None
+            else pol.get("term_end_date"))
+
+
+def _validate_renewal(pol: Dict) -> None:
+    """Refuse an incoherent renewal declaration LOUDLY (DP#32): a renewal on a
+    policy with no term (permanent policies do not renew), or a renewal that
+    ends on/before the term it extends (coverage cannot end twice)."""
+    renewal_end = pol.get("renewal_end_date")
+    if renewal_end is None:
+        return
+    term_end = pol.get("term_end_date")
+    if term_end is None:
+        raise ContractAdaptationError(
+            f"Life-insurance policy {pol['id']!r} declares "
+            f"renewal_end_date={renewal_end!r} but has term_end_date=null "
+            f"(permanent). A policy with no term does not renew -- drop the "
+            f"renewal_end_date, or give the policy its real term_end_date "
+            f"(issue #138)."
+        )
+    if renewal_end <= term_end:
+        raise ContractAdaptationError(
+            f"Life-insurance policy {pol['id']!r} declares "
+            f"renewal_end_date={renewal_end!r}, which is on/before its own "
+            f"term_end_date={term_end!r}. A renewal EXTENDS coverage past the "
+            f"term cliff -- a renewal that ends first is contradictory input, "
+            f"not a policy to silently truncate (issue #138)."
+        )
+
+
+def map_insurance_premiums(doc: Dict, primary_id: str,
+                           start_year: int) -> List[Dict[str, Any]]:
+    """Issue #138: every declared policy's ``premium_annual`` becomes dated,
+    NEGATIVE cash-flow legs -- one per calendar year the policy charges its
+    declared premium inside the projection window -- which the caller folds
+    into the engine's EXISTING dated cash-flow channel (the same channel
+    #139's transaction costs and #1075's origination cash-back ride), so every
+    objective that folds the balance sheet sees the true cost of coverage
+    (DP#8: one read of one channel, no new engine machinery).
+
+    Cliff semantics (the piece that makes keep/replace/lapse priceable):
+    a TERM policy charges its DECLARED premium through the last calendar year
+    it is in force -- the years y with Jan-1(y) strictly before
+    ``term_end_date``, i.e. every year the policy covers at least one day --
+    and from the following year a LAPSED policy charges nothing. A PERMANENT
+    policy (``term_end_date`` null) charges through the whole projection
+    window.
+
+    Renewal pricing is deliberately NOT invented: the insurer sets the
+    post-cliff renewal premium at underwriting time, so a declared
+    ``renewal_end_date`` keeps the DEATH BENEFIT alive past the cliff (see
+    ``_policy_coverage_end``) while the premium legs still stop at
+    ``term_end_date`` -- priced coverage cost stops where the engine's
+    knowledge stops, and the gap is logged, never filled with a guess (DP#32).
+
+    Premiums are AFTER-TAX cash: life-insurance premiums are not deductible
+    (ITA s.60(a)(i) excludes them; there is no tax effect to model), each leg
+    books ``tax_treatment: post-tax`` and simply leaves the household's cash
+    flow by the declared amount.
+
+    Returns ``[]`` for a household declaring no policies -- the golden
+    household -- leaving the fold byte-identical (DP#32).
+    """
+    estate = doc.get("estate", {})
+    policies = estate.get("life_insurance", []) if estate else []
+    if not policies:
+        return []
+
+    horizon_end_year = _horizon_end_year(doc, primary_id)
+    # When the horizon does not date against the primary, use the same
+    # generous cap ``to_internal_config`` uses for the mortgage schedule
+    # (projection_years=100): the fold simply never simulates past its own
+    # span, so extra legs beyond it are inert by construction.
+    last_possible_year = (horizon_end_year if horizon_end_year is not None
+                          else start_year + 99)
+
+    out: List[Dict[str, Any]] = []
+    for pol in policies:
+        _validate_renewal(pol)
+        premium = pol["premium_annual"]
+        term_end = pol.get("term_end_date")
+        renewal_end = pol.get("renewal_end_date")
+        if term_end is None:
+            last_premium_year = last_possible_year
+        else:
+            # The last calendar year whose FIRST DAY the policy is still in
+            # force (DP#1: dates, not years -- a Jun-30 expiry still charges
+            # its June-year premium; a Jan-1 expiry does not charge January).
+            te = _date.fromisoformat(term_end)
+            last_premium_year = (te.year if _date(te.year, 1, 1) < te
+                                 else te.year - 1)
+            if renewal_end is not None:
+                logger.info(
+                    "Life-insurance policy %r renews at %s: the insurer sets "
+                    "the renewal premium at underwriting, so only the declared "
+                    "$%s/yr through the term cliff is priced -- the renewal-"
+                    "period premium is NOT modelled (issue #138).",
+                    pol["id"], term_end, f"{premium:,.0f}")
+        for year in range(start_year, last_premium_year + 1):
+            out.append({
+                "year": year,
+                "amount": -float(premium),
+                "tax_treatment": "post-tax",
+                "kind": "cost",
+                "id": pol["id"],
+                "label": "life insurance premium",
+            })
+    return out
 
 
 def _ownership_share(doc: Dict, kind: str, person_id: str,

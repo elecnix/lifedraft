@@ -87,7 +87,7 @@ from contract_decisions import (
     map_borrow_to_invest, map_contribution_strategies, map_declared_objective,
     map_income_scenarios, map_mortgage_decisions, map_resp_action_scenarios,
 )
-from contract_estate import _family_pre_window, _map_estate
+from contract_estate import _family_pre_window, _map_estate, map_insurance_premiums
 from contract_liabilities import map_consumer_loans, resolve_liability_facilities
 from contract_people import (
     _find_primary_and_spouse, _horizon_end_year, _map_child,
@@ -222,6 +222,15 @@ def to_internal_config(doc: Dict) -> Dict:
     transaction_cost_legs = map_transaction_costs(doc, start_year)
     if transaction_cost_legs:
         legacy_cash_flows = legacy_cash_flows + transaction_cost_legs
+    # Issue #138: each declared life-insurance policy's premium_annual joins
+    # the SAME dated cash-flow channel -- one negative leg per in-force year,
+    # stopping at the term cliff (a lapsed policy charges nothing; a renewed
+    # one keeps its death benefit but its renewal premium is insurer-set and
+    # deliberately not priced) -- so every objective sees the true cost of
+    # coverage. Absent policies -> no legs -> byte-identical fold (DP#32).
+    insurance_premium_legs = map_insurance_premiums(doc, primary_id, start_year)
+    if insurance_premium_legs:
+        legacy_cash_flows = legacy_cash_flows + insurance_premium_legs
 
     legacy: Dict[str, Any] = {
         "assumptions": assumptions_cfg,
