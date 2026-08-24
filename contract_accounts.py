@@ -62,13 +62,18 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
     'locked': {kind: [{balance, unlock_age, owner_birth_year}]},
     'mer_drag': {kind: {mer_balance, weighted_mer_sum}}}``.
 
-    - ``mer_drag[kind]`` (issue #691): the summed balance of accounts of ``kind``
-      that declared a `mer` fee, plus the balance-weighted fee sum
-      (`sum(balance * mer)`). The growth rule subtracts this from the pot's
-      gross rate: ``net = gross - weighted_mer_sum / pot_total`` -- so a declared
-      fee reduces the compounded balance (composing on top of the expected_return
-      blend). A null/absent `mer` records nothing (fee-free global rate, golden);
-      an explicit 0.0 is recorded (a declared fact, DP#32) but moves no rate.
+    - ``mer_drag[kind]`` (issue #691/#136): the summed balance of accounts of
+      ``kind`` that declared a `mer` fee, the balance-weighted fee sum
+      (``sum(balance * mer)``), and -- issue #136 -- the fee as a FIXED DRAG
+      RATE (``fee_rate``, the balance-weighted average fee; ``fee_share``, the
+      fee-accounts' share of the kind's DECLARED pot balance). The growth rule
+      subtracts ``fee_share * fee_rate`` from the gross rate. The fee is a
+      RATE, not a frozen dollar snapshot, so it does not dilute as the pot
+      grows; a zero-opening-balance fee account is treated as the whole pot
+      when it is the only declared account of its kind (it must still pay its
+      declared fee once funded, issue #136). A null/absent `mer` records
+      nothing (fee-free global rate, golden); an explicit 0.0 is recorded (a
+      declared fact, DP#32) but moves no rate.
 
     - ``return_overrides[kind]``: the summed balance of accounts of ``kind``
       that declared an `expected_return`, plus the balance-weighted rate sum
@@ -102,11 +107,22 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
     return_overrides: Dict[str, Dict[str, float]] = {}
     locked: Dict[str, List[Dict[str, Any]]] = {}
     mer_drag: Dict[str, Dict[str, float]] = {}
+    # Issue #136: the pot-kind's DECLARED total balance (sum of every account
+    # of this kind, fee-bearing or not) -- used to price the fee-accounts' share
+    # of the pot. A zero-opening fee account funded by future contributions
+    # keeps its fee live because the DRAG RATE (not a rolling dollar sum) is
+    # what the growth rule subtracts.
+    kind_declared: Dict[str, float] = {}
+    fee_rates_by_kind: Dict[str, List[float]] = {}
     for acc in doc.get("accounts", []):
         kind = acc["kind"]
         if kind not in _GROWTH_POT_KINDS:
             continue
         amount = acc["balance"]["amount"]
+        kind_declared[kind] = kind_declared.get(kind, 0.0) + amount
+        mer = acc.get("mer")
+        if mer is not None and mer != 0:
+            fee_rates_by_kind.setdefault(kind, []).append(mer)
         # Issue #826 (DP#7/#10/#12/#13): a product flag resolves the
         # product module's well-known rules as DEFAULTS for expected_return /
         # locked_until. An EXPLICIT account.expected_return / account.locked_until
@@ -129,8 +145,7 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
         # explicit 0.0 IS a declared fact (fee-free), recorded here (mer_balance
         # counted, weighted_mer_sum contributes 0) and distinct from a null/
         # absent MER, which records nothing and leaves today's global-rate
-        # behaviour untouched (golden). This is the ONE engine-read fee spelling
-        # (DP#8); it composes on top of the #823 expected_return blend above.
+        # behaviour untouched (the canonical fee (DP#8)).
         mer = acc.get("mer")
         if mer is not None:
             m = mer_drag.setdefault(kind, {"mer_balance": 0.0,
@@ -175,6 +190,36 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
             locked.setdefault(kind, []).append(
                 {"balance": amount, "unlock_age": unlock_age,
                  "owner_birth_year": owner_birth_year})
+    # Issue #136: normalize each pot-kind's fee entry to a FIXED DRAG RATE ---
+    # ``fee_rate`` (the balance-weighted average declared fee over the kind's
+    # fee-flagged accounts, or the declared average when they all open
+    # zero-balance) and ``fee_share`` (the fee-accounts' share of the kind's
+    # DECLARED pot balance). The growth rule subtracts ``fee_share * fee_rate``
+    # -- a constant rate every year, immune to the pot's dollar drift (no
+    # dilution as an ongoing plan, and a zero-balance account that is the only
+    # account of its kind gets the WHOLE pot fraction once funded -- issue
+    # #136).
+    for kind, entry in mer_drag.items():
+        bal = entry["mer_balance"]
+        wms = entry["weighted_mer_sum"]
+        rates = fee_rates_by_kind.get(kind, [])
+        if bal > 0:
+            entry["fee_rate"] = wms / bal
+        elif rates:
+            # All fee-flagged accounts of this kind close zero-balance (e.g. a
+            # brand-new account being funded later): keep the DECLARED average
+            # fee rate -- a single 0-opening account at 0.5% is a 0.5% pot once
+            # it holds money (issue #136).
+            entry["fee_rate"] = sum(rates) / len(rates)
+        else:
+            entry["fee_rate"] = 0.0
+        total = kind_declared.get(kind, 0.0)
+        if total > 0:
+            entry["fee_share"] = bal / total
+        else:
+            # No other declared account of this kind: the fee-flagged account
+            # (or the future money in this pot) IS the whole pot.
+            entry["fee_share"] = 1.0 if (bal > 0 or rates) else 0.0
     return {"return_overrides": return_overrides, "locked": locked,
             "mer_drag": mer_drag}
 

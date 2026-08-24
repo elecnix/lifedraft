@@ -106,7 +106,8 @@ class TestMerSubtractsFromPotRate(unittest.TestCase):
         # A $40k slice of a $100k RRSP pot carries a 1.00% MER.
         # net = 0.07 - (40000*0.01)/100000 = 0.07 - 0.004 = 0.066
         cfg = _config(account_mer_drag={
-            'rrsp': {'mer_balance': 40_000, 'weighted_mer_sum': 40_000 * 0.01},
+            'rrsp': {'mer_balance': 40_000, 'weighted_mer_sum': 40_000 * 0.01,
+                             'fee_share': 0.4, 'fee_rate': 0.01},
         })
         ctx = _ctx(cfg, investment_return=0.07)
         self.assertAlmostEqual(_blended_pot_rate(ctx, 'rrsp', 100_000), 0.066)
@@ -114,21 +115,24 @@ class TestMerSubtractsFromPotRate(unittest.TestCase):
     def test_whole_pot_mer_subtracts_full_fee(self):
         # The whole $100k pot carries a 1.16% MER -> net = 0.07 - 0.0116.
         cfg = _config(account_mer_drag={
-            'rrsp': {'mer_balance': 100_000, 'weighted_mer_sum': 100_000 * 0.0116},
+            'rrsp': {'mer_balance': 100_000, 'weighted_mer_sum': 100_000 * 0.0116,
+                             'fee_share': 1.0, 'fee_rate': 0.0116},
         })
         ctx = _ctx(cfg, investment_return=0.07)
         self.assertAlmostEqual(_blended_pot_rate(ctx, 'rrsp', 100_000), 0.07 - 0.0116)
 
     def test_mer_for_different_kind_does_not_affect_this_pot(self):
         cfg = _config(account_mer_drag={
-            'tfsa': {'mer_balance': 50_000, 'weighted_mer_sum': 50_000 * 0.01},
+            'tfsa': {'mer_balance': 50_000, 'weighted_mer_sum': 50_000 * 0.01,
+                             'fee_share': 1.0, 'fee_rate': 0.01},
         })
         ctx = _ctx(cfg, investment_return=0.07)
         self.assertAlmostEqual(_blended_pot_rate(ctx, 'rrsp', 100_000), 0.07)
 
     def test_zero_pot_returns_global(self):
         cfg = _config(account_mer_drag={
-            'rrsp': {'mer_balance': 40_000, 'weighted_mer_sum': 40_000 * 0.01},
+            'rrsp': {'mer_balance': 40_000, 'weighted_mer_sum': 40_000 * 0.01,
+                             'fee_share': 0.4, 'fee_rate': 0.01},
         })
         ctx = _ctx(cfg, investment_return=0.07)
         self.assertAlmostEqual(_blended_pot_rate(ctx, 'rrsp', 0.0), 0.07)
@@ -137,7 +141,8 @@ class TestMerSubtractsFromPotRate(unittest.TestCase):
         """DP#32: an explicit 0.0 MER is fee-free, identical to no MER -- not a
         source of divergence."""
         cfg = _config(account_mer_drag={
-            'rrsp': {'mer_balance': 100_000, 'weighted_mer_sum': 0.0},
+            'rrsp': {'mer_balance': 100_000, 'weighted_mer_sum': 0.0,
+                             'fee_share': 1.0, 'fee_rate': 0.0},
         })
         ctx = _ctx(cfg, investment_return=0.07)
         self.assertAlmostEqual(_blended_pot_rate(ctx, 'rrsp', 100_000), 0.07)
@@ -153,7 +158,8 @@ class TestMerSubtractsFromPotRate(unittest.TestCase):
                          'weighted_rate_sum': 25_000 * 0.073},
             },
             account_mer_drag={
-                'rrsp': {'mer_balance': 25_000, 'weighted_mer_sum': 25_000 * 0.01},
+                'rrsp': {'mer_balance': 25_000, 'weighted_mer_sum': 25_000 * 0.01,
+                             'fee_share': 0.25, 'fee_rate': 0.01},
             },
         )
         ctx = _ctx(cfg, investment_return=0.07)
@@ -168,10 +174,12 @@ class TestRegisteredGrowthAppliesMer(unittest.TestCase):
         gross rate, differ ONLY in MER -> their post-growth balances diverge by
         the compounded fee. Today (before the fix) they were byte-identical."""
         cfg_cheap = _config(account_mer_drag={
-            'rrsp': {'mer_balance': 100_000, 'weighted_mer_sum': 100_000 * 0.0020},
+            'rrsp': {'mer_balance': 100_000, 'weighted_mer_sum': 100_000 * 0.0020,
+                             'fee_share': 1.0, 'fee_rate': 0.0020},
         })
         cfg_dear = _config(account_mer_drag={
-            'rrsp': {'mer_balance': 100_000, 'weighted_mer_sum': 100_000 * 0.0116},
+            'rrsp': {'mer_balance': 100_000, 'weighted_mer_sum': 100_000 * 0.0116,
+                             'fee_share': 1.0, 'fee_rate': 0.0116},
         })
         ws_cheap = YearWorkingState(year=0)
         ws_cheap.new_rrsp_bal = 100_000
@@ -200,7 +208,8 @@ class TestRegisteredGrowthAppliesMer(unittest.TestCase):
 class TestConfigRoundTrip(unittest.TestCase):
     def test_mer_drag_round_trips(self):
         cfg = _config(account_mer_drag={
-            'rrsp': {'mer_balance': 40_000, 'weighted_mer_sum': 40_000 * 0.01},
+            'rrsp': {'mer_balance': 40_000, 'weighted_mer_sum': 40_000 * 0.01,
+                             'fee_share': 0.4, 'fee_rate': 0.01},
         })
         d = cfg.to_dict()
         self.assertIn('mer_drag', d['accounts'])
@@ -306,7 +315,8 @@ class TestMerReachesEngineOutput(unittest.TestCase):
         # The golden household's RRSP has a balance of $300k (primary) +
         # $150k (spouse). Add a 1.16% MER on the RRSP pot.
         variant['accounts']['mer_drag'] = {
-            'rrsp': {'mer_balance': 450_000, 'weighted_mer_sum': 450_000 * 0.0116},
+            'rrsp': {'mer_balance': 450_000, 'weighted_mer_sum': 450_000 * 0.0116,
+                             'fee_share': 1.0, 'fee_rate': 0.0116},
         }
         base_terminal = _run(base_cfg)[-1].total_assets
         variant_terminal = _run(variant)[-1].total_assets

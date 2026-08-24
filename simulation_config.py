@@ -574,14 +574,17 @@ class SimulationConfig:
     account_return_overrides: Dict = field(default_factory=dict)
     account_locked: Dict = field(default_factory=dict)
 
-    # Issue #691: per-account MER fees, pot-keyed. Defaults to empty -- a
+    # Issue #691/#136: per-account MER fees, pot-keyed. Defaults to empty -- a
     # household that declares no `mer` grows at the fee-free global rate
     # (today's behaviour; keeps the golden invariant unchanged, DP#32: an
-    # absent fee is not a zero fee). The growth rule subtracts the balance-
-    # weighted fee from the pot's gross rate (net = gross - weighted_mer_sum /
-    # pot_total).
-    #   mer_drag[kind] = {'mer_balance': float,
-    #                     'weighted_mer_sum': float}  # sum(bal*mer)
+    # absent fee is not a zero fee). The growth rule subtracts a FIXED DRAG
+    # RATE from the pot's gross rate (net = gross - fee_share * fee_rate) so
+    # the fee neither dilutes as the pot grows nor freezes at a zero-opening
+    # account's $0 contribution (issue #136).
+    #   mer_drag[kind] = {'mer_balance': float,     # declared fee-account balances
+    #                     'weighted_mer_sum': float}  # sum(bal*mer), declared
+    #                     'fee_share': float,      # fee acs' share of declared pot
+    #                     'fee_rate': float}       # balance-weighted avg fee
     account_mer_drag: Dict = field(default_factory=dict)
 
     @classmethod
