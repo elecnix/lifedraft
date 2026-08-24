@@ -168,9 +168,19 @@ def _mortgage_data_for(year: int, *, amort_annual: list, amort: list) -> Dict:
     # Fallback
     months = [m for m in amort if m['year'] == year + 1]
     if months:
+        # Issue #113: the year's debt-service cash includes any applied
+        # prepayment principal and the excess-prepayment penalty the
+        # schedule charged — exactly what annual_summary folds into
+        # total_payment on its own rows, so this fallback can never
+        # disagree with it (DP#9: one spelling of the year's outflow).
+        # Legacy schedules carry no prepayment keys; these default to 0.0.
         return {
             'year': year + 1,
-            'total_payment': sum(m['payment'] for m in months),
+            'total_payment': sum(
+                m['payment'] + m.get('prepayment_extra', 0.0)
+                + m.get('prepayment_penalty', 0.0) for m in months),
+            'prepayment_penalty': sum(
+                m.get('prepayment_penalty', 0.0) for m in months),
             'total_interest': sum(m['interest'] for m in months),
             'total_principal': sum(m['principal'] for m in months),
             'total_readvanced': sum(m['principal'] for m in months),

@@ -30,12 +30,21 @@ from countries.canada.ird_penalty import (
     compute_ird_penalty, compute_three_months_interest,
 )
 
+# Issue #113: prepayment-privilege pricing lives in its own module (one
+# spelling of the allowance split and the excess penalty, DP#10); the
+# amortization loop calls it rather than restating it.
+from countries.canada.prepayment_privileges import price_monthly_extra
+
 # DP#10 / issue #723: ReadvanceableMortgage was moved here from account_models.py
 # (it is a mortgage-rate / product concern, not a registered account). It shares
 # the one "apply a rate of return to a balance" implementation with the account
 # types; importing the helper keeps a single spelling of that math (no clone).
 # No circular import: account_models imports only dataclasses/typing.
 from countries.canada.account_models import _apply_growth
+
+# Issue #113: tolerance for the "this prepayment repays the tranche in
+# full" comparison against a float balance.
+_BALANCE_EPSILON = 1e-6
 
 
 # ──────────────────────────────────────────────────────
@@ -413,19 +422,33 @@ def monthly_payment(principal: float, annual_rate: float,
     payment = principal * monthly_rate * factor / (factor - 1)
     return payment
 
-
 def amortization_schedule(principal: float, rate_path: RatePath,
                           amortization_years: int = 25,
                           projection_months: int = 120,
                           extra_payment: float = 0.0,
                           readvance_smith: bool = False,
-                          readvance_invest_monthly: bool = True) -> List[Dict]:
+                          readvance_invest_monthly: bool = True,
+                          prepayment_privileges=None) -> List[Dict]:
     """Month-by-month amortization with rate changes.
     
     Handles:
     - Rate changes at renewal (recalculates payment)
     - Extra payments to principal
     - Readvanceable mortgage: readvancing paid principal into HELOC
+    - Prepayment privileges (issue #113): when ``prepayment_privileges``
+      (a countries.canada.prepayment_privileges.PrepaymentPrivileges) is
+      supplied alongside a nonzero ``extra_payment``, each month's extra is
+      split into its FREE slices (the annual lump-sum allowance — a percent
+      of ORIGINAL principal per year — plus the payment-increase allowance
+      of ``multiplier x regular_payment`` at each payment) and the PENALIZED
+      excess, charged ``penalty_months_interest`` months of interest at the
+      lender's standard variable rate IN the month the excess fires. The
+      entry carries 'prepayment_extra'/'prepayment_free'/
+      'prepayment_excess'/'prepayment_penalty'; a prepayment that closes the
+      loan entirely gets NO privilege protection and the whole amount is
+      penalized. Without privileges the extra applies unlimited and free —
+      the pre-#113 behaviour, unchanged (DP#32: no declared contract terms,
+      no modeled limits).
     
     Args:
         principal: Initial mortgage balance
@@ -435,6 +458,12 @@ def amortization_schedule(principal: float, rate_path: RatePath,
         extra_payment: Additional monthly principal payment
         readvance_smith: Whether to readvance paid principal for investment
         readvance_invest_monthly: Whether readvanceable investment is monthly
+        prepayment_privileges: Optional PrepaymentPrivileges governing how
+            much of ``extra_payment`` is penalty-free (issue #113). The
+            annual allowance buckets reset at each schedule-year boundary
+            (the schedule's own year index — the origination-anniversary
+            convention, since the engine's schedule carries no calendar
+            dates).
 
     Returns:
         List of dicts with monthly details
@@ -442,6 +471,12 @@ def amortization_schedule(principal: float, rate_path: RatePath,
     balance = principal
     schedule = []
     remaining_months = amortization_years * 12
+    # Issue #113: cumulative free LUMP-SUM prepayments made so far in the
+    # current schedule year, against that year's allowance. The
+    # payment-increase privilege has no annual accumulator (it is capped per
+    # payment, not per year), so it needs none here.
+    lump_sum_used_ytd = 0.0
+    schedule_year_seen = -1
 
     # Calculate initial payment
     current_rate = rate_path.get_rate_month(0)
@@ -455,6 +490,14 @@ def amortization_schedule(principal: float, rate_path: RatePath,
     for month in range(projection_months):
         year_frac = month / 12.0
         year = int(year_frac)
+
+        # Issue #113: the annual lump-sum allowance resets at each schedule-
+        # year boundary (the origination-anniversary convention — the engine's
+        # schedule carries no calendar dates to align a calendar-year window
+        # against).
+        if year != schedule_year_seen:
+            lump_sum_used_ytd = 0.0
+            schedule_year_seen = year
         
         # Check for rate change (recalculate payment at renewal)
         new_rate = rate_path.get_rate_month(month)
@@ -476,6 +519,35 @@ def amortization_schedule(principal: float, rate_path: RatePath,
         # Total principal (including extra)
         total_principal_month = principal_portion + min(extra_payment, balance - principal_portion)
         total_principal_month = min(total_principal_month, balance)
+
+        # Issue #113: price the extra against the declared prepayment
+        # privileges — free within the allowances, penalized above them.
+        # Absent privileges this block never runs and the schedule is
+        # byte-identical to the pre-#113 one (DP#32).
+        prepayment_extra = 0.0
+        prepayment_free = 0.0
+        prepayment_excess = 0.0
+        prepayment_penalty = 0.0
+        if prepayment_privileges is not None and extra_payment > 0:
+            balance_after_regular = max(0.0, balance - principal_portion)
+            applied_extra = min(extra_payment, balance_after_regular)
+            # "Repaid entirely": the requested extra reaches the remaining
+            # balance itself (NOT merely this month's applied cap).
+            closes_loan = (
+                balance_after_regular > _BALANCE_EPSILON
+                and extra_payment >= balance_after_regular - _BALANCE_EPSILON
+            )
+            priced = price_monthly_extra(
+                prepayment_privileges, applied_extra, payment,
+                lump_sum_used_ytd, closes_loan=closes_loan)
+            # Only the lump-sum slice consumed this year's allowance (the
+            # per-payment increase privilege has no annual accumulator);
+            # a full-repayment prepayment consumes none of it.
+            lump_sum_used_ytd += priced['lump_sum']
+            prepayment_extra = applied_extra
+            prepayment_free = priced['free']
+            prepayment_excess = priced['excess']
+            prepayment_penalty = priced['penalty']
 
         # Update balance (negative total_principal_month → balance grows)
         balance -= total_principal_month
@@ -502,6 +574,14 @@ def amortization_schedule(principal: float, rate_path: RatePath,
             'cumulative_interest': total_interest,
             'cumulative_principal': total_principal,
             'cumulative_readvanced': total_readvanced,
+            **({
+                # Issue #113: present only when privileges are declared, so
+                # every legacy caller's schedule dict keeps its exact shape.
+                'prepayment_extra': prepayment_extra,
+                'prepayment_free': prepayment_free,
+                'prepayment_excess': prepayment_excess,
+                'prepayment_penalty': prepayment_penalty,
+            } if prepayment_privileges is not None else {}),
         })
         
         if balance <= 0:
@@ -511,7 +591,17 @@ def amortization_schedule(principal: float, rate_path: RatePath,
 
 
 def annual_summary(schedule: List[Dict]) -> List[Dict]:
-    """Aggregate monthly schedule into annual summaries."""
+    """Aggregate monthly schedule into annual summaries.
+
+    Issue #113: a schedule that prices prepayment privileges carries
+    'prepayment_extra'/'prepayment_free'/'prepayment_excess'/
+    'prepayment_penalty' on its entries; ``total_payment`` — the figure
+    ``apply_solvency`` folds as mortgage debt service — includes BOTH the
+    applied extra principal AND the penalty, because the household pays
+    both in cash (without them the extra paydown would conjure principal
+    reduction out of no outflow). A legacy schedule carries none of those
+    keys, every read defaults to 0.0, and the rows are unchanged.
+    """
     if not schedule:
         return []
     
@@ -537,7 +627,18 @@ def annual_summary(schedule: List[Dict]) -> List[Dict]:
             }
         y = years[yr]
         y['payments'] += 1
-        y['total_payment'] += entry['payment']
+        # Issue #113: the year's cash cost of the mortgage is the regular
+        # payments PLUS any applied prepayment principal PLUS the excess-
+        # prepayment penalty charged that month. Legacy schedules carry no
+        # prepayment keys; these reads default to 0.0 and change nothing.
+        y['total_payment'] += (
+            entry['payment']
+            + entry.get('prepayment_extra', 0.0)
+            + entry.get('prepayment_penalty', 0.0))
+        if 'prepayment_penalty' in entry:
+            y['prepayment_penalty'] = (
+                y.get('prepayment_penalty', 0.0)
+                + entry['prepayment_penalty'])
         y['total_interest'] += entry['interest']
         y['total_principal'] += entry['principal']
         y['end_balance'] = entry['balance']
