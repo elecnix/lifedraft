@@ -264,6 +264,8 @@ class SimulationConfig:
     private_loans: List[Dict] = field(default_factory=list)  # issue #813: private loans (lender income + borrower s.20(1)(c) deduction)
     gifts: List[Dict] = field(default_factory=list)  # epic #841 bite 3: parent->child gifts funding a child's registered room
     first_home_purchases: List[Dict] = field(default_factory=list)  # issue #704: a member's first-home purchase -> FHSA qualifying withdrawal + HBP
+    # Dated ZEV acquisitions -> federal iZEV + Quebec Roulez vert incentive inflow.
+    zev_purchases: List[Dict] = field(default_factory=list)
 
     # Accounts
     rrsp_annual_percent: float = 0.18

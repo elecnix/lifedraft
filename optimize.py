@@ -59,6 +59,8 @@ from countries.canada.retirement import (
     get_oas_annual_max,  # DP#20 year-versioned (#1029)
 )
 from countries.canada.lsif_credit import compute_lsif_credit, lsif_from_config, LSIFPurchase
+from countries.canada.zev_incentive import compute_izev_incentive, zev_purchase_from_dict
+from countries.canada.provinces.quebec.roulez_vert import compute_roulez_vert_rebate
 # Issue #732 (DP#25): objective.py resolves the estate math through the
 # jurisdiction provider seam and cannot import countries.canada.estate. The
 # static reach-detector (tests/architecture/test_unreached_rule_modules.py)
@@ -457,6 +459,36 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
         spouse_lsif_result = compute_lsif_credit(spouse_lsif_purchase, year=2026)
         lsif_credit_total += spouse_lsif_result.federal_credit + spouse_lsif_result.quebec_credit
 
+    # DP#16: zero-emission vehicle incentives. Fires only when the household
+    # declares a zev_purchases[] acquisition; absent the block this is 0.0 and
+    # every existing household's number is byte-identical (DP#32).
+    #
+    # Two INDEPENDENT programs are priced per acquisition and summed: the
+    # federal iZEV incentive (closed 2025-03-31) and, for a Quebec household,
+    # the provincial Roulez vert rebate. Each decides its own dated eligibility
+    # from the acquisition date -- neither reads the other, and a household may
+    # receive both, one, or neither.
+    #
+    # KNOWN SIMPLIFICATION, shared verbatim with lsif_credit_total above: the
+    # incentive is added to the terminal objective undiscounted, as though
+    # received at the horizon rather than in the acquisition year. It is
+    # therefore not compounded over the years between. This understates an
+    # early acquisition relative to a late one. Correcting it means routing the
+    # incentive through the yearly fold as a real inflow, which is the decision
+    # dimension's job, not this module's.
+    zev_incentive_total = 0.0
+    _province = cfg.get('tax', {}).get('province')
+    for _entry in cfg.get('zev_purchases', []):
+        _purchase = zev_purchase_from_dict(_entry)
+        zev_incentive_total += compute_izev_incentive(_purchase).amount
+        if _province == 'quebec':
+            zev_incentive_total += compute_roulez_vert_rebate(
+                acquisition_date=_purchase.acquisition_date,
+                msrp=_purchase.trim_msrp,
+                propulsion=_purchase.propulsion,
+                is_quebec_resident=True,
+            ).amount
+
     # Issue #1034: price the SM sleeve's terminal deemed disposition with the
     # SAME estate code path compute_after_tax_estate uses (DP#9 -- one
     # spelling, not a parallel marginal_rate computation). final.total_assets
@@ -510,7 +542,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     return (final.total_assets - final.total_debt
             + total_rrsp_savings + total_sm_savings + total_traced_savings
             - rrsp_withdrawal_tax - cg_tax - resp_tax - sm_deemed_tax
-            + lsif_credit_total)
+            + lsif_credit_total + zev_incentive_total)
 
 
 def _risk_ensemble_scores(

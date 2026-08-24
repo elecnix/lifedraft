@@ -136,6 +136,9 @@ _INTERNAL_ROOT_ALLOWED_KEYS = {
     # the contract boundary (input_contract) so a typo is refused loudly.
     'objective',
     'tax', 'house_comparison', 'jurisdiction',
+    # Dated zero-emission vehicle acquisitions. Household-level, not under
+    # 'family': the incentive is paid on the vehicle, not to a member.
+    'zev_purchases',
     # DP#18/DP#24 round-trip metadata (SimulationConfig.to_dict/apply_overlay
     # attach this; a config saved and reloaded must not be rejected for
     # carrying its own provenance).

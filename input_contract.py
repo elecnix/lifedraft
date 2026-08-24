@@ -98,7 +98,7 @@ from contract_property import _find_property, _map_owned_properties
 from contract_schema import load_contract_json, validate_contract
 from contract_transfers import (
     map_cash_flows, map_equity_grants, map_installments, _map_first_home_purchases,
-    _map_gifts, _map_private_loans,
+    _map_gifts, _map_private_loans, _map_zev_purchases,
 )
 
 
@@ -236,6 +236,9 @@ def to_internal_config(doc: Dict) -> Dict:
                        doc, {c["id"] for c in children},
                        {m["id"] for m in members})},
         "accounts": accounts_cfg,
+        # A dated zero-emission vehicle acquisition. Household-level, not
+        # member-level: the incentive is paid on the vehicle, not to a person.
+        "zev_purchases": _map_zev_purchases(doc),
         "tax": {"country": doc["jurisdiction"]["country"], "province": doc["jurisdiction"]["province"]},
         "cash_flows": legacy_cash_flows,
     }
