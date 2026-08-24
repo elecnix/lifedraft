@@ -358,7 +358,47 @@ jobs:
           pip install ".[dev]"
 
       - name: Run tests via pytest (no coverage)
-        run: python -m pytest -q -n auto --dist worksteal
+        # SAME MEMORY BOUND AS THE `test` JOB, and for the same reason -- this
+        # job was left on `-n auto` when that one was fixed, on the stated
+        # grounds that quick-tests "was never the job being evicted". That was
+        # an inference, not a measurement, and it was wrong: on `main`
+        # @ 9bd69af this step died with `conclusion: null` after 15 minutes,
+        # the runner-eviction signature, while `test (3.12)` passed on the
+        # dedicated pool.
+        #
+        # It stays on the shared `arc-runners` pool deliberately: the cgroup
+        # limit there is smaller (~3-4Gi vs the 8gb set's 7Gi), so the same
+        # arithmetic simply yields fewer workers, and this job does not need
+        # to consume one of the two dedicated 8 GB slots to be safe.
+        #
+        # Read the CGROUP limit, not /proc/meminfo: inside a container the
+        # latter reports the NODE's RAM, which is the exact mistake `-n auto`
+        # makes about CPUs.
+        run: |
+          MEM_MB=""
+          if [ -r /sys/fs/cgroup/memory.max ]; then
+            v=$(cat /sys/fs/cgroup/memory.max)
+            [ "$v" != "max" ] && MEM_MB=$((v / 1024 / 1024))
+          fi
+          if [ -z "$MEM_MB" ] && [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
+            v=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+            [ "$v" -lt 1000000000000 ] 2>/dev/null && MEM_MB=$((v / 1024 / 1024))
+          fi
+          if [ -z "$MEM_MB" ]; then
+            MEM_MB=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) / 1024 ))
+            echo "note: no cgroup memory limit found; falling back to node RAM"
+          fi
+          if [ -n "${PYTEST_MEM_BUDGET_MB:-}" ] && [ "$PYTEST_MEM_BUDGET_MB" -lt "$MEM_MB" ]; then
+            MEM_MB=$PYTEST_MEM_BUDGET_MB
+            echo "note: memory budget capped to ${MEM_MB}MB by PYTEST_MEM_BUDGET_MB"
+          fi
+          PER_WORKER_MB=${PYTEST_WORKER_MEM_MB:-1024}
+          BY_MEM=$((MEM_MB / PER_WORKER_MB))
+          BY_CPU=$(nproc)
+          WORKERS=${PYTEST_WORKERS:-$([ "$BY_MEM" -lt "$BY_CPU" ] && echo "$BY_MEM" || echo "$BY_CPU")}
+          [ "$WORKERS" -lt 1 ] && WORKERS=1
+          echo "xdist workers: $WORKERS (mem ${MEM_MB}MB / ${PER_WORKER_MB}MB = $BY_MEM, cpu = $BY_CPU)"
+          python -m pytest -q -n "$WORKERS" --dist worksteal
 
       # PERF GATE: same gate as the `test` job, but on the fast-signal leg.
       # The conftest.py plugin writes test_timings.json here too. This is
