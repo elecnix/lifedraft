@@ -371,6 +371,11 @@ class DrawdownResult:
     # wrapper reads it to compute each spouse's OAS clawback on that spouse's own
     # income. Its values sum to ``taxable_withdrawn``.
     taxable_by_owner: Dict[str, float] = None
+    # Issue #140: the ITA s.111(1)(b) net-capital-loss pool dollars (taxable
+    # basis) this draw CONSUMED -- the sheltered slice of the non-reg draws'
+    # taxable additions never entered taxable income. The caller books it
+    # against ``ws.capital_loss_offset_used``; 0.0 when no pool was supplied.
+    cg_loss_offset_used: float = 0.0
 
     def __post_init__(self):
         if self.balance_deltas is None:
@@ -401,7 +406,8 @@ def _bracket_at(income: float, brackets: List[Dict]):
 def _price_source_draw(running_income: float, inclusion: float,
                        net_target: float, max_gross: float,
                        brackets: Optional[List[Dict]],
-                       flat_rate: float):
+                       flat_rate: float,
+                       taxable_shelter: float = 0.0):
     """Gross to withdraw from one source to deliver up to ``net_target`` net.
 
     ``inclusion`` is the fraction of each gross dollar that is *taxable income*:
@@ -418,11 +424,33 @@ def _price_source_draw(running_income: float, inclusion: float,
     ``brackets`` it falls back to the deprecated single flat ``flat_rate`` —
     #579's residual, kept so the signature stays additive.
 
+    ``taxable_shelter`` (issue #140): taxable-basis dollars of net-capital-loss
+    carry-forward (ITA s.111(1)(b)) still available to this draw. The LEAD
+    slice of the gross -- whose entire taxable addition the pool absorbs -- is
+    genuinely tax-free and delivers $1 net per dollar WITHOUT STACKING on
+    ``running_income`` (the sheltered slice never enters taxable income, so
+    every later slice re-brackets from the same base). Solving it as a lead
+    slice (rather than post-adjusting a fully-taxed solve) keeps the gross-up
+    EXACT: the household draws no more gross than the now-lower tax requires.
+    ``0.0`` (default) takes the untouched pre-#140 path byte-for-byte (DP#32).
+
     Returns ``(gross_drawn, net_delivered)`` with ``gross_drawn ≤ max_gross``
     and ``net_delivered ≤ net_target``.
     """
     if net_target <= 0 or max_gross <= 0:
         return 0.0, 0.0
+    # Issue #140: price the sheltered lead slice first. Each of its gross
+    # dollars carries ``inclusion`` taxable that the loss pool absorbs, so it
+    # delivers $1 net and adds nothing to taxable income. The remainder (if
+    # any need/balance/leftover pool) recurses with the shelter consumed.
+    if taxable_shelter > 0.0 and inclusion > 0.0:
+        shelter_gross = min(taxable_shelter / inclusion, max_gross,
+                            float(net_target))
+        if shelter_gross > 0.0:
+            rest_gross, rest_net = _price_source_draw(
+                running_income, inclusion, net_target - shelter_gross,
+                max_gross - shelter_gross, brackets, flat_rate)
+            return shelter_gross + rest_gross, shelter_gross + rest_net
     if inclusion <= 0.0:
         # Tax-free: $1 gross delivers $1 net.
         gross = min(net_target, max_gross)
@@ -467,7 +495,8 @@ def _draw_sources_to_net(net_target: float, drawdown_order: List[str],
                          brackets: Optional[List[Dict]],
                          owner_specs: Dict[str, Dict],
                          owner_of,
-                         lif_max_withdrawal: Optional[float] = None) -> DrawdownResult:
+                         lif_max_withdrawal: Optional[float] = None,
+                         cg_loss_offset: float = 0.0) -> DrawdownResult:
     """Fill ``net_target`` (after-income-tax) account by account — the pure
     per-source waterfall extracted from ``plan_drawdown_net`` so the OAS-clawback
     fixpoint can re-drive it with a grossed-up target (issue #363 PR 2). Returns
@@ -486,6 +515,9 @@ def _draw_sources_to_net(net_target: float, drawdown_order: List[str],
     """
     result = DrawdownResult()
     remaining = net_target
+    # Issue #140: the still-available slice of the caller's net-capital-loss
+    # pool, depleted as the non-reg draws' taxable additions are sheltered.
+    cg_loss_remaining = cg_loss_offset
     # Per-owner MUTABLE running taxable income (issue #363/#618/PR 4). Seeded
     # from each owner's other taxable income (CPP/pension) and grown as that
     # owner's taxable slices are recognized, so successive draws re-bracket at
@@ -576,7 +608,7 @@ def _draw_sources_to_net(net_target: float, drawdown_order: List[str],
             # first slice) — no zero-take guard is reachable.
             take, net_delivered = _price_source_draw(
                 running_income[owner_key], inclusion, remaining, max_gross,
-                brackets, flat_rate)
+                brackets, flat_rate, taxable_shelter=cg_loss_remaining)
             result.balance_deltas[key] = result.balance_deltas.get(key, 0.0) - take
             result.total_withdrawn += take
             taxable_added = take * inclusion
@@ -588,6 +620,18 @@ def _draw_sources_to_net(net_target: float, drawdown_order: List[str],
             # at 0 by the caller, so a pot at/below ACB contributes nothing.
             if key == 'non_reg_balance':
                 result.realized_capital_gain += take * gain_frac
+                # Issue #140: the lead slice the s.111(1)(b) pool just
+                # sheltered -- priced INSIDE the solver above (its taxable
+                # addition never entered ``running_income``, so later slices
+                # re-bracket from the same base). Book the consumption so the
+                # fold's capital_loss_carryforward rule can reconcile the
+                # pool. With no pool available every adjustment here is an
+                # exact float no-op on the pre-#140 values (DP#32).
+                sheltered = min(cg_loss_remaining, taxable_added)
+                cg_loss_remaining -= sheltered
+                result.cg_loss_offset_used += sheltered
+                taxable_added -= sheltered
+                result.taxable_withdrawn -= sheltered
             running_income[owner_key] += taxable_added
             taxable_by_owner[owner_key] += taxable_added
             remaining -= net_delivered
@@ -613,7 +657,8 @@ def plan_drawdown_net(net_need: float, drawdown_order: List[str],
                       oas_clawback_threshold: Optional[float] = None,
                       oas_recovery_rate: float = OAS_RECOVERY_RATE,
                       per_member: Optional[Dict[str, Dict]] = None,
-                      lif_max_withdrawal: Optional[float] = None) -> DrawdownResult:
+                      lif_max_withdrawal: Optional[float] = None,
+                      cg_loss_offset: float = 0.0) -> DrawdownResult:
     """Withdraw to hit a NET (after-tax) spending target, per-source tax-aware.
 
     This is the only drawdown model (#579 — the old blended-rate ``gross``
@@ -754,6 +799,17 @@ def plan_drawdown_net(net_need: float, drawdown_order: List[str],
             (DP#32: zero is a value, not a fallback). Reuses the same
             ``fund.maximum_withdrawal`` primitive the forced path uses (DP#10:
             locked_in_account.py owns LIF rules).
+        cg_loss_offset: issue #140. The ITA s.111(1)(b) net-capital-loss
+            carry-forward still available this year (TAXABLE basis -- the
+            opening pool less what earlier rules already consumed). Each
+            non-reg draw's LEAD taxable slice is sheltered dollar-for-dollar
+            from it -- priced inside ``_price_source_draw`` so the gross-up
+            stays exact (the sheltered dollars deliver $1 net, never enter
+            taxable income, and later slices re-bracket from the same base).
+            The amount consumed is reported on ``result.cg_loss_offset_used``
+            for the fold's ``capital_loss_carryforward`` rule to reconcile.
+            ``0.0`` (default) takes the untouched pre-#140 path byte-for-byte
+            (DP#32).
 
     Returns:
         DrawdownResult with gross/taxable withdrawn, per-key balance deltas, and
@@ -801,7 +857,8 @@ def plan_drawdown_net(net_need: float, drawdown_order: List[str],
         return _draw_sources_to_net(
             net_target, drawdown_order, canada, non_reg_balance,
             flat_rate, gain_frac, cg_inclusion, brackets,
-            owner_specs, owner_of, lif_max_withdrawal)
+            owner_specs, owner_of, lif_max_withdrawal,
+            cg_loss_offset=cg_loss_offset)
 
     # No OAS to claw back (no owner has OAS, or the caller did not supply a
     # threshold): the draw is exactly the PR-1 progressive fill of net_need.

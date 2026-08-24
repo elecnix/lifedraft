@@ -249,6 +249,13 @@ def apply_retirement_drawdown(ws: YearWorkingState, ctx: RuleContext) -> bool:
     if 'lif' in order:
         lif_discretionary_ceiling = max(
             0.0, ws.lif_maximum_withdrawal - ws.lif_withdrawal)
+    # Issue #140: the ITA s.111(1)(b) net-capital-loss pool still available
+    # this year -- the Jan-1 carry-forward less what earlier rules (e.g.
+    # heloc_interest_servicing, which runs before this one) already consumed.
+    # The draw's non-reg taxable slices are sheltered from it BEFORE the
+    # bracket walk; plan.cg_loss_offset_used reports the consumption.
+    cg_loss_available = (ws.opening_capital_loss_carryforward
+                         - ws.capital_loss_offset_used)
     plan = plan_drawdown_net(
         ws.drawdown_net_target, order, draw_canada, ws.new_nonreg_bal,
         ws.new_nonreg_acb, ws.retiree_marginal_rate,
@@ -259,11 +266,16 @@ def apply_retirement_drawdown(ws: YearWorkingState, ctx: RuleContext) -> bool:
         oas_gross=ws.drawdown_oas_gross,
         oas_clawback_threshold=ws.drawdown_oas_threshold,
         per_member=per_member,
-        lif_max_withdrawal=lif_discretionary_ceiling)
+        lif_max_withdrawal=lif_discretionary_ceiling,
+        cg_loss_offset=max(0.0, cg_loss_available))
 
     ws.drawdown_total = plan.total_withdrawn
     ws.drawdown_taxable = plan.taxable_withdrawn
     ws.drawdown_net_delivered = plan.net_delivered
+    # Issue #140: book the loss-pool dollars the draw's pricing just consumed
+    # so later consumers (and the `capital_loss_carryforward` rule) see the
+    # remaining pool. 0.0 whenever no pool was available -- an exact no-op.
+    ws.capital_loss_offset_used += plan.cg_loss_offset_used
     # Issue #754: surface the raw realized capital gain the non-reg disposition
     # crystallized (proceeds - ACB, 100%). The taxable slice of it is already in
     # plan.taxable_withdrawn at the cg_inclusion rate; this is the pre-inclusion

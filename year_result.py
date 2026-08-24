@@ -499,6 +499,15 @@ class YearResult:
     primary_tuition_carryforward: float = 0.0
     spouse_tuition_carryforward: float = 0.0
 
+    # Issue #140: the ITA s.111(1)(b) net-capital-loss ledger, surfaced so a
+    # reader can see the loss was BOOKED, not swallowed. All taxable-basis
+    # except ``capital_loss_realized`` (pre-inclusion, 100%); all 0.0 for a
+    # household that realizes no net capital loss (the golden path).
+    capital_loss_carryforward_opening: float = 0.0
+    capital_loss_offset_applied: float = 0.0
+    capital_loss_realized: float = 0.0
+    capital_loss_carryforward: float = 0.0
+
     # Epic #841 bite 4: end-of-year snapshot of each child's OWN accounts (the
     # bite-2 child_accounts list -- one dict per child with rrsp/tfsa/fhsa/
     # non_reg balances and their room/acb). Threaded here as REPORTING data so

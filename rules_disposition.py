@@ -262,7 +262,15 @@ def _property_disposition_for(
 
     # PRE-apportioned, per-owner-banded capital-gains tax on the realized
     # gain (shared spine, DP#9 -- one spelling of the gain-banding math).
-    realized_gain = max(0.0, p_gross - acb_share)
+    # Issue #140: the gain is SIGNED. The pre-#140 ``max(0.0, ...)`` floor
+    # turned a disposition below ACB into a phantom $0 gain -- a realized
+    # capital loss was unrepresentable, so it could never join the
+    # s.111(1)(b) carry-forward pool (which ``sale_realized_gain`` feeds).
+    # The TAX still clamps at its own edge: ``tax_on_capital_gain_at_death``
+    # floors the taxable base at 0 internally, so a loss-year sale books
+    # zero tax (a negative tax would be a fabricated refund) while the
+    # signed loss flows to the ledger.
+    realized_gain = p_gross - acb_share
     disposition_tax = _disposition_gain_tax(
         realized_gain, sale, cal_year, brackets,
         primary_taxable_income, spouse_taxable_income)
@@ -490,6 +498,15 @@ def _principal_disposition_for(
     # same helper Bite B's _property_disposition_for composes). A principal
     # designated for its whole ownership -> ~0 tax; a principal with no
     # designation -> fully taxable.
+    # Issue #140: this floor is JUSTIFIED BY STATUTE, not by omission. A
+    # principal-residence disposition's accrued "gain" is pre-apportioned
+    # here (the PRE machinery below), and under ITA s.40(2)(b) a loss on a
+    # principal residence is NEVER an allowable capital loss -- Parliament
+    # exempted PR gains and expressly denied the symmetric loss relief. So a
+    # below-ACB principal sale is genuinely a $0-tax / no-loss event; letting
+    # this figure go negative would fabricate a deduction statute forbids.
+    # (Non-principal property sales realize their SIGNED gain -- see
+    # _property_disposition_for above.)
     realized_gain = max(0.0, value_share - acb_share)
     disposition_tax = _disposition_gain_tax(
         realized_gain, sale, cal_year, brackets,

@@ -111,6 +111,7 @@ from rule_registry import RULES, RuleContext, YearWorkingState
 # ``RULE_ORDER`` is unregistered, so a module missing from this list is a loud
 # failure, never a silently skipped rule (DP#32).
 import rules_amt              # noqa: F401
+import rules_capital_loss    # noqa: F401
 import rules_contributions    # noqa: F401
 import rules_debt             # noqa: F401
 import rules_disposition      # noqa: F401
@@ -302,6 +303,15 @@ RULE_ORDER: tuple = (
     # 'solvency'; it is placed here to sit beside the rule that reads it.
     'tuition_credit',
     'solvency',
+    # Issue #140: reconcile the year's NET capital position (every signed
+    # realized gain/loss the rules above surfaced) against the ITA
+    # s.111(1)(b) net-capital-loss carry-forward pool and re-persist the
+    # pool for next year. Runs AFTER 'solvency' (whose forced liquidations
+    # can realize the crash-year losses the pool books) and BEFORE 'amt'
+    # (which reads the raw realized-gain base, independent of the ledger).
+    # A household with no pool and no dispositions is a strict no-op (DP#32:
+    # the golden path is byte-identical by construction).
+    'capital_loss_carryforward',
     # issue #710/#747: the Alternative Minimum Tax is a YEAR-END assessment over
     # all of the year's realized income, so it runs DEAD LAST -- after solvency
     # has run every forced liquidation (each of which can realize a capital gain
