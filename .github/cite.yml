@@ -1,0 +1,24 @@
+# Cite configuration for this repository.
+#
+# The review role's default timeout is 120s. That number was calibrated when
+# cite's default output cap was 4096 tokens; v0.2.0 raised the cap to 32768
+# without raising the deadline, and the two describe the same call. The result
+# here was `reading response: context deadline exceeded` -- four attempts, zero
+# tokens billed, COULD_NOT_EVALUATE -- on a PR touching two files, one of which
+# reviewed fine. Filed upstream as elecnix/cite#28.
+#
+# Cite's own repository hit this while dogfooding and raised its review role to
+# 300s (elecnix/cite@974c0b4) rather than weakening the default for everyone.
+# The same escape hatch applies here, at 600s rather than 300s: cite calibrated
+# 300s against a 400-line test file, and this repository routinely reviews
+# modules an order of magnitude larger than that.
+#
+# This is a WORKAROUND for a default, not a fix. If elecnix/cite#28 lands a
+# deadline derived from the resolved output cap, delete this file rather than
+# keeping a number that no longer means anything.
+
+model: deepseek/deepseek-v4-flash-0731
+
+roles:
+  review:
+    timeout: 600s
