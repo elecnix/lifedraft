@@ -90,7 +90,7 @@ exclude = ["countries.*.tests*", "tests*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.md"]
-"schema" = ["*.json", "countries/canada/*.json"]
+"schema" = ["*.json", "defs/*.json", "countries/canada/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "countries/canada/tests", "countries/canada/provinces/quebec/tests"]

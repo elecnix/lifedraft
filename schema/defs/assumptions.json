@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/assumptions.json",
+  "title": "lifedraft input contract — universal $defs: the assumptions block",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. BELIEFS about the world: the return model and rate paths, mortality, tax-law and contribution-limit overrides, retirement beliefs, the emergency-reserve policy and the product definitions the assumptions reference. Never a fact about the balance sheet.",
+
+  "$defs": {
+
+    "return_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "enum": ["fixed", "variable", "stochastic", "mean_reverting", "stressed"] },
+        "rate": { "$ref": "#/$defs/rate",
+          "x-uncertainty": {
+            "resolvability": "belief",
+            "plausible_range": [0.03, 0.09],
+            "resolved_by": "A belief about the future, not a fact anyone can look up. Bound it by your actual asset mix and re-run; this is usually the single largest driver of the answer.",
+            "question": "What long-run nominal investment return should the projection assume?"
+          } },
+        "rates": { "type": "array", "items": { "$ref": "#/$defs/rate" } },
+        "fallback": { "$ref": "#/$defs/rate" },
+        "mean": { "$ref": "#/$defs/rate" },
+        "sigma": { "type": "number", "minimum": 0 },
+        "seed": { "type": "integer" },
+        "n_years": { "type": "integer", "minimum": 1 },
+        "long_term_mean": { "$ref": "#/$defs/rate" },
+        "reversion_speed": { "type": "number", "minimum": 0, "maximum": 1 },
+        "volatility": { "type": "number", "minimum": 0 },
+        "initial": { "$ref": "#/$defs/rate" },
+        "baseline_rate": { "$ref": "#/$defs/rate" },
+        "crash_year": { "type": "integer", "minimum": 0 },
+        "crash_pct": { "$ref": "#/$defs/percent0to1" },
+        "recovery_years": { "type": "integer", "minimum": 0 }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "fixed" } } }, "then": { "required": ["rate"] } },
+        { "if": { "properties": { "type": { "const": "variable" } } }, "then": { "required": ["rates", "fallback"] } },
+        { "if": { "properties": { "type": { "const": "stochastic" } } }, "then": { "required": ["mean", "sigma", "seed", "n_years"] } },
+        { "if": { "properties": { "type": { "const": "mean_reverting" } } }, "then": { "required": ["long_term_mean", "reversion_speed", "volatility", "initial", "seed"] } },
+        { "if": { "properties": { "type": { "const": "stressed" } } }, "then": { "required": ["baseline_rate", "crash_year", "crash_pct", "recovery_years"] } }
+      ],
+      "description": "The single source of truth for the investment return (#595A). No parallel `assumptions.investment_return` scalar exists anywhere in this schema — deleted, not documented (DP#9)."
+    },
+
+    "rate_path": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "enum": ["fixed", "variable", "forecast"] },
+        "rate": { "$ref": "#/$defs/rate",
+          "x-uncertainty": {
+            "resolvability": "belief",
+            "plausible_range": [0.03, 0.08],
+            "resolved_by": "No document fixes a rate decades out -- only your CURRENT signed rate is a fact (see liability.rate). Narrow this by your lender's renewal offer or a published rate sheet for the term you're about to take; the years beyond that term remain a belief.",
+            "question": "What rate will this borrowing actually carry over the horizon?"
+          } },
+        "path": { "type": "array", "items": { "$ref": "#/$defs/rate" } }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "fixed" } } }, "then": { "required": ["rate"] } },
+        { "if": { "properties": { "type": { "enum": ["variable", "forecast"] } } }, "then": { "required": ["path"] } }
+      ]
+    },
+
+    "mortality_belief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["person"],
+      "properties": {
+        "person": { "$ref": "#/$defs/person_id" },
+        "assumed_death_age": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 130 }, { "type": "null" }],
+          "x-uncertainty": {
+            "resolvability": "belief",
+            "plausible_range": [80, 100],
+            "resolved_by": "A belief, not a lookup. Bound it from a published mortality table for your age/sex cohort; the estate calculation is highly sensitive to it.",
+            "question": "How long does this person live?"
+          } },
+        "assumed_death_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+      },
+      "description": "Applies only to a person whose `death_date` fact is null (still living). Exactly one of assumed_death_age / assumed_death_date should be set — the loader (#582) rejects both-set or both-null."
+    },
+
+    "tax_law_overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capital_gains_inclusion", "frozen_brackets", "contribution_limit_overrides"],
+      "properties": {
+        "capital_gains_inclusion": { "anyOf": [{ "$ref": "#/$defs/percent0to1" }, { "type": "null" }], "description": "null = use the current-year legislated rate from the jurisdiction's code table. Non-null overrides it FOR SENSITIVITY TESTING ONLY. Bracket tables themselves are DELETED outright, not represented here at all — the code tables always win (#595H) and were never used for tax math even when present." },
+        "frozen_brackets": { "type": "boolean", "description": "True freezes start_year's brackets across the whole horizon (DP#5 sensitivity isolation)." },
+        "contribution_limit_overrides": { "$ref": "#/$defs/contribution_limit_overrides" }
+      }
+    },
+
+    "contribution_limit_overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "null-valued sensitivity overrides for jurisdiction-specific statutory contribution limits (e.g. Canada's RRSP/TFSA room). Empty here; the Canada overlay adds rrsp_annual_max/tfsa_annual_room properties. The normal case is the whole object empty -- year-versioned statutory limits from the code table."
+    },
+
+    "product_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "us_equity_pct", "intl_equity_pct", "foreign_income", "capital_gains", "mer", "foreign_content", "withholding_exposure", "turnover"],
+      "properties": {
+        "category": { "type": "string" },
+        "us_equity_pct": { "$ref": "#/$defs/percent0to1" },
+        "intl_equity_pct": { "$ref": "#/$defs/percent0to1" },
+        "foreign_income": { "$ref": "#/$defs/rate" },
+        "capital_gains": { "$ref": "#/$defs/rate" },
+        "mer": { "$ref": "#/$defs/percent0to1" },
+        "foreign_content": { "$ref": "#/$defs/percent0to1" },
+        "withholding_exposure": { "$ref": "#/$defs/percent0to1" },
+        "turnover": { "$ref": "#/$defs/percent0to1" }
+      }
+    },
+
+    "return_beliefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "equity_mean": { "$ref": "#/$defs/rate" },
+        "equity_sigma": { "type": "number", "minimum": 0 },
+        "fixed_income_mean": { "$ref": "#/$defs/rate" },
+        "fixed_income_sigma": { "type": "number", "minimum": 0 }
+      },
+      "description": "Per-sleeve long-run return beliefs (issue #993, DP#21): what the household believes global equity and fixed income return, mean and volatility, before the recommended mix blends them. All keys optional; an omitted key keeps the engine default (equity 6.8%/16%, fixed income 3.0%/5%)."
+    },
+
+    "retirement_beliefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spending_target", "net_replacement_rate", "drawdown_tax_mode", "drawdown_order"],
+      "properties": {
+        "spending_target": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }] },
+        "net_replacement_rate": { "anyOf": [{ "$ref": "#/$defs/percent0to1" }, { "type": "null" }] },
+        "drawdown_tax_mode": { "type": "string", "enum": ["net", "gross"], "description": "Default 'net' per #579 — 'gross' exists only for back-testing the deprecated over-drawing path, not as a recommended setting." },
+        "drawdown_order": { "type": "array", "items": { "$ref": "#/$defs/account_kind" }, "description": "$defs/account_kind is the Canada overlay's closed enum of registered-account kinds; a jurisdiction-agnostic reader sees an array of strings." },
+        "liquidate_to_target": { "type": "boolean", "description": "OPTIONAL (issue #1009): opt-in die-with-(near)-zero drawdown mode. When true the discretionary drawdown liquidates EVERY drawable FINANCIAL account the configured drawdown_order did not already exhaust (a residual sweep appended after the configured tokens — both spouses' TFSA/RRSP, the household non-reg, the slot-0 FHSA/LIF), so first_shortfall_year means 'financial savings genuinely exhausted' rather than 'the usual accounts emptied while a LIF/FHSA sits and compounds'. The LIF statutory maximum is respected on the new path. The principal residence is NOT drawn (it stays on the balance sheet / passes to the estate); the non-primary spouse's slot-1 LIRA/LIF/FHSA are not yet modelled (#901 follow-up). Absent/false = the configured order runs unchanged, byte-identical (DP#32)." }
+      }
+    },
+
+    "emergency_reserve": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_months", "held_in", "instrument", "rate", "replenish_priority"],
+      "$comment": "Issue #688. The single most important risk decision a leveraged household makes -- 'how much do I keep OUT of the market, where, and is it enough?' -- and the contract could not express any part of it. This block is a POLICY (how many months to hold, and where), which is why it lives under assumptions rather than beside the measured household_budget.annual_living_costs it is sized against. Absent = the household holds NO reserve: a hard zero that the ruin report states explicitly, never a silent default (DP#32).",
+      "properties": {
+        "target_months": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Months of ESSENTIAL outflows (household_budget.annual_living_costs + this year's debt service) to hold liquid. 0 is a real, declarable answer ('I hold no reserve'), distinct from omitting the block entirely -- both yield a $0 reserve, but the first is a decision and the second is an absence, and the output says which (DP#32). Sweepable: sensitivity.sweeps.emergency_reserve_months lets the optimizer show the real trade -- expected terminal wealth against the probability and cost of a forced sale.",
+          "x-uncertainty": {
+            "plausible_range": [0, 24],
+            "resolved_by": "A choice, not a fact. Narrow it by asking how long you would need to find comparable work, and how far your investments could fall while you looked.",
+            "question": "How many months of essential outflows should be held liquid, out of the market?",
+            "resolvability": "belief"
+          }
+        },
+        "held_in": {
+          "anyOf": [{ "$ref": "#/$defs/account_id" }, { "type": "null" }],
+          "description": "WHERE the reserve is held -- and this is most of the answer, not a detail. A reserve held as CASH INSIDE A TFSA grows tax-free, withdraws with no tax and no penalty, and its contribution room is restored the following January, so it costs nothing in room. The same dollars in a non-registered account are taxed on their yield; in an RRSP they are effectively unavailable (a withdrawal is fully taxable and the room is gone forever). The reserve is a CASH SLEEVE CARVED OUT of the named account's declared balance -- it is not extra money on top of it, so the account's remaining balance is what stays invested at the portfolio return. null = the reserve is held outside every declared account (an ordinary chequing/savings balance the contract does not otherwise model)."
+        },
+        "instrument": {
+          "type": "string",
+          "enum": ["cash", "short_term"],
+          "description": "What the reserve is held AS. A reserve modelled as compounding at the portfolio's equity return is not a reserve -- the engine grows this balance at `rate` below, never at assumptions.return_model's rate (simulation_rules.apply_emergency_reserve_growth)."
+        },
+        "rate": {
+          "$ref": "#/$defs/rate",
+          "description": "The annual return the reserve's declared `instrument` actually earns (a HISA/GIC/T-bill rate). Required rather than inferred from `instrument`: hardcoding 'cash means 2%' inside the engine would be exactly the opinion-in-code DP#2 forbids, and a household can look this rate up on its own account statement.",
+          "x-uncertainty": {
+            "plausible_range": [0.0, 0.05],
+            "resolved_by": "The rate your cash/HISA actually pays — read it off the account statement.",
+            "question": "What rate does the cash holding the emergency reserve actually earn?",
+            "resolvability": "document"
+          }
+        },
+        "replenish_priority": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Where refilling a drawn-down reserve ranks against other uses of surplus cash. Declared now because the reserve is meaningless without it; NOT yet consumed by the engine (the replenishment rule is follow-up work, and this field is listed in tests/test_schema_coverage.py's DEAD_ALLOWLIST as parsed-but-not-yet-read rather than quietly pretended to work)."
+        }
+      }
+    },
+
+    "assumptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["return_model", "inflation", "salary_growth", "savings_rate", "default_non_reg_yield", "rate_paths", "retirement", "mortality", "tax_law_overrides", "products", "time_step"],
+      "properties": {
+        "return_model": { "$ref": "#/$defs/return_model" },
+        "inflation": { "$ref": "#/$defs/rate",
+          "x-uncertainty": {
+            "resolvability": "belief",
+            "plausible_range": [0.01, 0.04],
+            "resolved_by": "A belief, not a lookup: nobody can measure it. Bound it from the central bank's target band and re-run.",
+            "question": "What long-run inflation rate should the projection assume?"
+          } },
+        "salary_growth": { "$ref": "#/$defs/rate", "description": "Global default; #598 leaves no room today for per-income overrides — noted as a Phase 2 addition, not blocking (see migration-plan.md).",
+          "x-uncertainty": {
+            "resolvability": "belief",
+            "plausible_range": [0.0, 0.05],
+            "resolved_by": "A belief about decades of your own career, not a fact anyone can look up. Narrow it from your employment agreement and historical raises, but no document fixes real wage growth 20+ years out.",
+            "question": "How fast does employment income grow, in real terms, over the horizon?"
+          } },
+        "savings_rate": { "$ref": "#/$defs/percent0to1", "description": "Target fraction of gross family income saved annually. A stated intention (belief-adjacent), swept via sensitivity.sweeps.savings_rate.",
+          "x-uncertainty": {
+            "resolvability": "belief",
+            "plausible_range": [0.05, 0.40],
+            "resolved_by": "A stated intention for the FUTURE, not a fact -- narrow it with 12 months of your own bank/credit statements (income minus spending), which tells you what you saved, not what you will.",
+            "question": "What fraction of gross family income actually gets saved each year?"
+          } },
+        "default_non_reg_yield": { "anyOf": [{ "$ref": "#/$defs/rate" }, { "type": "null" }], "description": "Flat fallback yield belief used ONLY when a non-registered account has no holdings/product composition declared. null = composition is required (the account's holdings[] must be non-empty); non-null is a deliberately coarse fallback, not the recommended path (DP#27 prefers per-holding composition)." },
+        "rate_paths": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mortgage", "heloc"],
+          "properties": {
+            "mortgage": { "$ref": "#/$defs/rate_path" },
+            "heloc": { "$ref": "#/$defs/rate_path" }
+          },
+          "description": "One canonical HELOC-rate spelling, replacing the four in #595B (heloc.rate / assumptions.heloc_rate / property.mortgage_rate / property.heloc_rate)."
+        },
+        "retirement": { "$ref": "#/$defs/retirement_beliefs" },
+        "mortality": { "type": "array", "items": { "$ref": "#/$defs/mortality_belief" } },
+        "tax_law_overrides": { "$ref": "#/$defs/tax_law_overrides" },
+        "products": { "type": "object", "additionalProperties": { "$ref": "#/$defs/product_definition" }, "description": "Synthetic product composition registry (issue #547). DP#15: synthetic names only, never real tickers." },
+        "time_step": { "type": "string", "enum": ["yearly", "monthly"] },
+        "return_beliefs": { "$ref": "#/$defs/return_beliefs", "description": "Issue #993 (DP#21): the household's long-run sleeve return beliefs used to price the risk-allocation recommendation's P10/P50/P90 metrics. Optional -- every key absent means the engine's documented default for that sleeve stands (a PARTIAL declaration merges over the defaults; it never zeroes the undeclared sleeves, DP#32). An explicit 0.0 is honoured as exactly zero." },
+        "emergency_reserve": { "$ref": "#/$defs/emergency_reserve", "description": "Issue #688: how much the household keeps OUT of the market, WHERE, and held as WHAT. Optional (DP#16 trigger data) and deliberately NOT in this object's `required` list -- but its absence is not a neutral default: it means the household holds a $0 reserve, and the ruin report (#679) says so explicitly rather than assuming one into existence (DP#32)." }
+      }
+    }
+
+  }
+}

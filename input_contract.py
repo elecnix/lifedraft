@@ -88,6 +88,12 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parent
 SCHEMA_DIR = REPO_ROOT / "schema"
 UNIVERSAL_SCHEMA_PATH = SCHEMA_DIR / "input_schema.json"
+#: Key in ``UNIVERSAL_SCHEMA_PATH`` listing the ``$defs`` fragment files that
+#: complete the universal schema (paths relative to ``SCHEMA_DIR``). The list is
+#: DATA in the schema file, not a constant in this module (DP#2/DP#14), and it
+#: is REQUIRED: a root file that does not declare it raises ``KeyError`` at
+#: import rather than composing a silently-truncated schema (DP#32).
+UNIVERSAL_PARTS_KEY = "x-schema-parts"
 CANADA_OVERLAY_SCHEMA_PATH = SCHEMA_DIR / "countries" / "canada" / "input_schema.json"
 EXAMPLE_PATH = SCHEMA_DIR / "example.json"
 
@@ -141,6 +147,29 @@ def _merge_fragment(base: Dict, overlay: Dict) -> Dict:
     return merged
 
 
+def load_universal_schema() -> Dict:
+    """Assemble the universal (jurisdiction-agnostic) schema from its files.
+
+    ``schema/input_schema.json`` holds the document spine -- metadata, the
+    root ``required``/``allOf`` and the top-level ``properties`` -- and names
+    its ``$defs`` fragments in ``x-schema-parts``. Each fragment is folded in
+    with ``compose_schema`` itself, i.e. the SAME total, declarative merge the
+    Canada overlay already goes through (DP#8/DP#9: one composition mechanism,
+    not two). A fragment carries only ``$defs`` today, so the fold is a
+    ``$defs`` union; the root-property refinement rule applies to it unchanged,
+    which means a fragment can never invent a root key.
+
+    The split is presentation, not semantics: the object returned here is the
+    object the single 1,368-line file used to be.
+    """
+    root = json.loads(UNIVERSAL_SCHEMA_PATH.read_text())
+    part_paths = root.pop(UNIVERSAL_PARTS_KEY)
+    universal = root
+    for rel in part_paths:
+        universal = compose_schema(universal, json.loads((SCHEMA_DIR / rel).read_text()))
+    return universal
+
+
 def compose_schema(universal: Optional[Dict] = None, overlay: Optional[Dict] = None) -> Dict:
     """Merge the Canada overlay into the universal target schema.
 
@@ -154,7 +183,7 @@ def compose_schema(universal: Optional[Dict] = None, overlay: Optional[Dict] = N
     e.g. ``lira``/``lsif``/``fhsa``/``resp``/``person_room``).
     """
     if universal is None:
-        universal = json.loads(UNIVERSAL_SCHEMA_PATH.read_text())
+        universal = load_universal_schema()
     if overlay is None:
         overlay = json.loads(CANADA_OVERLAY_SCHEMA_PATH.read_text())
 

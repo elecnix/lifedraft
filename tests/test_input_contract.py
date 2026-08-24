@@ -94,7 +94,7 @@ class SchemaCompositionTest(unittest.TestCase):
         self.assertEqual(len(schema["$defs"]["province"]["enum"]), 13)
 
     def test_overlay_cannot_invent_a_new_root_key(self):
-        universal = json.loads(ic.UNIVERSAL_SCHEMA_PATH.read_text())
+        universal = ic.load_universal_schema()
         bad_overlay = {"properties": {"not_a_real_root_key": {"type": "string"}}}
         with self.assertRaises(ic.ContractValidationError):
             ic.compose_schema(universal, bad_overlay)

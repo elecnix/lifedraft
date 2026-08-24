@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/common.json",
+  "title": "lifedraft input contract — universal $defs: shared primitives and cross-cutting shapes",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Scalar primitives and identifiers every other fragment refers to (money, rate, date, the four *_id patterns), the owner_ref share-split shape, the jurisdiction-agnostic province placeholder, and the provenance sidecar's entry shape. Referenced from every other fragment; refers to none of them.",
+
+  "$defs": {
+
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "RFC 3339 full-date (YYYY-MM-DD). Precision to the day, so month-granularity rules (CPP/OAS onset) and day-granularity rules (FHSA 15-year window, RRIF-at-71) are exact, not approximated to a year (#597)."
+    },
+
+    "person_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Stable identifier, referenced by accounts/liabilities/properties/estate/decisions. Never role text ('primary'/'spouse') — a role is a label, not an identity (#598)."
+    },
+
+    "account_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+
+    "liability_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+
+    "property_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+
+    "income_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+
+    "province": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Jurisdiction-agnostic placeholder — a non-empty string. The Canada overlay replaces this $def wholesale with the closed enum of provinces/territories (long form only; #595 flagged 'qc' vs 'quebec' as a self-inconsistent example in the old schema)."
+    },
+
+    "owner_ref": {
+      "anyOf": [
+        { "$ref": "#/$defs/person_id" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["joint"],
+          "properties": {
+            "joint": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["person", "pct"],
+                "properties": { "person": { "$ref": "#/$defs/person_id" }, "pct": { "$ref": "#/$defs/percent0to1" } }
+              }
+            }
+          }
+        }
+      ],
+      "description": "A single person, or a jointly-held asset/liability split by percentage. Reused by account/liability/property owner fields."
+    },
+
+    "money": { "type": "number", "minimum": 0, "description": "A non-negative dollar amount in the document's declared currency/dollars units. Debts are recorded as positive magnitudes on liabilities, never as negative assets." },
+
+    "signed_money": { "type": "number", "description": "A dollar amount that may legitimately be negative (e.g. a cash-flow outflow)." },
+
+    "rate": { "type": "number", "minimum": -1, "maximum": 1, "description": "An annual rate as a fraction (0.07, not 7). Negative allowed for stress scenarios (crash years, deflation)." },
+
+    "percent0to1": { "type": "number", "minimum": 0, "maximum": 1 },
+
+    "dated_amount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "as_of"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/money" },
+        "as_of": { "$ref": "#/$defs/date", "description": "Statements arrive on different dates; this need not equal the document's root as_of (#597)." }
+      }
+    },
+
+    "provenance_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confidence"],
+      "description": "One leaf's provenance (#660). `measured` MUST carry `source` + `as_of`; `assumed`/`stated` MUST carry `plausible_range` OR `domain` -- mandatory for `assumed` because nobody chose that value, the engine or author guessed it. Whether a `plausible_range`/`domain` actually BRACKETS the leaf's live value, and whether the pointer itself resolves, are cross-document checks jsonschema cannot express here -- see provenance.load_provenance().",
+      "properties": {
+        "confidence": {
+          "type": "string",
+          "enum": ["measured", "stated", "derived", "assumed", "unknown"],
+          "description": "measured=traceable to a document; stated=user asserted, no document; derived=computed from other facts; assumed=the engine or author guessed (range/domain mandatory); unknown=genuinely absent (engine refuses at load, DP#32)."
+        },
+        "source": { "type": "string", "minLength": 1, "description": "A URI, e.g. file:///path/to/statement.pdf#page=1 -- include a page anchor where applicable. Required when confidence=measured." },
+        "as_of": { "$ref": "#/$defs/date", "description": "The date the source document was true. Required when confidence=measured." },
+        "plausible_range": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {},
+          "description": "[lo, hi], inclusive, bracketing the leaf's current value. One of plausible_range/domain is required when confidence is assumed or stated."
+        },
+        "domain": {
+          "type": "array",
+          "minItems": 1,
+          "items": {},
+          "description": "The set of values this leaf may plausibly hold; must contain the leaf's current value. One of plausible_range/domain is required when confidence is assumed or stated."
+        },
+        "resolved_by": { "type": "string", "minLength": 1, "description": "Free text: what a human should go DO to upgrade this leaf to measured (e.g. \"Read the will.\"). Optional at every confidence level." }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "confidence": { "const": "measured" } } },
+          "then": { "required": ["source", "as_of"] }
+        },
+        {
+          "if": { "properties": { "confidence": { "const": "stated" } } },
+          "then": { "anyOf": [{ "required": ["plausible_range"] }, { "required": ["domain"] }] }
+        },
+        {
+          "if": { "properties": { "confidence": { "const": "assumed" } } },
+          "then": { "anyOf": [{ "required": ["plausible_range"] }, { "required": ["domain"] }] }
+        }
+      ]
+    }
+
+  }
+}
