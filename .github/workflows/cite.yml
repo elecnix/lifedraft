@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cite review
-        uses: elecnix/cite@v0.2.1
+        uses: elecnix/cite@v0.4.0
         with:
           model_api_key: ${{ secrets.MODEL_API_KEY }}
           model_base_url: https://openrouter.ai/api/v1
@@ -45,4 +45,4 @@ jobs:
           # the old binary), and a release-time drift guard now enforces lockstep
           # upstream. Keep the explicit pin so a future regression cannot
           # silently re-deploy a stale binary.
-          version: v0.2.1
+          version: v0.4.0
