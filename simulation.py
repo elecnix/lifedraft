@@ -131,6 +131,16 @@ class SimulationContext:
     # draw_fraction search dimension).
     deployment_lag_months: int = 0
     deployment_idle_rate: float = 0.0
+    # Issue #74: staggered-deployment search dimension — spread the year-0
+    # lump over N equal ANNUAL tranches deployed at years 0..N-1 instead of
+    # all at once (a SPREAD, not #137's fixed delay). Default 1 == deploy at
+    # year 0, today's behavior; like the lag above it is a SEARCH DIMENSION
+    # parameter threaded by the optimizer/caller (DP#22/#31), not a
+    # contract-mapped input field. The schedule prices a year-0-equivalent
+    # cost through deployment_lag.year0_deployment_cost — the same seam as
+    # the lag, so absent a schedule nothing moves (golden byte-identical,
+    # DP#32).
+    deployment_schedule_years: int = 1
 
 
 def _year_brackets_for(sim_year: int, *, frozen_brackets: bool, brackets: list,
@@ -1514,22 +1524,29 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     deployment_lag_cost = 0.0
 
     if ctx.lump_sum > 0 and year == 0:
-        # Issue #137: price deployment lag. The borrowed lump sits uninvested
-        # (in a parking sleeve at the idle rate) for the declared lag; the
-        # spread between the financing rate and the idle sleeve rate is a real
-        # cost that consumes part of the proceeds before they deploy. Net it
-        # out of the lump BEFORE fill_room so the projection prices the drag.
-        # Absent/zero lag -> carry 0 -> effective_lump == ctx.lump_sum, the
-        # byte-identical path (DP#32).
-        from deployment_lag import lump_financing_rate, deployment_carry_cost
+        # Issues #137/#74: price the declared deployment timing. The borrowed
+        # lump sits uninvested (in a parking sleeve at the idle rate) for the
+        # declared lag (#137) or until each tranche's deployment year (#74);
+        # the spread between the financing rate and the idle sleeve rate is a
+        # real cost that consumes part of the proceeds before they deploy, and
+        # a schedule additionally gives up k years of compounding per tranche.
+        # Net it out of the lump BEFORE fill_room so the projection prices the
+        # drag. Absent/zero lag and no schedule -> carry 0 -> effective_lump ==
+        # ctx.lump_sum, the byte-identical path (DP#32).
+        from deployment_lag import lump_financing_rate, year0_deployment_cost
         _lump_financing_rate = lump_financing_rate(
             ctx.lump_sum, ctx.config.margin_available,
             ctx.heloc_path.get_heloc_rate(0, ctx.rate_path.rate_type),
             ctx.rate_path.get_rate(0),
         )
-        _deployment_carry = deployment_carry_cost(
+        _deployment_carry = year0_deployment_cost(
             ctx.lump_sum, ctx.deployment_lag_months,
+            ctx.deployment_schedule_years,
             _lump_financing_rate, ctx.deployment_idle_rate,
+            # Discount tranches at the same flat return the ranker scores
+            # with (issue #74) — the cost is exact under the ranking model's
+            # own assumption, not under a second, disagreeing one.
+            ctx.return_model.return_for_year(0),
         )
         deployment_lag_cost = _deployment_carry
         effective_lump = max(0.0, ctx.lump_sum - _deployment_carry)
@@ -1832,7 +1849,8 @@ class FamilySimulation:
                  free_cash: float = 0.0,
                  return_model=None,
                  deployment_lag_months: int = 0,
-                 deployment_idle_rate: float = 0.0):
+                 deployment_idle_rate: float = 0.0,
+                 deployment_schedule_years: int = 1):
         
         self.config = config
         
@@ -1932,6 +1950,13 @@ class FamilySimulation:
         # Issue #137: deployment-lag search dimension (see SimulationContext).
         self.deployment_lag_months = deployment_lag_months
         self.deployment_idle_rate = deployment_idle_rate
+        # Issue #74: staggered-deployment search dimension (see
+        # SimulationContext). A lag AND a schedule at once is an ambiguous
+        # declaration — refuse here, eagerly, before any fold runs (DP#32).
+        from deployment_lag import validate_deployment_dimensions
+        validate_deployment_dimensions(deployment_lag_months,
+                                       deployment_schedule_years)
+        self.deployment_schedule_years = deployment_schedule_years
         
         # DP#21/#260: Pluggable return model — compose through data, not hardcoded
         # float. return_model_data is the single source of truth: SimulationConfig
@@ -2171,6 +2196,7 @@ class FamilySimulation:
             portfolio=self._portfolio,
             deployment_lag_months=self.deployment_lag_months,
             deployment_idle_rate=self.deployment_idle_rate,
+            deployment_schedule_years=self.deployment_schedule_years,
         )
 
     def _simulate_year_step(self, state, year: int,
@@ -2299,19 +2325,22 @@ class FamilySimulation:
                 bracket_gap=primary_rate - spouse_rate,
             )
             engine = StrategyEngine(self.strategy)
-            # Issue #137: price the deployment lag the same way the yearly
-            # path does (both folds must agree — cross-engine pinning, #258):
-            # net the undeployed-period spread cost out of the lump before
-            # fill_room. Absent/zero lag -> carry 0 -> no-op (DP#32).
-            from deployment_lag import lump_financing_rate, deployment_carry_cost
+            # Issues #137/#74: price the declared deployment timing the same
+            # way the yearly path does (both folds must agree — cross-engine
+            # pinning, #258): net the timing cost out of the lump before
+            # fill_room. Absent/zero lag and no schedule -> carry 0 -> no-op
+            # (DP#32).
+            from deployment_lag import lump_financing_rate, year0_deployment_cost
             _lump_financing_rate = lump_financing_rate(
                 self.lump_sum, self.config.margin_available,
                 self.heloc_path.get_heloc_rate(0, self.rate_path.rate_type),
                 self.rate_path.get_rate(0),
             )
-            _deployment_carry = deployment_carry_cost(
+            _deployment_carry = year0_deployment_cost(
                 self.lump_sum, self.deployment_lag_months,
+                self.deployment_schedule_years,
                 _lump_financing_rate, self.deployment_idle_rate,
+                self.return_model.return_for_year(0),
             )
             _effective_lump = max(0.0, self.lump_sum - _deployment_carry)
             deployment_lag_cost = _deployment_carry
