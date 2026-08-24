@@ -106,10 +106,10 @@ jobs:
       - name: Validate target input contract example (issue #602)
         run: |
           python -c "
-          import input_contract as ic
+          import contract_schema
           import json
-          doc = json.loads(open(ic.EXAMPLE_PATH).read())
-          ic.validate_contract(doc)
+          doc = json.loads(open(contract_schema.EXAMPLE_PATH).read())
+          contract_schema.validate_contract(doc)
           print('schema/example.json validates against the composed target schema (0 errors).')
           "
 

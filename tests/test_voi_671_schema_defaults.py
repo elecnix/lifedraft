@@ -41,8 +41,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import input_contract as ic
 import voi
+import contract_schema
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -60,7 +60,7 @@ def _new_user_contract() -> dict:
     the Phase-1 engine can actually simulate (#598) -- with the ``provenance``
     sidecar REMOVED. This is the brand-new user: nothing measured, no sidecar,
     every leaf a guess."""
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
     keep = {"p1", "p2", "ca", "cb"}
     doc["people"] = [p for p in doc["people"] if p["id"] in keep]
@@ -80,7 +80,7 @@ def _new_user_contract() -> dict:
         m for m in doc["assumptions"]["mortality"] if m["person"] in keep
     ]
     doc.pop("provenance", None)          # <- the whole point: no sidecar
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -185,7 +185,7 @@ def test_a_leaf_declared_uncertain_with_no_range_is_unranked_never_zero():
     width-less or not -- see ``test_voi_673_belief_vs_fact.py`` for that
     enforcement); this test is only about the ORTHOGONAL width dimension."""
     doc = _new_user_contract()
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
 
     # An annotation that says "this is an unknown" but not how wide it is.
     schema["$defs"]["date"] = {
@@ -213,7 +213,7 @@ def test_a_leaf_declared_uncertain_with_no_range_is_unranked_never_zero():
 
 def test_an_explicit_x_uncertainty_false_opts_a_leaf_out():
     doc = _new_user_contract()
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     assert voi.schema_spec(schema, "/assumptions/inflation") is not None
 
     schema["$defs"]["assumptions"]["properties"]["inflation"] = {
@@ -233,7 +233,7 @@ def test_engine_refusal_is_reported_not_raised_as_a_traceback():
     generations but still refuses additional ADULTS (a second couple) the
     two-slot compute cannot hold (#706/Step 9). VOI must SAY so, not blow up --
     and must not claim any leaf is worth $0 on the way out."""
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
 
     report = voi.sweep(doc, cross_objective=False)      # must not raise
@@ -253,7 +253,7 @@ def test_dead_key_pass_that_did_not_run_says_so_instead_of_printing_zero():
     """DP#32, applied to VOI itself: 'not computed' must never be rendered as
     '(none found)'. That was the #671 defect -- a silent zero inside the tool
     built to catch silent zeros."""
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
     report = voi.sweep(doc, cross_objective=False)
     assert report.dead_key_pass_ran is False
@@ -293,7 +293,7 @@ def _static_key(doc: dict, pointer: str) -> str:
 _INERT_FOR_THIS_DOCUMENT = {
     "estate.rollover_overrides[].spousal_rollover": (
         "#600",
-        "CONSUMED by input_contract._weighted_rolled_fraction, but inert in THIS "
+        "CONSUMED by contract_estate._weighted_rolled_fraction, but inert in THIS "
         "fixture: the only override names a SPOUSE-owned account (spousal_rrsp_p2) "
         "while the primary dies first, and the estate math reads the FIRST-TO-DIE's "
         "rolled fraction. Verified live in general: moving the same override onto a "

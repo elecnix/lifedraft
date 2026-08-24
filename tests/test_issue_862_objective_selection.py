@@ -33,6 +33,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 import optimize
 from objective import MAX_NET_BENEFIT, OBJECTIVES
+import contract_errors
+import contract_schema
 
 
 def _owner_ids(owner):
@@ -62,7 +64,7 @@ def _two_generation_subset(doc):
 
 
 def _base_doc():
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         return _two_generation_subset(json.load(f))
 
 
@@ -118,7 +120,7 @@ class TestContractField(unittest.TestCase):
         deep, and never silently scored under the wrong objective."""
         doc = _base_doc()
         doc["decisions"]["objective"] = "max_bogus"
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("max_bogus", msg)

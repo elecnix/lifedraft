@@ -31,6 +31,7 @@ from simulation import SimulationConfig
 from simulation_config import ScenarioOverlay, apply_overlay
 from optimize import run_optimization
 from return_model import ReturnModel, ReturnEngine, StochasticReturn
+import contract_schema
 
 
 # ── DP#14: Config pipeline ──────────────────────────────────────────────────
@@ -677,8 +678,7 @@ if __name__ == "__main__":
         # the template is the input contract's own example, not the
         # deleted legacy input_schema.json.
         import shutil
-        import input_contract
-        schema_path = input_contract.EXAMPLE_PATH
+        schema_path = contract_schema.EXAMPLE_PATH
         if args.template == '-':
             with open(schema_path) as f:
                 print(f.read())

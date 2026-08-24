@@ -10,7 +10,7 @@ nobody reviewed.
 The fix is presentation-only: the spine (metadata, root ``required``,
 ``allOf`` and the top-level ``properties``) stays in ``input_schema.json``,
 which now names its ``$defs`` fragments in ``x-schema-parts``; each fragment
-is folded in by ``input_contract.load_universal_schema()`` using
+is folded in by ``contract_schema.load_universal_schema()`` using
 ``compose_schema`` -- the SAME merge the Canada overlay already went through
 (DP#8/DP#9: one composition mechanism, not two).
 
@@ -34,7 +34,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import input_contract as ic
+# The fragment machinery lives in contract_schema (the adapter was split
+# per namespace); input_contract is now only the orchestrator.
+import contract_schema as ic
 
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schema"
 PARTS_DIR = SCHEMA_DIR / "defs"

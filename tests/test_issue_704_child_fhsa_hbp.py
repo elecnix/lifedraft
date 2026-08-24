@@ -27,6 +27,7 @@ import json
 import unittest
 
 import countries.canada  # noqa: F401
+import contract_schema
 
 
 def _run(children, first_home_purchases, *, years=3, savings_rate=0.0,
@@ -178,8 +179,7 @@ def _two_generation_doc(first_home_purchases):
     """The shipped example.json trimmed to the couple + their direct children --
     the one known-valid contract document -- with first_home_purchases injected,
     to exercise the real adapter (input_contract.to_internal_config)."""
-    import input_contract as ic
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = copy.deepcopy(json.load(fh))
     keep = {"p1", "p2", "ca", "cb"}
     doc["people"] = [p for p in doc["people"] if p["id"] in keep]
@@ -224,7 +224,8 @@ class TestFirstHomePurchaseReachesConfigViaContract(unittest.TestCase):
     def test_a_buyer_that_matches_no_member_is_refused(self):
         # An id that is neither a declared child nor a declared adult is a typo:
         # refused loudly (DP#32), not silently dropped.
-        from input_contract import to_internal_config, ContractAdaptationError
+        from contract_errors import ContractAdaptationError
+        from input_contract import to_internal_config
         with self.assertRaises(ContractAdaptationError) as cm:
             to_internal_config(
                 _two_generation_doc([{"buyer": "nobody", "year": 2035}]))

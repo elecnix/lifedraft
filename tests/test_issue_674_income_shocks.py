@@ -47,6 +47,8 @@ from countries.canada.earned_income import (
     EARNED_INCOME_KINDS, NON_EARNED_INCOME_KINDS, is_earned_income,
 )
 from simulation_config import SimulationConfig
+import contract_errors
+import contract_schema
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -215,7 +217,7 @@ class TestRRSPRoomExcludesEIEarnedIncome(unittest.TestCase):
 
 class TestNoKindFailsLoudly(unittest.TestCase):
     def _example_doc(self):
-        with open(ic.EXAMPLE_PATH) as f:
+        with open(contract_schema.EXAMPLE_PATH) as f:
             return json.load(f)
 
     def test_schema_rejects_an_override_with_no_kind(self):
@@ -226,8 +228,8 @@ class TestNoKindFailsLoudly(unittest.TestCase):
         override = doc["decisions"]["income"][1]["overrides"][0]
         self.assertIn("kind", override, "fixture assumption broken -- update this test")
         del override["kind"]
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_schema_rejects_an_override_with_no_dates(self):
         """Same for `from`/`to` -- issue #674's duration is not optional
@@ -237,8 +239,8 @@ class TestNoKindFailsLoudly(unittest.TestCase):
         doc = self._example_doc()
         override = doc["decisions"]["income"][1]["overrides"][0]
         del override["from"]
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_mapping_refuses_an_override_for_an_unknown_income_id(self):
         """input_contract.py's decisions.income mapping (issue #674 sweep):
@@ -248,7 +250,7 @@ class TestNoKindFailsLoudly(unittest.TestCase):
         never declared that scenario."""
         doc = self._example_doc()
         doc["decisions"]["income"][1]["overrides"][0]["income_id"] = "no_such_income"
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
 
@@ -344,7 +346,9 @@ class TestInternalConfigRefusesUndeclaredKind(unittest.TestCase):
         if someone adds a kind to $defs/income_kind's enum without deciding
         its ITA s.146(1) treatment, this fails HERE -- at the point of the
         omission -- instead of the engine silently accruing no room for it."""
-        enum = ic.load_universal_schema()["$defs"]["income_kind"]["enum"]
+        # The ASSEMBLED schema, not the root file: the universal schema's
+        # $defs live in the x-schema-parts fragments.
+        enum = contract_schema.load_universal_schema()["$defs"]["income_kind"]["enum"]
         classified = EARNED_INCOME_KINDS | NON_EARNED_INCOME_KINDS
         self.assertEqual(
             set(enum), classified,

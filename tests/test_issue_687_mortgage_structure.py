@@ -55,6 +55,8 @@ from simulation_config import (
     apply_structure_overlay, charge_limit, heloc_revolving_limit,
 )
 from trajectory_invariants import assert_invariant, run_invariant
+import contract_errors
+import contract_schema
 
 
 # ============================================================================
@@ -68,7 +70,7 @@ def _two_gen_doc():
     house_value = 650,000; baseline mortgage 340,000 + heloc limit 150,000
     -> combined 490,000 (80% charge = 520,000; 65% revolving-only ceiling
     = 422,500)."""
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = json.load(f)
     doc = copy.deepcopy(doc)
     keep = {"p1", "p2", "ca", "cb"}
@@ -321,7 +323,7 @@ class TestContractMapping(unittest.TestCase):
         doc = _two_gen_doc()
         unpriced = {"id": "unpriced", "label": "unpriced line", "revolving_share": 0.3}
         doc["decisions"]["mortgage"]["structure_options"] = [unpriced]
-        with pytest.raises(ic.ContractAdaptationError):
+        with pytest.raises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_readvanceable_at_zero_share_without_a_rate_is_also_refused(self):
@@ -332,7 +334,7 @@ class TestContractMapping(unittest.TestCase):
         unpriced = {"id": "unpriced", "label": "unpriced readvanceable",
                     "revolving_share": 0.0, "readvanceable": True}
         doc["decisions"]["mortgage"]["structure_options"] = [unpriced]
-        with pytest.raises(ic.ContractAdaptationError):
+        with pytest.raises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_all_mortgage_structure_needs_no_rate(self):
@@ -392,29 +394,29 @@ class TestSchemaValidation(unittest.TestCase):
         doc = _two_gen_doc()
         doc["decisions"]["mortgage"]["structure_options"] = [
             {"id": "x", "label": "x", "revolving_share": 1.5}]
-        with pytest.raises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with pytest.raises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_revolving_share_at_one_is_accepted_by_schema(self):
         doc = _two_gen_doc()
         doc["decisions"]["mortgage"]["structure_options"] = [
             {"id": "x", "label": "x", "revolving_share": 1.0,
              "revolving_rate": 0.05, "revolving_rate_type": "variable"}]
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
 
     def test_unknown_key_on_a_structure_option_is_rejected(self):
         doc = _two_gen_doc()
         doc["decisions"]["mortgage"]["structure_options"] = [
             {"id": "x", "label": "x", "revolving_share": 0.0, "bogus_key": 1}]
-        with pytest.raises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with pytest.raises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_structure_options_is_optional(self):
         """A contract that never declares this decision remains valid --
         DP#16, absence is the trigger for 'no sweep'."""
         doc = _two_gen_doc()
         assert "structure_options" not in doc["decisions"]["mortgage"]
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
 
 
 # ============================================================================

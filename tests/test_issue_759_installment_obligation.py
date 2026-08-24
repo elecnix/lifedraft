@@ -40,6 +40,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
 from test_golden_trajectory_581 import _run as _run_golden
 from test_golden_trajectory_581 import golden_household_config
+import contract_errors
+import contract_schema
 
 # ============================================================================
 # Fixture helpers (DP#4/DP#15: fabricated, round numbers, role-based names)
@@ -65,7 +67,7 @@ def _installment_plan(*, plan_id="ortho_plan", owner="p1", description="orthodon
 
 
 def _load_example_doc():
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         return _two_generation_subset(json.load(fh))
 
 
@@ -387,7 +389,7 @@ class TestPartialOrUnsupportedDeclarationRefused(unittest.TestCase):
         """A stated-rate plan's interest pricing is out of scope (#759); a
         non-zero rate is refused, not silently dropped to 0 nor honored."""
         plan = _installment_plan(rate=0.05)
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _config_from(_doc_with_installments(plan))
         self.assertIn("rate", str(cm.exception))
         self.assertIn("#759", str(cm.exception))
@@ -396,7 +398,7 @@ class TestPartialOrUnsupportedDeclarationRefused(unittest.TestCase):
         """An installment plan is must-pay by construction; a false
         non_discretionary is refused, not silently treated as compressible."""
         plan = _installment_plan(non_discretionary=False)
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _config_from(_doc_with_installments(plan))
         self.assertIn("non_discretionary", str(cm.exception))
 
@@ -405,7 +407,7 @@ class TestPartialOrUnsupportedDeclarationRefused(unittest.TestCase):
         the year-stepped simulation cannot re-price; refused, not silently
         dropped to the post-as_of portion."""
         plan = _installment_plan(start_date="2026-01-01")  # as_of is 2026-07-12
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _config_from(_doc_with_installments(plan))
         self.assertIn("start_date", str(cm.exception))
         self.assertIn("as_of", str(cm.exception))
@@ -417,7 +419,7 @@ class TestPartialOrUnsupportedDeclarationRefused(unittest.TestCase):
         piece to zero / to perpetual)."""
         plan = _installment_plan()
         del plan["number_of_payments"]
-        with self.assertRaises(ic.ContractValidationError):
+        with self.assertRaises(contract_errors.ContractValidationError):
             _config_from(_doc_with_installments(plan))
 
 

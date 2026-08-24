@@ -177,6 +177,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import input_contract
 from objective import OBJECTIVES, ObjectiveFunction
 from optimize import run_optimization
+import contract_errors
+import contract_schema
 
 
 OAT_LIMITATION = (
@@ -473,7 +475,7 @@ def collect_candidates(
     Pure (DP#3).
     """
     if schema is None:
-        schema = input_contract.compose_schema()
+        schema = contract_schema.compose_schema()
     validate_uncertainty_annotations(schema)   # #673, DP#32: fail loudly, up front
     doc_specs, doc_confidence = _document_specs(doc)
 
@@ -518,7 +520,7 @@ def _mapped_config(doc: Dict) -> Dict:
     A legitimate engine refusal surfaces as EngineRefusal, never a traceback."""
     try:
         return input_contract.to_internal_config(_strip_sidecar(doc))
-    except input_contract.ContractAdaptationError as exc:
+    except contract_errors.ContractAdaptationError as exc:
         raise EngineRefusal(str(exc)) from exc
 
 

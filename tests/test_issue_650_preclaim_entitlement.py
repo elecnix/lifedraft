@@ -26,6 +26,8 @@ import input_contract as ic
 from simulation_config import SimulationConfig
 from countries.canada.retirement_transition import member_retirement_income
 from test_input_contract import _load_example, _two_generation_subset
+import contract_errors
+import contract_schema
 
 
 def _preclaim_doc():
@@ -50,7 +52,7 @@ class PreClaimCppEntitlementReachesEngine(unittest.TestCase):
         }
 
     def test_document_validates(self):
-        ic.validate_contract(self.doc)  # raises on any violation
+        contract_schema.validate_contract(self.doc)  # raises on any violation
 
     def test_estimate_and_claim_age_land_on_read_keys(self):
         legacy = ic.to_internal_config(self.doc)
@@ -100,7 +102,7 @@ class InPayAndPreClaimAreMutuallyExclusive(unittest.TestCase):
                                   "monthly_amount": 900, "as_of": "2026-01-01"}}
         p1["entitlements"] = {"cpp": {"estimated_monthly_at_65": 1300,
                                       "as_of": "2026-01-01", "claim_age": 65}}
-        with self.assertRaises(ic.ContractValidationError):
+        with self.assertRaises(contract_errors.ContractValidationError):
             ic.to_internal_config(doc)
 
 

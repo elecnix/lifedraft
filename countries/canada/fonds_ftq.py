@@ -35,7 +35,7 @@ WHAT THE MODULE OWNS (the FTQ program's well-known rules)
 
 RESOLUTION (DP#13: a declared value wins over a fallback)
 ---------------------------------------------------------
-``input_contract._map_account_overrides`` calls ``resolve_product()`` for
+``contract_accounts._map_account_overrides`` calls ``resolve_product()`` for
 an account whose ``product`` is set. The product supplies
 ``expected_return`` / ``locked_until`` DEFAULTS into the SAME #823
 downstream machinery (the growth blend + solvency illiquidity). An EXPLICIT

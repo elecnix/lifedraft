@@ -34,7 +34,7 @@ from countries.canada.tax_calc import tuition_tax_credit, _load_fed_data
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-from input_contract import _tuition_by_year
+from contract_people import _tuition_by_year
 
 
 # ── The credit itself ───────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ def _spouse_tuition_config(tuition_by_year=None, start_year=2026):
     """A fabricated round-number couple, short frozen-bracket horizon.
 
     The spouse carries an OPTIONAL `tuition_by_year` map -- the exact legacy
-    shape input_contract._tuition_by_year produces for a taxed member."""
+    shape contract_people._tuition_by_year produces for a taxed member."""
     members = [
         {'role': 'primary', 'birth_year': 1980, 'gross_income': 120_000,
          'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0},
@@ -228,7 +228,7 @@ class TestTuitionCreditWiring(unittest.TestCase):
 # ── The adapter mapping: study_periods[].tuition -> member tuition_by_year ──
 
 class TestTuitionByYearMapping(unittest.TestCase):
-    """input_contract._tuition_by_year expands a study_period's tuition into a
+    """contract_people._tuition_by_year expands a study_period's tuition into a
     per-calendar-year map and emits the DP#32 load-time warning on what is NOT
     yet modelled (child transfer). The Quebec provincial tuition credit IS
     now modelled (#783), so its pre-#783 warning is gone."""
@@ -320,7 +320,7 @@ class TestAdapterMemberAndChildWiring(unittest.TestCase):
     reached (and the coverage gate sees them)."""
 
     def test_map_member_carries_tuition_by_year_for_a_taxed_member(self):
-        from input_contract import _map_member
+        from contract_people import _map_member
         doc = {'as_of': '2026-06-30', 'jurisdiction': {'province': 'quebec'},
                'people': [{'id': 'p2', 'room': {}, 'incomes': [],
                            'study_periods': [{'institution': 'X', 'program': 'Y',
@@ -337,7 +337,7 @@ class TestAdapterMemberAndChildWiring(unittest.TestCase):
         self.assertEqual(member['tuition_by_year'], {2026: 6000.0})
 
     def test_map_member_omits_tuition_by_year_when_none_declared(self):
-        from input_contract import _map_member
+        from contract_people import _map_member
         doc = {'as_of': '2026-06-30', 'jurisdiction': {'province': 'quebec'},
                'people': [{'id': 'p2', 'room': {}, 'incomes': []}],
                'decisions': {'retirement_age': []}}
@@ -346,7 +346,7 @@ class TestAdapterMemberAndChildWiring(unittest.TestCase):
 
     def test_map_child_records_tuition_no_warning(self):
         # Issue #785: the child-tuition warning is REMOVED (transfer is modelled).
-        from input_contract import _map_child
+        from contract_people import _map_child
         doc = {'as_of': '2026-06-30', 'jurisdiction': {'province': 'quebec'},
                'people': [{'id': 'ca', 'room': {}, 'incomes': [],
                            'study_periods': [{'institution': 'X', 'program': 'Y',

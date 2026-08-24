@@ -22,6 +22,7 @@ import tempfile
 import pytest
 
 import input_contract as ic
+import contract_errors
 import simulate
 import simulation_config
 from simulation_config import SimulationConfig
@@ -83,7 +84,7 @@ class TestCanonicalBoundary:
         doc["definitely_not_in_the_schema"] = True  # unknown top-level key
         path = tmp_path / "invalid.json"
         path.write_text(json.dumps(doc))
-        with pytest.raises(ic.ContractValidationError):
+        with pytest.raises(contract_errors.ContractValidationError):
             ic.load_and_map(str(path))
 
     def test_missing_required_key_refuses_loudly(self, tmp_path):
@@ -92,5 +93,5 @@ class TestCanonicalBoundary:
         del doc["as_of"]
         path = tmp_path / "incomplete.json"
         path.write_text(json.dumps(doc))
-        with pytest.raises(ic.ContractValidationError):
+        with pytest.raises(contract_errors.ContractValidationError):
             simulation_config.SimulationConfig.from_json(str(path))

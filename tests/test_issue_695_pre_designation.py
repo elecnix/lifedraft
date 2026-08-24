@@ -36,6 +36,8 @@ from countries.canada.pre_designation import (
     family_year_conflict)
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_errors
+import contract_schema
 
 
 # The couple's home appreciates less than their cottage: gain 300k vs 500k. The
@@ -74,7 +76,7 @@ def _two_properties(base, home_years, cottage_years):
 
 
 def _estate(doc):
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     results = FamilySimulation(cfg := SimulationConfig.from_dict(legacy)).run()
     return objective.compute_after_tax_estate(results, legacy), legacy
@@ -194,7 +196,7 @@ class OnePropertyPerFamilyPerYear(unittest.TestCase):
         the one exemption twice -- rejected loudly, not silently resolved."""
         doc = _two_properties(
             self.base, home_years=[(2007, 2016)], cottage_years=[(2010, 2020)])
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         self.assertIn("one property per family unit per year", str(ctx.exception))
 
@@ -207,7 +209,7 @@ class OnePropertyPerFamilyPerYear(unittest.TestCase):
             self.base, home_years=[(2007, 2016)], cottage_years=[(2017, None)])
         principal = next(p for p in doc["properties"] if p["kind"] == "principal")
         principal["acb"] = None
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
 

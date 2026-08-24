@@ -34,6 +34,7 @@ from countries.canada.rental_income import (
     classify_rental_income, net_rental_income)
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_schema
 
 
 def _add_owned_rental(doc, gross_rent, expenses, mortgage_balance, rate=0.05):
@@ -106,7 +107,7 @@ class RentalIncomeTaxLaw(unittest.TestCase):
 class RentalIncomeReachesTaxableIncome(unittest.TestCase):
     def setUp(self):
         self.base = _two_generation_subset(_load_example())  # no rental
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_net_rental_income_is_gross_less_expenses_less_interest(self):
         """A rental: 30000 rent, 8000 expenses, 200000 mortgage @ 5% (10000
@@ -114,7 +115,7 @@ class RentalIncomeReachesTaxableIncome(unittest.TestCase):
         interest deduction."""
         doc = _add_owned_rental(self.base, gross_rent=30000, expenses=8000,
                                 mortgage_balance=200000, rate=0.05)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         yr = _first_year(doc)
         self.assertAlmostEqual(yr.net_rental_income, 12000.0, places=6)
         self.assertAlmostEqual(yr.rental_interest_deductible, 10000.0, places=6)
@@ -169,7 +170,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())  # principal only
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_no_rental_block_in_internal_config(self):
         legacy = ic.to_internal_config(self.base)
@@ -196,7 +197,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
             "acb": 150000,
             "designated_principal_residence_years": [],
         })
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         self.assertTrue(all("rental" not in p for p in legacy["properties"]))
         self.assertEqual(_first_year(doc).net_rental_income, 0.0)

@@ -53,6 +53,7 @@ import model_fidelity
 import voi
 from objective import OBJECTIVES, estate_is_declared
 from optimize import run_optimization
+import contract_schema
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -73,7 +74,7 @@ def _owner_ids(owner):
 
 
 def _estate_live_contract() -> dict:
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
     keep = {"p1", "p2", "ca", "cb"}
     doc["people"] = [p for p in doc["people"] if p["id"] in keep]
@@ -86,7 +87,7 @@ def _estate_live_contract() -> dict:
     doc["estate"]["life_insurance"] = [i for i in doc["estate"]["life_insurance"] if i["owner"] in keep]
     doc["assumptions"]["mortality"] = [m for m in doc["assumptions"]["mortality"] if m["person"] in keep]
     doc.pop("provenance", None)
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -100,7 +101,7 @@ def _estate_scoped_schema() -> dict:
     stripping those two def-level nodes once clears every site that reaches
     them through a ``$ref`` too.
     """
-    schema = copy.deepcopy(ic.compose_schema())
+    schema = copy.deepcopy(contract_schema.compose_schema())
     keep_nodes = {
         id(schema["$defs"]["estate"]["properties"]["default_spousal_rollover"]),
         id(schema["$defs"]["rollover_override"]["properties"]["spousal_rollover"]),
