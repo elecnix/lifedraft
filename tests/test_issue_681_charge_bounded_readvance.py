@@ -41,10 +41,10 @@ from countries.canada.strategies import STRATEGY_BALANCED
 from objective import MAX_NET_BENEFIT
 from optimizer import GridOptimizer
 from simulation import FamilySimulation
-from simulation_config import (
-    SimulationConfig, YearResult, apply_ltv_overlay, charge_limit,
-    charge_room_for_readvance, heloc_revolving_limit,
-)
+from charge_limits import charge_limit, charge_room_for_readvance, heloc_revolving_limit
+from scenario_overlay import apply_ltv_overlay
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from trajectory_invariants import (
     InvariantBreachedError, RUN_PATH_INVARIANTS, assert_run_invariants,
     run_invariant,
@@ -216,9 +216,8 @@ class TestInvariantRunsInProductionPath:
         away (restoring the #681 bug exactly -- unbounded re-borrowing) and
         confirm ``FamilySimulation.run()`` itself now REFUSES the trajectory,
         rather than returning it for ranking."""
-        import simulation_config as sc
-        original = sc.charge_room_for_readvance
         import rules_leverage
+        original = rules_leverage.charge_room_for_readvance
         try:
             # The pre-#681 rule: infinite room, i.e. no bound at all.
             rules_leverage.charge_room_for_readvance = (

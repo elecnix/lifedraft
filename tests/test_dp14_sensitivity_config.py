@@ -25,7 +25,8 @@ class TestSensitivityDP14Compliance(unittest.TestCase):
         investment_return, heloc_rate, inflation — it should use ScenarioOverlay.
         """
         from sensitivity import run_scenario
-        from simulation_config import SimulationConfig, ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
+        from simulation_config import SimulationConfig
 
         sig = inspect.signature(run_scenario)
         params = list(sig.parameters.keys())
@@ -46,7 +47,8 @@ class TestSensitivityDP14Compliance(unittest.TestCase):
     def test_run_scenario_with_simulation_config(self):
         """run_scenario must work with SimulationConfig + ScenarioOverlay."""
         from sensitivity import run_scenario
-        from simulation_config import SimulationConfig, ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
+        from simulation_config import SimulationConfig
 
         config = SimulationConfig(
             projection_years=10,
@@ -76,7 +78,7 @@ class TestSensitivityDP14Compliance(unittest.TestCase):
     def test_run_scenario_with_dict_backward_compat(self):
         """run_scenario must also accept a dict for backward compatibility."""
         from sensitivity import run_scenario
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         cfg = {
             'assumptions': {'investment_return': 0.07, 'projection_years': 10},
@@ -142,7 +144,7 @@ class TestSensitivityDP14Compliance(unittest.TestCase):
 
     def test_scenario_overlay_has_inflation(self):
         """ScenarioOverlay must support inflation for sensitivity analysis (DP#14)."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         overlay = ScenarioOverlay(
             label="test-inflation",
@@ -156,7 +158,7 @@ class TestSensitivityDP14Compliance(unittest.TestCase):
 
     def test_scenario_overlay_inflation_round_trip(self):
         """ScenarioOverlay inflation must round-trip via to_dict/from_dict (DP#24)."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         overlay = ScenarioOverlay(
             label="test-round-trip",
@@ -172,7 +174,8 @@ class TestSensitivityDP14Compliance(unittest.TestCase):
 
     def test_apply_overlay_handles_inflation(self):
         """apply_overlay must propagate inflation to the derived config (DP#14)."""
-        from simulation_config import SimulationConfig, ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
+        from simulation_config import SimulationConfig
 
         config = SimulationConfig(
             investment_return=0.07,
@@ -243,14 +246,14 @@ class TestScenarioOverlaySalaryGrowth(unittest.TestCase):
 
     def test_overlay_salary_growth_default(self):
         """Overlay salary_growth defaults to None (no override)."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         overlay = ScenarioOverlay(label="test-default")
         self.assertIsNone(overlay.salary_growth)
 
     def test_overlay_salary_growth_round_trip(self):
         """salary_growth must round-trip via to_dict/from_dict."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         overlay = ScenarioOverlay(
             label="test-salary-growth",
@@ -263,7 +266,8 @@ class TestScenarioOverlaySalaryGrowth(unittest.TestCase):
 
     def test_apply_overlay_handles_salary_growth(self):
         """apply_overlay must propagate salary_growth to the derived config."""
-        from simulation_config import SimulationConfig, ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
+        from simulation_config import SimulationConfig
 
         config = SimulationConfig(
             family_members=[{'role': 'primary', 'gross_income': 100000}],
@@ -275,7 +279,8 @@ class TestScenarioOverlaySalaryGrowth(unittest.TestCase):
 
     def test_overlay_salary_growth_none_means_no_override(self):
         """When salary_growth is None, the base config value is preserved."""
-        from simulation_config import SimulationConfig, ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
+        from simulation_config import SimulationConfig
 
         config = SimulationConfig(
             family_members=[{'role': 'primary', 'gross_income': 100000}],
@@ -291,7 +296,8 @@ class TestScenarioOverlayFromOverlayDiff(unittest.TestCase):
 
     def test_from_overlay_diff_inflation(self):
         """from_overlay_diff must map inflation changes to overlay."""
-        from simulation_config import SimulationConfig, ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
+        from simulation_config import SimulationConfig
 
         config = SimulationConfig(inflation=0.025, investment_return=0.07)
         modified = SimulationConfig(inflation=0.04, investment_return=0.07)
@@ -301,7 +307,8 @@ class TestScenarioOverlayFromOverlayDiff(unittest.TestCase):
 
     def test_from_overlay_diff_salary_growth(self):
         """from_overlay_diff must map salary_growth changes to overlay."""
-        from simulation_config import SimulationConfig, ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
+        from simulation_config import SimulationConfig
 
         config = SimulationConfig(salary_growth=0.02, investment_return=0.07)
         modified = SimulationConfig(salary_growth=0.05, investment_return=0.07)
@@ -315,7 +322,7 @@ class TestScenarioOverlayExtract(unittest.TestCase):
 
     def test_extract_inflation(self):
         """extract must detect inflation changes."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         base_cfg = {'assumptions': {'inflation': 0.025, 'investment_return': 0.07},
                     'property': {'mortgage_rate': 0.05},
@@ -330,7 +337,7 @@ class TestScenarioOverlayExtract(unittest.TestCase):
 
     def test_extract_salary_growth(self):
         """extract must detect salary_growth changes."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         base_cfg = {'assumptions': {'salary_growth': 0.02, 'investment_return': 0.07},
                     'property': {'mortgage_rate': 0.05},
@@ -349,14 +356,15 @@ class TestScenarioOverlayInflation(unittest.TestCase):
 
     def test_overlay_inflation_zero_by_default(self):
         """Overlay inflation defaults to None (no override)."""
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         overlay = ScenarioOverlay(label="test-default")
         self.assertIsNone(overlay.inflation)
 
     def test_overlay_inflation_applied_to_config(self):
         """Inflation overlay propagates to the derived config dict."""
-        from simulation_config import SimulationConfig, ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
+        from simulation_config import SimulationConfig
 
         config = SimulationConfig(
             family_members=[{'role': 'primary', 'gross_income': 100000}],
@@ -367,7 +375,8 @@ class TestScenarioOverlayInflation(unittest.TestCase):
 
     def test_overlay_inflation_none_means_no_override(self):
         """When inflation is None, the base config value is preserved."""
-        from simulation_config import SimulationConfig, ScenarioOverlay, apply_overlay
+        from scenario_overlay import ScenarioOverlay, apply_overlay
+        from simulation_config import SimulationConfig
 
         config = SimulationConfig(
             family_members=[{'role': 'primary', 'gross_income': 100000}],

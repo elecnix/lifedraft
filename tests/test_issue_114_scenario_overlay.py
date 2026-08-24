@@ -10,7 +10,7 @@ All test data uses round numbers per DP#13/DP#15.
 
 import unittest
 
-from simulation_config import ScenarioOverlay, build_overlay_config
+from scenario_overlay import ScenarioOverlay, build_overlay_config
 
 
 def _base_cfg():

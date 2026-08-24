@@ -1413,10 +1413,12 @@ class HtmlReport(OutputReport):
         
         Runs a mini-simulation to get actual yearly contribution amounts.
         """
-        from simulation_config import (
-            SimulationConfig, build_overlay_config, ScenarioOverlay,
+        from scenario_overlay import (
+            build_overlay_config,
+            ScenarioOverlay,
             refinance_amortization_fallback,
         )
+        from simulation_config import SimulationConfig
         from countries.canada.rate_model import build_rate_path
 
         # Build overlay from best result

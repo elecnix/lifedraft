@@ -477,7 +477,7 @@ class TestYearByYear:
     def test_evaluate_overlay_includes_year_by_year(self):
         """evaluate_overlay surfaces one serialized YearResult per projection year."""
         import simulate
-        from simulation_config import ScenarioOverlay
+        from scenario_overlay import ScenarioOverlay
 
         cfg = _fixture_cfg()
         projection_years = cfg["assumptions"]["projection_years"]

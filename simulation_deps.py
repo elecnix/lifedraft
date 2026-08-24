@@ -28,7 +28,7 @@ scenario layer fails loudly (DP#32) rather than silently no-op'ing if it is not.
 
 from tax_calculator import marginal_rate
 from strategy import FamilyState, ChildState, StrategyEngine, AllocationStrategy
-from simulation_config import resolve_return_rate, resolve_heloc_rate
+from config_access import resolve_return_rate, resolve_heloc_rate
 
 from scenario_discovery import SimulationDeps
 

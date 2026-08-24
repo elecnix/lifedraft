@@ -16,7 +16,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from simulation_config import ScenarioOverlay, build_overlay_config
+from scenario_overlay import ScenarioOverlay, build_overlay_config
 from copy import deepcopy
 
 

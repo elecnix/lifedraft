@@ -28,7 +28,7 @@ from tax_calculator import (
     marginal_rate, tax_on_income,
 )
 from simulation import SimulationConfig
-from simulation_config import ScenarioOverlay, apply_overlay
+from scenario_overlay import ScenarioOverlay, apply_overlay
 from optimize import run_optimization
 from return_model import ReturnModel, ReturnEngine, StochasticReturn
 import contract_schema

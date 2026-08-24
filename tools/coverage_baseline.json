@@ -9,6 +9,9 @@
   "files": {
     "__init__.py": 0,
     "asset_location_optimize.py": 0,
+    "charge_limits.py": 0,
+    "config_access.py": 10,
+    "config_serde.py": 0,
     "contract_accounts.py": 0,
     "contract_assumptions.py": 4,
     "contract_decisions.py": 1,
@@ -89,6 +92,7 @@
     "optimizer.py": 23,
     "output_paths.py": 0,
     "output_plugins.py": 23,
+    "property_structure.py": 1,
     "provenance.py": 29,
     "retirement_analysis.py": 68,
     "return_model.py": 7,
@@ -107,12 +111,13 @@
     "rules_tuition_credit.py": 0,
     "runway.py": 0,
     "scenario_discovery.py": 17,
+    "scenario_overlay.py": 16,
     "scipy_optimizer.py": 0,
     "sensitivity.py": 263,
     "session_log.py": 5,
     "simulate.py": 343,
     "simulation.py": 18,
-    "simulation_config.py": 27,
+    "simulation_config.py": 0,
     "simulation_deps.py": 0,
     "simulation_rules.py": 0,
     "simulation_state.py": 11,
@@ -122,6 +127,7 @@
     "tax_calculator.py": 6,
     "tax_data.py": 19,
     "trajectory_invariants.py": 16,
-    "voi.py": 42
+    "voi.py": 42,
+    "year_result.py": 0
   }
 }

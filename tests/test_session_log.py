@@ -28,7 +28,7 @@ from session_log import (
     save_session,
     year_result_to_dict,
 )
-from simulation_config import YearResult
+from year_result import YearResult
 
 
 def _make_year_results(n: int = 3):

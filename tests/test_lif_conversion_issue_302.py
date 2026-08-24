@@ -69,7 +69,7 @@ class TestLongHorizonLIFConversion(unittest.TestCase):
         This test verifies the accounting identity by creating a YearResult
         with explicit retirement_income that includes LIF withdrawal.
         """
-        from simulation_config import YearResult
+        from year_result import YearResult
         lif_wd = 5000
         cpp = 12000
         oas = 8000
@@ -86,7 +86,7 @@ class TestLongHorizonLIFConversion(unittest.TestCase):
 
     def test_lif_withdrawal_zero_by_default(self):
         """LIF withdrawal defaults to 0 when no LIF conversion."""
-        from simulation_config import YearResult
+        from year_result import YearResult
         r = YearResult()
         self.assertEqual(r.lif_withdrawal, 0.0)
         self.assertEqual(r.lira_balance, 0.0)
@@ -98,19 +98,19 @@ class TestYearResultHasLIFFields(unittest.TestCase):
 
     def test_year_result_has_lif_withdrawal(self):
         """YearResult.lif_withdrawal exists and defaults to 0."""
-        from simulation_config import YearResult
+        from year_result import YearResult
         r = YearResult()
         self.assertEqual(r.lif_withdrawal, 0)
 
     def test_year_result_has_lira_balance(self):
         """YearResult.lira_balance exists and defaults to 0."""
-        from simulation_config import YearResult
+        from year_result import YearResult
         r = YearResult()
         self.assertEqual(r.lira_balance, 0)
 
     def test_year_result_has_lif_balance(self):
         """YearResult.lif_balance exists and defaults to 0."""
-        from simulation_config import YearResult
+        from year_result import YearResult
         r = YearResult()
         self.assertEqual(r.lif_balance, 0)
 

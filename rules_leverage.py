@@ -18,8 +18,12 @@ from __future__ import annotations
 
 import logging
 
-from simulation_config import (
-    SimulationConfig, charge_room_for_readvance,
+from simulation_config import SimulationConfig
+# The OSFI B-20 charge geometry and its typed refusal moved out of
+# simulation_config into their own module when the config was split (DP#25:
+# one concept per module, and this one imports nothing).
+from charge_limits import (
+    charge_room_for_readvance,
     ReadvanceableWithoutPropertyError,
 )
 from tax_data import default_tax_provider

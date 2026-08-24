@@ -7,7 +7,7 @@ A household signs a mortgage at a known contractual rate and declares it, off
 the document, on `liabilities[kind=mortgage].rate`. It also carries an
 `assumptions.rate_paths` block -- a belief about what borrowing costs over the
 horizon. `input_contract.to_internal_config` mapped `rate_paths.heloc.rate`
-onto `assumptions.heloc_rate`, which is `simulation_config.resolve_heloc_rate`'s
+onto `assumptions.heloc_rate`, which is `config_access.resolve_heloc_rate`'s
 FIRST tier -- the DECISION channel, deliberately built to outrank the
 household's own declared rate so that an anchor scenario ("what if the HELOC
 reprices on renewal", DP#5) is not shadowed by it.
@@ -48,7 +48,8 @@ import input_contract as ic
 import model_fidelity
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import SimulationConfig, resolve_heloc_rate
+from config_access import resolve_heloc_rate
+from simulation_config import SimulationConfig
 
 from test_input_contract import _load_example, _two_generation_subset
 import contract_liabilities

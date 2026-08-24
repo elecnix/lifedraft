@@ -65,7 +65,8 @@ import pytest
 
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import SimulationConfig, YearResult
+from simulation_config import SimulationConfig
+from year_result import YearResult
 
 from test_golden_trajectory_581 import (
     golden_household_config, _run, START_YEAR, PRIMARY_BIRTH,

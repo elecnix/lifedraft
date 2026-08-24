@@ -17,7 +17,7 @@ import unittest
 from unittest.mock import patch
 from scipy_optimizer import ScipyOptimizer, ScipyResult, _load_minimize
 from simulation import SimulationConfig
-from simulation_config import apply_ltv_overlay, apply_overlay, ScenarioOverlay
+from scenario_overlay import apply_ltv_overlay, apply_overlay, ScenarioOverlay
 from return_model import FixedReturn
 from objective import MAX_NET_BENEFIT
 from countries.canada.strategies import STRATEGY_BALANCED
@@ -86,7 +86,7 @@ class TestScipyOptimizer(unittest.TestCase):
 
     def test_apply_ltv_overlay_matches_grid_optimizer(self):
         """GridOptimizer and ScipyOptimizer both call the one
-        simulation_config.apply_ltv_overlay (#619: they used to each carry a
+        scenario_overlay.apply_ltv_overlay (#619: they used to each carry a
         private copy that inflated margin_available by cash_out). That
         shared overlay must also agree with the simulate.py overlay path
         (apply_overlay/ScenarioOverlay) on mortgage_balance, margin_available

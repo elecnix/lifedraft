@@ -38,10 +38,9 @@ import pytest
 
 import input_contract as ic
 import optimize
-from simulation_config import (
-    ChargeLimitExceededError, ScenarioOverlay, apply_overlay,
-    apply_sourcing_overlay, apply_structure_overlay,
-)
+from charge_limits import ChargeLimitExceededError
+from property_structure import apply_sourcing_overlay, apply_structure_overlay
+from scenario_overlay import ScenarioOverlay, apply_overlay
 from simulation_state import margin_draw_for_lump_sum
 import contract_schema
 

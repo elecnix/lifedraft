@@ -14,7 +14,8 @@ These tests verify the fix for issue #20.
 
 import pytest
 from copy import deepcopy
-from simulation_config import SimulationConfig, YearResult
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from simulation_state import SimState, simulate_year_pure
 
 

@@ -49,10 +49,10 @@ import input_contract as ic
 import optimize
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import (
-    ChargeLimitExceededError, SimulationConfig, YearResult,
-    apply_sourcing_overlay, apply_structure_overlay,
-)
+from charge_limits import ChargeLimitExceededError
+from property_structure import apply_sourcing_overlay, apply_structure_overlay
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
 from trajectory_invariants import assert_invariant
 import contract_errors

@@ -55,7 +55,9 @@ from jurisdiction import (
 )
 
 # Import config classes from the new module to break cycles
-from simulation_config import SimulationConfig, YearResult, ScenarioOverlay, build_overlay_config
+from scenario_overlay import ScenarioOverlay, build_overlay_config
+from simulation_config import SimulationConfig
+from year_result import YearResult
 # Issue #681: the trajectory invariants are LIBRARY code, asserted from the
 # run path itself -- not a test-only harness that a real household can walk
 # straight past (see trajectory_invariants.py's module docstring).

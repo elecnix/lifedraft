@@ -16,7 +16,7 @@ from countries.canada.attribution import (
     attribution_planning_summary,
 )
 from simulation import SimulationConfig
-from simulation_config import apply_ltv_overlay
+from scenario_overlay import apply_ltv_overlay
 from optimizer import GridOptimizer, Optimizer
 from scipy_optimizer import ScipyOptimizer
 from monte_carlo_optimizer import MonteCarloOptimizer, RiskMeasures
