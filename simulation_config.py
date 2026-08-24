@@ -587,6 +587,25 @@ class SimulationConfig:
     #                     'fee_rate': float}       # balance-weighted avg fee
     account_mer_drag: Dict = field(default_factory=dict)
 
+    def non_reg_management_fees(self) -> Dict[str, float]:
+        """Issue #142: ``{role: annual s.20(1)(e)-deductible fee}`` -- each
+        member's DECLARED total of separately-charged non-registered
+        management/counsel fees (attributed pro rata to joint owners by the
+        contract adapter, which rides the totals onto the member records;
+        family.members round-trips wholesale, DP#24). One spelling (DP#9):
+        every consumer -- the working-phase prologue's taxable-income
+        reduction, the retirement drawdown base's OAS-clawback reduction,
+        and rules_amt's s.127.52(1)(j) half-add-back -- reads this map, so a
+        household declaring no fee gets an empty map everywhere and is
+        byte-identical to before (DP#32).
+        """
+        fees: Dict[str, float] = {}
+        for m in self.family_members:
+            f = m.get('mgmt_fee_non_reg_annual')
+            if f is not None:
+                fees[m['role']] = float(f)
+        return fees
+
     @classmethod
     def from_json(cls, path: str) -> 'SimulationConfig':
         """Load configuration from an on-disk input contract document.

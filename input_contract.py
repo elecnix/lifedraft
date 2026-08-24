@@ -77,7 +77,9 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from contract_accounts import _map_account_overrides, map_account_pots
+from contract_accounts import (
+    _map_account_overrides, map_account_pots, map_management_fee_legs,
+)
 from contract_assumptions import (
     apply_rate_path_reconciliation, apply_spending_reconciliation,
     map_assumptions, map_emergency_reserve, map_household_budget,
@@ -196,6 +198,18 @@ def to_internal_config(doc: Dict) -> Dict:
     # Issue #691: per-account MER fees, pot-keyed, subtracted from the gross
     # growth rate. Empty when no account declares a `mer` (golden: fee-free).
     accounts_cfg["mer_drag"] = account_overrides["mer_drag"]
+    # Issue #142: each declared non-reg deductible_management_fee_annual is
+    # attributed pro rata to its owner(s); the per-person annual totals ride
+    # OUT on the member records (family.members round-trips wholesale,
+    # DP#24) so both tax folds -- the working-phase prologue and the
+    # retirement drawdown base -- can read their own member's fee. Absent
+    # fees -> no member carries a key -> byte-identical fold (DP#32).
+    mgmt_fees_by_person = account_overrides["mgmt_fees"]
+    if mgmt_fees_by_person:
+        for _m in members:
+            _fee = mgmt_fees_by_person.get(_m["id"])
+            if _fee is not None:
+                _m["mgmt_fee_non_reg_annual"] = float(_fee)
 
     horizon = doc["decisions"]["horizon"]  # schema-required
     if horizon["person"] == primary_id:
@@ -231,6 +245,14 @@ def to_internal_config(doc: Dict) -> Dict:
     insurance_premium_legs = map_insurance_premiums(doc, primary_id, start_year)
     if insurance_premium_legs:
         legacy_cash_flows = legacy_cash_flows + insurance_premium_legs
+    # Issue #142: each declared non-registered management fee joins the SAME
+    # dated cash-flow channel -- one negative leg per projection year (a
+    # discretionary mandate charges while the account exists) -- so the fee
+    # leaves the household's cash flow instead of being a phantom deduction.
+    # Absent fees -> no legs -> byte-identical fold (DP#32).
+    management_fee_legs = map_management_fee_legs(doc, start_year)
+    if management_fee_legs:
+        legacy_cash_flows = legacy_cash_flows + management_fee_legs
 
     legacy: Dict[str, Any] = {
         "assumptions": assumptions_cfg,

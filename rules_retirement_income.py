@@ -244,6 +244,28 @@ def apply_retirement_income(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # folding OAS in here would double-count it.
     other_taxable_income = cpp + pension
 
+    # Issue #142: a RETIRED member's declared s.20(1)(e) management-fee
+    # deduction reduces net income, and net income is the OAS-clawback base --
+    # so the fee comes off the drawdown bases HERE, at the source, before any
+    # downstream consumer reads them: plan_drawdown_net's bounded clawback
+    # fixpoint (the draw's clawback is resolved against other_taxable + oas +
+    # taxable_draw), the bracket-fill headroom, and apply_rrif_minimum's
+    # forced-minimum pricing all see the SAME reduced base. Floored at 0: a
+    # deduction larger than its base strands the excess (a non-capital loss /
+    # carry-forward, not modeled here), never a negative base charged at the
+    # bottom bracket (the #1033 Major-4 convention). The WORKING member's fee
+    # is NOT subtracted here -- their deduction fires in the prologue's
+    # per-adult tax while their employment income still exists; exactly one
+    # mechanism fires per phase (#1033 gate pattern), so no dollar of the fee
+    # reaches two captures. A household declaring no fee gets 0.0 everywhere
+    # and every line below is untouched (DP#32).
+    _mgmt_fees = config.non_reg_management_fees()
+    _fee_primary = _mgmt_fees.get('primary', 0.0) if p_retired else 0.0
+    _fee_spouse = _mgmt_fees.get('spouse', 0.0) if s_retired else 0.0
+    if _fee_primary > 0.0 or _fee_spouse > 0.0:
+        other_taxable_income = max(
+            0.0, other_taxable_income - (_fee_primary + _fee_spouse))
+
     # Issue #618: the bracket-fill drawdown ceiling. OAS IS taxable income for
     # bracket purposes — it is RECEIVED net of the 15% recovery tax, but the tax
     # brackets still see the full taxable OAS — so the RRSP-draw ceiling the
@@ -269,8 +291,8 @@ def apply_retirement_income(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # does household-wide. In a one-retiree year the split is off and these are
     # unused (the household schedule above prices the draw exactly as pre-PR-4).
     two_member_split = both_retired  # (computed above for the split elections)
-    other_taxable_primary = ri_p.cpp + ri_p.pension
-    other_taxable_spouse = ri_s.cpp + ri_s.pension
+    other_taxable_primary = max(0.0, ri_p.cpp + ri_p.pension - _fee_primary)
+    other_taxable_spouse = max(0.0, ri_s.cpp + ri_s.pension - _fee_spouse)
     bracket_fill_base_primary = other_taxable_primary + ri_p.oas
     bracket_fill_base_spouse = other_taxable_spouse + ri_s.oas
     if ret.get('bracket_fill_target') is not None:

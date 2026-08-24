@@ -1364,10 +1364,26 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # added, deduction + CCA subtracted) but -- unlike the interest -- it is NOT
     # subtracted from after-tax cash below (see _after_tax_by_role): depreciation
     # lowers the tax bill without consuming cash.
+    # Issue #142: each member's DECLARED s.20(1)(e) non-registered management
+    # fee reduces their OWN taxable income here -- the same income-reduction
+    # trace as the RRSP/Smith/rental deductions (one spelling, DP#9), priced
+    # bracket-aware by the tax_on_income that runs on the reduced base. The
+    # fee is CASH (its dated leg rides cfg.cash_flows below); only its tax
+    # effect is booked here. Gated per member on NOT being retired: once a
+    # member retires this prologue zeroes their employment income and the
+    # drawdown base (rules_retirement_income, feeding plan_drawdown_net's
+    # OAS-clawback fixpoint) becomes the deduction's sole capture -- exactly
+    # ONE mechanism fires per phase (the #1033 gate pattern), so no dollar of
+    # the fee is ever deducted twice.
+    _mgmt_fees = cfg.non_reg_management_fees()
+    _p_mgmt_fee = 0.0 if p_retired else _mgmt_fees.get('primary', 0.0)
+    _s_mgmt_fee = 0.0 if s_retired else _mgmt_fees.get('spouse', 0.0)
     _income_by_role, _loan_by_role = _adult_income_maps(
         primary_income, spouse_income,
-        (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
-        (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
+        (_p_loan_inc + _p_rent_op,
+         _p_loan_ded + _p_rent_ded + _p_rent_cca + _p_mgmt_fee),
+        (_s_loan_inc + _s_rent_op,
+         _s_loan_ded + _s_rent_ded + _s_rent_cca + _s_mgmt_fee),
         _extra_specs)
     _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
     primary_rate = _adult_tax['primary']['rate']
@@ -2559,10 +2575,17 @@ class FamilySimulation:
             # adjustment but -- unlike the interest -- is NOT subtracted from
             # after-tax cash below (depreciation lowers tax without consuming cash).
             _extra_specs = _extra_adult_specs(cfg, sim_year, salary_growth, year, year_brackets)
+            # Issue #142: the monthly path mirrors simulate_year's prologue
+            # exactly (same per-phase gating, same income-reduction trace).
+            _mgmt_fees = cfg.non_reg_management_fees()
+            _p_mgmt_fee = 0.0 if p_retired else _mgmt_fees.get('primary', 0.0)
+            _s_mgmt_fee = 0.0 if s_retired else _mgmt_fees.get('spouse', 0.0)
             _income_by_role, _loan_by_role = _adult_income_maps(
                 primary_income, spouse_income,
-                (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
-                (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
+                (_p_loan_inc + _p_rent_op,
+                 _p_loan_ded + _p_rent_ded + _p_rent_cca + _p_mgmt_fee),
+                (_s_loan_inc + _s_rent_op,
+                 _s_loan_ded + _s_rent_ded + _s_rent_cca + _s_mgmt_fee),
                 _extra_specs)
             _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
             primary_rate = _adult_tax['primary']['rate']

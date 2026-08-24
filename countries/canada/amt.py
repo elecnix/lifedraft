@@ -44,6 +44,11 @@ Verified 2024+ AMT base (ITA s.127.52(1), as amended; CRA T691):
            to (f) and (bb) **interest and carrying charges incurred to earn
            income from property** (the leveraged-investing / Smith-Manoeuvre
            case) and investment counsel fees.
+           Production source (#142): rules_amt.py passes the household's
+           declared ``deductible_management_fee_annual`` totals (ITA
+           s.20(1)(e)) here via ``carrying_charges`` -- until then this
+           half-add-back priced a preference on a deduction the ordinary tax
+           path never granted.
     - AMT rate raised from 15% to 20.5%; exemption raised to the 29%-bracket
       threshold (s.127.51).
 
