@@ -117,15 +117,22 @@ _REVIEWED_HARMLESS = {
     ("output_plugins.py", "r.get('future_value', 0) or 0"): {"reason": "#606 verified-not-a-bug: display layer, symmetric 0-or-0."},
     ("output_plugins.py", "r.get('total_debt', 0) or 0"): {"reason": "#606 verified-not-a-bug: display layer, symmetric 0-or-0."},
     ("output_plugins.py", "r.get('year_by_year') or []"): {"reason": "#606 verified-not-a-bug: display layer, symmetric []-or-[] (repeated at 3 call sites; see module docstring re: duplicate-snippet collapse)."},
-    # scenario_discovery.py / simulation_config.py: dict-section fallbacks
-    # where absence of the whole section and an explicitly empty section
-    # produce the same {}.
+    # scenario_discovery.py / the config layer (config_access.py,
+    # config_serde.py, scenario_overlay.py -- all three carved out of the old
+    # simulation_config.py): dict-section fallbacks where absence of the whole
+    # section and an explicitly empty section produce the same {}.
+    #
+    # NOTE these are the SAME already-triaged sites the entries below used to
+    # name under "simulation_config.py"; the split re-filed them, it did not add
+    # any. `cfg.get('assumptions', {}) or {}` needs two keys now only because
+    # the two call sites landed in two different modules.
     ("scenario_discovery.py", "cfg.get('retirement', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty retirement section reads the same as an absent one."},
     ("scenario_discovery.py", "cfg.get('assumptions', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty assumptions section reads the same as an absent one."},
-    ("simulation_config.py", "cfg.get('assumptions', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty assumptions section reads the same as an absent one."},
-    ("simulation_config.py", "cfg.get('return_model') or {}"): {"reason": "Fallback is the dict type's own empty identity {}; an explicitly empty return_model reads the same as an absent one."},
-    ("simulation_config.py", "cfg.get('lira', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty lira section reads the same as an absent one."},
-    ("simulation_config.py", "cfg.get('retirement', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty retirement section reads the same as an absent one."},
+    ("config_access.py", "cfg.get('assumptions', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty assumptions section reads the same as an absent one."},
+    ("config_access.py", "cfg.get('return_model') or {}"): {"reason": "Fallback is the dict type's own empty identity {}; an explicitly empty return_model reads the same as an absent one."},
+    ("config_serde.py", "cfg.get('lira', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty lira section reads the same as an absent one."},
+    ("scenario_overlay.py", "cfg.get('retirement', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty retirement section reads the same as an absent one."},
+    ("scenario_overlay.py", "cfg.get('assumptions', {}) or {}"): {"reason": "Symmetric {}-or-{}: an empty assumptions section reads the same as an absent one."},
     # session_log.py / loop.py / optimize.py: developer tooling and session
     # bookkeeping, not financial input DP#32 is about.
     ("session_log.py", "getattr(scenario, 'config_overrides', {}) or {}"): {"reason": "Symmetric {}-or-{}; session-logging metadata, not financial input."},

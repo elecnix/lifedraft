@@ -26,7 +26,7 @@ import pytest
 from optimize import run_optimization
 from simulate import evaluate_overlay
 from scenario_discovery import discover_anchors
-from simulation_config import ScenarioOverlay
+from scenario_overlay import ScenarioOverlay
 
 
 # ---------------------------------------------------------------------------

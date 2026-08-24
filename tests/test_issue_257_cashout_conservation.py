@@ -47,9 +47,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
 
-from simulation_config import (
-    SimulationConfig, ScenarioOverlay, build_overlay_config,
-)
+from scenario_overlay import ScenarioOverlay, build_overlay_config
+from simulation_config import SimulationConfig
 from simulation_state import SimState
 
 

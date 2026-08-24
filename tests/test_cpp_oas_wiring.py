@@ -25,7 +25,7 @@ class TestRetirementIncomeFromConfig:
     def test_cpp_monthly_wired_into_retirement_income(self):
         """Per issue #232: cpp_monthly_estimated should flow into retirement_income."""
         from optimize import compute_net_benefit
-        from simulation_config import YearResult
+        from year_result import YearResult
 
         # Create a minimal results list with CPP data in config
         final = YearResult(
@@ -67,7 +67,7 @@ class TestRetirementIncomeFromConfig:
     def test_zero_cpp_oas_backward_compatible(self):
         """Zero CPP/OAS (placeholder) should still work without errors."""
         from optimize import compute_net_benefit
-        from simulation_config import YearResult
+        from year_result import YearResult
 
         final = YearResult(
             year=2036,
@@ -104,7 +104,7 @@ class TestRetirementIncomeFromConfig:
     def test_pension_income_annual_wired(self):
         """pension_income_annual from config should flow into retirement_income."""
         from optimize import compute_net_benefit
-        from simulation_config import YearResult
+        from year_result import YearResult
 
         final = YearResult(
             year=2036,
@@ -141,7 +141,7 @@ class TestRetirementIncomeFromConfig:
     def test_lif_withdrawal_included_in_retirement_income(self):
         """LIF withdrawal should be included in retirement income for CG tax."""
         from optimize import compute_net_benefit
-        from simulation_config import YearResult
+        from year_result import YearResult
 
         # YearResult WITH LIF withdrawal
         final_with_lif = YearResult(

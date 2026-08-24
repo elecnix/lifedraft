@@ -135,7 +135,7 @@ class TestConvertIncomeScenariosPreservesUnmentionedEarner(unittest.TestCase):
         """A 'primary loses their job' scenario that overrides only the
         primary must not silently zero the spouse's income -- None means
         'no override', matching ScenarioOverlay's own convention
-        (simulation_config.apply_overlay: 'if overlay.spouse_income is not
+        (scenario_overlay.apply_overlay: 'if overlay.spouse_income is not
         None')."""
         scenarios = [{
             "id": "job_loss",

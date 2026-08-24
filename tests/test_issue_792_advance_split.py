@@ -40,11 +40,8 @@ import contract_schema  # noqa: E402
 from countries.canada.adapter import CanadaAdapter  # noqa: E402
 from countries.canada.strategies import STRATEGIES  # noqa: E402
 from simulation import FamilySimulation  # noqa: E402
-from simulation_config import (  # noqa: E402
-    ScenarioOverlay,
-    SimulationConfig,
-    apply_overlay,
-)
+from scenario_overlay import ScenarioOverlay, apply_overlay
+from simulation_config import SimulationConfig
 from strategy import FamilyState, StrategyEngine  # noqa: E402
 
 

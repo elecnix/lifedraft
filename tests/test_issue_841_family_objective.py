@@ -34,7 +34,7 @@ from objective import (
     MAX_FAMILY_AFTER_TAX_NETWORTH, MAX_AFTER_TAX_ESTATE, get_objective,
     _family_after_tax_networth,
 )
-from simulation_config import YearResult
+from year_result import YearResult
 
 
 # A Quebec terminal return in a fixed tax year, so the deemed-disposition

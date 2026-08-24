@@ -17,7 +17,7 @@ from scenario_discovery import (
     DEFAULT_RETIREMENT_CANDIDATE_AGES,
 )
 from simulate import build_all_overlays, evaluate_overlay
-from simulation_config import ScenarioOverlay
+from scenario_overlay import ScenarioOverlay
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ import pytest
 import decumulation
 import optimize
 import trajectory_invariants as ti
-from simulation_config import YearResult
+from year_result import YearResult
 
 
 # =============================================================================

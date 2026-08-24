@@ -15,7 +15,7 @@ write").
 
 Three layers are tested here (DP#11):
 
-1. ``simulation_config.apply_structure_overlay`` in isolation -- the pure
+1. ``property_structure.apply_structure_overlay`` in isolation -- the pure
    mechanism that splits ONE registered charge between an amortizing
    mortgage and a revolving line, and both OSFI B-20 refusals (DP#17: both
    sides of the 80% combined threshold and the 65% revolving-only
@@ -50,10 +50,10 @@ import optimize
 import scenario_discovery as sd
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
-from simulation_config import (
-    SimulationConfig, YearResult, ChargeLimitExceededError,
-    apply_structure_overlay, charge_limit, heloc_revolving_limit,
-)
+from charge_limits import ChargeLimitExceededError, charge_limit, heloc_revolving_limit
+from property_structure import apply_structure_overlay
+from simulation_config import SimulationConfig
+from year_result import YearResult
 from trajectory_invariants import assert_invariant, run_invariant
 import contract_errors
 import contract_schema
@@ -110,7 +110,7 @@ SPLIT_WITH_LINE = {"id": "split_with_line", "label": "Smaller mortgage + revolvi
 
 
 # ============================================================================
-# simulation_config.apply_structure_overlay -- the mechanism
+# property_structure.apply_structure_overlay -- the mechanism
 # ============================================================================
 
 class TestApplyStructureOverlay(unittest.TestCase):

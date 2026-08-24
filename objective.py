@@ -39,7 +39,8 @@ from typing import Callable, Dict, List, Optional
 # simulation_config.py and only re-exported through simulation.py. objective.py
 # lives in the optimization layer and must depend inward (on data/config), so
 # it imports directly from simulation_config rather than the simulation engine.
-from simulation_config import YearResult, SimulationConfig
+from simulation_config import SimulationConfig
+from year_result import YearResult
 # DP#25 (issue #732): the estate tax math lives in the jurisdiction package;
 # the optimization layer resolves it through the provider registry seam
 # instead of importing countries.canada.estate directly. objective.py has
@@ -457,7 +458,7 @@ def _estate_call_args(results: List[YearResult], cfg: Dict) -> Optional[Dict]:
     final = results[-1]
     prop = cfg.get('property', {}) or {}
     # DP#32: explicit absence-test, not `or {}` -- the estate block has a
-    # strict loader (`simulation_config._estate_block` raises on an explicit
+    # strict loader (`config_access._estate_block` raises on an explicit
     # null), so here it is either a dict (possibly empty) or absent. An empty
     # dict and an absent key both fall to `_UNDECLARED_ESTATE_DEFAULTS` via
     # `plan_from_config` (symmetric), but reading the rate off it must use the

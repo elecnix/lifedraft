@@ -21,7 +21,7 @@ asserted through the engine entry point, not a reimplementation).
 
 
 def _final_year_result():
-    from simulation_config import YearResult
+    from year_result import YearResult
     return YearResult(
         year=2036,
         total_assets=500000,

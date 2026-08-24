@@ -34,7 +34,7 @@ from objective import (
     OBJECTIVES,
     get_objective,
 )
-from simulation_config import YearResult
+from year_result import YearResult
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 

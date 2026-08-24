@@ -25,7 +25,7 @@ from simulate import (
     mortgage_rate_sweep,
     run_mortgage_sensitivity,
 )
-from simulation_config import ScenarioOverlay
+from scenario_overlay import ScenarioOverlay
 
 
 def _fixture_cfg():

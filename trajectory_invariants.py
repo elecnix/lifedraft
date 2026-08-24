@@ -295,7 +295,7 @@ def check_total_secured_debt_within_charge(results, ctx):
     balance`` -- issue #689 -- when ``ctx['credit_facility_secured']`` is
     True) must fit inside ``charge_ltv_limit x house_value`` (OSFI B-20: 80%
     LTV is the legal maximum for an uninsured combined loan plan -- see
-    ``simulation_config.OSFI_B20_CHARGE_LTV_MAX``). Requires
+    ``charge_limits.OSFI_B20_CHARGE_LTV_MAX``). Requires
     ``ctx['house_value']`` (the property is not tracked on ``YearResult``,
     same limitation as the estate invariant above); a no-op without it.
     ``ctx['charge_ltv_limit']`` defaults to 0.80.

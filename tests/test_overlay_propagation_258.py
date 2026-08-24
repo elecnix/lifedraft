@@ -27,12 +27,8 @@ import warnings
 
 import pytest
 
-from simulation_config import (
-    SimulationConfig,
-    ScenarioOverlay,
-    apply_overlay,
-    build_overlay_config,
-)
+from scenario_overlay import ScenarioOverlay, apply_overlay, build_overlay_config
+from simulation_config import SimulationConfig
 from simulation import FamilySimulation
 from simulation_state import SimState
 from countries.canada.adapter import CanadaAdapter

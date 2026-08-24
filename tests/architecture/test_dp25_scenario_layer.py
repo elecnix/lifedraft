@@ -10,7 +10,8 @@ scenario layer may not import from it. Issue #998 found three outward imports:
 
     from tax_calculator import marginal_rate
     from strategy import FamilyState, ChildState, StrategyEngine, AllocationStrategy
-    from simulation_config import resolve_return_rate, resolve_heloc_rate, find_member_by_role
+    from config_access import resolve_return_rate, resolve_heloc_rate
+    from simulation_config import find_member_by_role
 
 The fix (DP#25 inversion):
   - ``find_member_by_role`` / ``projection_span`` were RELOCATED to the data
@@ -43,7 +44,25 @@ import scenario_discovery
 
 # The simulation-layer modules the scenario layer (scenario_discovery) must not
 # import at runtime (DP#25 -- dependencies point inward; these are inner).
-_FORBIDDEN_MODULES = ("tax_calculator", "strategy", "simulation_config")
+#
+# ``config_access`` / ``config_serde`` / ``charge_limits`` / ``scenario_overlay``
+# / ``property_structure`` / ``year_result`` were carved out of the old
+# ``simulation_config.py``; naming only the parent module would have left the
+# guard covering a file that no longer holds the resolvers #998 was about
+# (``resolve_return_rate`` / ``resolve_heloc_rate`` now live in
+# ``config_access``), i.e. a guard that passes because the thing it forbids
+# moved house.
+_FORBIDDEN_MODULES = (
+    "tax_calculator",
+    "strategy",
+    "simulation_config",
+    "config_access",
+    "config_serde",
+    "charge_limits",
+    "scenario_overlay",
+    "property_structure",
+    "year_result",
+)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCENARIO_DISCOVERY_PATH = os.path.join(REPO_ROOT, "scenario_discovery.py")

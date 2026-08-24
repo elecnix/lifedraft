@@ -11,7 +11,7 @@ from dataclasses import replace
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from simulation import SimulationConfig
-from simulation_config import apply_ltv_overlay
+from scenario_overlay import apply_ltv_overlay
 from optimizer import GridOptimizer, Optimizer
 from scipy_optimizer import ScipyOptimizer
 from countries.canada.debt import DebtInstrument, DebtPurpose, AdvanceRecord, HELOCTracing, PrescribedRateLoan
