@@ -38,7 +38,17 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
     by ``decisions.horizon.person`` (and their spouse, if any); else the
     first ``spouse_of`` pair found; else the first person alone."""
     people = _people_by_id(doc)
-    horizon_person = doc["decisions"]["horizon"]["person"]  # schema-required; caller has already validated
+    # The horizon person is the documented first preference. It is
+    # schema-required on a validated contract, but this helper is also called
+    # directly on synthetic partial docs (e.g. issue #823's contract-mapping
+    # tests) that carry no ``decisions`` block at all. Fall back to the
+    # documented remaining preference order (first ``spouse_of`` pair, else
+    # the first person alone) so an absent horizon degrades gracefully instead
+    # of raising a KeyError that masks the loud failure the caller is about to
+    # raise (DP#32: a missing preference must not crash the wrong layer).
+    decisions = doc.get("decisions")
+    horizon = decisions.get("horizon") if decisions is not None else None
+    horizon_person = horizon.get("person") if horizon is not None else None
     if horizon_person and horizon_person in people:
         primary_id = horizon_person
     else:
@@ -48,19 +58,20 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
                 primary_id = pid
                 break
         if primary_id is None:
-            primary_id = next(iter(people))
+            primary_id = next(iter(people), None)
 
     spouse_id = None
-    for r in people[primary_id].get("relationships", []):
-        if r["type"] == "spouse_of":
-            spouse_id = r["person"]
-            break
-    if spouse_id is None:
-        for pid, p in people.items():
-            for r in p.get("relationships", []):
-                if r["type"] == "spouse_of" and r["person"] == primary_id:
-                    spouse_id = pid
-                    break
+    if primary_id is not None:
+        for r in people[primary_id].get("relationships", []):
+            if r["type"] == "spouse_of":
+                spouse_id = r["person"]
+                break
+        if spouse_id is None:
+            for pid, p in people.items():
+                for r in p.get("relationships", []):
+                    if r["type"] == "spouse_of" and r["person"] == primary_id:
+                        spouse_id = pid
+                        break
     return primary_id, spouse_id
 
 

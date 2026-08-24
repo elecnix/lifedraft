@@ -90,6 +90,28 @@ def _tranche(template, liab_id, balance, rate, **overrides):
     return t
 
 
+def _flows_not_priced_by_stack(cash_flows):
+    """The #1075 cash_flows that are NOT the #136-#143 stack's priced-cost legs.
+
+    The stack folds several unrelated living-economics features into the SAME
+    dated cash-flow channel as #1075's origination cash-back: #138's
+    life-insurance premiums, #139's one-time transaction costs and #142's
+    non-registered management fees. Each of those legs carries a ``label``
+    (and ``kind``/``id``); the example's own declared ``cash_flows[]`` and
+    #1075's origination cash-back inflow do NOT. So ``'label' not in cf``
+    isolates exactly the cash_flows #1075 owns -- the same discriminator
+    #138's own ``test_no_policies_map_cash_flows_exactly_as_before`` uses
+    (it filters on ``cf.get('label') != 'life insurance premium'``).
+
+    The #1075 no-op invariant these tests check is 'absence of cash_back /
+    deductible adds no origination inflow' -- it is NOT 'the whole cash_flows
+    list is unchanged', which the stack's priced premiums legitimately move.
+    Filtering here scopes the assertion to #1075's own feature instead of
+    re-asserting a pre-#138 whole-list equality that #138 violates by design.
+    """
+    return [cf for cf in cash_flows if "label" not in cf]
+
+
 # ============================================================================
 # (a) Two tranches sharing one charge: sum + balance-weighted rate
 # ============================================================================
@@ -297,17 +319,27 @@ class TestCashBack(unittest.TestCase):
         ]
         cfg = ic.to_internal_config(doc)
         start_year = int(doc["as_of"][:4])
-        total = sum(cf["amount"] for cf in cfg["cash_flows"]
+        # The origination cash-backs join the dated cash-flow channel; sum
+        # only the #1075-owned flows (the stack's #138/#139/#142 priced-cost
+        # legs are unrelated to the cash-back and are filtered out -- see
+        # ``_flows_not_priced_by_stack``).
+        total = sum(cf["amount"] for cf in _flows_not_priced_by_stack(cfg["cash_flows"])
                     if cf["year"] == start_year)
         self.assertEqual(total, 1200.0 + 250.0)
 
     def test_no_cash_back_adds_no_cash_flow(self):
-        """DP#32: absence of the block is 'no incentive' -- the cash_flows
-        list is byte-identical to the example's own declared flows."""
+        """DP#32: absence of the block is 'no incentive' -- the #1075-owned
+        cash_flows (the example's declared flows plus any origination inflow)
+        are exactly the example's own declared flows, with no appended
+        origination inflow. (The stack's #138/#139/#142 priced-cost legs are
+        unrelated to cash-back and are filtered out -- see
+        ``_flows_not_priced_by_stack``; they legitimately move with the
+        example's declared life-insurance premiums, which is #138's job, not
+        #1075's.)"""
         doc = _load_doc()
         cfg = ic.to_internal_config(doc)
         self.assertEqual(
-            cfg["cash_flows"],
+            _flows_not_priced_by_stack(cfg["cash_flows"]),
             [{"year": int(cf["date"][:4]), "amount": cf["amount"],
               "tax_treatment": "non-taxable" if cf["tax_treatment"] == "tax_free"
               else "post-tax"}
@@ -485,8 +517,13 @@ class TestSingleMortgageUnchanged(unittest.TestCase):
         self.assertNotIn("deductible_mortgage_balance", cfg["property"])
         self.assertNotIn("deductible_mortgage_interest", cfg["property"])
         # The two declared example cash-flows, unchanged, with no appended
-        # origination inflow.
-        self.assertEqual(len(cfg["cash_flows"]), len(doc.get("cash_flows", [])))
+        # origination inflow. The stack's #138/#139/#142 priced-cost legs are
+        # filtered out (they move with the example's declared life-insurance
+        # premiums, which is #138's job, not #1075's -- see
+        # ``_flows_not_priced_by_stack``); the #1075-owned flows are exactly
+        # the declared ones.
+        self.assertEqual(len(_flows_not_priced_by_stack(cfg["cash_flows"])),
+                         len(doc.get("cash_flows", [])))
 
     def test_an_explicit_false_flag_is_still_a_no_op(self):
         """`deductible: false` / a cash_back with amount 0 are real values
@@ -500,7 +537,12 @@ class TestSingleMortgageUnchanged(unittest.TestCase):
         cfg = ic.to_internal_config(doc)
         self.assertNotIn("deductible_mortgage_balance", cfg["property"])
         self.assertNotIn("deductible_mortgage_interest", cfg["property"])
-        self.assertEqual(len(cfg["cash_flows"]), len(doc.get("cash_flows", [])))
+        # No origination inflow is appended (amount 0 is a no-op, not a
+        # fallback): the #1075-owned cash_flows equal the declared ones. The
+        # stack's priced-cost legs are filtered out (see
+        # ``_flows_not_priced_by_stack``).
+        self.assertEqual(len(_flows_not_priced_by_stack(cfg["cash_flows"])),
+                         len(doc.get("cash_flows", [])))
 
 
 # ============================================================================
