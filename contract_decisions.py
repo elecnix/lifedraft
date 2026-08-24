@@ -365,7 +365,11 @@ def map_mortgage_decisions(doc: Dict, prop_cfg: Dict[str, Any]) -> List[Dict[str
     # exclusive.
     structure_options = mortgage_decisions.get("structure_options", [])
     if structure_options:
-        from simulation_config import apply_structure_overlay, ChargeLimitExceededError
+        # Both moved out of simulation_config when the config was split: the
+        # structure overlay to property_structure, the charge refusal to
+        # charge_limits (DP#9 -- re-pointed, not re-exported).
+        from property_structure import apply_structure_overlay
+        from charge_limits import ChargeLimitExceededError
         prop_cfg["structure_options"] = []
         for opt in structure_options:
             readvanceable = opt.get("readvanceable", False)

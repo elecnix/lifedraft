@@ -275,7 +275,9 @@ def map_property_config(principal: Optional[Dict], mortgage: Optional[Dict],
         # whether an LTV overlay is ever applied downstream
         # (apply_ltv_overlay/apply_overlay re-check after any overlay that
         # grows the mortgage further, per their own docstrings).
-        from simulation_config import (
+        # The OSFI B-20 charge geometry moved out of simulation_config into its
+        # own module when the config was split (DP#25: one concept, no imports).
+        from charge_limits import (
             charge_limit as _charge_limit, heloc_revolving_limit as _heloc_revolving_limit,
             OSFI_B20_CHARGE_LTV_MAX, OSFI_B20_REVOLVING_LTV_MAX, _CHARGE_TOLERANCE,
         )

@@ -10,7 +10,8 @@ scenario layer may not import from it. Issue #998 found three outward imports:
 
     from tax_calculator import marginal_rate
     from strategy import FamilyState, ChildState, StrategyEngine, AllocationStrategy
-    from simulation_config import resolve_return_rate, resolve_heloc_rate, find_member_by_role
+    from config_access import resolve_return_rate, resolve_heloc_rate
+    from simulation_config import find_member_by_role
 
 The fix (DP#25 inversion):
   - ``find_member_by_role`` / ``projection_span`` were RELOCATED to the data
