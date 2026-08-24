@@ -41,7 +41,12 @@ name: Clone detection
 
 on:
   pull_request:
-    branches: [main]
+    # No `branches:` filter: see tests.yml's `pull_request:` comment -- that
+    # filter matches the PR's BASE ref, and matching only `main` silently
+    # dropped this job from every stacked PR (base = another open PR's
+    # branch). The `paths:` filter below still bounds cost the way it always
+    # has, independent of what the PR's base happens to be.
+    #
     # Only opine when the PR touches something this job can opine on: Python
     # source (the duplication detectors' input), the dupdelta config that
     # tunes them, or this workflow itself (so a change to the filter

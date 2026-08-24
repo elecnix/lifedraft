@@ -342,6 +342,13 @@ class YearWorkingState:
     sp_tfsa: float = 0.0
     non_reg_alloc: float = 0.0
     resp_alloc: float = 0.0
+    # Issue #170 (DP#32): what the contributions rule REFUSED -- a declared
+    # RRSP contribution above the contributor's room is clipped by the room
+    # clamp, and the clipped slice is a fact the engine must disclose, not an
+    # absence to absorb. Written unconditionally by ``apply_contributions``
+    # every year (0.0 when everything booked), so no stale carryover.
+    rrsp_refused_own: float = 0.0
+    rrsp_refused_spousal: float = 0.0
 
     # ── contributions rule ──
     p_rrsp_actual: float = 0.0

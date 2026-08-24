@@ -430,6 +430,11 @@ class TestCaveatVocabularyIsCoveredOrAllowlisted(unittest.TestCase):
 _CODE_ANCHORS = {
     'terminal_wealth_is_pretax': (
         'objective.py', 'def _terminal_wealth('),
+    # Issue #170: the refused-contribution caveat is anchored to the clamp
+    # site that records the refusal -- if the clip (or its disclosure) is
+    # ever removed, this anchor goes stale and the caveat must go with it.
+    'rrsp_contribution_refused': (
+        'rules_contributions.py', 'ws.rrsp_refused_own'),
     'net_benefit_withdrawal_tax_is_estimated': (
         'optimize.py', 'def compute_net_benefit('),
     # Issue #672: sibling caveat, same anchor -- both describe

@@ -1211,3 +1211,88 @@ register(Approximation(
     issue='#143',
     applies=_trading_friction_declared,
 ))
+
+
+# ── Issue #170: refused RRSP contributions (a runtime fact, not a code
+# approximation). When a household's declared RRSP contributions exceed the
+# contributor's room, ``apply_contributions`` clips the excess -- and before
+# #170 the clipped slice simply VANISHED: booked $0, no warning, no redirect,
+# no disclosure. The per-year refusal amounts now ride every YearResult
+# (rrsp_contribution_refused_own / _spousal), and the optimize caller records
+# the trajectory summary onto assumptions.rrsp_contribution_refused (the same
+# bridge #707's decumulation_shortfall uses), so this caveat can name the
+# first refused year and the refused totals on every surface. Direction is
+# UNKNOWN because the bias runs both ways: the modeled balances UNDERSTATE the
+# household's real position (the budgeted money exists off-model) while any
+# plan derived from the output OVERSTATES the savings the household believes
+# it deployed -- and in reality the money would either sit unsheltered or
+# incur the CRA's 1%/month excess-contribution tax (T1-OVP).
+
+def rrsp_refusal_summary(cfg: dict) -> Dict:
+    """The run-recorded RRSP-refusal summary (written by the optimize caller
+    onto ``assumptions.rrsp_contribution_refused``), or an all-clear summary
+    when no contribution was refused. Recorded as data, not recomputed here --
+    the registry is built at import time and an Approximation is frozen, so it
+    can only read what the run wrote onto the cfg (the #685/#707 bridge)."""
+    assumptions = cfg.get('assumptions') if isinstance(cfg, dict) else None
+    if assumptions is None:
+        assumptions = {}
+    summary = assumptions.get('rrsp_contribution_refused')
+    if summary is None:
+        summary = {
+            'engaged': False, 'first_refused_year': None,
+            'refused_own_total': 0.0, 'refused_spousal_total': 0.0,
+        }
+    return summary
+
+
+def _has_rrsp_refusal(ctx: FidelityContext) -> bool:
+    return bool(rrsp_refusal_summary(ctx.cfg).get('engaged'))
+
+
+def _describe_rrsp_refusal(ctx: FidelityContext) -> List[str]:
+    s = rrsp_refusal_summary(ctx.cfg)
+    if not s.get('engaged'):
+        return []
+    year = s.get('first_refused_year')
+    own = s.get('refused_own_total', 0.0)
+    spousal = s.get('refused_spousal_total', 0.0)
+    parts = []
+    if year is not None:
+        parts.append(f"first refused contribution in year {year}")
+    if own > 0:
+        parts.append(f"${own:,.0f} of declared OWN RRSP contributions were "
+                     f"refused (above the contributor's room)")
+    if spousal > 0:
+        parts.append(f"${spousal:,.0f} of declared SPOUSAL RRSP contributions "
+                     f"were refused (the contributor's pool was exhausted)")
+    parts.append("the refused amounts were NOT redirected -- they entered no "
+                 "account; a plan reading these contributions as made is wrong")
+    return parts
+
+
+register(Approximation(
+    id='rrsp_contribution_refused',
+    summary=("Declared RRSP contributions exceeded the contributor's room and "
+             "the engine REFUSED the excess: the money booked $0 -- it entered "
+             "no account, spilled nowhere, and stayed in no cash line. The "
+             "output shows a plan whose contributions were not all made"),
+    biased_figure=("any plan or ranking that assumes the declared RRSP "
+                   "contributions were made; the household's real-world "
+                   "contribution would either sit unsheltered or trigger the "
+                   "CRA's 1%-per-month excess-contribution tax (T1-OVP)"),
+    direction=Direction.UNKNOWN,
+    detail=("apply_contributions clamps each declared contribution to the "
+            "room remaining (own first, spousal from the remainder of the "
+            "contributor's pool). Before #170 the clipped slice was dropped "
+            "by the bare min() with no record. Now the per-year refusals are "
+            "on YearResult.rrsp_contribution_refused_own/_spousal, and the "
+            "run-wide totals are recorded onto assumptions."
+            "rrsp_contribution_refused so this caveat fires identically in "
+            "TXT/JSON/HTML. The optimizer rarely trips this (it ranks splits "
+            "by net benefit and prefers fully-deployed ones); it bites when a "
+            "household declares its contribution split manually."),
+    issue='#170',
+    applies=_has_rrsp_refusal,
+    findings=_describe_rrsp_refusal,
+))

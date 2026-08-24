@@ -13,6 +13,8 @@ the room that bounds it -- and they run adjacent in ``RULE_ORDER`` except for
 
 from __future__ import annotations
 
+from typing import Dict
+
 from tax_data import default_tax_provider
 
 from rule_registry import RuleContext, YearWorkingState, rule
@@ -34,6 +36,14 @@ def apply_contributions(ws: YearWorkingState, ctx: RuleContext) -> bool:
     sp_rrsp_actual = min(ws.sp_rrsp, max(0, ws.opening_spouse_rrsp_room))
     p_tfsa_actual = min(ws.p_tfsa, max(0, ws.opening_tfsa_primary_room))
     sp_tfsa_actual = min(ws.sp_tfsa, max(0, ws.opening_tfsa_spouse_room))
+
+    # Issue #170 (DP#32): a declared contribution above room is a FACT, not an
+    # absence -- record what was refused instead of letting the min() clamp
+    # drop it silently. The booked amounts are unchanged (the clamp still
+    # bounds what enters the plan); this only makes the refusal VISIBLE, on
+    # the working state, every YearResult, and the model_fidelity caveat.
+    ws.rrsp_refused_own = ws.p_rrsp - p_rrsp_actual
+    ws.rrsp_refused_spousal = ws.s_rrsp - s_rrsp_actual
 
     ws.p_rrsp_actual = p_rrsp_actual
     ws.s_rrsp_actual = s_rrsp_actual
@@ -224,3 +234,67 @@ def apply_contribution_room(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.new_tfsa_p_room += tfsa_limit
     ws.new_tfsa_sp_room += tfsa_limit
     return (primary_room_added + spouse_room_added + tfsa_limit + tfsa_limit) > 0
+
+
+def worst_rrsp_refusal(rows) -> Dict:
+    """Reduce ranked-scenario ``rrsp_refusal`` summaries (the per-row dicts
+    ``summarize_rrsp_refusal`` produces, carried on each ranking row) to the
+    ONE summary the run-wide caveat names: the scenario that refused the MOST
+    declared money; ties break to the earliest first-refused year. An empty or
+    all-clear row set returns the all-clear summary (DP#32: "nothing was
+    refused" is a checked result, not an absence).
+
+    Pure function (DP#3); the optimize caller records its result onto
+    ``assumptions.rrsp_contribution_refused`` for the fidelity caveat.
+    """
+    engaged = [r for r in rows
+               if isinstance(r, dict) and r.get('engaged')]
+    if not engaged:
+        return {'engaged': False, 'first_refused_year': None,
+                'refused_own_total': 0.0, 'refused_spousal_total': 0.0}
+    return max(
+        engaged,
+        key=lambda row: (row.get('refused_own_total', 0.0)
+                         + row.get('refused_spousal_total', 0.0),
+                         -(row.get('first_refused_year')
+                           if row.get('first_refused_year') is not None
+                           else float('inf'))))
+
+
+def summarize_rrsp_refusal(results) -> Dict:
+    """Fold a trajectory's ``YearResult`` list into the RRSP-refusal facts a
+    household needs (issue #170).
+
+    Returns::
+
+        {
+          'engaged':              bool,  # any year refused a declared contribution
+          'first_refused_year':   int | None,
+          'refused_own_total':    float, # sum of own-RRSP refusals across the run
+          'refused_spousal_total': float, # sum of spousal-RRSP refusals
+        }
+
+    Mirrors ``decumulation.summarize_drawdown_shortfall`` (#707): the facts are
+    folded once from the trajectory and travel as DATA, so the model_fidelity
+    caveat (which reads ``assumptions.rrsp_contribution_refused`` off the cfg)
+    can surface them on every output surface without recomputing (DP#9/DP#3).
+    """
+    engaged = False
+    first_year = None
+    own_total = 0.0
+    spousal_total = 0.0
+    for r in results:
+        own = getattr(r, 'rrsp_contribution_refused_own', 0.0)
+        spousal = getattr(r, 'rrsp_contribution_refused_spousal', 0.0)
+        if own > 0 or spousal > 0:
+            engaged = True
+            if first_year is None:
+                first_year = getattr(r, 'year', None)
+        own_total += own
+        spousal_total += spousal
+    return {
+        'engaged': engaged,
+        'first_refused_year': first_year,
+        'refused_own_total': own_total,
+        'refused_spousal_total': spousal_total,
+    }

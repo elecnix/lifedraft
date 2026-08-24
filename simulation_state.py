@@ -3364,6 +3364,12 @@ def simulate_year_pure(
         total_family_income=total_family_income,
         annual_savings=allocations.get('_annual_savings', 0),
         contributions={k: v for k, v in allocations.items() if not k.startswith('_')},
+        # Issue #170: the declared-but-refused RRSP contributions (over-room
+        # slices the clamp declined) travel on every year's output, so a
+        # household whose manual split exceeds room SEES the refusal instead
+        # of silently booking $0.
+        rrsp_contribution_refused_own=ws.rrsp_refused_own,
+        rrsp_contribution_refused_spousal=ws.rrsp_refused_spousal,
         primary_rrsp=ws.new_rrsp_bal,
         spousal_rrsp=ws.new_spousal_rrsp_bal,
         spouse_rrsp=ws.new_spouse_rrsp_bal,

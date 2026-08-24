@@ -785,6 +785,13 @@ def evaluate_strategy_with_simulation(
     runway = compute_runway(results, shock_date=shock_date,
                             start_year=config.start_year)
 
+    # Issue #170: the RRSP-refusal verdict travels WITH the ranking row, right
+    # beside drawdown_shortfall/solvency -- a scenario whose declared RRSP
+    # contributions were clipped to room must be readable off the row, not
+    # rediscovered from the source. Signalled as DATA (same bridge as #707).
+    from rules_contributions import summarize_rrsp_refusal
+    rrsp_refusal = summarize_rrsp_refusal(results)
+
     return {
         'strategy': name,
         'year_by_year': year_by_year,
@@ -792,6 +799,7 @@ def evaluate_strategy_with_simulation(
         'ruined': solvency['ruined'],
         'drawdown_shortfall': drawdown_shortfall,
         'exhausted': drawdown_shortfall['exhausted'],
+        'rrsp_refusal': rrsp_refusal,
         'runway': runway.to_dict(),
         'total_invested': final.total_assets + final.total_debt - final.non_reg_balance,
         'TFSA': final.total_tfsa,
@@ -4524,6 +4532,17 @@ def main():
     # because a top-level key would be rejected by _validate_internal_shape
     # (build_overlay_config -> from_dict is on every HtmlReport path).
     cfg.setdefault('assumptions', {})['decumulation_shortfall'] = worst_drawdown_shortfall(results)
+    # Issue #170: record whether any ranked scenario refused a declared RRSP
+    # contribution (over-room slice clipped to $0) onto cfg BEFORE any surface
+    # renders, so the model_fidelity caveat (which reads
+    # assumptions.rrsp_contribution_refused) fires identically in TXT/JSON/
+    # HTML. Same bridge, same spelling, as decumulation_shortfall above
+    # (#707/DP#9); the worst-across-scenarios reduction is the pure
+    # ``worst_rrsp_refusal`` beside the summarizer.
+    from rules_contributions import worst_rrsp_refusal
+    cfg.setdefault('assumptions', {})['rrsp_contribution_refused'] = \
+        worst_rrsp_refusal([r.get('rrsp_refusal') for r in results
+                            if isinstance(r, dict)])
     # Issue #758: record the worst-case (shortest-runway) scenario's verdict
     # onto cfg BEFORE any surface renders, so the model_fidelity runway caveats
     # (which read assumptions.runway) fire identically in TXT/JSON/HTML and the
