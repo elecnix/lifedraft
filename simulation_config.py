@@ -574,15 +574,57 @@ class SimulationConfig:
     account_return_overrides: Dict = field(default_factory=dict)
     account_locked: Dict = field(default_factory=dict)
 
-    # Issue #691: per-account MER fees, pot-keyed. Defaults to empty -- a
+    # Issue #691/#136: per-account MER fees, pot-keyed. Defaults to empty -- a
     # household that declares no `mer` grows at the fee-free global rate
     # (today's behaviour; keeps the golden invariant unchanged, DP#32: an
-    # absent fee is not a zero fee). The growth rule subtracts the balance-
-    # weighted fee from the pot's gross rate (net = gross - weighted_mer_sum /
-    # pot_total).
-    #   mer_drag[kind] = {'mer_balance': float,
-    #                     'weighted_mer_sum': float}  # sum(bal*mer)
+    # absent fee is not a zero fee). The growth rule subtracts a FIXED DRAG
+    # RATE from the pot's gross rate (net = gross - fee_share * fee_rate) so
+    # the fee neither dilutes as the pot grows nor freezes at a zero-opening
+    # account's $0 contribution (issue #136).
+    #   mer_drag[kind] = {'mer_balance': float,     # declared fee-account balances
+    #                     'weighted_mer_sum': float}  # sum(bal*mer), declared
+    #                     'fee_share': float,      # fee acs' share of declared pot
+    #                     'fee_rate': float}       # balance-weighted avg fee
     account_mer_drag: Dict = field(default_factory=dict)
+
+    def non_reg_management_fees(self) -> Dict[str, float]:
+        """Issue #142: ``{role: annual s.20(1)(e)-deductible fee}`` -- each
+        member's DECLARED total of separately-charged non-registered
+        management/counsel fees (attributed pro rata to joint owners by the
+        contract adapter, which rides the totals onto the member records;
+        family.members round-trips wholesale, DP#24). One spelling (DP#9):
+        every consumer -- the working-phase prologue's taxable-income
+        reduction, the retirement drawdown base's OAS-clawback reduction,
+        and rules_amt's s.127.52(1)(j) half-add-back -- reads this map, so a
+        household declaring no fee gets an empty map everywhere and is
+        byte-identical to before (DP#32).
+        """
+        fees: Dict[str, float] = {}
+        for m in self.family_members:
+            f = m.get('mgmt_fee_non_reg_annual')
+            if f is not None:
+                fees[m['role']] = float(f)
+        return fees
+
+    def superficial_loss_events(self) -> List[Dict]:
+        """Issue #141: every DECLARED ITA s.53(1)(c)/s.54 superficial-loss
+        disposition across the household, each tagged with its seller's
+        member id. The events ride family.members (round-trips wholesale,
+        DP#24 -- config_serde untouched); this is the one read seam the
+        registered `superficial_loss` rule consumes, so a household
+        declaring none gets an empty list everywhere and is byte-identical
+        to before (DP#32).
+        """
+        events: List[Dict] = []
+        for m in self.family_members:
+            declared = m.get('superficial_losses')
+            if declared is None:
+                continue
+            for e in declared:
+                tagged = dict(e)
+                tagged['seller'] = m.get('id', m.get('role'))
+                events.append(tagged)
+        return events
 
     @classmethod
     def from_json(cls, path: str) -> 'SimulationConfig':

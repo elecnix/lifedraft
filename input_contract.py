@@ -77,7 +77,9 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from contract_accounts import _map_account_overrides, map_account_pots
+from contract_accounts import (
+    _map_account_overrides, map_account_pots, map_management_fee_legs,
+)
 from contract_assumptions import (
     apply_rate_path_reconciliation, apply_spending_reconciliation,
     map_assumptions, map_emergency_reserve, map_household_budget,
@@ -87,7 +89,7 @@ from contract_decisions import (
     map_borrow_to_invest, map_contribution_strategies, map_declared_objective,
     map_income_scenarios, map_mortgage_decisions, map_resp_action_scenarios,
 )
-from contract_estate import _family_pre_window, _map_estate
+from contract_estate import _family_pre_window, _map_estate, map_insurance_premiums
 from contract_liabilities import map_consumer_loans, resolve_liability_facilities
 from contract_people import (
     _find_primary_and_spouse, _horizon_end_year, _map_child,
@@ -100,6 +102,7 @@ from contract_transfers import (
     map_cash_flows, map_equity_grants, map_installments, _map_first_home_purchases,
     _map_gifts, _map_private_loans, _map_zev_purchases,
 )
+from transaction_costs import map_transaction_costs
 
 
 def to_internal_config(doc: Dict) -> Dict:
@@ -195,6 +198,18 @@ def to_internal_config(doc: Dict) -> Dict:
     # Issue #691: per-account MER fees, pot-keyed, subtracted from the gross
     # growth rate. Empty when no account declares a `mer` (golden: fee-free).
     accounts_cfg["mer_drag"] = account_overrides["mer_drag"]
+    # Issue #142: each declared non-reg deductible_management_fee_annual is
+    # attributed pro rata to its owner(s); the per-person annual totals ride
+    # OUT on the member records (family.members round-trips wholesale,
+    # DP#24) so both tax folds -- the working-phase prologue and the
+    # retirement drawdown base -- can read their own member's fee. Absent
+    # fees -> no member carries a key -> byte-identical fold (DP#32).
+    mgmt_fees_by_person = account_overrides["mgmt_fees"]
+    if mgmt_fees_by_person:
+        for _m in members:
+            _fee = mgmt_fees_by_person.get(_m["id"])
+            if _fee is not None:
+                _m["mgmt_fee_non_reg_annual"] = float(_fee)
 
     horizon = doc["decisions"]["horizon"]  # schema-required
     if horizon["person"] == primary_id:
@@ -213,6 +228,31 @@ def to_internal_config(doc: Dict) -> Dict:
     household_budget_out = map_household_budget(doc)
     reserve_out = map_emergency_reserve(doc, spouse_id)
     legacy_cash_flows = map_cash_flows(doc, mortgage, start_year)
+    # Issue #139: declared one-time transaction costs / credits join the SAME
+    # dated cash-flow channel as the mortgage's origination cash-back (#1070),
+    # so every objective that folds the balance sheet (net benefit, solvency,
+    # estate) sees them through one engine read (DP#8). Absent block -> no legs
+    # -> byte-identical fold (DP#32).
+    transaction_cost_legs = map_transaction_costs(doc, start_year)
+    if transaction_cost_legs:
+        legacy_cash_flows = legacy_cash_flows + transaction_cost_legs
+    # Issue #138: each declared life-insurance policy's premium_annual joins
+    # the SAME dated cash-flow channel -- one negative leg per in-force year,
+    # stopping at the term cliff (a lapsed policy charges nothing; a renewed
+    # one keeps its death benefit but its renewal premium is insurer-set and
+    # deliberately not priced) -- so every objective sees the true cost of
+    # coverage. Absent policies -> no legs -> byte-identical fold (DP#32).
+    insurance_premium_legs = map_insurance_premiums(doc, primary_id, start_year)
+    if insurance_premium_legs:
+        legacy_cash_flows = legacy_cash_flows + insurance_premium_legs
+    # Issue #142: each declared non-registered management fee joins the SAME
+    # dated cash-flow channel -- one negative leg per projection year (a
+    # discretionary mandate charges while the account exists) -- so the fee
+    # leaves the household's cash flow instead of being a phantom deduction.
+    # Absent fees -> no legs -> byte-identical fold (DP#32).
+    management_fee_legs = map_management_fee_legs(doc, start_year)
+    if management_fee_legs:
+        legacy_cash_flows = legacy_cash_flows + management_fee_legs
 
     legacy: Dict[str, Any] = {
         "assumptions": assumptions_cfg,
@@ -249,6 +289,18 @@ def to_internal_config(doc: Dict) -> Dict:
 
     if portfolio_cfg:
         legacy["portfolio"] = portfolio_cfg
+    # Issue #143: the declared per-transaction trading friction rides the
+    # household `portfolio` block (the ONE internal dict that round-trips
+    # wholesale through config_serde -- config_serde itself is untouched,
+    # DP#24 -- and reaches the engine as SimulationConfig.portfolio_data).
+    # The engine's friction model reads it off that block; a document that
+    # declares no trading_friction adds no key and runs byte-identical
+    # (DP#32). An empty declared block is carried as-is: an explicitly
+    # frictionless venue is a fact, not an absence to collapse.
+    _friction_decl = doc.get("trading_friction")
+    if _friction_decl is not None:
+        _friction_target = legacy.setdefault("portfolio", {})
+        _friction_target["trading_friction"] = dict(_friction_decl)
     if retirement_out:
         legacy["retirement"] = retirement_out
     if "return_model" in assumptions:

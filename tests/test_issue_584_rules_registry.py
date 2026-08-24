@@ -95,6 +95,8 @@ EXPECTED_RULE_NAMES = frozenset({
     'property_disposition',        # issue #956 bite B: a declared mid-horizon property SALE settles in its sale year (net proceeds invested post-growth, gain taxed + PRE-apportioned, conservation identity Δtotal_assets = -(selling_costs + T))
     'tuition_credit',              # epic #795 bite 3: federal (+ QC) tuition tax credit (own credit + #784 carry-forward + #785 transfers) -- was inline in the fold's prologue
     'solvency',                    # issue #679: cash-flow identity + forced-liquidation waterfall
+    'capital_loss_carryforward',   # issue #140: reconcile the year's net capital position against the ITA s.111(1)(b) loss pool and re-persist it
+    'superficial_loss',            # issue #141: deny declared ITA s.53(1)(c)/s.54 superficial losses (never joins the pool; added to the non-reg ACB instead, s.53(1)(f))
     'amt',                         # issue #710: year-end Alternative Minimum Tax assessment (max(regular, AMT)) over the year's realized capital gains
 })
 
@@ -205,6 +207,15 @@ EXPECTED_RULE_ORDER = (
     # after-tax income. Was inline in the fold's prologue (two spellings).
     'tuition_credit',
     'solvency',
+    # issue #141: the s.53(1)(c) denial runs after solvency (whose forced
+    # liquidations are the realized losses it validates against) and before
+    # capital_loss_carryforward (which must net the denial out of the
+    # position it reconciles).
+    'superficial_loss',
+    # issue #140: the loss-ledger reconciliation runs after solvency (whose
+    # forced liquidations realize the crash-year losses it books) and before
+    # the AMT (which reads the raw realized-gain base, independent of it).
+    'capital_loss_carryforward',
     # issue #710: the AMT assessment runs DEAD LAST -- it is a year-end
     # assessment over ALL of the year's realized income, so it must run after
     # solvency has crystallized every forced-liquidation gain (the AMT base).
@@ -639,6 +650,74 @@ def test_every_rule_fires_somewhere_in_representative_households():
             calendar_year=2026,
             drawdown_net_target=1_200_000, drawdown_order=['non_reg'],
             any_retired=True, retirement_spending_target=1_200_000,
+        )
+    _merge(fired)
+
+    # Scenario J2: the SAME retired large-gain household, but carrying an
+    # ITA s.111(1)(b) net-capital-loss pool from a prior year's realized
+    # loss (issue #140). The drawdown's lead taxable slice is SHELTERED by
+    # the pool before it reaches the bracket walk, and the
+    # 'capital_loss_carryforward' reconciliation rule books the consumption
+    # and re-persists the remainder -- an observable effect in a year that
+    # would otherwise only exercise the AMT. No other representative
+    # household realizes a net capital loss or carries the pool, so this is
+    # the one scenario that reaches the ledger.
+    loss_pool_state = SimState(
+        non_reg_balance=3_000_000, non_reg_acb=0.0,
+        jurisdiction_state={'canada': {
+            **_default_canada_state(),
+            'capital_loss_carryforward': 100_000,
+        }},
+    )
+    with trace_firing() as fired:
+        simulate_year_pure(
+            state=loss_pool_state, year=0,
+            allocations={'_primary_income': 0, '_annual_savings': 0},
+            config=amt_config, investment_return=0.05,
+            primary_marginal_rate=0.53, retiree_marginal_rate=0.53,
+            calendar_year=2026,
+            drawdown_net_target=1_200_000, drawdown_order=['non_reg'],
+            any_retired=True, retirement_spending_target=1_200_000,
+        )
+    _merge(fired)
+
+    # Scenario J3 (issue #141): a WORKING household whose living costs exceed
+    # its after-tax income -- the solvency waterfall force-liquidates the
+    # under-water non-reg pot (ACB $400k > FMV $200k) and realizes a real
+    # capital loss, while the primary DECLARES a superficial-loss disposition
+    # for this calendar year (substituted property reacquired by the SPOUSE
+    # 10 days later, still held). The `superficial_loss` rule fires: the
+    # declared loss is DENIED (never joins the s.111(1)(b) pool) and added
+    # to the non-reg ACB instead (s.53(1)(f)). No other representative
+    # household declares a superficial-loss event, so this is the one
+    # scenario that reaches the denial.
+    superficial_config = _make_config(
+        living_costs=200_000,
+        family_members=[
+            {'role': 'primary', 'gross_income': 50_000, 'birth_year': 1990,
+             'superficial_losses': [
+                 {'year': 2026, 'loss_amount': 50_000,
+                  'acquired_by': 'spouse', 'days_to_acquisition': 10,
+                  'still_held_30_days_after': True},
+             ]},
+            {'role': 'spouse', 'gross_income': 20_000, 'birth_year': 1992},
+        ],
+    )
+    superficial_state = SimState(
+        non_reg_balance=200_000, non_reg_acb=400_000,
+        jurisdiction_state={'canada': _default_canada_state()},
+    )
+    with trace_firing() as fired:
+        simulate_year_pure(
+            state=superficial_state, year=0,
+            allocations={'_primary_income': 50_000, '_spouse_income': 20_000,
+                         '_annual_savings': 0},
+            config=superficial_config, investment_return=0.06,
+            primary_marginal_rate=0.40,
+            # Working-phase spending exceeds after-tax income => the solvency
+            # waterfall force-liquidates the under-water non-reg pot.
+            living_costs=200_000, after_tax_income=55_000,
+            calendar_year=2026,
         )
     _merge(fired)
 

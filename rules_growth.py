@@ -34,17 +34,17 @@ def _blended_pot_rate(ctx: 'RuleContext', kind: str, pot_total: float) -> float:
       ``kind``, the pot's GROSS rate is a balance-weighted blend of the override
       rate and the global ``ctx.investment_return``; otherwise the gross rate is
       the global rate (today's behaviour).
-    - #691 ``mer``: a declared per-account fee is subtracted from that gross
-      rate -- ``net = gross - weighted_mer_sum / pot_total`` -- so a declared fee
-      reduces the compounded balance. An account carrying BOTH grows at
+    - #691/#136 ``mer``: a declared per-account fee is subtracted from that
+      gross rate as a FIXED DRAG RATE -- ``net = gross - fee_share * fee_rate``,
+      where ``fee_share`` is the fee-accounts' share of the kind's DECLARED pot
+      and ``fee_rate`` their balance-weighted average fee. The fee price stays on
+      the pot's value regardless: it does NOT dilute as the pot grows, and it
+      does NOT freeze to a $0 contribution when a fee account opens zero and is
+      funded later (issue #136). An account carrying BOTH grows at
       (expected_return - mer): the two terms simply add here.
 
     Absence is a strict no-op: no override and no fee -> the global rate is
-    returned unchanged (the golden household declares neither). See
-    ``apply_registered_growth`` for the approximation caveat (the blend uses the
-    DECLARED opening balance of the flagged accounts, not a per-account
-    sub-balance tracked through the run -- a first-order approximation the issue
-    itself flags as numerically small).
+    returned unchanged (the golden household declares neither).
     """
     if pot_total <= 0:
         return ctx.investment_return
@@ -60,16 +60,24 @@ def _blended_pot_rate(ctx: 'RuleContext', kind: str, pot_total: float) -> float:
             gross = (weighted_rate_sum
                      + max(0.0, pot_total - override_balance) * ctx.investment_return
                      ) / pot_total
-    # Issue #691: subtract the balance-weighted MER of fee-flagged accounts in
-    # this pot from the gross rate. Absent (no mer_drag entry) or fee-free
-    # (weighted_mer_sum == 0) -> no change, so the gross rate is returned
-    # untouched (golden no-op, DP#32).
+    # Issue #691/#136: the MER drag is a FIXED RATE (fee_share x fee_rate), not
+    # a frozen dollar snapshot divided by the current pot total. Under the old
+    # spelling (weighted_mer_sum / pot_total) the numerator stayed at the
+    # DECLARED opening balance: a zero-balance fee account contributed 0 to it
+    # forever (its declared fee never applied once funded), and a funded
+    # segment diluted as the pot grew. Storing the DRAG AS A RATE prices the
+    # fee on the pot's whole value every year: no freezing at opening, no
+    # dilution, and the golden no-op (no fee declared -> fee is None -> gross
+    # unchanged) holds (DP#32). Fee-free (fee_rate == 0 or fee_share == 0) is a
+    # strict no-op (DP#32: an explicit 0.0 fee is a declared fact that moves no
+    # rate).
     mer_drag = ctx.config.account_mer_drag
     fee = mer_drag.get(kind) if mer_drag else None
     if fee:
-        weighted_mer_sum = fee.get('weighted_mer_sum', 0.0)
-        if weighted_mer_sum:
-            gross -= weighted_mer_sum / pot_total
+        share = fee.get('fee_share', 0.0)
+        rate = fee.get('fee_rate', 0.0)
+        if share > 0 and rate != 0:
+            gross -= share * rate
     # Issue #641: subtract the foreign-withholding-tax drag of this REGISTERED
     # pot's declared holdings (rrsp/tfsa) -- the one tax that leaks from an
     # otherwise tax-sheltered account. Absent (no registered composition, or a

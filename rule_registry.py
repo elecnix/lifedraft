@@ -314,6 +314,25 @@ class YearWorkingState:
     opening_primary_tuition_carryforward: float = 0.0
     opening_spouse_tuition_carryforward: float = 0.0
     opening_child_tuition_carryforwards: list = field(default_factory=list)
+    # Issue #140: the ITA s.111(1)(b) NET-CAPITAL-LOSS carry-forward pool at
+    # Jan-1 (taxable basis -- inclusion_rate x the pre-inclusion loss),
+    # threaded through jurisdiction_state['canada'] like every other
+    # cross-year pool. Read by retirement_drawdown (which shelters its
+    # non-reg draws' taxable slices with it) and by the registered
+    # `capital_loss_carryforward` rule (which reconciles and re-persists it).
+    # 0.0 for a household that has never realized a net capital loss (the
+    # golden fixture) -- a strict no-op, DP#32.
+    opening_capital_loss_carryforward: float = 0.0
+    # Issue #141: the pre-inclusion capital loss DENIED this year by the ITA
+    # s.53(1)(c)/s.54 superficial-loss rule (written by the registered
+    # `superficial_loss` rule, which runs after 'solvency' and before
+    # `capital_loss_carryforward`). The denied slice never joins the
+    # s.111(1)(b) pool -- the capital_loss rule adds it back out of the
+    # year's net position -- and is instead added to the substituted
+    # property's ACB (s.53(1)(f)), which the same rule books onto
+    # ws.new_nonreg_acb. 0.0 for a household declaring no superficial-loss
+    # disposition (the golden fixture) -- a strict no-op, DP#32.
+    superficial_loss_denied: float = 0.0
 
     # ── This year's allocations (extracted from ctx.allocations) ──
     p_rrsp: float = 0.0
@@ -774,6 +793,21 @@ class YearWorkingState:
     # The END-of-year unused-credit remainder carried to the next year
     # (per-member / per-child; #784/#785). Written to jurisdiction_state by the
     # epilogue and surfaced on YearResult by build_year_result.
+    # Issue #140: how much of the opening capital-loss pool THIS year's
+    # pricing consumed (taxable basis). Written incrementally by every
+    # consumer -- apply_retirement_drawdown via plan_drawdown_net's
+    # cg_loss_offset -- each capping its own consumption at what remains,
+    # so the sum never exceeds the opening pool. Reconciled by the
+    # `capital_loss_carryforward` rule; 0.0 when no pool exists.
+    capital_loss_offset_used: float = 0.0
+    # Issue #140: reporting figures the `capital_loss_carryforward` rule
+    # writes and build_year_result surfaces: the taxable-basis pool dollars
+    # that sheltered this year's gains (`capital_loss_applied`), the year's
+    # net realized capital LOSS pre-inclusion (`capital_loss_realized`, 0.0
+    # in a net-gain year), and the Dec-31 pool carried forward indefinitely.
+    capital_loss_applied: float = 0.0
+    capital_loss_realized: float = 0.0
+    new_capital_loss_carryforward: float = 0.0
     new_primary_tuition_carryforward: float = 0.0
     new_spouse_tuition_carryforward: float = 0.0
     new_child_tuition_carryforwards: list = field(default_factory=list)
@@ -943,6 +977,12 @@ class YearWorkingState:
             'spouse_tuition_carryforward', 0.0)
         ws.opening_child_tuition_carryforwards = list(
             canada.get('child_tuition_carryforwards', []))
+        # Issue #140: carry the opening net-capital-loss pool into the fold
+        # (read by retirement_drawdown's shelter and the registered
+        # `capital_loss_carryforward` rule). 0.0 for a household that has
+        # never realized a net capital loss (the golden fixture).
+        ws.opening_capital_loss_carryforward = canada.get(
+            'capital_loss_carryforward', 0.0)
 
         ws.p_rrsp = allocations.get('primary_rrsp', 0)
         ws.s_rrsp = allocations.get('spousal_rrsp', 0)

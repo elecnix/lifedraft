@@ -1095,3 +1095,119 @@ register(Approximation(
     issue='#758',
     applies=_runway_is_interpolated,
 ))
+
+
+# ── Issue #141: the superficial-loss window is DECLARABLE, never detected ──
+#
+# ITA s.53(1)(c)/s.54 is a DAY-granular 60-day rule over identified security
+# lots; the engine holds one aggregated non-reg pot (no per-lot acquisition
+# ledger) and steps a YEAR at a time. The rule therefore ships declarable --
+# people[].superficial_losses[] -- and the abstraction below discloses both
+# halves of that gap on every run the feature actually activates.
+
+def _superficial_losses_declared(ctx: FidelityContext) -> bool:
+    return bool(superficial_loss_events(ctx.cfg))
+
+
+def superficial_loss_events(cfg: dict) -> list:
+    """Every declared s.53(1)(c)/s.54 event in this run's config (the same
+    read seam the registered `superficial_loss` rule consumes)."""
+    events: list = []
+    if cfg is None:
+        return events
+    family = cfg.get('family')
+    if not isinstance(family, dict):
+        return events
+    members = family.get('members')
+    if not isinstance(members, list):
+        return events
+    for m in members:
+        declared = m.get('superficial_losses')
+        if not declared:
+            continue
+        for e in declared:
+            tagged = dict(e)
+            tagged['seller'] = m.get('id', m.get('role'))
+            events.append(tagged)
+    return events
+
+
+def _superficial_loss_findings(ctx: FidelityContext) -> List[str]:
+    return [
+        f"{e.get('seller')!r} disposed at a {e.get('loss_amount')} loss in "
+        f"{e.get('year')}; substituted property acquired by "
+        f"{e.get('acquired_by')!r} at {e.get('days_to_acquisition'):+d} days,"
+        f" still held 30 days after: "
+        f"{bool(e.get('still_held_30_days_after'))}"
+        for e in superficial_loss_events(ctx.cfg)
+    ]
+
+
+register(Approximation(
+    id='superficial_loss_window_is_declarable',
+    summary=("The ITA s.53(1)(c)/s.54 substitution window (30 days either "
+             "side of the disposition, plus 30 days' holding) is DECLARED by "
+             "the household, not detected from balances: this config declares "
+             "superficial-loss dispositions, and the engine prices the "
+             "statute on those declared facts"),
+    biased_figure=("net-capital-loss carry-forward pool (s.111(1)(b)) and "
+                    "future non-registered disposition tax (via the s.53(1)(f)"
+                    " ACB bump)"),
+    direction=Direction.UNKNOWN,
+    detail=("The engine holds its non-registered sleeve as ONE aggregated pot "
+            "with a single cost basis -- there is no per-lot acquisition "
+            "ledger and the simulation step is a year, so no balance snapshot "
+            "can reveal whether a repurchase happened within 30 calendar days. "
+            "The household declares each disposition's facts (year, loss "
+            "amount, acquirer, signed day offset, 30-day holding) and the pure "
+            "rule applies the statute to them exactly -- including the "
+            "not-superficial side (an offset outside [-30, +30] or sold-out-"
+            "before-day-30 leaves the loss fully allowable). A declaration "
+            "that misstates the day facts prices the wrong thing silently: "
+            "the declaration IS the approximation surface. Direction UNKNOWN: "
+            "denying a loss defers benefit (higher near-term tax, higher "
+            "future basis) whose net sign depends on the horizon."),
+    issue='#141',
+    applies=_superficial_losses_declared,
+    findings=_superficial_loss_findings,
+))
+
+
+# ── Issue #143: per-transaction trading friction, priced at the step scale ────
+#
+# A household that declares `trading_friction` pays its bid/ask spread (and,
+# at the year-0 lump deployment, one countable flat fee) on the dollars the
+# engine turns over. Two step-scale abstractions apply, in opposite
+# directions; both are disclosed rather than silently netted:
+
+def _trading_friction_declared(ctx: FidelityContext) -> bool:
+    """Fires only when this run's config actually declares a friction block —
+    a frictionless run must not carry a caveat that does not apply to it."""
+    cfg = {} if ctx.cfg is None else ctx.cfg
+    portfolio = cfg.get('portfolio')
+    if not isinstance(portfolio, dict):
+        return False
+    return bool(portfolio.get('trading_friction'))
+
+
+register(Approximation(
+    id='trading_friction_annual_step',
+    summary=("Declared trading friction is priced at the ANNUAL step scale: "
+             "the year's savings deployment and the year-0 lump deployment are "
+             "charged their spread once each, not per real-world ticket, and "
+             "sale-side trades (retirement drawdowns, forced liquidations) are "
+             "not yet charged at all"),
+    biased_figure="terminal wealth / net benefit for high-turnover strategies",
+    direction=Direction.UNKNOWN,
+    detail=("The engine moves money at pot level -- there is no order ledger -- "
+            "so the buy side is priced as one proportional haircut per year "
+            "(exact when registered room does not bind; when room caps bind, "
+            "less deploys than the charged base and friction is slightly "
+            "OVERCHARGED). The sell side (drawdown waterfall gross draws) is "
+            "NOT yet priced, which UNDERSTATES friction. Direction UNKNOWN: "
+            "the two biases oppose. Property dispositions already carry their "
+            "own declared selling_costs and are deliberately not double-"
+            "charged."),
+    issue='#143',
+    applies=_trading_friction_declared,
+))

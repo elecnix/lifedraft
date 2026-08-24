@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/trading_friction.json",
+  "title": "lifedraft input contract — universal $defs: the trading_friction block",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Issue #143: the DECLARABLE per-transaction trading friction -- bid/ask spread and commission on the dollars the engine turns over. The engine moves money at pot level (aggregate balances), never per ticket, so the honest spelling is a proportional cost per dollar turned over (rebalance_bps) plus a flat fee only where the engine counts real events (the single year-0 lump deployment). Optional and deliberately NOT in the spine's required list (DP#16: auto-include on trigger data) -- a document that omits trading_friction trades frictionlessly, exactly as every pre-#143 run did, and the golden invariant does not move (DP#32).",
+
+  "$defs": {
+    "trading_friction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rebalance_bps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Issue #143. The proportional cost of turning one dollar of the portfolio over, in BASIS POINTS: 5 bps on a $100,000 deployment = $50. Covers the bid/ask spread crossed on each round trip plus any ad-valorem commission; for liquid broad-market ETFs a few bps is typical, but the value is the household's DECLARED fact about its venue, not an engine assumption. Charged at each trade event the engine performs: the year-0 borrowed lump deployment and each year's savings deployment into the pots. A declared 0 is valid and distinct from omitting the block (DP#32: zero is a value, not a fallback); a negative value is refused at load."
+        },
+        "per_trade_fee": {
+          "$ref": "#/$defs/money",
+          "description": "Issue #143. A FLAT commission charged per COUNTED trade event (a $9.95 ticket charge), not per dollar. Deliberately narrow: the engine moves money at aggregate-pot level and cannot observe how many tickets a real account traded, so this fee is priced ONLY at the one seam where the event count is honest -- the year-0 lump deployment, which crosses through exactly one allocation call. Omit (or declare 0) when the venue is genuinely zero-commission or when only the spread matters."
+        }
+      }
+    }
+  }
+}

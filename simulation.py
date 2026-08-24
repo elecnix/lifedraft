@@ -120,6 +120,35 @@ class SimulationContext:
     primary_income: float   # base (year-0) primary gross income
     spouse_income: float    # base (year-0) spouse gross income
     portfolio: object       # non-reg composition (DP#8: static input data)
+    # Issue #137: deployment lag — the months a borrowed year-0 lump sum sits
+    # uninvested, and the rate its idle parking sleeve earns while it waits.
+    # Both default to zero/idle-rate-0 (today's deploy-immediately behavior;
+    # a lump with no declared lag is priced at 0 and the golden trajectory is
+    # byte-identical, DP#32). These are SEARCH DIMENSION parameters threaded
+    # by the optimizer/caller, not contract-mapped input fields (DP#22/#31 —
+    # deployment timing is a decision the engine ranks 0/3/6/12 months of,
+    # not a fact the household declares; the same reasoning as the #735
+    # draw_fraction search dimension).
+    deployment_lag_months: int = 0
+    deployment_idle_rate: float = 0.0
+    # Issue #74: staggered-deployment search dimension — spread the year-0
+    # lump over N equal ANNUAL tranches deployed at years 0..N-1 instead of
+    # all at once (a SPREAD, not #137's fixed delay). Default 1 == deploy at
+    # year 0, today's behavior; like the lag above it is a SEARCH DIMENSION
+    # parameter threaded by the optimizer/caller (DP#22/#31), not a
+    # contract-mapped input field. The schedule prices a year-0-equivalent
+    # cost through deployment_lag.year0_deployment_cost — the same seam as
+    # the lag, so absent a schedule nothing moves (golden byte-identical,
+    # DP#32).
+    deployment_schedule_years: int = 1
+    # Issue #143: the DECLARED per-transaction friction model (a
+    # TradingFrictionModel, or None when the household declares none --
+    # every gate reads is_frictionless, so absent -> today's byte-identical
+    # behaviour, DP#32). Contract-mapped input (a fact about the household's
+    # venue), unlike the #137/#74 search dimensions above: it is read off
+    # config.portfolio_data['trading_friction'], the one internal block that
+    # round-trips wholesale (DP#24).
+    trading_friction: object = None
 
 
 def _year_brackets_for(sim_year: int, *, frozen_brackets: bool, brackets: list,
@@ -147,9 +176,19 @@ def _mortgage_data_for(year: int, *, amort_annual: list, amort: list) -> Dict:
     # Fallback
     months = [m for m in amort if m['year'] == year + 1]
     if months:
+        # Issue #113: the year's debt-service cash includes any applied
+        # prepayment principal and the excess-prepayment penalty the
+        # schedule charged — exactly what annual_summary folds into
+        # total_payment on its own rows, so this fallback can never
+        # disagree with it (DP#9: one spelling of the year's outflow).
+        # Legacy schedules carry no prepayment keys; these default to 0.0.
         return {
             'year': year + 1,
-            'total_payment': sum(m['payment'] for m in months),
+            'total_payment': sum(
+                m['payment'] + m.get('prepayment_extra', 0.0)
+                + m.get('prepayment_penalty', 0.0) for m in months),
+            'prepayment_penalty': sum(
+                m.get('prepayment_penalty', 0.0) for m in months),
             'total_interest': sum(m['interest'] for m in months),
             'total_principal': sum(m['principal'] for m in months),
             'total_readvanced': sum(m['principal'] for m in months),
@@ -1333,10 +1372,26 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # added, deduction + CCA subtracted) but -- unlike the interest -- it is NOT
     # subtracted from after-tax cash below (see _after_tax_by_role): depreciation
     # lowers the tax bill without consuming cash.
+    # Issue #142: each member's DECLARED s.20(1)(e) non-registered management
+    # fee reduces their OWN taxable income here -- the same income-reduction
+    # trace as the RRSP/Smith/rental deductions (one spelling, DP#9), priced
+    # bracket-aware by the tax_on_income that runs on the reduced base. The
+    # fee is CASH (its dated leg rides cfg.cash_flows below); only its tax
+    # effect is booked here. Gated per member on NOT being retired: once a
+    # member retires this prologue zeroes their employment income and the
+    # drawdown base (rules_retirement_income, feeding plan_drawdown_net's
+    # OAS-clawback fixpoint) becomes the deduction's sole capture -- exactly
+    # ONE mechanism fires per phase (the #1033 gate pattern), so no dollar of
+    # the fee is ever deducted twice.
+    _mgmt_fees = cfg.non_reg_management_fees()
+    _p_mgmt_fee = 0.0 if p_retired else _mgmt_fees.get('primary', 0.0)
+    _s_mgmt_fee = 0.0 if s_retired else _mgmt_fees.get('spouse', 0.0)
     _income_by_role, _loan_by_role = _adult_income_maps(
         primary_income, spouse_income,
-        (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
-        (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
+        (_p_loan_inc + _p_rent_op,
+         _p_loan_ded + _p_rent_ded + _p_rent_cca + _p_mgmt_fee),
+        (_s_loan_inc + _s_rent_op,
+         _s_loan_ded + _s_rent_ded + _s_rent_cca + _s_mgmt_fee),
         _extra_specs)
     _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
     primary_rate = _adult_tax['primary']['rate']
@@ -1445,6 +1500,26 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         cfg.children, getattr(cfg, 'gifts', []), child_savings_after_tax,
         state.jurisdiction_state.get('canada', {}).get('child_accounts', []))
     adult_annual_savings = annual_savings - sum(child_savings) - sum(child_gifts)
+    # Issue #143: this year's trading friction, split by seam (0.0 whenever
+    # the household declares no friction — DP#32). Surfaced on YearResult via
+    # allocations['_trading_friction_cost'].
+    _lump_friction = 0.0
+    _annual_friction = 0.0
+    # Issue #143: turning the year's savings over is not free. The year's
+    # deployment base IS the traded notional (the engine deploys every saved
+    # dollar in one pass), so the cost is base x rebalance_bps and what
+    # reaches the pots is the post-friction remainder — the drag compounds
+    # for the rest of the horizon like any real fee. Bps spelling only: an
+    # aggregate pot's per-ticket count is unobservable, so no flat fee here
+    # (DP#32: never price a fabricated count). Known step-scale limit,
+    # disclosed via model_fidelity: when registered room caps bind, less
+    # deploys than this base and the haircut slightly OVERCHARGES friction.
+    if ctx.trading_friction is not None and not ctx.trading_friction.is_frictionless \
+            and adult_annual_savings > 0:
+        from trading_friction import BPS as _friction_bps
+        _annual_friction = (adult_annual_savings
+                            * ctx.trading_friction.rebalance_bps / _friction_bps)
+        adult_annual_savings = adult_annual_savings - _annual_friction
     # Issue #859 (Part A): the LOAN-kind portion of that gift funding (a subset,
     # capped to the SAME room). It does not affect the carve or the child's
     # growth (both already use the total child_gifts) -- it is threaded onto the
@@ -1497,13 +1572,55 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # savings that were never borrowed. 0.0 in every year but year 0, and in
     # year 0 for a household that took no lump sum (DP#32).
     lump_non_reg = 0.0
+    # Issue #137: the deployment-lag spread cost priced at year 0 (0.0 absent
+    # a lag, or in every year after year 0 — DP#32). Surfaces on YearResult so
+    # a caller can quote "what is each month of waiting costing me".
+    deployment_lag_cost = 0.0
 
     if ctx.lump_sum > 0 and year == 0:
+        # Issues #137/#74: price the declared deployment timing. The borrowed
+        # lump sits uninvested (in a parking sleeve at the idle rate) for the
+        # declared lag (#137) or until each tranche's deployment year (#74);
+        # the spread between the financing rate and the idle sleeve rate is a
+        # real cost that consumes part of the proceeds before they deploy, and
+        # a schedule additionally gives up k years of compounding per tranche.
+        # Net it out of the lump BEFORE fill_room so the projection prices the
+        # drag. Absent/zero lag and no schedule -> carry 0 -> effective_lump ==
+        # ctx.lump_sum, the byte-identical path (DP#32).
+        from deployment_lag import lump_financing_rate, year0_deployment_cost
+        _lump_financing_rate = lump_financing_rate(
+            ctx.lump_sum, ctx.config.margin_available,
+            ctx.heloc_path.get_heloc_rate(0, ctx.rate_path.rate_type),
+            ctx.rate_path.get_rate(0),
+        )
+        _deployment_carry = year0_deployment_cost(
+            ctx.lump_sum, ctx.deployment_lag_months,
+            ctx.deployment_schedule_years,
+            _lump_financing_rate, ctx.deployment_idle_rate,
+            # Discount tranches at the same flat return the ranker scores
+            # with (issue #74) — the cost is exact under the ranking model's
+            # own assumption, not under a second, disagreeing one.
+            ctx.return_model.return_for_year(0),
+        )
+        deployment_lag_cost = _deployment_carry
+        effective_lump = max(0.0, ctx.lump_sum - _deployment_carry)
+        # Issue #143: the lump's own round trip is not free either — crossing
+        # the spread on $X deployed costs X × rebalance_bps, plus ONE flat
+        # fee: this deployment crosses through exactly one fill_room call,
+        # the one seam where the engine can honestly COUNT an event. Netted
+        # out BEFORE fill_room so only the post-friction dollars deploy (the
+        # debt booked stays full — you really did borrow the gross and pay
+        # the fee from proceeds). Absent/zero friction -> no-op (DP#32).
+        if ctx.trading_friction is not None and not ctx.trading_friction.is_frictionless:
+            from trading_friction import round_trip_cost
+            _lump_friction = round_trip_cost(
+                effective_lump, ctx.trading_friction, count_events=1)
+            effective_lump = max(0.0, effective_lump - _lump_friction)
         # Allocate lump sum first, then annual savings. Issue #792: honour a
         # declared deductible-vs-registered advance split when the household
         # has stated one (None = today's registered-first internal optimization).
         lump_alloc = engine.fill_room(
-            ctx.lump_sum, family_state,
+            effective_lump, family_state,
             deductible_non_reg_first=ctx.config.refinance_advance_deductible_non_reg,
         )
         annual_alloc = engine.allocate(family_state)
@@ -1570,6 +1687,12 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         # above. Both are 0.0 in every year but year 0.
         '_lump_sum': ctx.lump_sum if year == 0 else 0.0,
         '_lump_non_reg': lump_non_reg,
+        # Issue #137: the deployment-lag spread cost priced at year 0.
+        '_deployment_lag_cost': deployment_lag_cost,
+        # Issue #143: this year's trading friction (lump + annual seams),
+        # surfaced on YearResult. 0.0 when the household declares no
+        # friction — the read side defaults to 0.0 (DP#32).
+        '_trading_friction_cost': _lump_friction + _annual_friction,
     }
 
     # ── Compute RESP CESG/QESI grants (pre-computed, passed as data) ──
@@ -1794,7 +1917,10 @@ class FamilySimulation:
                  deduct_later: bool = None,
                  lump_sum: float = 0.0,
                  free_cash: float = 0.0,
-                 return_model=None):
+                 return_model=None,
+                 deployment_lag_months: int = 0,
+                 deployment_idle_rate: float = 0.0,
+                 deployment_schedule_years: int = 1):
         
         self.config = config
         
@@ -1891,6 +2017,23 @@ class FamilySimulation:
             self.deduct_later = deduct_later
         self.lump_sum = lump_sum  # Refinance cash-out for year-0 allocation
         self.free_cash = free_cash  # Free cash (e.g., RESP proceeds) — invested without adding to HELOC debt
+        # Issue #137: deployment-lag search dimension (see SimulationContext).
+        self.deployment_lag_months = deployment_lag_months
+        self.deployment_idle_rate = deployment_idle_rate
+        # Issue #74: staggered-deployment search dimension (see
+        # SimulationContext). A lag AND a schedule at once is an ambiguous
+        # declaration — refuse here, eagerly, before any fold runs (DP#32).
+        from deployment_lag import validate_deployment_dimensions
+        validate_deployment_dimensions(deployment_lag_months,
+                                       deployment_schedule_years)
+        self.deployment_schedule_years = deployment_schedule_years
+        # Issue #143: the declared trading-friction model, read once at the
+        # impure boundary and threaded into every context/fold below. Absent
+        # block -> frictionless -> every seam no-ops (DP#32, golden
+        # byte-identical).
+        from trading_friction import TradingFrictionModel
+        self.trading_friction = TradingFrictionModel.from_decl(
+            (config.portfolio_data or {}).get('trading_friction'))
         
         # DP#21/#260: Pluggable return model — compose through data, not hardcoded
         # float. return_model_data is the single source of truth: SimulationConfig
@@ -2128,6 +2271,10 @@ class FamilySimulation:
             primary_income=self._primary_income,
             spouse_income=self._spouse_income,
             portfolio=self._portfolio,
+            deployment_lag_months=self.deployment_lag_months,
+            deployment_idle_rate=self.deployment_idle_rate,
+            deployment_schedule_years=self.deployment_schedule_years,
+            trading_friction=self.trading_friction,
         )
 
     def _simulate_year_step(self, state, year: int,
@@ -2227,6 +2374,9 @@ class FamilySimulation:
         # cash is present, fill_room(0) returns all zeros so borrowed_investment
         # stays 0.
         if (self.lump_sum > 0 or self.free_cash > 0) and state is not None:
+            # Issue #143: this seam's trading friction (0.0 when the
+            # household declares none, DP#32).
+            _lump_friction = 0.0
             # Issue #674: honour a dated income_segment covering the
             # lump-sum's own calendar year (start_year) the same way the
             # per-year loop below does -- a job-loss scenario whose window
@@ -2256,10 +2406,38 @@ class FamilySimulation:
                 bracket_gap=primary_rate - spouse_rate,
             )
             engine = StrategyEngine(self.strategy)
+            # Issues #137/#74: price the declared deployment timing the same
+            # way the yearly path does (both folds must agree — cross-engine
+            # pinning, #258): net the timing cost out of the lump before
+            # fill_room. Absent/zero lag and no schedule -> carry 0 -> no-op
+            # (DP#32).
+            from deployment_lag import lump_financing_rate, year0_deployment_cost
+            _lump_financing_rate = lump_financing_rate(
+                self.lump_sum, self.config.margin_available,
+                self.heloc_path.get_heloc_rate(0, self.rate_path.rate_type),
+                self.rate_path.get_rate(0),
+            )
+            _deployment_carry = year0_deployment_cost(
+                self.lump_sum, self.deployment_lag_months,
+                self.deployment_schedule_years,
+                _lump_financing_rate, self.deployment_idle_rate,
+                self.return_model.return_for_year(0),
+            )
+            _effective_lump = max(0.0, self.lump_sum - _deployment_carry)
+            # Issue #143: the lump's round trip is not free (same seam as the
+            # yearly fold — both folds must agree, #258): net the spread cost
+            # plus ONE countable flat fee out of the lump BEFORE fill_room.
+            if self.trading_friction is not None \
+                    and not self.trading_friction.is_frictionless:
+                from trading_friction import round_trip_cost
+                _lump_friction = round_trip_cost(
+                    _effective_lump, self.trading_friction, count_events=1)
+                _effective_lump = max(0.0, _effective_lump - _lump_friction)
+            deployment_lag_cost = _deployment_carry
             # Issue #792: honour a declared deductible-vs-registered advance
             # split (None = today's registered-first internal optimization).
             lump_alloc = engine.fill_room(
-                self.lump_sum, lump_state,
+                _effective_lump, lump_state,
                 deductible_non_reg_first=self.config.refinance_advance_deductible_non_reg,
             )
             
@@ -2288,6 +2466,10 @@ class FamilySimulation:
                 # lump-sum allocation, with no salary-funded savings mixed in.
                 '_lump_sum': self.lump_sum,
                 '_lump_non_reg': lump_alloc.non_reg,
+                # Issue #137: the deployment-lag spread cost priced at year 0.
+                '_deployment_lag_cost': deployment_lag_cost,
+                # Issue #143: the year-0 lump deployment's friction.
+                '_trading_friction_cost': _lump_friction,
             }
             lump_return = self.return_model.return_for_year(0)
             result0, state = simulate_year_pure(
@@ -2459,10 +2641,17 @@ class FamilySimulation:
             # adjustment but -- unlike the interest -- is NOT subtracted from
             # after-tax cash below (depreciation lowers tax without consuming cash).
             _extra_specs = _extra_adult_specs(cfg, sim_year, salary_growth, year, year_brackets)
+            # Issue #142: the monthly path mirrors simulate_year's prologue
+            # exactly (same per-phase gating, same income-reduction trace).
+            _mgmt_fees = cfg.non_reg_management_fees()
+            _p_mgmt_fee = 0.0 if p_retired else _mgmt_fees.get('primary', 0.0)
+            _s_mgmt_fee = 0.0 if s_retired else _mgmt_fees.get('spouse', 0.0)
             _income_by_role, _loan_by_role = _adult_income_maps(
                 primary_income, spouse_income,
-                (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
-                (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
+                (_p_loan_inc + _p_rent_op,
+                 _p_loan_ded + _p_rent_ded + _p_rent_cca + _p_mgmt_fee),
+                (_s_loan_inc + _s_rent_op,
+                 _s_loan_ded + _s_rent_ded + _s_rent_cca + _s_mgmt_fee),
                 _extra_specs)
             _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
             primary_rate = _adult_tax['primary']['rate']
@@ -2546,6 +2735,18 @@ class FamilySimulation:
                 cfg.children, getattr(cfg, 'gifts', []), child_savings_after_tax,
                 state.jurisdiction_state.get('canada', {}).get('child_accounts', []))
             adult_annual_savings = annual_savings - sum(child_savings) - sum(child_gifts)
+            # Issue #143: the annual deployment's exact bps haircut — same
+            # seam, same spelling as the yearly fold (DP#9). Bps only: no
+            # honest per-ticket count exists for aggregate pots.
+            _annual_friction = 0.0
+            if self.trading_friction is not None \
+                    and not self.trading_friction.is_frictionless \
+                    and adult_annual_savings > 0:
+                from trading_friction import BPS as _friction_bps
+                _annual_friction = (adult_annual_savings
+                                    * self.trading_friction.rebalance_bps
+                                    / _friction_bps)
+                adult_annual_savings = adult_annual_savings - _annual_friction
             # Issue #859 (Part A): the loan-kind subset of that funding, threaded
             # onto loan_funded_principal for the family balance sheet (DP#18).
             child_loans = child_loan_funded_for_year(
@@ -2630,6 +2831,8 @@ class FamilySimulation:
                 '_primary_earned_income': primary_earned_income,
                 '_spouse_earned_income': spouse_earned_income,
                 '_annual_savings': annual_savings,
+                # Issue #143: this year's annual-deployment friction.
+                '_trading_friction_cost': _annual_friction,
             }
             
             # ── Compute RESP CESG/QESI grants ──

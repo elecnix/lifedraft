@@ -166,7 +166,8 @@
         "incomes": { "type": "array", "items": { "$ref": "#/$defs/income" } },
         "benefits": { "$ref": "#/$defs/benefit_claim" },
         "entitlements": { "$ref": "#/$defs/benefit_entitlement" },
-        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } }
+        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } },
+        "superficial_losses": { "type": "array", "items": { "$ref": "#/$defs/superficial_loss_event" }, "description": "OPTIONAL (issue #141): loss-bearing dispositions this person declares for the ITA s.53(1)(c)/s.54 superficial-loss rule -- the anti-avoidance precondition any tax-loss-harvest feature must honour. The engine cannot auto-detect the 30-day substitution window from aggregated balances (no per-lot ledger), so the household DECLARES the transaction facts and the engine prices the statute on them: a substituted-property acquisition within [-30, +30] days by this person OR an affiliated person, still held 30 days after the disposition, DENIES the whole loss (it never joins the s.111(1)(b) pool) and adds it to the non-registered ACB instead (s.53(1)(f)). Absent/empty = no declared superficial-loss disposition (the golden household; byte-identical run). Declared only on simulated adult members -- a child or outsider declaring is refused loudly at load (DP#32)." }
       }
     }
 

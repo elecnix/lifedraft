@@ -349,6 +349,15 @@ def _default_canada_state() -> dict:
         # parallel to SimulationConfig.children, initialized to all 0.0.
         'child_tuition_carryforwards': [],
 
+        # Issue #140: the ITA s.111(1)(b) NET-CAPITAL-LOSS carry-forward pool
+        # (taxable basis -- inclusion_rate x the pre-inclusion loss), written
+        # by the `capital_loss_carryforward` rule and read back next year by
+        # retirement_drawdown's shelter + the rule itself. 0.0 for a
+        # household that has never realized a net capital loss (the golden
+        # path -- inert, DP#32). Lives in jurisdiction_state['canada']
+        # because it is a Canada-specific tax construct (DP#25).
+        'capital_loss_carryforward': 0.0,
+
         # Epic #841 bite 2 / issue #812: each child's OWN registered accounts
         # (TFSA/FHSA/RRSP/non-reg) -- balances + available room -- as a list
         # parallel to SimulationConfig.children. A child is a first-class
@@ -3104,6 +3113,11 @@ def simulate_year_pure(
         'primary_tuition_carryforward': ws.new_primary_tuition_carryforward,
         'spouse_tuition_carryforward': ws.new_spouse_tuition_carryforward,
         'child_tuition_carryforwards': ws.new_child_tuition_carryforwards,
+        # Issue #140: write the capital_loss_carryforward rule's new
+        # net-capital-loss pool back to jurisdiction_state (the fold's
+        # cross-year loss ledger). 0.0 for a household that realizes no net
+        # capital loss (the golden path).
+        'capital_loss_carryforward': ws.new_capital_loss_carryforward,
         # Issue #700/#643/#704: write the single-slot WorkingState scalars back
         # into FRESH per-adult FHSA/LIRA/LIF stores carrying the prior ids/order.
         # A second adult's FHSA (slot 1) compounds at the same investment_return
@@ -3579,6 +3593,27 @@ def simulate_year_pure(
         # household that declares no tuition (the golden path).
         primary_tuition_carryforward=ws.new_primary_tuition_carryforward,
         spouse_tuition_carryforward=ws.new_spouse_tuition_carryforward,
+        # Issue #140: surface the s.111(1)(b) loss ledger -- the opening
+        # pool, what this year's pricing sheltered with it, the year's net
+        # realized capital loss (pre-inclusion), and the Dec-31 pool carried
+        # forward indefinitely. All 0.0 for a household with no losses (the
+        # golden path).
+        capital_loss_carryforward_opening=ws.opening_capital_loss_carryforward,
+        capital_loss_offset_applied=ws.capital_loss_applied,
+        capital_loss_realized=ws.capital_loss_realized,
+        capital_loss_carryforward=ws.new_capital_loss_carryforward,
+        # Issue #141: surface the s.53(1)(c) denial -- the pre-inclusion loss
+        # the `superficial_loss` rule denied this year (already excluded from
+        # the pool above and added to non_reg_acb under s.53(1)(f)). 0.0 for
+        # a household declaring no superficial-loss disposition.
+        superficial_loss_denied=ws.superficial_loss_denied,
+        # Issue #137: surface the year-0 deployment-lag spread cost (prices the
+        # "what is each month of waiting costing me" headline). 0.0 except in
+        # year 0 with a declared lag (DP#32).
+        deployment_lag_cost=allocations.get('_deployment_lag_cost', 0.0),
+        # Issue #143: surface the year's trading friction (0.0 absent a
+        # declared model, DP#32).
+        trading_friction_cost=allocations.get('_trading_friction_cost', 0.0),
     )
 
     return result, new_state

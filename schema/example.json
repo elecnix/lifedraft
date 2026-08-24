@@ -888,7 +888,8 @@
         "face_amount": 500000,
         "premium_annual": 620,
         "as_of": "2026-01-01",
-        "term_end_date": "2040-01-01"
+        "term_end_date": "2040-01-01",
+        "renewal_end_date": "2045-01-01"
       },
       {
         "id": "permanent_p2",

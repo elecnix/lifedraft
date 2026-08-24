@@ -132,6 +132,19 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
         employment_income += ctx.primary_income_pre
     if not ctx.spouse_retired:
         employment_income += ctx.spouse_income_pre
+    # Issue #142: the declared s.20(1)(e) management/counsel fees the fold
+    # DEDUCTED this year (working-phase: off the owner's prologue taxable
+    # income; retirement: off the drawdown/OAS-clawback base -- either way an
+    # amount deducted in computing income). Two alignments, both statutory:
+    # the AMTI base below is assembled WITHOUT the prologue's deduction, so
+    # the fee is netted back OUT of taxable_income here (else AMT would tax
+    # income the regular tax never did); and compute_amt half-adds the fee
+    # back per s.127.52(1)(j)(ii) -- paragraphs 20(1)(c) to (f) and (bb)
+    # "in respect of an amount borrowed or paid" [to earn income from
+    # property, and investment counsel fees]. This is the REAL source the
+    # (j)(ii) half-add-back previously referenced without any production
+    # caller ever supplying.
+    mgmt_fees_total = sum(ctx.config.non_reg_management_fees().values())
     taxable_income = (
         employment_income
         + ws.drawdown_taxable
@@ -141,6 +154,8 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
         + ws.oas_income
         + ws.pension_income
     )
+    if mgmt_fees_total > 0.0:
+        taxable_income -= min(mgmt_fees_total, taxable_income)
     # The regular-inclusion slice of the realized gain -- already in
     # taxable_income -- that total_tax_with_amt grosses up to the AMT's 100%
     # inclusion (s.127.52(1)(d)). Issue #1082: the inclusion rate is the
@@ -171,6 +186,7 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
         taxable_income=taxable_income,
         taxable_capital_gains=taxable_capital_gains,
         capital_gains_inclusion=inclusion,
+        carrying_charges=mgmt_fees_total,
         nonrefundable_credits=nr_credits,
         params=AMTParameters.for_year(year, provider),
     )

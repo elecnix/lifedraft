@@ -10,9 +10,11 @@ Two halves:
   to their owner and are mapped by ``contract_people``.
 * **The overrides** (``_map_account_overrides``,
   ``_registered_composition_accounts``) -- a per-account ``expected_return``,
-  ``locked_until``, ``mer`` or ``product`` flag is blended, balance-weighted,
-  into its pot, so a flagged account grows at its own rate while the rest of
-  the pot uses the global one (issues #823/#691/#826/#917).
+  ``locked_until``, ``mer``, ``deductible_management_fee_annual`` or
+  ``product`` flag reaches the engine: rate/fee overrides are blended,
+  balance-weighted, into the pot (issues #823/#691/#826/#917), and the
+  separately-charged s.20(1)(e) management fee (#142) is attributed to its
+  owner(s) and priced as cash + a bracket-aware deduction.
 
 Absence is a strict no-op throughout: an account declaring none of these
 leaves its pot on today's global rate, fully liquid and fee-free (DP#32).
@@ -22,7 +24,10 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from contract_errors import ContractAdaptationError
-from contract_people import _active_employment_income, _owner_shares, _people_by_id
+from contract_people import (
+    _active_employment_income, _find_primary_and_spouse, _horizon_end_year,
+    _owner_shares, _people_by_id,
+)
 
 
 # Issue #823: account kinds whose balances the engine grows as one aggregate
@@ -60,15 +65,21 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
 
     Returns ``{'return_overrides': {kind: {override_balance, weighted_rate_sum}},
     'locked': {kind: [{balance, unlock_age, owner_birth_year}]},
-    'mer_drag': {kind: {mer_balance, weighted_mer_sum}}}``.
+    'mer_drag': {kind: {mer_balance, weighted_mer_sum}},
+    'mgmt_fees': {person_id: annual_fee}}``.
 
-    - ``mer_drag[kind]`` (issue #691): the summed balance of accounts of ``kind``
-      that declared a `mer` fee, plus the balance-weighted fee sum
-      (`sum(balance * mer)`). The growth rule subtracts this from the pot's
-      gross rate: ``net = gross - weighted_mer_sum / pot_total`` -- so a declared
-      fee reduces the compounded balance (composing on top of the expected_return
-      blend). A null/absent `mer` records nothing (fee-free global rate, golden);
-      an explicit 0.0 is recorded (a declared fact, DP#32) but moves no rate.
+    - ``mer_drag[kind]`` (issue #691/#136): the summed balance of accounts of
+      ``kind`` that declared a `mer` fee, the balance-weighted fee sum
+      (``sum(balance * mer)``), and -- issue #136 -- the fee as a FIXED DRAG
+      RATE (``fee_rate``, the balance-weighted average fee; ``fee_share``, the
+      fee-accounts' share of the kind's DECLARED pot balance). The growth rule
+      subtracts ``fee_share * fee_rate`` from the gross rate. The fee is a
+      RATE, not a frozen dollar snapshot, so it does not dilute as the pot
+      grows; a zero-opening-balance fee account is treated as the whole pot
+      when it is the only declared account of its kind (it must still pay its
+      declared fee once funded, issue #136). A null/absent `mer` records
+      nothing (fee-free global rate, golden); an explicit 0.0 is recorded (a
+      declared fact, DP#32) but moves no rate.
 
     - ``return_overrides[kind]``: the summed balance of accounts of ``kind``
       that declared an `expected_return`, plus the balance-weighted rate sum
@@ -102,11 +113,59 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
     return_overrides: Dict[str, Dict[str, float]] = {}
     locked: Dict[str, List[Dict[str, Any]]] = {}
     mer_drag: Dict[str, Dict[str, float]] = {}
+    # Issue #142: {person_id: annual s.20(1)(e)-deductible management fee},
+    # attributed pro rata to the account's owner(s) (a joint non-reg account
+    # splits its fee by declared ownership shares, the same split every
+    # other owner-attributed fact uses). Collected by the kind gate below.
+    mgmt_fees: Dict[str, float] = {}
+    primary_id, spouse_id = _find_primary_and_spouse(doc)
+    couple = {primary_id, spouse_id} - {None}
+    for acc in doc.get("accounts", []):
+        fee = acc.get("deductible_management_fee_annual")
+        if fee is None:
+            continue
+        if acc["kind"] != "non_reg":
+            raise ContractAdaptationError(
+                f"Account {acc['id']!r} (kind={acc['kind']}) declares "
+                f"deductible_management_fee_annual={fee!r}. ITA s.20(1)(e) "
+                f"allows a deduction only for fees paid to manage or "
+                f"administer NON-REGISTERED investments -- a fee inside a "
+                f"registered plan is not deductible and this field is not "
+                f"its spelling. Drop the field here (issue #142)."
+            )
+        owners = _owner_shares(acc.get("owner"))
+        if not set(owners) <= couple:
+            # A fee on an ADDITIONAL ACCUMULATING adult's account has no tax
+            # seam to reach (#899's adults never retire and their prologue
+            # tax path carries no deductions) -- silently dropping it would
+            # price a phantom deduction. Refuse rather than drop (DP#32).
+            raise ContractAdaptationError(
+                f"Account {acc['id']!r} declares "
+                f"deductible_management_fee_annual={fee!r} but is owned by "
+                f"{sorted(set(owners) - couple)!r}, outside the simulated "
+                f"couple. An additional accumulating adult's fee has no tax "
+                f"path to reach yet (#899/#901) -- move the account to the "
+                f"primary or spouse, or drop the field (issue #142)."
+            )
+        for person_id, share in owners.items():
+            mgmt_fees[person_id] = (mgmt_fees.get(person_id, 0.0)
+                                    + float(fee) * share)
+    # Issue #136: the pot-kind's DECLARED total balance (sum of every account
+    # of this kind, fee-bearing or not) -- used to price the fee-accounts' share
+    # of the pot. A zero-opening fee account funded by future contributions
+    # keeps its fee live because the DRAG RATE (not a rolling dollar sum) is
+    # what the growth rule subtracts.
+    kind_declared: Dict[str, float] = {}
+    fee_rates_by_kind: Dict[str, List[float]] = {}
     for acc in doc.get("accounts", []):
         kind = acc["kind"]
         if kind not in _GROWTH_POT_KINDS:
             continue
         amount = acc["balance"]["amount"]
+        kind_declared[kind] = kind_declared.get(kind, 0.0) + amount
+        mer = acc.get("mer")
+        if mer is not None and mer != 0:
+            fee_rates_by_kind.setdefault(kind, []).append(mer)
         # Issue #826 (DP#7/#10/#12/#13): a product flag resolves the
         # product module's well-known rules as DEFAULTS for expected_return /
         # locked_until. An EXPLICIT account.expected_return / account.locked_until
@@ -129,8 +188,7 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
         # explicit 0.0 IS a declared fact (fee-free), recorded here (mer_balance
         # counted, weighted_mer_sum contributes 0) and distinct from a null/
         # absent MER, which records nothing and leaves today's global-rate
-        # behaviour untouched (golden). This is the ONE engine-read fee spelling
-        # (DP#8); it composes on top of the #823 expected_return blend above.
+        # behaviour untouched (the canonical fee (DP#8)).
         mer = acc.get("mer")
         if mer is not None:
             m = mer_drag.setdefault(kind, {"mer_balance": 0.0,
@@ -175,8 +233,83 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
             locked.setdefault(kind, []).append(
                 {"balance": amount, "unlock_age": unlock_age,
                  "owner_birth_year": owner_birth_year})
+    # Issue #136: normalize each pot-kind's fee entry to a FIXED DRAG RATE ---
+    # ``fee_rate`` (the balance-weighted average declared fee over the kind's
+    # fee-flagged accounts, or the declared average when they all open
+    # zero-balance) and ``fee_share`` (the fee-accounts' share of the kind's
+    # DECLARED pot balance). The growth rule subtracts ``fee_share * fee_rate``
+    # -- a constant rate every year, immune to the pot's dollar drift (no
+    # dilution as an ongoing plan, and a zero-balance account that is the only
+    # account of its kind gets the WHOLE pot fraction once funded -- issue
+    # #136).
+    for kind, entry in mer_drag.items():
+        bal = entry["mer_balance"]
+        wms = entry["weighted_mer_sum"]
+        rates = fee_rates_by_kind.get(kind, [])
+        if bal > 0:
+            entry["fee_rate"] = wms / bal
+        elif rates:
+            # All fee-flagged accounts of this kind close zero-balance (e.g. a
+            # brand-new account being funded later): keep the DECLARED average
+            # fee rate -- a single 0-opening account at 0.5% is a 0.5% pot once
+            # it holds money (issue #136).
+            entry["fee_rate"] = sum(rates) / len(rates)
+        else:
+            entry["fee_rate"] = 0.0
+        total = kind_declared.get(kind, 0.0)
+        if total > 0:
+            entry["fee_share"] = bal / total
+        else:
+            # No other declared account of this kind: the fee-flagged account
+            # (or the future money in this pot) IS the whole pot.
+            entry["fee_share"] = 1.0 if (bal > 0 or rates) else 0.0
     return {"return_overrides": return_overrides, "locked": locked,
-            "mer_drag": mer_drag}
+            "mer_drag": mer_drag, "mgmt_fees": mgmt_fees}
+
+
+def map_management_fee_legs(doc: Dict, start_year: int) -> List[Dict[str, Any]]:
+    """Issue #142: every declared non-registered
+    ``deductible_management_fee_annual`` becomes dated NEGATIVE cash-flow legs
+    -- one per projection year, folded into the engine's EXISTING dated
+    cash-flow channel by ``input_contract.to_internal_config`` (the same
+    channel #138's insurance premiums and #139's transaction costs ride), so
+    the fee is REAL CASH paid to the manager, never a phantom deduction.
+
+    The deduction itself does NOT live on the legs: it is priced in the tax
+    fold (bracket-aware taxable-income reduction while the owner works; OAS-
+    clawback-base reduction once they are retired). The legs carry
+    ``tax_treatment: post-tax`` because the leg is after-tax cash -- the
+    saving is booked where the tax is computed, not by re-pricing the leg.
+
+    A discretionary mandate charges while the account exists, so a PERPETUAL
+    fee (no end date in the contract) prices through the horizon person's
+    final simulated year. Returns ``[]`` for a household declaring no fee --
+    the golden household -- leaving the fold byte-identical (DP#32).
+    """
+    fee_accounts = [a for a in doc.get("accounts", [])
+                    if a.get("deductible_management_fee_annual") is not None]
+    if not fee_accounts:
+        return []
+    primary_id, _ = _find_primary_and_spouse(doc)
+    last_year = (_horizon_end_year(doc, primary_id) if primary_id else None)
+    if last_year is None:
+        # Same generous cap map_insurance_premiums uses when the horizon does
+        # not date against the primary: extra legs beyond the fold's own span
+        # are inert by construction.
+        last_year = start_year + 99
+    out: List[Dict[str, Any]] = []
+    for acc in fee_accounts:
+        amount = -float(acc["deductible_management_fee_annual"])
+        for year in range(start_year, last_year + 1):
+            out.append({
+                "year": year,
+                "amount": amount,
+                "tax_treatment": "post-tax",
+                "kind": "cost",
+                "id": acc["id"],
+                "label": "non-registered management fee",
+            })
+    return out
 
 
 #: Issue #917: the registered kinds whose composition the engine reads back --

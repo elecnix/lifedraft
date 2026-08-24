@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/transaction_costs.json",
+  "title": "lifedraft input contract — universal $defs: the transaction_costs[] block",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Issue #139: one-time costs and credits attached to a dated financial event (refinance origination fees, discharge/quittance fees, title insurance, appraisal, transfer-in rebates and match bonuses). Each entry is one directional, dated, one-off balance-sheet delta; the adapter folds its dated cash-flow legs into the engine's existing cash_flows channel so every objective sees them (DP#8). Optional and deliberately NOT in the spine's required list (DP#16: auto-include on trigger data) -- a document that omits transaction_costs[] has no such frictions, and the run is unchanged (the golden invariant does not move, DP#32).",
+
+  "$defs": {
+    "transaction_cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "kind", "date", "amount"],
+      "properties": {
+        "id": { "type": "string", "description": "A stable identifier for this one-time leg (e.g. 'refinance_origination_2026')." },
+        "label": { "type": "string", "description": "What the leg is for (e.g. 'lender origination fees', 'title insurance premium', 'transfer-in rebate'). Free text, a FACT." },
+        "kind": {
+          "type": "string",
+          "enum": ["cost", "credit"],
+          "description": "Issue #139. The direction of this one-time balance-sheet leg, explicit and never collapsed into the sign of an amount (DP#32): 'cost' = the household PAYS (origination/discharge fees, title insurance, appraisal, transfer-out fees); 'credit' = the household RECEIVES (transfer-in reimbursement, asset match bonus). A genuine zero (no net cost) is still a declarable 0 amount within either direction."
+        },
+        "date": { "$ref": "#/$defs/date", "description": "The date the leg fires. The adapter maps the calendar year of this date; a credit spread over an installment period fires its first annual leg this year." },
+        "amount": { "$ref": "#/$defs/money", "description": "The non-negative MAGNITUDE of the leg, in the document's currency/dollars units. The direction is carried by `kind`, never by a negative literal here (DP#32: a $-zero cost is real and distinct from a credit). The household declares the net after-tax figure." },
+        "installment_years": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "description": "Issue #139. Optional: spread the amount across this many equal ANNUAL legs starting in the date's calendar year. A transfer-in match paid over a 24-month installment period is therefore not priced as one year-0 lump (a one-time delta between near-identical custodian choices is exactly what a fee comparison wants, and a lump mis-prices the crossover). Omit for the ordinary closing-day lump that fires entirely in the date's year. Default: 1 (a single leg)."
+        }
+      }
+    }
+  }
+}
