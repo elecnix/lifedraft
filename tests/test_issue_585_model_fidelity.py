@@ -469,6 +469,7 @@ _CODE_ANCHORS = {
         'contract_assumptions.py', 'def _reconcile_spending_figures('),
     # Issue #758: runway caveats. The two structural biases (all-spend-rigid,
     # contributions-counted) and the credit-line/waterfall-order findings are
+
     # produced by runway.compute_runway reading the #679 solvency verdict; the
     # interpolation caveat is the linear point estimate itself. All four are
     # anchored to the fold that produces them.
@@ -486,6 +487,10 @@ _CODE_ANCHORS = {
         'runway.py', 'frac = max(0.0, min(1.0, covered_r / shortfall_r))'),
     # unlabeled_dollar_basis is a config-shape gap, not a code path — it has
     # no anchor and is exempt below.
+    # Issue #141: the declarable-window disclosure is anchored to the rule
+    # that books the denial -- delete the rule and the caveat can never fire.
+    'superficial_loss_window_is_declarable': (
+        'rules_superficial_loss.py', 'ws.superficial_loss_denied'),
 }
 
 _NO_CODE_ANCHOR = {'unlabeled_dollar_basis'}

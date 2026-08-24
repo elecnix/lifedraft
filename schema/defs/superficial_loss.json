@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/superficial_loss.json",
+  "title": "lifedraft input contract — universal $defs: declared superficial-loss dispositions",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Issue #141: the ITA s.53(1)(c)/s.54 superficial-loss rule's DECLARABLE facts -- one record per loss-bearing disposition the household knows (or plans) a substituted-property acquisition around.",
+
+  "$defs": {
+
+    "superficial_loss_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["year", "loss_amount", "acquired_by", "days_to_acquisition", "still_held_30_days_after"],
+      "description": "Issue #141: ONE loss-bearing disposition of property (shares, funds, crypto -- any capital property) that MIGHT be a superficial loss under ITA s.53(1)(c)/s.54, declared with the transaction facts the engine cannot observe. The engine holds its non-registered sleeve as one aggregated pot with no per-lot acquisition ledger, so it CANNOT auto-detect the 60-day substitution window from balances -- the household declares the window instead, and the rule applies the statute to the declared facts exactly: an acquisition inside [-30, +30] days (by the seller OR an affiliated person -- in this engine, the spouse) with the substituted property still owned 30 days after the disposition DENIES the whole loss (it never reaches the s.111(1)(b) carry-forward pool, issue #140) and adds it to the non-registered ACB instead (s.53(1)(f)), deferring the benefit to the substituted property's eventual disposition. An acquisition outside the window, or sold out before day 30, is NOT superficial and the loss is fully allowed -- declare those too if you want the engine to price the allowance explicitly; both sides of every threshold are real outcomes.",
+      "properties": {
+        "year": { "type": "integer", "description": "The calendar YEAR of the disposition. The engine's step is a year (the day-level statute is abstracted to the step scale -- disclosed on every run this feature activates), so the declaration is year-granular; the day-level facts live in `days_to_acquisition`." },
+        "loss_amount": { "$ref": "#/$defs/money", "description": "The PRE-inclusion capital loss (proceeds less ACB, 100% basis, a positive magnitude) this disposition realized or will realize. Must not exceed the net capital losses the engine actually realizes for the household in that year across all sources -- a declaration larger than the realized losses is refused loudly at simulation time (a loss that was never realized cannot be denied, DP#32)." },
+        "acquired_by": { "$ref": "#/$defs/person_id", "description": "The person who acquired the substituted property. s.54's affiliation test spans the household: a repurchase by the SPOUSE attributes to the seller exactly like the seller's own repurchase (the household-level trap/practice pattern this engine is uniquely positioned to price). Must resolve to a simulated adult member -- a child's or outsider's acquisition has no tax seam here and is refused loudly at load rather than silently dropped (DP#32)." },
+        "days_to_acquisition": { "type": "integer", "description": "Signed calendar days from the disposition to the acquisition of the substituted property: NEGATIVE = acquired BEFORE the sale (e.g. -10 = ten days before), POSITIVE = after (e.g. +19 = nineteen days after). Both sides count toward the s.54 window ([-30, +30], endpoints included); a value outside the window makes the event NOT superficial and the loss fully allowed -- the rule prices both sides, so declare the true sign and magnitude." },
+        "still_held_30_days_after": { "type": "boolean", "description": "Whether the acquiring person STILL OWNED the substituted property 30 calendar days after the disposition (s.54(c)(i)). false = sold out inside the window => NOT superficial => the loss is fully allowed. Required explicitly: a missing holding fact is not assumable (DP#32)." }
+      }
+    }
+
+  }
+}

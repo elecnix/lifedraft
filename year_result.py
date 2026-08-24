@@ -508,6 +508,16 @@ class YearResult:
     capital_loss_realized: float = 0.0
     capital_loss_carryforward: float = 0.0
 
+    # Issue #141: the pre-inclusion capital loss DENIED this year by the ITA
+    # s.53(1)(c)/s.54 superficial-loss rule (already excluded from
+    # ``capital_loss_realized`` and from the closing pool, and already added
+    # to ``non_reg_acb`` under s.53(1)(f)). Surfaced so a reader can see WHY
+    # a realized loss produced no pool dollars -- denied, not swallowed.
+    # Also the statute-deferred-ACB allowance the acb_le_fmv invariant grants
+    # (the s.53(1)(f) bump can legitimately lift ACB above FMV). 0.0 for a
+    # household declaring no superficial-loss disposition (the golden path).
+    superficial_loss_denied: float = 0.0
+
     # Epic #841 bite 4: end-of-year snapshot of each child's OWN accounts (the
     # bite-2 child_accounts list -- one dict per child with rrsp/tfsa/fhsa/
     # non_reg balances and their room/acb). Threaded here as REPORTING data so

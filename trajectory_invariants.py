@@ -467,15 +467,26 @@ def check_undrawn_heloc_not_debt(results, ctx):
 
 @invariant('acb_le_fmv')
 def check_acb_le_fmv(results, ctx):
-    """Cost basis never exceeds fair market value on the non-reg account."""
+    """Cost basis never exceeds fair market value on the non-reg account
+    -- EXCEPT by exactly the statute-deferred amount: under ITA s.53(1)(f)
+    (issue #141) a DENIED superficial loss is ADDED to the substituted
+    property's ACB, which can legitimately lift cost basis above FMV (sell
+    at a loss, rebuy cheaper, add the denied loss back). The allowance is
+    the CUMULATIVE denials booked through each year (each year's
+    ``superficial_loss_denied`` is surfaced on YearResult), so any ACB drift
+    beyond what declared denials explain still fires -- the invariant keeps
+    catching bugs; it just stops calling the statute one."""
     start_year = ctx.get('start_year', 0)
     tol = ctx.get('tolerance', 1e-6)
     violations = []
+    deferred_acb = 0.0   # cumulative s.53(1)(f) bumps booked so far
     for i, r in enumerate(results):
-        if r.non_reg_acb > r.non_reg_balance + tol:
+        deferred_acb += getattr(r, 'superficial_loss_denied', 0.0)
+        if r.non_reg_acb > r.non_reg_balance + deferred_acb + tol:
             violations.append(Violation(
                 start_year + i,
-                f'ACB ({r.non_reg_acb:.2f}) exceeds FMV ({r.non_reg_balance:.2f})',
+                f'ACB ({r.non_reg_acb:.2f}) exceeds FMV ({r.non_reg_balance:.2f})'
+                f' + statute-deferred s.53(1)(f) basis ({deferred_acb:.2f})',
                 r.non_reg_acb - r.non_reg_balance))
     return violations
 

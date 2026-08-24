@@ -3602,6 +3602,11 @@ def simulate_year_pure(
         capital_loss_offset_applied=ws.capital_loss_applied,
         capital_loss_realized=ws.capital_loss_realized,
         capital_loss_carryforward=ws.new_capital_loss_carryforward,
+        # Issue #141: surface the s.53(1)(c) denial -- the pre-inclusion loss
+        # the `superficial_loss` rule denied this year (already excluded from
+        # the pool above and added to non_reg_acb under s.53(1)(f)). 0.0 for
+        # a household declaring no superficial-loss disposition.
+        superficial_loss_denied=ws.superficial_loss_denied,
         # Issue #137: surface the year-0 deployment-lag spread cost (prices the
         # "what is each month of waiting costing me" headline). 0.0 except in
         # year 0 with a declared lag (DP#32).

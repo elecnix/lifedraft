@@ -606,6 +606,26 @@ class SimulationConfig:
                 fees[m['role']] = float(f)
         return fees
 
+    def superficial_loss_events(self) -> List[Dict]:
+        """Issue #141: every DECLARED ITA s.53(1)(c)/s.54 superficial-loss
+        disposition across the household, each tagged with its seller's
+        member id. The events ride family.members (round-trips wholesale,
+        DP#24 -- config_serde untouched); this is the one read seam the
+        registered `superficial_loss` rule consumes, so a household
+        declaring none gets an empty list everywhere and is byte-identical
+        to before (DP#32).
+        """
+        events: List[Dict] = []
+        for m in self.family_members:
+            declared = m.get('superficial_losses')
+            if declared is None:
+                continue
+            for e in declared:
+                tagged = dict(e)
+                tagged['seller'] = m.get('id', m.get('role'))
+                events.append(tagged)
+        return events
+
     @classmethod
     def from_json(cls, path: str) -> 'SimulationConfig':
         """Load configuration from an on-disk input contract document.

@@ -63,6 +63,14 @@ def apply_capital_loss_carryforward(ws: YearWorkingState,
         ws.sale_realized_gain,
         ws.principal_sale_realized_gain,
     )
+    # Issue #141: the `superficial_loss` rule (which runs immediately
+    # before this one) DENIED part of the year's realized losses under ITA
+    # s.53(1)(c)/s.54 -- a denied loss is never allowable, so it must not
+    # join the net position that feeds the s.111(1)(b) pool. Adding the
+    # positive denial magnitude back removes exactly that slice from the
+    # loss side. 0.0 for every caller that never ran the rule (direct unit
+    # tests, households declaring nothing) -- byte-identical (DP#32).
+    year_net += ws.superficial_loss_denied
     applied, net_loss_realized, new_pool = advance_pool(
         opening_pool=ws.opening_capital_loss_carryforward,
         offset_used=ws.capital_loss_offset_used,

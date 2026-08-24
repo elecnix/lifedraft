@@ -564,6 +564,14 @@ def _map_member(doc: Dict, person_id: str, role: str,
         transfer_to = _tuition_transfer_to(p)
         member.update({"tuition_transfer_to": transfer_to} if transfer_to else {})
 
+    # Issue #141: this person's DECLARED superficial-loss dispositions ride
+    # the member record wholesale (family.members round-trips verbatim,
+    # DP#24 -- config_serde untouched). Shape/affiliation validation lives
+    # in ``map_members``, which knows the full admitted-member set.
+    declared = p.get("superficial_losses")
+    if declared:
+        member["superficial_losses"] = [dict(e) for e in declared]
+
     return member
 
 
@@ -746,4 +754,47 @@ def map_members(doc: Dict, primary_id: str, spouse_id: Optional[str],
     # iterate it in declared order after the primary couple.
     for xid in extra_adult_ids:
         members.append(_map_member(doc, xid, xid, registered_balances))
+
+    # Issue #141: validate every declared superficial-loss disposition
+    # against the household that declared it -- loudly, at load (DP#32):
+    # an unresolvable `acquired_by`, or a declaration on someone who is NOT
+    # a simulated adult member (a child, an outsider), has no tax seam the
+    # engine could price, and silently dropping it would price a denial
+    # that never happens (or hide one that does).
+    admitted = {m["id"] for m in members}
+    people = _people_by_id(doc)
+    for pid, person in people.items():
+        events = person.get("superficial_losses")
+        if not events:
+            continue
+        if pid not in admitted:
+            raise ContractAdaptationError(
+                f"Person {pid!r} declares superficial_losses but is not a "
+                f"simulated adult member of this household. The ITA "
+                f"s.53(1)(c)/s.54 denial has no tax seam to price through a "
+                f"non-member (a child's or outsider's acquisition is not the "
+                f"seller's affiliated-person attribution this engine models). "
+                f"Move the declaration to the disposing member or drop it "
+                f"(issue #141)."
+            )
+        for e in events:
+            acquirer = e.get("acquired_by")
+            if acquirer not in admitted:
+                raise ContractAdaptationError(
+                    f"Person {pid!r} declares a superficial-loss disposition "
+                    f"acquired_by {acquirer!r}, which is not a simulated "
+                    f"adult member of this household. s.54 affiliation spans "
+                    f"the household (the spouse acquiring IS attribution); "
+                    f"declare only acquisitions by a simulated member "
+                    f"(issue #141)."
+                )
+            amount = e.get("loss_amount")
+            if not isinstance(amount, (int, float)) or amount <= 0.0:
+                raise ContractAdaptationError(
+                    f"Person {pid!r} declares a superficial-loss disposition "
+                    f"with loss_amount {amount!r}. A denial "
+                    f"needs a positive pre-inclusion loss magnitude -- there "
+                    f"is nothing to deny otherwise (DP#32)."
+                )
+
     return members

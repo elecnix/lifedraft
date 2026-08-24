@@ -323,6 +323,16 @@ class YearWorkingState:
     # 0.0 for a household that has never realized a net capital loss (the
     # golden fixture) -- a strict no-op, DP#32.
     opening_capital_loss_carryforward: float = 0.0
+    # Issue #141: the pre-inclusion capital loss DENIED this year by the ITA
+    # s.53(1)(c)/s.54 superficial-loss rule (written by the registered
+    # `superficial_loss` rule, which runs after 'solvency' and before
+    # `capital_loss_carryforward`). The denied slice never joins the
+    # s.111(1)(b) pool -- the capital_loss rule adds it back out of the
+    # year's net position -- and is instead added to the substituted
+    # property's ACB (s.53(1)(f)), which the same rule books onto
+    # ws.new_nonreg_acb. 0.0 for a household declaring no superficial-loss
+    # disposition (the golden fixture) -- a strict no-op, DP#32.
+    superficial_loss_denied: float = 0.0
 
     # ── This year's allocations (extracted from ctx.allocations) ──
     p_rrsp: float = 0.0
