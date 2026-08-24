@@ -76,7 +76,21 @@ def apply_retirement_drawdown(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # carry-forward are still worth $0 once the primary retires -- the
     # provincial cap's release is #1035, out of scope here; (d) the leveraged
     # portfolio's DISTRIBUTED income still never ENTERS the base (the deferred
-    # income-flowing half).
+    # income-flowing half -- issue #105's remaining acceptance criterion, and
+    # deliberately OUT OF SCOPE here, because it is inseparable from the
+    # net-of-tax growth model: non-reg and SM pots grow at
+    # ``non_reg_after_tax_return`` (the distributed income's tax is already
+    # folded into that rate), so feeding the same income into this base again
+    # would charge the same dollar to the OAS recovery tax AND to the growth
+    # rate's embedded tax -- a double-take. #105's acceptance ("borrowing to
+    # invest shows clawback rising from the new investment income below AND
+    # falling from the deduction above; an eligible-dividend tilt and a
+    # growth tilt with the same total return differ in clawback") needs the
+    # growth model restructured first: grow the non-reg/SM pots GROSS and
+    # recognize the distributed income (interest, grossed-up dividends,
+    # realized gains) as this year's taxable income / OAS base in the fold,
+    # with the carrying-charge deduction already netting it here. NOT done in
+    # this PR; the piece above (deduction netting the base, "down") IS.)
     if ctx.primary_retired and ws.sm_interest_deduction > 0.0:
         _D = ws.sm_interest_deduction
         from tax_calculator import bracket_ceiling

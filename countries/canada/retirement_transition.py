@@ -911,13 +911,15 @@ class SmUnwindResult:
     liquidate-to-target decumulation year (issue #1017).
 
     The SM sleeve is a leveraged non-reg portfolio: selling it realizes a
-    capital gain (taxed), the proceeds repay the readvanceable HELOC that
-    financed it, and the NET (after tax + HELOC repayment) funds the spending
-    shortfall the ordinary financial drawdown could not cover. Money-conserving:
-    ``net_delivered == gross_sold - tax - heloc_repaid``.
+    capital gain (taxed) or a capital loss (deductible against the year's
+    other taxable income, issue #110); the proceeds repay the readvanceable
+    HELOC that financed it, and the NET (after tax/credit + HELOC
+    repayment) funds the spending shortfall the ordinary financial drawdown
+    could not cover. Money-conserving:
+    ``net_delivered == gross_sold - tax - heloc_repaid`` (with ``tax`` signed).
     """
     gross_sold: float = 0.0          # SM portfolio proceeds (FMV sold)
-    tax: float = 0.0                 # capital-gains income tax on the realized gain
+    tax: float = 0.0                 # capital-gains income tax on the realized gain (negative = deductible loss credit)
     heloc_repaid: float = 0.0        # SM HELOC principal repaid from the proceeds
     net_delivered: float = 0.0       # proceeds - tax - heloc_repaid (to spending)
     realized_gain: float = 0.0       # pre-inclusion realized gain (proceeds - ACB)
@@ -938,13 +940,29 @@ def price_sm_unwind(net_need: float, sm_fmv: float, sm_acb: float,
     the overlay's money flow must conserve, and the HELOC principal the sale
     retires is a real liability reduction, not a free default).
 
-    The capital gain (``gross_sold * gain_frac``, where ``gain_frac`` is the
-    sleeve's accrued-gain fraction) is included at ``inclusion_rate`` and priced
-    at its REAL marginal cost through the progressive ``brackets``, stacking on
+    The realized gain/loss (``gross_sold * gain_frac``, where ``gain_frac`` is
+    the sleeve's SIGNED accrued-gain fraction) is included at
+    ``inclusion_rate`` and priced at its REAL marginal cost through the
+    progressive ``brackets``, STACKING signed: a positive gain stacks on
     ``other_income`` (the household's already-recognized taxable income this
-    year -- the discretionary drawdown + forced RRIF + CPP/pension). Solved by
-    binary search because the progressive tax makes ``net(gross)`` non-linear;
-    ``net(gross)`` is monotonic increasing so the search is well-posed.
+    year -- the discretionary drawdown + forced RRIF + CPP/pension) as extra
+    taxable income, while a capital LOSS (``gain_frac < 0``, an underwater
+    pot) offsets the same ``other_income`` as a DEDUCTIBLE loss priced through
+    the identical bracket sweep -- mirroring ``liquidation_waterfall
+    .capital_gains_cost``'s signed-and-unclamped ``gain_frac`` (issue #110;
+    the prior ``max(0.0, gain_frac)`` floor silently swallowed an underwater
+    pot's loss, leaving the surviving sleeve carrying ``acb > fmv`` with no
+    loss booked anywhere). Solved by binary search because the progressive tax
+    makes ``net(gross)`` non-linear; ``net(gross)`` is monotonic increasing on
+    each linear tax band, so the search is well-posed.
+
+    The loss's deductible slice (``inclusion_rate x gross_sold x gain_frac``)
+    is priced against the year's ``other_income`` only. Under ITA s.111(1)(c)
+    net-capital-loss rules the portion the year's other income cannot absorb
+    must carry forward to shelter a later capital gain; this engine has no
+    loss-carryforward state, so the unabsorbed remainder is neither credited
+    nor persisted here (issue #140). See ``test_issue_1017_sm_unwind`` for
+    the regression that pins this.
 
     Money conservation: ``net_delivered = gross_sold - tax - heloc_repaid``.
     If selling the WHOLE sleeve still cannot deliver ``net_need`` (the sleeve is
@@ -972,14 +990,23 @@ def price_sm_unwind(net_need: float, sm_fmv: float, sm_acb: float,
     if net_need <= 0.0 or sm_fmv <= 0.0:
         return SmUnwindResult()
     gain_frac = ((sm_fmv - sm_acb) / sm_fmv) if sm_fmv > 0 else 0.0
-    gain_frac = max(0.0, gain_frac)
+    # Issue #110: `gain_frac` is SIGNED and NOT clamped to [0,1]. An underwater
+    # pot (sm_fmv < sm_acb) realises a genuine capital LOSS; the pre-#110
+    # `max(0.0, gain_frac)` floor silently swallowed it -- the ACB still
+    # dropped proportionally while no loss was booked anywhere, so the
+    # surviving sleeve carried acb > fmv with the loss hidden. Mirror
+    # liquidation_waterfall.capital_gains_cost's signed-and-unclamped gain_frac
+    # and price the loss against this year's other taxable income below.
     # Proportional HELOC repayment: selling fraction f of the sleeve retires
     # f * sm_heloc of the loan. Capped at the proceeds (you cannot repay more
     # debt than the sale raised -- the underwater case sm_heloc > sm_fmv).
     heloc_frac = (sm_heloc / sm_fmv) if sm_fmv > 0 else 0.0
 
     def _net_of_gross(gross: float):
-        """Returns (net_delivered, tax) for selling ``gross`` of the sleeve."""
+        """Returns (net_delivered, tax, heloc_repaid) for selling ``gross``
+        of the sleeve. `taxable_gain` is SIGNED (issue #110): positive for a
+        gain (stacks on other_income as added tax), negative for a capital
+        loss (its deductible slice offsets the year's other_income)."""
         taxable_gain = gross * gain_frac * inclusion_rate
         if brackets:
             from tax_calculator import tax_on_income
@@ -997,9 +1024,12 @@ def price_sm_unwind(net_need: float, sm_fmv: float, sm_acb: float,
         gross = sm_fmv
         net, tax, heloc_repaid = full_net, full_tax, full_heloc
     else:
-        # Binary-search the gross that delivers exactly net_need. net(gross) is
-        # monotonic increasing (each extra dollar sold adds (1 - heloc_frac)
-        # less its marginal tax, both >= 0), so the search is well-posed.
+        # Binary-search the gross that delivers exactly net_need. net(gross)
+        # is monotonic increasing within each linear tax band (each extra
+        # dollar of gross adds to net its full value less the marginal
+        # gain/loss tax-delta and the heloc repayment), so the search stays
+        # well-posed even for an underwater loss, where the signed gain makes
+        # the marginal "tax" a negative credit against other_income.
         lo, hi = 0.0, sm_fmv
         for _ in range(64):
             mid = 0.5 * (lo + hi)
@@ -1013,8 +1043,14 @@ def price_sm_unwind(net_need: float, sm_fmv: float, sm_acb: float,
 
     realized_gain = gross * gain_frac
     return SmUnwindResult(
+        # `tax` is SIGNED for issue #110: a loss's deductible slice offsets the
+        # year's OTHER taxable income as a genuine credit, instead of being
+        # floored to 0 -- priced through the bracket sweep above and capped by
+        # the tax other_income actually owes (tax_on_income has a zero floor,
+        # so an underwater pot booked against other income cannot push the
+        # year's tax negative).
         gross_sold=gross,
-        tax=max(0.0, tax),
+        tax=tax,
         heloc_repaid=heloc_repaid,
         net_delivered=max(0.0, net),
         realized_gain=realized_gain,
