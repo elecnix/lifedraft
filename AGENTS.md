@@ -57,6 +57,19 @@ So a local full-suite run costs you wall-clock and nothing else: it cannot starv
 job. Still prefer a **targeted** run while you iterate — six minutes per edit is its own tax, and
 several agents sharing the box will thrash — then run the full suite once before you push.
 
+**Bound the memory a local run may take.** `pytest -n auto` starts one worker per CPU and knows
+nothing about RAM, so on a 16-core workstation it starts 16 — and if several agents each do that,
+the box thrashes. Cap it:
+
+```sh
+PYTEST_MEM_BUDGET_MB=8192 VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q
+```
+
+Measured on this suite: **4 workers peak at 2364 MB** for the whole process tree (~590 MB/worker)
+and finish in 4m15s, so an 8 GB budget leaves a wide margin. `PYTEST_WORKERS=N` overrides the
+computation outright when you want an exact number. The same arithmetic runs in CI
+(`.github/workflows/tests.yml`), where the cgroup limit supplies the ceiling instead.
+
 ### Coverage (`tools/coverage_gate.py`)
 
 CI measures coverage on the 3.12 leg and enforces, per file: **zero-coverage** files fail, and a
