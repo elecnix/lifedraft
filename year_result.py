@@ -27,6 +27,13 @@ class YearResult:
 
     # Contributions this year
     contributions: Dict[str, float] = field(default_factory=dict)
+    # Issue #170 (DP#32): what the contributions rule REFUSED this year -- a
+    # declared RRSP contribution above the contributor's room is clipped by
+    # the room clamp, and without these fields the refused slice simply
+    # vanished (booked $0, no warning, no disclosure). Surfaced so the output
+    # shows what was declined; 0.0 on every within-room year (golden no-op).
+    rrsp_contribution_refused_own: float = 0.0
+    rrsp_contribution_refused_spousal: float = 0.0
 
     # Account balances (end of year)
     primary_rrsp: float = 0.0
