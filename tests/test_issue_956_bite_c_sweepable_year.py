@@ -260,7 +260,7 @@ class SchemaCarriesYearLeaf(unittest.TestCase):
     def setUp(self):
         # Composed from schema/input_schema.json + its x-schema-parts $defs
         # fragments -- the same object the single file used to be.
-        self.schema = ic.load_universal_schema()
+        self.schema = contract_schema.load_universal_schema()
 
     def _check_year_leaf(self, def_name):
         d = self.schema["$defs"][def_name]

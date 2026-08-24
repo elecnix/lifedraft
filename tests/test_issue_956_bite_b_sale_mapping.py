@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from simulation_state import _property_equity_for_year
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_schema
 import contract_property
 
 
@@ -282,7 +283,7 @@ class SchemaCarriesPropertySaleDef(unittest.TestCase):
         # The universal schema is composed from schema/input_schema.json (spine)
         # plus its x-schema-parts $defs fragments; load_universal_schema()
         # returns exactly the object the single file used to be.
-        schema = ic.load_universal_schema()
+        schema = contract_schema.load_universal_schema()
         self.assertIn("property_sale", schema["$defs"])
         sale_def = schema["$defs"]["property_sale"]
         # #956 bite C: `date` is no longer top-level-required -- the def now
@@ -308,7 +309,7 @@ class SchemaCarriesPropertySaleDef(unittest.TestCase):
         # The universal schema is composed from schema/input_schema.json (spine)
         # plus its x-schema-parts $defs fragments; load_universal_schema()
         # returns exactly the object the single file used to be.
-        schema = ic.load_universal_schema()
+        schema = contract_schema.load_universal_schema()
         self.assertIn("sale", schema["$defs"]["property"]["properties"])
         slot = schema["$defs"]["property"]["properties"]["sale"]
         self.assertEqual(len(slot["anyOf"]), 2)
