@@ -166,6 +166,12 @@ class TestCarryCostIsPure:
         blended = lump_financing_rate(100_000, 50_000, LINE_RATE, ADVANCE_RATE)
         assert blended == pytest.approx(0.5 * LINE_RATE + 0.5 * ADVANCE_RATE)
 
+    def test_nonpositive_lump_has_no_financing_to_price(self):
+        # DP#32: a nonpositive lump has no financing to price and returns 0.0
+        # — a hard zero, never a fabricated rate from a zero-division.
+        assert lump_financing_rate(0, 100_000, LINE_RATE, ADVANCE_RATE) == 0.0
+        assert lump_financing_rate(-1, 100_000, LINE_RATE, ADVANCE_RATE) == 0.0
+
 
 # ============================================================================
 # 3. The engine prices it

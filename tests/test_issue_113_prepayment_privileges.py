@@ -89,6 +89,12 @@ class TestPrepaymentPrivilegesValidation:
 
 class TestSplitExtraPayment:
 
+    def test_negative_requested_extra_refuses_loudly(self):
+        # DP#32: a prepayment is money paid TO the lender; a negative one is
+        # nonsense and must refuse rather than be silently treated as zero.
+        with pytest.raises(ValueError, match="requested_extra cannot be negative"):
+            split_extra_payment(_priv(), -1.0, 3_000.0, 0.0)
+
     def test_within_annual_allowance_all_free(self):
         # $30k of a $50k allowance: entirely free.
         split = split_extra_payment(_priv(), 30_000.0, 3_000.0, 0.0)

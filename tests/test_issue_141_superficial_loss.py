@@ -336,6 +336,93 @@ class TestFidelityDisclosure(unittest.TestCase):
         for expected in ('p1', 'p2', '2028', '100000', '+19'):
             self.assertIn(expected, f)
 
+    def test_superficial_loss_events_handles_none_config(self):
+        # The read seam degrades to an empty list on a None config
+        # (defensive guard, DP#32 — absence yields nothing, never a crash).
+        import model_fidelity
+        self.assertEqual(model_fidelity.superficial_loss_events(None), [])
+
+    def test_superficial_loss_events_handles_non_list_members(self):
+        # A malformed config where family.members is not a list degrades
+        # to an empty list rather than crashing (DP#32).
+        import model_fidelity
+        self.assertEqual(
+            model_fidelity.superficial_loss_events(
+                {'family': {'members': 'not-a-list'}}), [])
+
+
+class TestRuleDefenseInDepth(unittest.TestCase):
+    """The ``superficial_loss`` rule carries runtime guards that duplicate the
+    contract loader's validations. The contract loader refuses bad events at
+    load (``TestContractMapping`` above); these tests bypass the contract by
+    building a legacy config directly — the same path the optimizer and
+    ScenarioOverlay use — so the rule's own defense-in-depth guards fire.
+    Driving ``FamilySimulation.run()`` exercises the rule in the fold, not a
+    hand-built ``YearWorkingState`` (DP#11/DP#18)."""
+
+    _START_YEAR = 2026
+
+    @staticmethod
+    def _legacy_cfg(members):
+        return {
+            'family': {'members': members, 'children': []},
+            'accounts': {'rrsp_annual_max': 0},
+            'assumptions': {'start_year': TestRuleDefenseInDepth._START_YEAR,
+                            'horizon_age': 60,
+                            'investment_return': 0.06, 'salary_growth': 0.0,
+                            'inflation': 0.0, 'frozen_brackets': True},
+            'portfolio': {
+                'accounts': {
+                    'non_reg': {
+                        'balance': 0, 'cost_basis': 0,
+                        'composition': {'cdn_equity_pct': 0.6,
+                                        'fixed_income_pct': 0.4},
+                        'yield': {'eligible_dividends': 0.02,
+                                  'interest': 0.0},
+                    },
+                },
+            },
+            'property': {
+                'house_value': 800_000, 'mortgage_balance': 0,
+                'mortgage_rate': 0.05, 'margin_available': 0,
+                'heloc_readvance': False, 'amortization_years': 25,
+            },
+            'household_budget': {'annual_living_costs': 60_000},
+        }
+
+    def test_non_member_acquirer_refuses_at_runtime(self):
+        from simulation import FamilySimulation
+        from simulation_config import SimulationConfig
+        cfg = SimulationConfig.from_dict(self._legacy_cfg([
+            {'role': 'primary', 'id': 'p1', 'birth_year': 1980,
+             'gross_income': 150_000, 'retirement_age': 65,
+             'rrsp_room_accumulated': 0, 'tfsa_room_accumulated': 0,
+             'superficial_losses': [
+                 {'year': self._START_YEAR, 'loss_amount': 100_000,
+                  'acquired_by': 'ghost', 'days_to_acquisition': 19,
+                  'still_held_30_days_after': True}]},
+        ]))
+        with self.assertRaises(ValueError):
+            FamilySimulation(cfg).run()
+
+    def test_non_positive_loss_refuses_at_runtime(self):
+        from simulation import FamilySimulation
+        from simulation_config import SimulationConfig
+        cfg = SimulationConfig.from_dict(self._legacy_cfg([
+            {'role': 'primary', 'id': 'p1', 'birth_year': 1980,
+             'gross_income': 150_000, 'retirement_age': 65,
+             'rrsp_room_accumulated': 0, 'tfsa_room_accumulated': 0,
+             'superficial_losses': [
+                 {'year': self._START_YEAR, 'loss_amount': 0,
+                  'acquired_by': 'p2', 'days_to_acquisition': 19,
+                  'still_held_30_days_after': True}]},
+            {'role': 'spouse', 'id': 'p2', 'birth_year': 1982,
+             'gross_income': 0, 'retirement_age': 65,
+             'rrsp_room_accumulated': 0, 'tfsa_room_accumulated': 0},
+        ]))
+        with self.assertRaises(ValueError):
+            FamilySimulation(cfg).run()
+
 
 if __name__ == '__main__':
     unittest.main()

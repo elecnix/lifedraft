@@ -180,6 +180,42 @@ class TestContractBoundary(unittest.TestCase):
         with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
+    def test_fee_outside_couple_refuses_at_override_mapper(self):
+        """The fee check in ``_map_account_overrides`` refuses a non-reg fee
+        on an owner outside the couple even when the people-admission stage
+        is bypassed (directly-authored configs, the optimizer's path).
+        Called directly as the #823 tests do — a pure contract function,
+        not internal engine state (DP#11)."""
+        import contract_accounts
+        doc = {
+            "people": [
+                {"id": "p1", "birth_date": "1980-01-01",
+                 "relationships": [{"type": "spouse_of", "person": "p2"}]},
+                {"id": "p2", "birth_date": "1982-01-01",
+                 "relationships": [{"type": "spouse_of", "person": "p1"}]},
+            ],
+            "accounts": [
+                {"id": "xa_nonreg", "owner": "xa", "kind": "non_reg",
+                 "balance": {"amount": 10000},
+                 "deductible_management_fee_annual": 100},
+            ],
+        }
+        with self.assertRaises(contract_errors.ContractAdaptationError):
+            contract_accounts._map_account_overrides(doc)
+
+    def test_fee_legs_fall_back_to_99_year_cap_without_primary(self):
+        """``map_management_fee_legs`` uses a ``start_year + 99`` cap when no
+        primary can be dated against the horizon — the same generous cap
+        ``map_insurance_premiums`` uses. Called directly with a doc whose
+        people list is empty so ``_find_primary_and_spouse`` returns None."""
+        legs = map_management_fee_legs(
+            {"accounts": [{"id": "x", "kind": "non_reg",
+                           "deductible_management_fee_annual": 100}],
+             "people": []}, 2026)
+        self.assertTrue(legs)
+        self.assertEqual(legs[0]["year"], 2026)
+        self.assertEqual(legs[-1]["year"], 2026 + 99)
+
 
 # ============================================================================
 # 3. The working-phase fold: real cash out, bracket-aware deduction back
