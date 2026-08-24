@@ -45,6 +45,11 @@ progress.md
 !schema/input_schema.json
 !schema/countries/canada/input_schema.json
 !schema/example.json
+# The universal schema's $defs, split out of the 140 KB single file so the
+# automated reviewer can read them (input_schema.json's x-schema-parts names
+# every one). The blanket `*.json` above would swallow them, and a fragment
+# that never reaches git is a contract block that silently vanishes (DP#32).
+!schema/defs/*.json
 inputs/
 
 # Implementation output artifacts (ephemeral, not version-controlled)

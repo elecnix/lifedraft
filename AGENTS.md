@@ -175,8 +175,10 @@ follows:
 }
 ```
 
-Schema: `schema/input_schema.json` plus the jurisdiction overlay
-(`schema/countries/canada/input_schema.json`); synthetic example at
+Schema: `schema/input_schema.json` (the spine: root `required`/`allOf` and the top-level
+properties) plus its `$defs` fragments in `schema/defs/*.json` — listed in the spine's
+`x-schema-parts` and folded in by `input_contract.load_universal_schema()` — plus the
+jurisdiction overlay (`schema/countries/canada/input_schema.json`); synthetic example at
 `schema/example.json`. Validate any document with
 `python -c "import input_contract; input_contract.load_and_map('my.json')"` —
 it refuses loudly rather than silently dropping what it cannot model.

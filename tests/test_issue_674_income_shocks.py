@@ -344,8 +344,7 @@ class TestInternalConfigRefusesUndeclaredKind(unittest.TestCase):
         if someone adds a kind to $defs/income_kind's enum without deciding
         its ITA s.146(1) treatment, this fails HERE -- at the point of the
         omission -- instead of the engine silently accruing no room for it."""
-        with open(ic.UNIVERSAL_SCHEMA_PATH) as f:
-            enum = json.load(f)["$defs"]["income_kind"]["enum"]
+        enum = ic.load_universal_schema()["$defs"]["income_kind"]["enum"]
         classified = EARNED_INCOME_KINDS | NON_EARNED_INCOME_KINDS
         self.assertEqual(
             set(enum), classified,
