@@ -519,3 +519,11 @@ class YearResult:
     # + the golden invariant are bit-identical, DP#32), but read back by the
     # family objective so an extra adult's wealth is not silently dropped.
     extra_adult_accounts: List[Dict] = field(default_factory=list)
+
+    # Issue #137: the deployment-lag spread cost priced in YEAR 0. This is the
+    # "what is each month of waiting costing me" headline — the dollars the
+    # undeployed borrowed lump loses to the financing-vs-idle spread while it
+    # waits. 0.0 in every year but year 0, and for any run that declares no
+    # lag (golden byte-identical, DP#32). The cost itself feeds the balances
+    # through the year-0 fill_room reduction; this field only REPORTS it.
+    deployment_lag_cost: float = 0.0

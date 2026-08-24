@@ -3579,6 +3579,10 @@ def simulate_year_pure(
         # household that declares no tuition (the golden path).
         primary_tuition_carryforward=ws.new_primary_tuition_carryforward,
         spouse_tuition_carryforward=ws.new_spouse_tuition_carryforward,
+        # Issue #137: surface the year-0 deployment-lag spread cost (prices the
+        # "what is each month of waiting costing me" headline). 0.0 except in
+        # year 0 with a declared lag (DP#32).
+        deployment_lag_cost=allocations.get('_deployment_lag_cost', 0.0),
     )
 
     return result, new_state

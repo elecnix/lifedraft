@@ -400,7 +400,9 @@ class Optimizer:
 
     def _build_context(self, config: SimulationConfig, strategy: AllocationStrategy,
                         use_readvanceable: bool, deduct_later: bool,
-                        lump_sum: float, state: SimState) -> SimulationContext:
+                        lump_sum: float, state: SimState,
+                        deployment_lag_months: int = 0,
+                        deployment_idle_rate: float = 0.0) -> SimulationContext:
         """Build the SimulationContext simulate_year needs (issue #627).
 
         This is the ONE constructor for "the year step's static inputs" on
@@ -487,6 +489,8 @@ class Optimizer:
             brackets=self._tax_provider.get_combined_brackets(),
             start_year=config.start_year,
             primary_income=primary_income,
+            deployment_lag_months=deployment_lag_months,
+            deployment_idle_rate=deployment_idle_rate,
             spouse_income=spouse_income,
             portfolio=portfolio,
         )
@@ -495,7 +499,9 @@ class Optimizer:
                         strategy: AllocationStrategy,
                         use_readvanceable: bool = False,
                         deduct_later: bool = False,
-                        lump_sum: float = 0.0) -> Tuple[List[YearResult], SimState]:
+                        lump_sum: float = 0.0,
+                        deployment_lag_months: int = 0,
+                        deployment_idle_rate: float = 0.0) -> Tuple[List[YearResult], SimState]:
         """Run a full simulation by folding ``simulate_year`` (DP#26/#627).
 
         Issue #627: this used to be a second, thinner implementation of "the
@@ -524,7 +530,9 @@ class Optimizer:
         # what "the opening state" is.
         state = initial_state_for_run(config, lump_sum)
         ctx = self._build_context(config, strategy, use_readvanceable, deduct_later,
-                                   lump_sum, state)
+                                   lump_sum, state,
+                                   deployment_lag_months=deployment_lag_months,
+                                   deployment_idle_rate=deployment_idle_rate)
 
         results = []
         for year in range(config.projection_years):
@@ -586,7 +594,9 @@ class GridOptimizer(Optimizer):
                  income_overrides: List[Dict] = None,
                  search_space: Dict = None,
                  refinance_amortization_years: Optional[int] = None,
-                 draw_fraction_options: List[float] = None) -> List[RankedScenario]:
+                 draw_fraction_options: List[float] = None,
+                 deployment_lag_options: List[int] = None,
+                 deployment_idle_rate: float = 0.0) -> List[RankedScenario]:
         """Evaluate a grid of scenario combinations and rank by objective.
 
         Args:
@@ -662,11 +672,24 @@ class GridOptimizer(Optimizer):
             # ways" pattern -- see this parameter's docstring for why the
             # default must be the single correct value, not a sweep.
             draw_fraction_options = draw_fraction_options or search_space.get('draw_fraction_options', [0.0])
+            # Issue #137: deployment lag is another SEARCH DIMENSION — same
+            # rationale as draw_fraction (DP#22/#31): how long borrowed money
+            # sits uninvested is a decision the optimizer ranks by pricing the
+            # idle-carry cost, not a fact the household declares. Default [0]
+            # (deploy at year 0 — today's behavior; a lag must be asked for).
+            deployment_lag_options = deployment_lag_options or [0,]
         else:
             use_readvanceable_options = use_readvanceable_options or [True, False]  # DP#31: hardcoded default
             deduct_later_options = deduct_later_options or [True, False]  # DP#31: hardcoded default
             draw_fraction_options = draw_fraction_options or [0.0]  # Issue #735: undrawn by default (DP#32)
+        # Issue #137: same convention absent/zero lag is the DP#32 default.
+        deployment_lag_options = deployment_lag_options or [0,]
         ltv_levels = ltv_levels or [0.0]  # Default: no refinance exploration
+        # Issue #137: expand the draw-fraction × deployment-lag grid into pairs
+        # so the inner loop body needs no re-indent.
+        _draw_lag_pairs = [
+            (df, lag) for df in draw_fraction_options for lag in deployment_lag_options
+        ]
 
         ranked = []
 
@@ -706,7 +729,7 @@ class GridOptimizer(Optimizer):
                 for strategy in strategies:
                     for use_readvanceable in use_readvanceable_options:
                         for deduct_later in deduct_later_options:
-                            for draw_fraction in draw_fraction_options:
+                            for draw_fraction, deployment_lag in _draw_lag_pairs:
                                 parts = [strategy.name, f"sm{int(use_readvanceable)}", f"dl{int(deduct_later)}"]
                                 if ltv > 0:
                                     parts.append(f"ltv{ltv:.0%}")
@@ -718,6 +741,10 @@ class GridOptimizer(Optimizer):
                                 # existed.
                                 if len(draw_fraction_options) > 1:
                                     parts.append(f"df{draw_fraction:.0%}")
+                                # Issue #137: only clutter the name for a lag
+                                # when more than one candidate was swept.
+                                if len(deployment_lag_options) > 1:
+                                    parts.append(f"lag{deployment_lag}m")
                                 if income_ov is not None:
                                     parts.append(income_label)
                                 name = "_".join(parts)
@@ -757,6 +784,10 @@ class GridOptimizer(Optimizer):
                                         config, strategy,
                                         use_readvanceable=use_readvanceable, deduct_later=deduct_later,
                                         lump_sum=config.margin_available * draw_fraction + config.cash_out,
+                                        # Issue #137: thread the deployment-lag
+                                        # search dimension (default 0 = today).
+                                        deployment_lag_months=deployment_lag,
+                                        deployment_idle_rate=deployment_idle_rate,
                                     )
                                     score = objective.evaluate(results)
                                     # DP#29: Compute risk measures from deterministic path
@@ -782,6 +813,7 @@ class GridOptimizer(Optimizer):
                                         'ltv': ltv,
                                         'cash_out': cash_out,
                                         'draw_fraction': draw_fraction,
+                                        'deployment_lag_months': deployment_lag,
                                         'income_label': income_label,
                                     },
                                     final_state=final_state,

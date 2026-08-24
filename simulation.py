@@ -120,6 +120,17 @@ class SimulationContext:
     primary_income: float   # base (year-0) primary gross income
     spouse_income: float    # base (year-0) spouse gross income
     portfolio: object       # non-reg composition (DP#8: static input data)
+    # Issue #137: deployment lag — the months a borrowed year-0 lump sum sits
+    # uninvested, and the rate its idle parking sleeve earns while it waits.
+    # Both default to zero/idle-rate-0 (today's deploy-immediately behavior;
+    # a lump with no declared lag is priced at 0 and the golden trajectory is
+    # byte-identical, DP#32). These are SEARCH DIMENSION parameters threaded
+    # by the optimizer/caller, not contract-mapped input fields (DP#22/#31 —
+    # deployment timing is a decision the engine ranks 0/3/6/12 months of,
+    # not a fact the household declares; the same reasoning as the #735
+    # draw_fraction search dimension).
+    deployment_lag_months: int = 0
+    deployment_idle_rate: float = 0.0
 
 
 def _year_brackets_for(sim_year: int, *, frozen_brackets: bool, brackets: list,
@@ -1497,13 +1508,36 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # savings that were never borrowed. 0.0 in every year but year 0, and in
     # year 0 for a household that took no lump sum (DP#32).
     lump_non_reg = 0.0
+    # Issue #137: the deployment-lag spread cost priced at year 0 (0.0 absent
+    # a lag, or in every year after year 0 — DP#32). Surfaces on YearResult so
+    # a caller can quote "what is each month of waiting costing me".
+    deployment_lag_cost = 0.0
 
     if ctx.lump_sum > 0 and year == 0:
+        # Issue #137: price deployment lag. The borrowed lump sits uninvested
+        # (in a parking sleeve at the idle rate) for the declared lag; the
+        # spread between the financing rate and the idle sleeve rate is a real
+        # cost that consumes part of the proceeds before they deploy. Net it
+        # out of the lump BEFORE fill_room so the projection prices the drag.
+        # Absent/zero lag -> carry 0 -> effective_lump == ctx.lump_sum, the
+        # byte-identical path (DP#32).
+        from deployment_lag import lump_financing_rate, deployment_carry_cost
+        _lump_financing_rate = lump_financing_rate(
+            ctx.lump_sum, ctx.config.margin_available,
+            ctx.heloc_path.get_heloc_rate(0, ctx.rate_path.rate_type),
+            ctx.rate_path.get_rate(0),
+        )
+        _deployment_carry = deployment_carry_cost(
+            ctx.lump_sum, ctx.deployment_lag_months,
+            _lump_financing_rate, ctx.deployment_idle_rate,
+        )
+        deployment_lag_cost = _deployment_carry
+        effective_lump = max(0.0, ctx.lump_sum - _deployment_carry)
         # Allocate lump sum first, then annual savings. Issue #792: honour a
         # declared deductible-vs-registered advance split when the household
         # has stated one (None = today's registered-first internal optimization).
         lump_alloc = engine.fill_room(
-            ctx.lump_sum, family_state,
+            effective_lump, family_state,
             deductible_non_reg_first=ctx.config.refinance_advance_deductible_non_reg,
         )
         annual_alloc = engine.allocate(family_state)
@@ -1570,6 +1604,8 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         # above. Both are 0.0 in every year but year 0.
         '_lump_sum': ctx.lump_sum if year == 0 else 0.0,
         '_lump_non_reg': lump_non_reg,
+        # Issue #137: the deployment-lag spread cost priced at year 0.
+        '_deployment_lag_cost': deployment_lag_cost,
     }
 
     # ── Compute RESP CESG/QESI grants (pre-computed, passed as data) ──
@@ -1794,7 +1830,9 @@ class FamilySimulation:
                  deduct_later: bool = None,
                  lump_sum: float = 0.0,
                  free_cash: float = 0.0,
-                 return_model=None):
+                 return_model=None,
+                 deployment_lag_months: int = 0,
+                 deployment_idle_rate: float = 0.0):
         
         self.config = config
         
@@ -1891,6 +1929,9 @@ class FamilySimulation:
             self.deduct_later = deduct_later
         self.lump_sum = lump_sum  # Refinance cash-out for year-0 allocation
         self.free_cash = free_cash  # Free cash (e.g., RESP proceeds) — invested without adding to HELOC debt
+        # Issue #137: deployment-lag search dimension (see SimulationContext).
+        self.deployment_lag_months = deployment_lag_months
+        self.deployment_idle_rate = deployment_idle_rate
         
         # DP#21/#260: Pluggable return model — compose through data, not hardcoded
         # float. return_model_data is the single source of truth: SimulationConfig
@@ -2128,6 +2169,8 @@ class FamilySimulation:
             primary_income=self._primary_income,
             spouse_income=self._spouse_income,
             portfolio=self._portfolio,
+            deployment_lag_months=self.deployment_lag_months,
+            deployment_idle_rate=self.deployment_idle_rate,
         )
 
     def _simulate_year_step(self, state, year: int,
@@ -2256,10 +2299,26 @@ class FamilySimulation:
                 bracket_gap=primary_rate - spouse_rate,
             )
             engine = StrategyEngine(self.strategy)
+            # Issue #137: price the deployment lag the same way the yearly
+            # path does (both folds must agree — cross-engine pinning, #258):
+            # net the undeployed-period spread cost out of the lump before
+            # fill_room. Absent/zero lag -> carry 0 -> no-op (DP#32).
+            from deployment_lag import lump_financing_rate, deployment_carry_cost
+            _lump_financing_rate = lump_financing_rate(
+                self.lump_sum, self.config.margin_available,
+                self.heloc_path.get_heloc_rate(0, self.rate_path.rate_type),
+                self.rate_path.get_rate(0),
+            )
+            _deployment_carry = deployment_carry_cost(
+                self.lump_sum, self.deployment_lag_months,
+                _lump_financing_rate, self.deployment_idle_rate,
+            )
+            _effective_lump = max(0.0, self.lump_sum - _deployment_carry)
+            deployment_lag_cost = _deployment_carry
             # Issue #792: honour a declared deductible-vs-registered advance
             # split (None = today's registered-first internal optimization).
             lump_alloc = engine.fill_room(
-                self.lump_sum, lump_state,
+                _effective_lump, lump_state,
                 deductible_non_reg_first=self.config.refinance_advance_deductible_non_reg,
             )
             
@@ -2288,6 +2347,8 @@ class FamilySimulation:
                 # lump-sum allocation, with no salary-funded savings mixed in.
                 '_lump_sum': self.lump_sum,
                 '_lump_non_reg': lump_alloc.non_reg,
+                # Issue #137: the deployment-lag spread cost priced at year 0.
+                '_deployment_lag_cost': deployment_lag_cost,
             }
             lump_return = self.return_model.return_for_year(0)
             result0, state = simulate_year_pure(
