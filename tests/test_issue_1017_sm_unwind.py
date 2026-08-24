@@ -276,3 +276,50 @@ class TestPriceSmUnwindHelper:
         # realized_gain = gross_sold * (fmv - acb) / fmv (the gain fraction).
         expected = r.gross_sold * (2_000_000 - 1_000_000) / 2_000_000
         assert abs(r.realized_gain - expected) < 0.5
+
+    def test_underwater_loss_sleeve_books_a_negative_realized_gain(self):
+        """Issue #110: an underwater SM pot (fmv < acb) realizes a capital LOSS
+        and prices its deductible slice against the year's other income,
+        instead of the pre-#110 `max(0.0, gain_frac)` floor hiding it (which
+        left net = gross down, a proportional ACB cut, and no loss recorded
+        anywhere -- the surviving pot silently carried acb > fmv)."""
+        from countries.canada.retirement_transition import price_sm_unwind
+        # The issue's exact reproduction: FMV 1,000,000 / ACB 1,500,000,
+        # need 50,000. other_income is the household's already-recognized
+        # taxable income this year, which the loss's deductible slice offsets.
+        r = price_sm_unwind(50_000, 1_000_000, 1_500_000, 0.0,
+                            self._brackets(), other_income=100_000)
+        # 1. The loss is recognised: realized_gain is negative and tracks the
+        #    signed gain fraction (fmv - acb) / fmv = -0.5.
+        assert r.realized_gain < 0.0
+        assert abs(r.realized_gain - r.gross_sold * (1_000_000 - 1_500_000) / 1_000_000) < 0.5
+        # 2. The loss is priced: it offsets the year's other income, so the
+        #    disposition's tax is a negative credit (a real tax reduction),
+        #    not the pre-#110 phantom zero.
+        assert r.tax < 0.0
+        # 3. Money conservation with the signed tax still closes exactly -- the
+        #    net delivered equals the gross proceeds minus the signed tax minus
+        #    the (zero here) HELOC repayment.
+        assert abs(r.gross_sold - r.tax - r.heloc_repaid - r.net_delivered) < 0.5
+        # 4. The surviving pot's ACB is NOT silently absorb-verwritten: the
+        #    proportional reduction ([ref] fix) leaves it carrying acb > fmv,
+        #    and the loss is visible in realized_gain rather than hidden.
+        f = r.gross_sold / 1_000_000
+        acb_sold = f * 1_500_000
+        fmv_after = 1_000_000 - r.gross_sold
+        acb_after = 1_500_000 - acb_sold
+        assert acb_after > fmv_after  # the surviving pot holds acb > fmv openly
+
+    def test_underwater_loss_with_no_other_income_recognises_loss_but_books_no_credit(self):
+        """With no taxable income to absorb it, the loss is still RECOGNISED
+        (a negative realized_gain, never floored to zero) but warrants no tax
+        credit -- tax_on_income's zero floor means the deduction cannot push
+        the year's tax below zero. The cross-year carryforward of the unused
+        remainder is tracked as issue #140 (no loss-carryforward state yet)."""
+        from countries.canada.retirement_transition import price_sm_unwind
+        r = price_sm_unwind(50_000, 1_000_000, 1_500_000, 0.0,
+                            self._brackets(), other_income=0.0)
+        assert r.realized_gain < 0.0
+        assert abs(r.realized_gain - 50_000 * (1_000_000 - 1_500_000) / 1_000_000) < 0.5
+        assert r.tax == 0.0  # nothing to credit against
+        assert abs(r.gross_sold - r.tax - r.heloc_repaid - r.net_delivered) < 0.5
