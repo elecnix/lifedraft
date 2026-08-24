@@ -47,10 +47,12 @@ import countries.canada  # noqa: F401 -- registers the Canada jurisdiction provi
 
 import input_contract as ic
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
+import contract_errors
+import contract_schema
 
 
 def _load_doc():
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         return _two_generation_subset(json.load(fh))
 
 
@@ -104,7 +106,7 @@ class TestMultiTrancheMortgageAggregates(unittest.TestCase):
         m2["collateral"] = "rental_duplex"
         doc["liabilities"] = doc["liabilities"] + [m1, m2]
 
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("mortgage", msg)
@@ -125,7 +127,7 @@ class TestMultiTrancheMortgageAggregates(unittest.TestCase):
         second["amortization"] = {"years": 25, "payment_monthly": 500}
         doc["liabilities"] = doc["liabilities"] + [second]
 
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         self.assertIn("amortization", str(ctx.exception))
 
@@ -158,7 +160,7 @@ class TestMultiTrancheMortgageAggregates(unittest.TestCase):
         second["limit"] = 100_000
         doc["liabilities"] = doc["liabilities"] + [second]
 
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("heloc", msg)
@@ -176,7 +178,7 @@ class TestMultiTrancheMortgageAggregates(unittest.TestCase):
         second["limit"] = 50_000
         doc["liabilities"] = doc["liabilities"] + [second]
 
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("line_of_credit", msg)

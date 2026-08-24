@@ -50,8 +50,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import input_contract as ic
 import voi
+import contract_schema
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -70,7 +70,7 @@ def _fabricated_household() -> dict:
     sidecar removed, so every candidate is schema-sourced. All figures in the
     shipped example are fabricated round numbers with role-based ids (DP#4/
     DP#15); nothing here is anyone's real household."""
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
     keep = {"p1", "p2", "ca", "cb"}
     doc["people"] = [p for p in doc["people"] if p["id"] in keep]
@@ -90,7 +90,7 @@ def _fabricated_household() -> dict:
         m for m in doc["assumptions"]["mortality"] if m["person"] in keep
     ]
     doc.pop("provenance", None)
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -100,14 +100,14 @@ def _fabricated_household() -> dict:
 
 def test_the_real_schema_passes_uncertainty_validation():
     """The whole point of DP#32's 'no silent default': this must not raise."""
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     voi.validate_uncertainty_annotations(schema)   # must not raise
 
 
 def test_the_real_schema_has_both_document_and_belief_leaves():
     """A sanity check that the classification work actually happened -- not a
     schema where everything defaulted to one bucket."""
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     found = {"document": 0, "belief": 0}
 
     def _walk(node):
@@ -132,7 +132,7 @@ def test_the_real_schema_has_both_document_and_belief_leaves():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_missing_resolvability_fails_schema_validation():
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     schema["$defs"]["date"] = {
         "type": "string",
         "x-uncertainty": {"plausible_range": [0, 1], "resolved_by": "somewhere"},
@@ -142,7 +142,7 @@ def test_missing_resolvability_fails_schema_validation():
 
 
 def test_invalid_resolvability_value_fails_schema_validation():
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     schema["$defs"]["date"] = {
         "type": "string",
         "x-uncertainty": {"plausible_range": [0, 1], "resolvability": "vibes"},
@@ -155,7 +155,7 @@ def test_missing_resolvability_fails_the_moment_the_pointer_is_read():
     """Not just the whole-schema audit -- the per-pointer read path
     (``schema_annotation``) must ALSO refuse, since that is what a live
     ``collect_candidates``/``sweep`` call actually exercises."""
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     schema["$defs"]["date"] = {
         "type": "string",
         "x-uncertainty": {"plausible_range": [0, 1]},
@@ -168,7 +168,7 @@ def test_a_document_with_a_bad_schema_annotation_cannot_be_swept():
     """End-to-end: collect_candidates validates the WHOLE schema up front, so
     a bad annotation anywhere is caught even before the document is walked."""
     doc = _fabricated_household()
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     schema["$defs"]["date"] = {
         "type": "string",
         "x-uncertainty": {"domain": [True, False], "resolvability": "not-a-real-value"},
@@ -205,7 +205,7 @@ _EXPECTED_RESOLVABILITY = {
 
 @pytest.mark.parametrize("pointer,expected", sorted(_EXPECTED_RESOLVABILITY.items()))
 def test_real_schema_leaf_classified_as_expected(pointer, expected):
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     entry = voi.schema_annotation(schema, pointer)
     assert entry is not None, f"{pointer} carries no x-uncertainty annotation at all"
     assert entry["resolvability"] == expected, (
@@ -353,7 +353,7 @@ def test_provenance_only_leaf_with_no_schema_annotation_defaults_to_document():
         reason="needs Track 1 (#660)'s sidecar module to build a provenance-only candidate",
     )
     doc = _fabricated_household()
-    schema = ic.compose_schema()
+    schema = contract_schema.compose_schema()
     # legal_name carries no x-uncertainty annotation anywhere in the schema.
     assert voi.schema_annotation(schema, "/people/0/legal_name") is None
 

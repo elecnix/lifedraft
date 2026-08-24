@@ -64,6 +64,7 @@ from test_issue_694_cca_recapture import _add_owned_rental, _CCA as _RENTAL_CCA
 from test_issue_956_bite_b_sale_core import (
     _add_cottage, _base_doc_no_pr_designation, _SALE_2031,
 )
+import contract_schema
 
 
 # The shipped example projects 50 years from start_year 2026, so results[i]
@@ -78,13 +79,13 @@ def _base_doc():
     """The shipped two-generation example, validated (the sub-family the
     adapter can honestly map onto the two-adults-plus-children engine)."""
     doc = _two_generation_subset(_load_example())
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
 def _run(doc):
     """Validate -> map to internal config -> run the real engine."""
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run(), legacy
@@ -100,7 +101,7 @@ def _rental_doc_with_sale(sale, cca=_RENTAL_CCA):
     for p in doc["properties"]:
         if p["id"] == "couple_rental":
             p["sale"] = sale
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -119,7 +120,7 @@ def _rental_doc_with_sale_below_ucc(sale, cca=_RENTAL_CCA):
             p["sale"] = sale
             p["value"]["amount"] = 200000  # proceeds below the declining UCC
             p["acb"] = 200000  # ACB = proceeds -> zero capital gain (isolate)
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 

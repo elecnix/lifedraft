@@ -42,6 +42,7 @@ from countries.canada.cca import (
 import objective
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_schema
 
 
 def _add_owned_rental(doc, gross_rent, expenses, mortgage_balance=0, rate=0.05,
@@ -148,7 +149,7 @@ class CCATaxLaw(unittest.TestCase):
 class CCAReducesTaxableIncomeAndTracksUCC(unittest.TestCase):
     def setUp(self):
         self.base = _two_generation_subset(_load_example())  # no rental
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_cca_reduces_net_rental_income_and_declines_ucc(self):
         """A $30k-rent, $8k-expense, mortgage-free rental (net 22000 before CCA)
@@ -156,7 +157,7 @@ class CCAReducesTaxableIncomeAndTracksUCC(unittest.TestCase):
         rental income drops to 6800, and the UCC declines to 364800 in year 1."""
         doc = _add_owned_rental(self.base, gross_rent=30000, expenses=8000,
                                 cca=_CCA)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         results = _run(doc)
         yr = results[0]
         # 22000 net-before-CCA less 15200 CCA = 6800 T776 net rental income.
@@ -182,7 +183,7 @@ class CCAReducesTaxableIncomeAndTracksUCC(unittest.TestCase):
         never negative."""
         doc = _add_owned_rental(self.base, gross_rent=15000, expenses=5000,
                                 cca=_CCA)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         yr = _run(doc)[0]
         self.assertAlmostEqual(yr.cca_claimed, 10000.0, places=6)
         self.assertAlmostEqual(yr.net_rental_income, 0.0, places=6)
@@ -203,7 +204,7 @@ class CCAReducesTaxableIncomeAndTracksUCC(unittest.TestCase):
 class CCARecaptureAtEstate(unittest.TestCase):
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def _estate(self, doc):
         legacy = ic.to_internal_config(doc)
@@ -253,7 +254,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_rental_without_cca_carries_no_cca_facts(self):
         doc = _add_owned_rental(self.base, 30000, 8000)  # rental, no cca

@@ -12,6 +12,7 @@ removed. Use evaluate_strategy_with_simulation() and discover_strategies()
 from strategy.py instead.
 """
 
+import contract_schema
 from tax_data import default_tax_provider
 import json
 import argparse
@@ -4246,8 +4247,7 @@ def main():
         # input_schema.json was an example-instance file of the retired
         # legacy shape, not the contract itself (DP#9).
         import shutil
-        import input_contract
-        schema_path = input_contract.EXAMPLE_PATH
+        schema_path = contract_schema.EXAMPLE_PATH
         if args.template == '-':
             with open(schema_path) as f:
                 print(f.read())

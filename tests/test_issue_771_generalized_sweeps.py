@@ -27,15 +27,15 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import input_contract as ic
 import sweep
+import contract_schema
 
 
 def _couple_doc() -> dict:
     """The shipped example trimmed to the couple + their children -- the shape
     the Phase-1 engine can actually simulate (#598; the full four-generation
     example is correctly REFUSED). Mirrors tests/test_voi_661.py's fixture."""
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
     keep = {"p1", "p2", "ca", "cb"}
 
@@ -326,8 +326,8 @@ def test_cli_prints_a_table_for_a_declared_sweep(monkeypatch, capsys):
     doc = _couple_doc()
     doc["sensitivity"]["sweeps"] = {"assumptions.retirement.spending_target": [80000]}
     monkeypatch.setattr(sys, "argv", ["sweep.py", "--input", "ignored.json"])
-    monkeypatch.setattr(sweep.input_contract, "load_contract_json", lambda p: doc)
-    monkeypatch.setattr(sweep.input_contract, "validate_contract", lambda d: None)
+    monkeypatch.setattr(sweep.contract_schema, "load_contract_json", lambda p: doc)
+    monkeypatch.setattr(sweep.contract_schema, "validate_contract", lambda d: None)
     monkeypatch.setattr(sweep, "run_optimization",
                         lambda *a, **k: [{"objective_score": 42.0, "net_benefit": 42.0, "label": "x"}])
     sweep._main()

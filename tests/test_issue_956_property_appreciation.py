@@ -18,8 +18,8 @@ Round numbers per DP#13/DP#15.
 import unittest
 
 from simulation_state import _property_equity_for_year
-import input_contract as ic
 import sweep
+import contract_property
 
 
 class TestAppreciationMath(unittest.TestCase):
@@ -85,14 +85,14 @@ def _doc_with_cottage(appreciation_rate=None):
 
 class TestMapperCarriesShares(unittest.TestCase):
     def test_shares_emitted_only_when_rate_declared(self):
-        entry = ic._map_owned_properties(_doc_with_cottage(0.03), "p1", "p2")[0]
+        entry = contract_property._map_owned_properties(_doc_with_cottage(0.03), "p1", "p2")[0]
         self.assertEqual(entry["appreciation_rate"], 0.03)
         self.assertEqual(entry["value_share"], 500000)     # couple owns 100%
         self.assertEqual(entry["secured_share"], 300000)
         self.assertEqual(entry["net_equity"], 200000)
 
     def test_no_rate_round_trips_byte_identically(self):
-        entry = ic._map_owned_properties(_doc_with_cottage(None), "p1", "p2")[0]
+        entry = contract_property._map_owned_properties(_doc_with_cottage(None), "p1", "p2")[0]
         self.assertNotIn("appreciation_rate", entry)       # #692/#696 byte-identical
         self.assertNotIn("value_share", entry)
         self.assertNotIn("secured_share", entry)

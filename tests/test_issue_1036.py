@@ -35,6 +35,8 @@ import tempfile
 import unittest
 
 import input_contract as ic
+import contract_errors
+import contract_schema
 import optimize
 import output_paths
 from objective import MAX_NET_BENEFIT
@@ -239,14 +241,14 @@ class TestBorrowToInvestValidation(unittest.TestCase):
     LOUDLY at load, never silently coerce to the supported value."""
 
     def _load(self, doc):
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         return ic.to_internal_config(doc)
 
     def test_source_must_resolve_to_a_heloc(self):
         doc = _mortgage_free_doc()
         doc["decisions"]["borrow_to_invest"] = [
             _btv_option("btv_x", "Draw", 50_000, source="personal_loc")]
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             self._load(doc)
         self.assertIn("personal_loc", str(cm.exception))
 
@@ -264,7 +266,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         doc["liabilities"].append(second)
         doc["decisions"]["borrow_to_invest"] = [
             _btv_option("btv_x", "Draw", 10_000, source="heloc_second")]
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             self._load(doc)
         self.assertIn("exactly one heloc facility", str(cm.exception))
 
@@ -292,7 +294,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         doc["liabilities"].append(second)
         doc["decisions"]["borrow_to_invest"] = [
             _btv_option("btv_x", "Draw", 10_000, source="heloc_cottage")]
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             self._load(doc)
         self.assertIn("single drawn HELOC facility", str(cm.exception))
 
@@ -305,7 +307,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
                               if l["kind"] != "heloc"]
         doc["decisions"]["borrow_to_invest"] = [
             _btv_option("btv_x", "Draw", 50_000, source="heloc_main")]
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             self._load(doc)
         self.assertIn("no kind=heloc liability with that id", str(cm.exception))
 
@@ -314,7 +316,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         # heloc_main limit is 150000 in the shipped example.
         doc["decisions"]["borrow_to_invest"] = [
             _btv_option("btv_x", "Draw", 200_000, source="heloc_main")]
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             self._load(doc)
         self.assertIn("over-limit", str(cm.exception).lower())
 
@@ -322,7 +324,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         doc = _mortgage_free_doc()
         doc["decisions"]["borrow_to_invest"] = [
             _btv_option("btv_zero", "Draw zero", 0, source="heloc_main")]
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             self._load(doc)
 
     def test_target_account_other_than_non_reg_is_refused(self):
@@ -332,7 +334,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         doc = _mortgage_free_doc()
         doc["decisions"]["borrow_to_invest"] = [
             _btv_option("btv_rrsp", "Draw into RRSP", 50_000, target="rrsp")]
-        with self.assertRaises(ic.ContractValidationError) as cm:
+        with self.assertRaises(contract_errors.ContractValidationError) as cm:
             self._load(doc)
         self.assertIn("target_account", str(cm.exception))
 
@@ -422,7 +424,7 @@ class TestHelocDeclarationsRefusedOrRead(unittest.TestCase):
     capitalize_interest are each either read or loudly refused (DP#32)."""
 
     def _load(self, doc):
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         return ic.to_internal_config(doc)
 
     def test_heloc_opening_drawn_balance_without_deductibility_refused(self):
@@ -435,7 +437,7 @@ class TestHelocDeclarationsRefusedOrRead(unittest.TestCase):
         heloc = next(l for l in doc["liabilities"] if l["kind"] == "heloc")
         heloc["balance"]["amount"] = 65_000
         del heloc["deductibility"]
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             self._load(doc)
         self.assertIn("OPENING DRAWN balance", str(cm.exception))
 
@@ -455,7 +457,7 @@ class TestHelocDeclarationsRefusedOrRead(unittest.TestCase):
         doc = _example_doc()
         heloc = next(l for l in doc["liabilities"] if l["kind"] == "heloc")
         heloc["deductibility"] = {"investment_portion": 0.6, "personal_portion": 0.4}
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             self._load(doc)
         self.assertIn("deductibility", str(cm.exception))
 

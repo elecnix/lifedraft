@@ -33,6 +33,7 @@ import unittest
 from countries.canada.rate_model import build_rate_path
 from countries.canada.strategies import STRATEGY_BALANCED
 import input_contract as ic
+import contract_schema
 import optimize
 from objective import MAX_NET_BENEFIT
 from simulation import FamilySimulation
@@ -179,7 +180,7 @@ class TestHoldDrawContractMapping(unittest.TestCase):
 
     def test_schema_accepts_and_maps_hold_draw_true(self):
         doc = self._doc_with_btv(hold_draw=True)
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
         cfg = ic.to_internal_config(doc)
         options = cfg["borrow_to_invest_options"]
         self.assertEqual(len(options), 1)
@@ -190,7 +191,7 @@ class TestHoldDrawContractMapping(unittest.TestCase):
         """A config that does not declare hold_draw maps to the exact
         pre-#1040 internal shape -- no synthesized key (DP#24/DP#32)."""
         doc = self._doc_with_btv()
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
         cfg = ic.to_internal_config(doc)
         self.assertNotIn("hold_draw", cfg["borrow_to_invest_options"][0])
 
