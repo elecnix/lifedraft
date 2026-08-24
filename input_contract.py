@@ -100,6 +100,7 @@ from contract_transfers import (
     map_cash_flows, map_equity_grants, map_installments, _map_first_home_purchases,
     _map_gifts, _map_private_loans, _map_zev_purchases,
 )
+from transaction_costs import map_transaction_costs
 
 
 def to_internal_config(doc: Dict) -> Dict:
@@ -213,6 +214,14 @@ def to_internal_config(doc: Dict) -> Dict:
     household_budget_out = map_household_budget(doc)
     reserve_out = map_emergency_reserve(doc, spouse_id)
     legacy_cash_flows = map_cash_flows(doc, mortgage, start_year)
+    # Issue #139: declared one-time transaction costs / credits join the SAME
+    # dated cash-flow channel as the mortgage's origination cash-back (#1070),
+    # so every objective that folds the balance sheet (net benefit, solvency,
+    # estate) sees them through one engine read (DP#8). Absent block -> no legs
+    # -> byte-identical fold (DP#32).
+    transaction_cost_legs = map_transaction_costs(doc, start_year)
+    if transaction_cost_legs:
+        legacy_cash_flows = legacy_cash_flows + transaction_cost_legs
 
     legacy: Dict[str, Any] = {
         "assumptions": assumptions_cfg,
