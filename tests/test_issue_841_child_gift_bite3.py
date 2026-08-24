@@ -33,6 +33,7 @@ from simulation_state import (
     _initial_child_accounts, child_savings_for_year,
     child_gift_funding_for_year, _step_child_accounts,
 )
+import contract_schema
 
 
 # A teen-saver-shaped child (fabricated): 18, a $9,000 income she cannot use to fill
@@ -200,8 +201,7 @@ def _two_generation_doc(gift):
     (the sub-family the adapter can map, #598) with a gift injected -- the one
     known-valid contract document to exercise the real adapter against."""
     import copy
-    import input_contract as ic
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
     doc = copy.deepcopy(doc)
     keep = {"p1", "p2", "ca", "cb"}
@@ -228,7 +228,8 @@ class TestGiftEndpointsAreValidatedLoudly(unittest.TestCase):
     gift. Exercised through the real contract adapter (input_contract)."""
 
     def test_undeclared_donor_is_refused(self):
-        from input_contract import to_internal_config, ContractAdaptationError
+        from contract_errors import ContractAdaptationError
+        from input_contract import to_internal_config
         doc = _two_generation_doc(
             {"id": "g1", "from": "nobody", "to": "ca", "amount": 20000})
         with self.assertRaises(ContractAdaptationError) as cm:
@@ -238,7 +239,8 @@ class TestGiftEndpointsAreValidatedLoudly(unittest.TestCase):
     def test_recipient_that_is_not_a_child_is_refused(self):
         # p1 is an adult member, not a child -- a gift cannot fund an adult's
         # "child room" (there is none). Refused, not mapped to nothing.
-        from input_contract import to_internal_config, ContractAdaptationError
+        from contract_errors import ContractAdaptationError
+        from input_contract import to_internal_config
         doc = _two_generation_doc(
             {"id": "g1", "from": "p2", "to": "p1", "amount": 20000})
         with self.assertRaises(ContractAdaptationError) as cm:

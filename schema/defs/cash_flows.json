@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/cash_flows.json",
+  "title": "lifedraft input contract — universal $defs: the cash_flows[], household_budget, installments[], equity_grants[] and gifts[] blocks",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Money moving through the year that is neither an owned account nor a debt: declared cash flows, the measured household budget and its expense segments, fixed-term installment obligations, record-only equity grants and their vesting, and parent-to-child gifts.",
+
+  "$defs": {
+
+    "cash_flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner", "date", "amount", "tax_treatment", "description"],
+      "properties": {
+        "id": { "type": "string" },
+        "owner": { "anyOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }], "description": "null = household-level (not attributable to one person)." },
+        "date": { "$ref": "#/$defs/date", "description": "Replaces the old `.year` integer (#594) — a date, per DP#1." },
+        "amount": { "$ref": "#/$defs/signed_money", "description": "Positive = inflow, negative = planned expense." },
+        "tax_treatment": { "type": "string", "enum": ["taxable_ordinary", "capital_gain", "tax_free", "not_applicable"] },
+        "description": { "type": "string" }
+      }
+    },
+
+    "household_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["annual_living_costs"],
+      "properties": {
+        "annual_living_costs": {
+          "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
+          "description": "Issue #679: the household's own measured annual working-phase spend outside any account or debt payment (housing/utilities/food/transport/etc. -- NOT the mortgage payment, which is already on liabilities[kind=mortgage], and NOT the retirement assumptions.retirement.spending_target, which only applies post-retirement). null = not measured; the cash-flow solvency invariant does not run without it (DP#16). A household that declares this omits the input entirely rather than writing 0 -- no real household spends nothing to live.",
+          "x-uncertainty": {
+            "plausible_range": [30000, 200000],
+            "resolved_by": "Your own budget: 12 months of bank/credit statements — total spend, minus debt payments and minus savings/investment contributions.",
+            "question": "What does this household actually spend per year to live, outside its mortgage payment and its own savings?",
+            "resolvability": "document"
+          }
+        },
+        "discretionary_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Issue #761: the fraction (0..1) of annual_living_costs that is DISCRETIONARY -- restaurants, alcohol, vacations, entertainment: spending a household cuts FIRST under an income shock. The remainder (1 - fraction) is NON-DISCRETIONARY (groceries, utilities, insurance, phones, transport, medicine) and stays rigid, alongside debt service and any committed installment (#759). Optional and deliberately NOT required (DP#16): omitting it reproduces today's behaviour exactly -- the solvency/runway identity treats the WHOLE scalar as rigid, and the output says so explicitly (the runway_treats_all_spend_as_rigid approximation fires), never inventing a fraction (DP#32). Under a dated income shock (decisions.income[] with an override that reduces income below baseline), the runway/solvency identity compresses the discretionary portion to ZERO -- a labelled, documented stress assumption (a household in genuine distress stops dining out and taking vacations; it does not stop buying groceries or paying insurance). 0.0 = all rigid (explicit); 1.0 = all discretionary (explicit); both are real declarable values, distinct from omitting the field."
+        },
+        "expense_segments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/expense_segment" },
+          "description": "Issue #760: dated, finite-term living-cost segments ON TOP OF the perpetual annual_living_costs scalar -- a private-school tuition that ENDS when a child ages out, childcare that ages out, a term expense that stops on a date. The scalar can only smear such a cost across the whole horizon (carrying a child's tuition through retirement and into the estate -- wrong, and wrong in the direction that makes the household look poorer than it is). Each segment is an ANNUAL recurring amount active over [from, to): it contributes its amount prorated by the days of that window falling in each calendar year (day-count blend, the outflow-side analog of #674's dated income windows), and a non-null `to` means the expense STOPS after that date (reverts to $0, never carried to the horizon). Optional and deliberately NOT required (DP#16): omitting it reproduces today's behaviour exactly (the golden invariant does not move, DP#32). Each segment folds into the solvency identity's spending outflow (simulation_rules.apply_solvency) beside annual_living_costs; a discretionary segment (non_discretionary=false) compresses to zero under an income shock exactly as #761's scalar split does, a non-discretionary one stays rigid. Requires annual_living_costs to be declared -- a dated segment WITHOUT the measured base fails loudly at the contract boundary (DP#32), never defaulting the base to zero."
+        }
+      }
+    },
+
+    "expense_segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "amount", "from", "to", "non_discretionary"],
+      "$comment": "Issue #760. A dated, finite-term living-cost segment layered ON TOP of the perpetual household_budget.annual_living_costs scalar -- a private-school tuition that ends when a child ages out, childcare, a term expense that stops. `amount` is an ANNUAL recurring figure; the segment is active over the half-open window [from, to) and contributes `amount` prorated by the days of that window falling in each calendar year (day-count blend, the outflow-side analog of #674's dated income segments). `to` is REQUIRED and nullable: null is the EXPLICIT spelling of 'perpetual / no known end' (DP#32 -- an open-ended segment must SAY null, not omit the key), a non-null date means the expense ENDS there and contributes $0 afterwards (never carried to the horizon the way the base scalar is). `non_discretionary` is REQUIRED: true = a committed, must-pay dated expense that stays rigid under an income shock (tuition, childcare); false = a dated discretionary expense that compresses to $0 under a dated income shock exactly as #761's scalar discretionary split does. The two values are genuinely distinct decisions, so neither may be defaulted (DP#32 two-way trap). A segment can only be declared alongside a measured annual_living_costs -- the base engages the solvency module (DP#16); a segment without it is refused at load.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "What the segment pays for (e.g. 'private-school tuition, child_a', 'daycare'). A FACT, free text."
+        },
+        "amount": {
+          "$ref": "#/$defs/money",
+          "description": "The ANNUAL recurring amount while the segment is active (same annual convention as annual_living_costs). Prorated by the days of [from, to) that fall in each calendar year, so a segment starting mid-year contributes a partial first year."
+        },
+        "from": {
+          "$ref": "#/$defs/date",
+          "description": "The date the segment starts (inclusive). May be before the document's as_of -- a living cost already underway at the snapshot (e.g. tuition begun last year) simply applies from the start of the projection; unlike an installment plan (#759) there is no already-paid lump to re-price, so a past `from` is honest, not refused."
+        },
+        "to": {
+          "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }],
+          "description": "The date the segment ENDS (exclusive), or null for perpetual. Required and nullable: null is the explicit DP#32 spelling of 'no known end' (an open-ended segment must declare null, never omit the key); a non-null date means the expense stops -- it contributes $0 from that date on, never carried to the horizon the way annual_living_costs is. Must be strictly after `from` (a zero/negative window is refused at load, not silently treated as $0)."
+        },
+        "non_discretionary": {
+          "type": "boolean",
+          "description": "true = a committed, must-pay dated expense that does NOT compress under an income shock (tuition, childcare, insurance); false = a dated DISCRETIONARY expense that compresses to $0 under a dated income shock, exactly as #761's scalar discretionary split does. Both values are genuine, distinct decisions -- neither is defaulted (DP#32 two-way trap: silently treating a discretionary segment as rigid, or vice versa, is the exact defect the flag prevents)."
+        },
+        "active_months": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "minItems": 1,
+          "uniqueItems": true,
+          "$comment": "Issue #882. OPTIONAL intra-year seasonality. Absent = the segment is active every day of its [from, to) window (the #760 day-count blend, unchanged). Present = a subset of calendar-month numbers (1=January .. 12=December) the segment recurs in: the ANNUAL `amount` is spent in EQUAL shares across only these months, so a bill that runs a few months a year (heating Nov-Mar -> [1,2,3,11,12]) or a one-shot charge dated to one month (property tax each July -> [7]) is resolved at MONTHLY granularity. The within-year charge counts only the active months the [from, to) window touches (a boundary month the window enters/leaves mid-way prorates by its days), and the emergency reserve is sized on the PEAK active month rather than the annual average -- a concentrated seasonal bill demands a larger reserve. An empty list or a duplicated month is refused at load (DP#32): an empty within-year window is not silently 'every month' or $0, and a repeated month is not silently de-duplicated.",
+          "description": "Optional calendar months (1-12) the segment's annual amount is spent in; absent = active year-round (#760 behaviour)."
+        }
+      }
+    },
+
+    "installment_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner", "description", "start_date", "monthly_amount", "number_of_payments", "rate", "non_discretionary"],
+      "$comment": "Issue #759. A fixed-term, zero-interest installment obligation -- the contract for a medical/dental/education payment plan that is neither a liability (no drawable facility, no collateral, no prepayment/refinance) nor a perpetual living cost. `start_date` is the date of the FIRST monthly payment and MUST be on or after the document's `as_of` (the up-front lump is already paid before the snapshot; the simulation models only the remaining N payments forward from `as_of`). The final payment date -- the end of the plan's finite term -- is DERIVED as `start_date + (number_of_payments - 1) months`; it is not declared separately, so the term cannot be stated two conflicting ways (DP#32: one spelling of the fact). `rate` is REQUIRED and must be 0: a 0%-interest plan is the whole point of this block, and a stated-rate plan's interest pricing/attribution is out of scope (#759) -- a non-zero `rate` is REFUSED at load rather than silently coerced to 0 or silently honoured. `non_discretionary` is REQUIRED and must be true: an installment plan is by construction a must-pay contractual outflow that does NOT compress under an income shock (contrast #761); a `false` value is refused loudly rather than silently treated as compressible. `final_payment` is the one optional field: omitted = no balloon (a structural absence, not a silent zero -- a $0 balloon is meaningless).",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Stable identifier for this plan." },
+        "owner": { "$ref": "#/$defs/owner_ref", "description": "The person(s) legally bound to the payment plan." },
+        "description": { "type": "string", "description": "What the plan pays for (e.g. 'orthodontic payment plan', 'tuition installment plan'). A FACT, free text." },
+        "start_date": { "$ref": "#/$defs/date", "description": "The date of the FIRST monthly payment. Must be on or after the document's as_of (the up-front lump is already paid; the simulation models only the remaining installments forward)." },
+        "monthly_amount": { "$ref": "#/$defs/money", "description": "Each of the N equal monthly payments." },
+        "number_of_payments": { "type": "integer", "minimum": 1, "description": "The count of equal monthly payments. The final payment date is start_date + (number_of_payments - 1) months." },
+        "final_payment": { "$ref": "#/$defs/money", "description": "Optional balloon payment made on the same date as the last monthly payment (start_date + number_of_payments - 1 months). Omitted = no balloon." },
+        "rate": { "$ref": "#/$defs/rate", "description": "The annual interest rate as a fraction. REQUIRED and must be 0: this block models a 0%-interest plan; a stated-rate plan's interest pricing is out of scope (#759) and a non-zero value is refused at load (DP#32)." },
+        "non_discretionary": { "type": "boolean", "description": "Required and must be true: an installment plan is a must-pay contractual outflow that does not compress under an income shock (contrast #761's discretionary split). A false value is refused at load rather than silently treated as compressible (DP#32)." }
+      }
+    },
+
+    "equity_grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner", "grantor", "grant_date", "vesting", "liquidity"],
+      "$comment": "Issue #768. A private-company stock-option / equity grant the household holds. This is a RECORD, not an asset: the engine values it at $0 for every solvency / runway / decumulation metric and never counts it as a liquid resource, because a private, unvested, or strike-undetermined option cannot be sold and realises only on a speculative liquidity event outside the projection. `strike` is nullable: null means 'not yet set / TBD' -- the option has no determinable value today, and the engine must say so (output 'strike TBD') rather than invent one (DP#32). `liquidity` is 'private' for a grant on a company with no public market (the case this block exists for) or 'public' for one with a listed market (still recorded, still $0 here until a dated liquidity event is modelled -- a separate, speculative input not in this block).",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Stable identifier for this grant." },
+        "owner": { "$ref": "#/$defs/person_id", "description": "The person who holds the grant (the optionee)." },
+        "grantor": { "type": "string", "minLength": 1, "description": "The company granting the options (the issuer). A FACT, free text -- a branded company name is fine here because it is the user's own document, not library code (DP#7 is about engine modelling, not about what a user writes in their input)." },
+        "grant_date": { "$ref": "#/$defs/date", "description": "The date the grant was made (the board/compensation-committee grant date)." },
+        "vesting": { "$ref": "#/$defs/equity_vesting", "description": "The vesting schedule: a cliff date (0% vests before it -- termination before the cliff forfeits everything) and the date 100% vests." },
+        "strike": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "The per-share exercise/strike price. null = not yet set (TBD): the option has no determinable value today and the engine surfaces 'strike TBD' (DP#32: never invent a value)." },
+        "liquidity": { "type": "string", "enum": ["private", "public"], "description": "private = the grant is on a company with no public market (cannot be sold); public = a listed market exists. Both are recorded at $0 here until an explicitly-modelled, dated liquidity event (a separate, speculative input) -- this block is record-only." },
+        "shares": { "type": "integer", "minimum": 0, "description": "The number of options/shares in the grant. Optional -- a record of the size, not used to value the grant (no market price to multiply by)." },
+        "fully_diluted_pct": { "$ref": "#/$defs/percent0to1", "description": "The grant's share of the company on a fully-diluted basis. Optional record; not used to value the grant." },
+        "notes": { "type": "string", "description": "Free-text notes (e.g. 'exercisable for 7 years after vesting', 'subject to acceleration on change of control'). A FACT about the grant's terms." }
+      }
+    },
+
+    "equity_vesting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cliff_date", "fully_vested_date"],
+      "$comment": "Issue #768. The vesting schedule of an equity grant. `cliff_date` is the first date ANY shares vest (termination before it forfeits the entire grant -- 0% vests); `fully_vested_date` is the date 100% vests. The interim schedule (monthly/quarterly instalments between the cliff and full vesting) is free-text `schedule` -- it does not change the $0-for-solvency valuation (the grant is $0 regardless of vesting state until a dated liquidity event), so it is a record, not a rule input.",
+      "properties": {
+        "cliff_date": { "$ref": "#/$defs/date", "description": "The first date any shares vest. Termination before this date forfeits the entire grant (0% vested)." },
+        "fully_vested_date": { "$ref": "#/$defs/date", "description": "The date 100% of the grant is vested." },
+        "schedule": { "type": "string", "description": "Free-text description of the interim vesting (e.g. '25% at the 1-year cliff, then 1/36 monthly thereafter'). A record; the engine does not value partial vesting (the grant stays $0 until a dated liquidity event)." }
+      }
+    },
+
+    "gift": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to", "amount"],
+      "description": "Epic #841 bite 3: a parent->child cash gift that funds the child's OWN registered contributions. Redirects after-tax savings from the household adult base to the child's registered room (DP#18: conserved). Tax-free to both (not income to the child, not deductible to the donor). Applied each projection year, self-limited by the child's remaining registered room (never funds non-registered).",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Epic #841 bite 3: stable identifier for this gift." },
+        "from": { "$ref": "#/$defs/person_id", "description": "Epic #841 bite 3: the DONOR -- a declared adult household member whose after-tax savings base funds the gift. Must resolve to a declared member (DP#32: an unresolvable reference is refused loudly, not a zero gift)." },
+        "to": { "$ref": "#/$defs/person_id", "description": "Epic #841 bite 3: the RECIPIENT -- a declared child of the household whose OWN registered room the gift fills. Must resolve to a declared child (DP#32: a gift to a non-child or an undeclared person is refused loudly)." },
+        "amount": { "$ref": "#/$defs/money", "description": "Epic #841 bite 3: the annual cash gift. Funds the child's registered contribution up to the child's remaining registered room this year; the excess is not transferred (self-limiting -- the donor keeps what the room cannot absorb)." },
+        "repayable": { "type": "boolean", "default": false, "description": "Issue #859 (Part A): when true, this transfer is an intra-family LOAN rather than a gift. It funds the child's registered room IDENTICALLY (same room cap, same #857 accrual), but the principal that lands is booked on the FAMILY BALANCE SHEET as a RECEIVABLE the donor keeps (asset) and a LIABILITY the child owes -- so a funding loan does NOT reduce the lender's net worth (DP#18: the receivable offsets the carve), unlike a gift given away. The family TOTAL is unchanged (an intra-family loan is a wash: receivable == liability). Absent/false = a plain gift (given away)." }
+      }
+    }
+
+  }
+}

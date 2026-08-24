@@ -54,6 +54,8 @@ Tests (DP#15: fabricated round numbers, role-based names):
 import unittest
 
 import countries.canada  # noqa: F401  (register the jurisdiction adapter)
+import contract_errors
+import contract_schema
 
 
 def _cfg(*, family_members, children=None, private_loans=None, time_step='yearly',
@@ -239,7 +241,7 @@ class TestContractParsing(unittest.TestCase):
         import json
 
         import input_contract as ic
-        with open(ic.EXAMPLE_PATH) as f:
+        with open(contract_schema.EXAMPLE_PATH) as f:
             d = json.load(f)
         # Trim to the two-generation subset the adapter can map (p1/p2 + ca/cb).
         keep = {"p1", "p2", "ca", "cb"}
@@ -260,7 +262,7 @@ class TestContractParsing(unittest.TestCase):
         doc["private_loans"] = [{
             "id": "bad", "lender": "nobody", "borrower": "p1",
             "rate": 0.05, "principal": 1000, "use": "investment"}]
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_valid_loan_is_parsed_onto_config(self):
@@ -268,7 +270,7 @@ class TestContractParsing(unittest.TestCase):
         import json
 
         import input_contract as ic
-        with open(ic.EXAMPLE_PATH) as f:
+        with open(contract_schema.EXAMPLE_PATH) as f:
             d = json.load(f)
         keep = {"p1", "p2", "ca", "cb"}
         doc = copy.deepcopy(d)
@@ -512,8 +514,7 @@ class TestExternalLenderContractParsing(unittest.TestCase):
         import copy
         import json
 
-        import input_contract as ic
-        with open(ic.EXAMPLE_PATH) as f:
+        with open(contract_schema.EXAMPLE_PATH) as f:
             d = json.load(f)
         keep = {"p1", "p2", "ca", "cb"}
         doc = copy.deepcopy(d)
@@ -555,7 +556,7 @@ class TestExternalLenderContractParsing(unittest.TestCase):
         doc["private_loans"] = [{
             "id": "bad", "lender": "stranger", "borrower": "p1",
             "rate": 0.05, "principal": 1000, "use": "investment"}]
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_borrower_not_in_people_is_refused(self):
@@ -566,7 +567,7 @@ class TestExternalLenderContractParsing(unittest.TestCase):
             "id": "bad_borrower", "lender": {"id": "ext_a"},
             "borrower": "nobody", "rate": 0.05, "principal": 1000,
             "use": "investment"}]
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_inline_lender_without_id_is_refused(self):
@@ -581,5 +582,5 @@ class TestExternalLenderContractParsing(unittest.TestCase):
             "id": "no_id", "lender": {"relationship": "friend"},
             "borrower": "p1", "rate": 0.05, "principal": 1000,
             "use": "investment"}]
-        with self.assertRaises(ic.ContractValidationError):
+        with self.assertRaises(contract_errors.ContractValidationError):
             ic.to_internal_config(doc)

@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/decisions.json",
+  "title": "lifedraft input contract — universal $defs: the decisions and sensitivity blocks",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. QUESTIONS: the candidate sets the optimizer ranks (horizon, retirement ages, contribution strategy, income scenarios, mortgage/refinance/renewal/tranche structures, RESP actions, estate elections, deposit products) and the sensitivity presets/sweeps layered across every one of those comparisons. Both are 'what are we deciding between', kept together and apart from the facts.",
+
+  "$defs": {
+
+    "horizon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["person", "until_age"],
+      "properties": {
+        "person": { "$ref": "#/$defs/person_id" },
+        "until_age": { "type": "integer", "minimum": 0, "maximum": 130 }
+      },
+      "description": "Replaces horizon_age/projection_years (#597, #598): explicitly names WHOSE age bounds the projection instead of an implicit 'the primary'. projection_years is never authored — always derived."
+    },
+
+    "retirement_age_candidates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["person", "candidate_ages"],
+      "properties": {
+        "person": { "$ref": "#/$defs/person_id" },
+        "candidate_ages": { "type": "array", "items": { "type": "integer", "minimum": 40, "maximum": 100 } }
+      }
+    },
+
+    "contribution_allocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["non_reg_pct"],
+      "properties": {
+        "non_reg_pct": { "$ref": "#/$defs/percent0to1" }
+      },
+      "description": "Jurisdiction-agnostic base: only the non-registered bucket is universal. The Canada overlay adds rrsp_pct/spousal_rrsp_pct/tfsa_pct/fhsa_pct/resp_pct."
+    },
+
+    "contribution_strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "allocation", "use_smith", "deduct_later", "deduct_later_bracket_target"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "allocation": { "$ref": "#/$defs/contribution_allocation" },
+        "use_smith": { "type": "boolean" },
+        "deduct_later": { "type": "boolean" },
+        "deduct_later_bracket_target": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "Income threshold below which a deferrable deduction is withheld. null when deduct_later=false. Single surviving spelling — collapses assumptions.deduct_later_bracket_target and accounts.deduct_later_bracket_target (#595C) into the one decision it actually parametrizes." }
+      }
+    },
+
+    "income_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["income_id", "kind", "amount", "from", "to"],
+      "properties": {
+        "income_id": { "$ref": "#/$defs/income_id" },
+        "kind": { "$ref": "#/$defs/income_kind", "description": "Issue #674 (Gap 2): no default. A job-loss scenario that hands 'kind' by omission (assumed employment) is exactly the bug this field exists to prevent — an EI-shaped override would silently overstate next year's RRSP room (ITA s.146(1)). Required, so a scenario that doesn't declare it fails to load rather than being guessed." },
+        "amount": { "$ref": "#/$defs/money", "description": "Annual gross amount in effect over [from, to) — same convention as $defs/income.amount." },
+        "expenses_annual": {
+          "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
+          "description": "Issue #980 (T2125): for kind=self_employment, the total annual professional expenses deductible against this override's gross `amount` to derive NET business income over [from, to). Same convention as $defs/income.expenses_annual: the engine taxes / charges the #978 contribution stack / accrues RRSP room on (amount - expenses_annual). Absent/null = no expenses declared (taxed on the full `amount`, DP#32 absence-safe, byte-identical to pre-#980). Read only on a self_employment override."
+        },
+        "from": { "$ref": "#/$defs/date", "description": "Issue #674 (Gap 1): the date this override's amount/kind takes effect. Before this date the base income (this income_id's own declared amount, unmodified) applies — a scenario is a window, not a whole-horizon replacement." },
+        "to": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "Issue #674 (Gap 1): null = permanent (open-ended from `from` onward) — the explicit, DP#32-compliant spelling of 'no known end', not an absent/optional key. A non-null date means the override's window closes here and the income REVERTS to this income_id's base declared amount/kind (e.g. re-employment at the pre-scenario salary) — not to zero, and not held at the override's amount forever. A scenario needing recovery at a DIFFERENT post-gap income declares a second income_override for the same income_id whose own `from` starts where this one's `to` ends." }
+      },
+      "description": "A dated income shock for one income_id: [from, to) uses this override's kind/amount; outside that window the base income (declared on the person's own incomes[] entry) applies unchanged. Two or more income_overrides in one income_scenario's `overrides` may target the SAME income_id with non-overlapping windows to express a shock-then-recovery-at-a-different-income schedule (issue #674's 'small schedule of segments') — the mapping layer (input_contract.py) rejects overlapping windows for the same income_id rather than silently picking one (DP#32)."
+    },
+
+    "income_scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "overrides"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "overrides": { "type": "array", "items": { "$ref": "#/$defs/income_override" } }
+      },
+      "description": "Replaces scenarios.income[].members[].role matching (#598) — overrides reference income_id, which is stable regardless of how many people/incomes exist."
+    },
+
+    "refinance_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "cash_out", "ltv", "amortization_years"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "cash_out": { "$ref": "#/$defs/money" },
+        "ltv": { "$ref": "#/$defs/percent0to1" },
+        "amortization_years": { "type": "number", "exclusiveMinimum": 0,
+          "description": "Issue #655: a cash-out refinance is a NEW LOAN re-amortized over its own term -- not the incumbent mortgage's remaining amortization. Required so the engine never has to silently inherit the incumbent's schedule (DP#32)." },
+        "advance_split": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["deductible_non_reg"],
+          "properties": {
+            "deductible_non_reg": { "$ref": "#/$defs/money",
+              "description": "Issue #792: of THIS option's cash_out advance, the dollar amount the household declares it will route into the DEDUCTIBLE non-registered account first (ITA s.20(1)(c) interest tracing is established only when the borrowed money is deployed into income-producing non-reg at the refinance -- borrowed money put into RRSP/TFSA is non-deductible forever, s.18(11)). When present, the year-0 lump-sum waterfall fronts this amount into non-reg before filling registered room; registered is then backfilled from ongoing income. Absent means the engine keeps today's internal optimization (fill registered first, non-reg gets the remainder). A declared 0 is a real choice (route nothing to deductible non-reg), distinct from absence -- both are honoured." }
+          },
+          "description": "Issue #792: a declared split of the refinance advance between the DEDUCTIBLE non-reg account and registered accounts. Optional; absent = the engine optimizes the split internally (today's behaviour)."
+        }
+      },
+      "description": "margin_available is deleted from this shape (#593): it is not read on this path today and 'availability' already lives on the heloc liability's `limit`."
+    },
+
+    "renewal_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "rate", "type", "term_years"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "rate": { "$ref": "#/$defs/rate" },
+        "type": { "type": "string", "enum": ["fixed", "variable"] },
+        "term_years": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    },
+
+    "mortgage_tranche": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["house", "investment", "line"],
+          "description": "Issue #1075: which sub-account of the 3-tranche readvanceable structure this tranche is. 'house' = the amortizing family-home mortgage; 'investment' = the amortizing mortgage tranche borrowed to invest (its interest is deductible under ITA s.20(1)(c)); 'line' = the readvanceable revolving segment (the structure's revolving_share equivalent -- its amount is the residual of the charge, never swept independently)." },
+        "min_amount": { "$ref": "#/$defs/money",
+          "description": "Issue #1075: the CASH-BACK THRESHOLD for the house tranche's amount (e.g. 600000 for a $1,200 cash-back program) -- the sweep anchors its house grid here and reports whether a winning house at/above it keeps the incentive, but it is NOT a floor anymore: the sweep may put the house mortgage BELOW it (forgoing the cash-back -- the exact trade-off issue #1075 asks the optimizer to price). The sweep's actual lower bound is min_house_floor (defaulting to 60% of the registered charge); the credit condition itself is the cash_back block's min_house_amount. Declarable on the 'house' tranche only." },
+        "min_house_floor": { "$ref": "#/$defs/money",
+          "description": "Issue #1075 (optimizer half): the sweep's LOWER BOUND for the house tranche's amount (e.g. 432000 = 60% of a $720k charge). The sweep varies the house mortgage from this floor UP to the registered charge, in fixed steps (25k/50k/100k, coarsened to keep the sweep under its cell cap). ABSENT = 60% of the registered charge (DP#13: a fallback for absent input, not an opinion). Declarable on the 'house' tranche only; a floor above the charge refuses loudly (no house amount exists to sweep)." },
+        "deductible": { "type": "boolean",
+          "description": "Issue #1075: true on the 'investment' tranche means its interest is deductible under ITA s.20(1)(c) -- the exact per-tranche interest (balance x ITS OWN rate) accumulates into property.deductible_mortgage_interest and is consumed by the s.20(1)(c) pricing, never the blended-rate product. Declarable on the 'investment' tranche only." },
+        "rate": { "$ref": "#/$defs/rate",
+          "description": "Issue #1075: this tranche's OWN annual rate, when it differs from the other tranches (e.g. a dearer investment mortgage). The amortizing tranches blend balance-weighted for the single schedule; the investment tranche's exact interest is priced at ITS rate. Absent = the structure inherits the household's baseline mortgage rate." },
+        "rate_type": { "type": "string", "enum": ["fixed", "variable"],
+          "description": "The rate type paired with this tranche's rate (required alongside the line tranche's rate -- the revolving segment must be priced, #654)." }
+      },
+      "description": "One sub-account of a 3-tranche readvanceable structure (issue #1075 -- an all-in-one product): a house mortgage (swept from its declared floor -- defaulting to 60% of the registered charge -- up to the charge; the $600k min_amount is the cash-back threshold, not a floor), a deductible investment mortgage, and a readvanceable line. The structure declares the tranches' kinds and FIXED facts (floor, cash-back threshold, deductibility, own rates); the optimizer sweeps their AMOUNTS against the registered charge."
+    },
+
+    "mortgage_structure_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "oneOf": [
+        { "required": ["revolving_share"] },
+        { "required": ["tranches"] }
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "revolving_share": { "$ref": "#/$defs/percent0to1",
+          "description": "Issue #687: the fraction of the ONE registered charge (the same total secured debt this household's mortgage+HELOC together occupy) carved out as a revolving line rather than an amortizing mortgage. 0.0 = the whole charge is an amortizing mortgage (no revolving line at all -- structurally no readvance is possible). NOTE: the optimizer currently DRAWS a declared line in full at year 0 and invests it (#257/#577), so a share > 0 is scored as leverage taken, not as undrawn standby liquidity -- optimize.py discloses this above the ranking it biases. Mutually exclusive with tranches -- a structure declares its split EITHER as one share (issue #687) or as 3-tranche kinds (issue #1075), never both." },
+        "tranches": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/mortgage_tranche" },
+          "description": "Issue #1075: the 3-tranche readvanceable structure (an all-in-one product): the same registered charge split into a house mortgage (swept from its floor -- min_house_floor, defaulting to 60% of the charge -- UP to the charge; min_amount is the cash-back threshold, below which the sweep may go to FORGO a declared cash-back), a deductible investment mortgage, and a readvanceable line. The optimizer sweeps the AMOUNTS (house x the surplus split between the investment tranche and the line) and ranks the winning split. Additive opt-in: a structure that declares revolving_share keeps today's exact #687 semantics." },
+        "readvanceable": { "type": "boolean",
+          "description": "Issue #687: whether principal repaid on the amortizing segment regrows this structure's revolving limit dollar-for-dollar (the readvance mechanism, #664/#681). A structure may declare this true even with revolving_share=0.0 -- the line starts at $0 and grows only as principal is repaid; that is the ONLY structure in which the Smith Manoeuvre is ever possible." },
+        "revolving_rate": { "$ref": "#/$defs/rate",
+          "description": "Required (with revolving_rate_type) whenever revolving_share > 0 or readvanceable is true (#687) -- a line that can carry a balance, today or later, must be priced; it is never derived from the mortgage's own rate (#654). For a tranches-declared structure, serves as the line tranche's rate when the 'line' tranche carries none of its own." },
+        "revolving_rate_type": { "type": "string", "enum": ["fixed", "variable"] }
+      },
+      "description": "One candidate way to split the SAME registered charge between an amortizing mortgage and a revolving line (issue #687) -- a structural choice the household is WEIGHING, not a fact about what they already have (that is liabilities[]). Rankable under every decisions.income[] scenario, per DP#5/DP#22. Two forms: the #687 share form (revolving_share) or the #1075 3-tranche form (tranches) -- mutually exclusive."
+    },
+
+    "mortgage_decisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["refinance_options", "renewal_options"],
+      "properties": {
+        "refinance_options": { "type": "array", "items": { "$ref": "#/$defs/refinance_option" } },
+        "renewal_options": { "type": "array", "items": { "$ref": "#/$defs/renewal_option" } },
+        "structure_options": { "type": "array", "items": { "$ref": "#/$defs/mortgage_structure_option" },
+          "description": "Issue #687: candidate mortgage STRUCTURES (all-mortgage vs. readvanceable vs. mortgage+revolving-line) against the same charge, for the optimizer to sweep and rank -- optional; absent means the household has not declared this as an open decision, and the engine runs the declared liabilities[] as-is (no structure sweep)." }
+      }
+    },
+
+    "resp_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "cash_out"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "cash_out": { "type": "boolean" }
+      }
+    },
+
+    "borrow_to_invest_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "source", "amount", "target_account"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Issue #1036: stable identifier for this borrow-to-invest candidate." },
+        "label": { "type": "string", "description": "Issue #1036: human-readable label, e.g. 'Draw $50k against the HELOC into non-reg'." },
+        "source": { "type": "string", "description": "Issue #1036: the id of a declared liabilities[kind=heloc] entry the borrowed funds are drawn against. The draw is capped at that HELOC's limit. Refused loudly at load if it does not resolve to a declared kind=heloc liability (DP#32)." },
+        "amount": { "$ref": "#/$defs/money", "description": "Issue #1036: the dollar amount to draw at year 0 and invest in target_account. One option = one rung on the amount ladder; the optimizer also runs the implicit amount=0 (no-draw) baseline so 'do nothing' is always the frame of reference (DP#33)." },
+        "target_account": { "type": "string", "enum": ["non_reg"], "description": "Issue #1036: the account the borrowed proceeds are invested in. 'non_reg' only in this slice -- a borrow-to-invest draw into non-reg is the s.20(1)(c)-qualifying trace (the interest is deductible because the proceeds earn income in a taxable account). Registered targets (RRSP/TFSA) are non-deductible under s.18(11) and are refused loudly until a separate slice models them (DP#32)." },
+        "hold_draw": { "type": "boolean", "description": "OPTIONAL (issue #1040): opt OUT of the RRSP-refund HELOC paydown sweep for this draw. Default false (absent) = the existing debt-sweep behaviour: each year's RRSP tax refund pays the drawn balance down dollar-for-dollar (the Smith-Manoeuvre mechanic -- correct for an accumulator sweeping their refund against the loan). true = HOLD the draw invested: the drawn balance is NOT reduced by the RRSP-refund paydown (the refund stays in the household's cash and flows to the usual allocation instead); the interest is still priced, deducted under s.20(1)(c), and serviced/capitalized per liabilities[kind=heloc].capitalize_interest exactly as before." }
+      },
+      "description": "Issue #1036: ONE candidate way to borrow against home equity and invest the proceeds -- a one-shot, non-readvanceable draw (the standalone borrow-to-invest decision, independent of any mortgage). Declaring an array of these IS the amount ladder the optimizer sweeps and ranks under the household's objective, mirroring decisions.mortgage.structure_options[] / refinance_options[]. The draw reuses the year-0 margin-draw machinery (initial_state_for_run); the interest is priced and deducted under ITA s.20(1)(c) by the existing drawn-margin rules, traced 100% investment (a borrow-to-invest draw has no personal portion). No readvanceable facility is required. The optional unwind trigger (sell investments -> repay the HELOC) is the #1017 decumulation lever and is NOT modelled in this slice." },
+
+    "estate_election_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "spousal_rollover"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "spousal_rollover": { "type": "boolean" }
+      },
+      "description": "Sweeps default_spousal_rollover as a QUESTION, distinct from estate.default_spousal_rollover (the FACT of what's currently elected)."
+    },
+
+    "deposit_rate_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rate"],
+      "properties": {
+        "rate": { "$ref": "#/$defs/percent0to1", "description": "The interest rate paid during this step (e.g. 0.03 for a teaser, 0.015 for a base rate)." },
+        "duration_days": { "type": "number", "exclusiveMinimum": 0, "description": "How long this step lasts, in days from funding (e.g. 730 for a 730-day teaser). Mutually exclusive with duration_years. OMIT on the final step to make it open-ended (the ongoing rate held to the horizon)." },
+        "duration_years": { "type": "number", "exclusiveMinimum": 0, "description": "How long this step lasts, in years from funding. Mutually exclusive with duration_days. OMIT on the final step to make it open-ended." }
+      },
+      "description": "One step of a deposit product's interest schedule (issue #936). The rate reader walks the steps by elapsed time since funding; a step with no duration is open-ended."
+    },
+
+    "deposit_rate_schedule": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/deposit_rate_step" },
+      "description": "A deposit product's interest rate as an ORDERED list of steps by elapsed time since funding (issue #936, capability #2 -- rate_path-shaped, bound to one account). The final step is open-ended (no duration = ongoing to the horizon). Examples: a flat HISA is [{rate:0.015}]; a promo HISA is [{rate:0.03, duration_days:730}, {rate:0.015}]; a 5-year GIC is a single termed step [{rate:0.04, duration_years:5}, {rate:0.015}] (or one open step if held at rate thereafter). One mechanism expresses all three -- they are different field values, not different concepts."
+    },
+
+    "deposit_product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "account_kind", "fund_amount", "funding_source", "rate_schedule", "tax_character"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "account_kind": { "type": "string", "enum": ["non_reg"], "description": "The kind of account the deposit is held in. A HISA/GIC deposit is non-registered (issue #936)." },
+        "fund_amount": { "$ref": "#/$defs/money", "description": "The dollar amount the household would move into the deposit product if it takes it. Carved out of funding_source at year 0 (money-conserving), not new money." },
+        "funding_source": { "type": "string", "enum": ["non_reg"], "description": "The account the fund_amount is debited from when the product is taken -- the deposit's 'new net deposits' come from the household's existing non-registered cash (issue #936, capability #5). The carve conserves money: the source shrinks by exactly fund_amount." },
+        "rate_schedule": { "$ref": "#/$defs/deposit_rate_schedule" },
+        "rate_eligible_cap": { "$ref": "#/$defs/money", "description": "OPTIONAL (issue #936, capability #3): a capped-rate product pays the current step's rate only on the portion of the balance up to this cap (e.g. $500k); any excess earns the product's ONGOING (final-step) rate. Absent = no cap, the whole balance earns the current step's rate (the trivial case for a plain HISA/GIC)." },
+        "tax_character": { "type": "string", "enum": ["interest"], "description": "How the yield is taxed. A HISA/GIC yield is ordinary interest -- 100% taxable at the marginal rate each year as it accrues, NOT a deferred/50%-inclusion capital return (issue #936, capability #1)." }
+      },
+      "description": "A bank DEPOSIT PRODUCT the optimizer ranks take-vs-leave as pure contract data (issue #936). One generic mechanism -- a plain HISA, a term/GIC, and a promotional teaser are just different rate_schedule/cap field values, not different concepts. Each declared product, plus the implicit 'leave it' baseline, is a candidate the sweep scores head-to-head; under the deterministic engine a 3% deposit correctly ranks below investing at ~7% and above idle cash. Sequence-of-returns risk / staggered deployment is the companion issue #937."
+    },
+
+    "decisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["horizon", "retirement_age", "contribution_strategy", "income", "mortgage", "resp_action", "estate_elections"],
+      "properties": {
+        "objective": { "type": "string", "description": "OPTIONAL (issue #862, DP#22/DP#5): the name of the optimization objective the strategy ranking is scored under -- one of objective.py's OBJECTIVES registry (e.g. 'max_net_benefit', 'max_after_tax_estate', 'min_after_tax_estate', 'max_family_after_tax_networth', 'min_retirement_gap'). Absent = the default 'max_net_benefit'. An unknown name is refused loudly at load (DP#32), naming the bad value and listing the valid names -- the optimizer ranks, it doesn't choose (DP#22); this is where the household chooses. A --objective CLI flag overrides this for ad-hoc comparison." },
+        "horizon": { "$ref": "#/$defs/horizon" },
+        "retirement_age": { "type": "array", "items": { "$ref": "#/$defs/retirement_age_candidates" }, "description": "Replaces retirement.apply_to's 'primary'|'both' enum (#598) with an explicit per-person list." },
+        "contribution_strategy": { "type": "array", "items": { "$ref": "#/$defs/contribution_strategy" } },
+        "income": { "type": "array", "items": { "$ref": "#/$defs/income_scenario" } },
+        "mortgage": { "$ref": "#/$defs/mortgage_decisions" },
+        "resp_action": { "type": "array", "items": { "$ref": "#/$defs/resp_action" } },
+        "estate_elections": { "type": "array", "items": { "$ref": "#/$defs/estate_election_candidate" } },
+        "deposit_products": { "type": "array", "items": { "$ref": "#/$defs/deposit_product" }, "description": "OPTIONAL (issue #936): bank deposit products (a plain HISA, a term/GIC, a promotional teaser -- one generic mechanism) the optimizer ranks take-vs-leave as pure contract data. Absent/empty = no product swept -- a strict no-op, the golden trajectory is byte-identical (DP#32)." },
+        "borrow_to_invest": { "type": "array", "items": { "$ref": "#/$defs/borrow_to_invest_option" }, "description": "OPTIONAL (issue #1036): one-shot borrow-to-invest candidates (draw $X against a declared HELOC at year 0, invest the proceeds in non-reg, deduct the interest under ITA s.20(1)(c)). The optimizer sweeps the declared amount ladder plus the implicit no-draw baseline and ranks under the household's objective, mirroring decisions.mortgage.structure_options[]. Absent/empty = no borrow-to-invest sweep -- a strict no-op, the golden trajectory is byte-identical (DP#32). Independent of any mortgage / readvanceable facility: a mortgage-free household with a HELOC can express leverage this way. The unwind trigger is the #1017 decumulation lever, not modelled in this slice." }
+      }
+    },
+
+    "sensitivity_preset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["investment_return", "salary_growth", "inflation", "label"],
+      "properties": {
+        "investment_return": { "$ref": "#/$defs/rate" },
+        "salary_growth": { "$ref": "#/$defs/rate" },
+        "inflation": { "$ref": "#/$defs/rate" },
+        "label": { "type": "string" }
+      }
+    },
+
+    "sensitivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["presets", "sweeps"],
+      "properties": {
+        "presets": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/sensitivity_preset" },
+          "description": "Selected via --overlay <name>. ONE canonical block — collapses sensitivity_overlay_presets (the only one that was ever applied) with the dead savings.rates_for_sensitivity / return_model.rates_for_sensitivity duplicates (#595I)."
+        },
+        "sweeps": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "number" }, "minItems": 1 },
+          "description": "Issue #771: a GENERAL map from a contract path -> a list of values the optimizer sweeps that path across, reporting the objective and the first decumulation-shortfall year (#707/#770) for each value (consumed by sweep.py). A key is either a DOTTED path (`assumptions.retirement.spending_target`) or an RFC-6901 JSON Pointer (`/assumptions/retirement/spending_target`) that MUST resolve to an existing contract leaf -- a path that does not resolve fails loudly, naming the bad path (DP#32: a mistyped path must never silently produce a single-point run that looks like a sweep). The three legacy axes -- `investment_return`, `mortgage_rate`, `savings_rate` -- keep working as SUGAR over the same resolver (DP#9: no separate hardcoded sweep path), each an alias for the canonical contract path(s) it always meant (assumptions.return_model.rate, every liabilities[kind=mortgage].rate, assumptions.savings_rate). Replaces sensitivity_overlays.{renewal_rates,savings_rate,investment_return,mortgage_rates} vs sensitivity_overlay_presets' overlapping, four-way-duplicated meaning (#595I)."
+        }
+      }
+    }
+
+  }
+}

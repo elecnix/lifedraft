@@ -20,7 +20,7 @@ This tests (DP#4/DP#15: fabricated round numbers):
 import unittest
 
 import countries.canada  # noqa: F401
-from simulation_rules import _apply_tuition_credit_with_carryforward
+from rules_tuition_credit import _apply_tuition_credit_with_carryforward
 
 
 class TestApplyTuitionCreditsWithCarryforward(unittest.TestCase):

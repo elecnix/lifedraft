@@ -36,8 +36,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import input_contract as ic
 import voi
+import contract_schema
 
 pytest.importorskip(
     "provenance",
@@ -55,7 +55,7 @@ def _couple_contract() -> dict:
     """The shipped example trimmed to the couple + their children -- the shape
     the Phase-1 engine can simulate (#598; the full four-generation example is
     correctly REFUSED, see test_voi_671_schema_defaults.py)."""
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
     keep = {"p1", "p2", "ca", "cb"}
     doc["people"] = [p for p in doc["people"] if p["id"] in keep]

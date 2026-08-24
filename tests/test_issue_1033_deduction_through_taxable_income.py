@@ -67,7 +67,7 @@ import pytest
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-import simulation_rules
+import rule_registry
 
 # ── The fabricated 70-year-old household (DP#15) ───────────────────────────
 # Mortgage-free (mortgage_balance 0), income just under the 2026 OAS recovery
@@ -164,18 +164,18 @@ def _run_without_routing(cfg_dict, lump_sum=LUMP_SUM):
     side-credit is left untouched; ONLY the clawback-base routing is disabled,
     so the A/B difference isolates the OAS-clawback interaction this PR adds.
     """
-    original = simulation_rules.RULES["sm_interest"]
+    original = rule_registry.RULES["sm_interest"]
 
     def patched(ws, ctx):
         fired = original(ws, ctx)
         ws.sm_interest_deduction = 0.0
         return fired
 
-    simulation_rules.RULES["sm_interest"] = patched
+    rule_registry.RULES["sm_interest"] = patched
     try:
         return _run(cfg_dict, lump_sum=lump_sum)
     finally:
-        simulation_rules.RULES["sm_interest"] = original
+        rule_registry.RULES["sm_interest"] = original
 
 
 # ============================================================================
@@ -334,7 +334,7 @@ class TestDeductionReducesOasClawback:
         -- no routing vs QC-capped routing (the Major-3 bug) vs federal routing
         (this PR) -- and the federal-routing relief strictly exceeds the
         QC-capped-routing relief, which strictly exceeds zero."""
-        original = simulation_rules.RULES["sm_interest"]
+        original = rule_registry.RULES["sm_interest"]
 
         def qc_capped(ws, ctx):
             # The Major-3 bug: route the QC-CAPPED slice into the federal base.
@@ -344,11 +344,11 @@ class TestDeductionReducesOasClawback:
 
         rs_federal = _run(_retiree_cfg())
         rs_none = _run_without_routing(_retiree_cfg())
-        simulation_rules.RULES["sm_interest"] = qc_capped
+        rule_registry.RULES["sm_interest"] = qc_capped
         try:
             rs_qc = _run(_retiree_cfg())
         finally:
-            simulation_rules.RULES["sm_interest"] = original
+            rule_registry.RULES["sm_interest"] = original
         moved = False
         for fed, none, qc in zip(rs_federal, rs_none, rs_qc):
             if fed.sm_qc_deductible > 0 and none.oas_clawback > 0:
@@ -413,7 +413,7 @@ class TestBaseFlooredAtZero:
     production entry point; this is not a re-implementation)."""
 
     def test_the_reduced_base_never_goes_negative(self):
-        from simulation_rules import YearWorkingState, RuleContext, RULES
+        from rule_registry import YearWorkingState, RuleContext, RULES
         from tax_data import default_tax_provider
         brackets = default_tax_provider().get_combined_brackets(2026, "quebec")
         ws = YearWorkingState(year=0)

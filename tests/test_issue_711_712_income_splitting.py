@@ -50,7 +50,7 @@ from countries.canada.pension_split_optimizer import (
     split_pension_amounts, MAX_PENSION_SPLIT_PCT,
 )
 from simulation import FamilySimulation, SimulationConfig
-from simulation_rules import RuleContext, YearWorkingState, RULES
+from rule_registry import RuleContext, YearWorkingState, RULES
 
 START_YEAR = 2026
 BRACKETS = default_tax_provider().get_combined_brackets(START_YEAR, "quebec")

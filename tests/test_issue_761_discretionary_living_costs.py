@@ -54,6 +54,7 @@ import countries.canada  # noqa: F401 -- registers the Canada jurisdiction provi
 from runway import compute_runway
 from simulation_config import SimulationConfig
 from simulation_state import SimState, simulate_year_pure
+import contract_errors
 
 # ─── A one-year pure-step helper that varies ONLY the discretionary split ──
 # Isolates the solvency identity's spending-outflow term from everything else
@@ -370,7 +371,7 @@ class TestAbsenceFailsLoudly(unittest.TestCase):
         doc = _two_generation_subset(_load_example())
         doc['household_budget'] = {'annual_living_costs': None,
                                    'discretionary_fraction': 0.25}
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             ic.to_internal_config(doc)
         self.assertIn('discretionary_fraction', str(cm.exception))
         self.assertIn('annual_living_costs', str(cm.exception))

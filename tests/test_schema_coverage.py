@@ -7,7 +7,7 @@ input_schema.json``) -- both deleted now (DP#9), along with
 ``adapt_contract_to_legacy``'s status as an optional bridge between two live
 shapes. There is one shape now: the input contract (``schema/input_schema.
 json`` + ``schema/countries/canada/input_schema.json``, composed by
-``input_contract.compose_schema()``), and this guard walks the contract's
+``contract_schema.compose_schema()``), and this guard walks the contract's
 own populated example (``schema/example.json``, Phase 1's 4-generation
 household) as the representative instance -- the same technique the old
 guard used, pointed at the real thing instead of a legacy stand-in.
@@ -26,12 +26,13 @@ GUARD 1 — every schema leaf is either consumed or explicitly allowlisted.
     unmodified downstream code (``simulation_state.py``, ``simulation_
     rules.py``, ``optimize.py``, ``scenario_discovery.py``, ...) reads that
     internal shape exactly as it always has. A citation may legitimately
-    point at ``input_contract.py`` itself when the "real decision" IS the
-    mapping/selection logic there (e.g. choosing which person is primary
-    vs. spouse from ``relationships[].type``, or computing an age from a
-    date) -- that is doing real work, not merely copying a key, and
-    ``input_contract.py`` is deliberately NOT in the excluded-loader set
-    below (unlike ``simulation_config.py``). For a leaf whose value flows
+    point at the adapter itself (``input_contract.py`` or one of the
+    ``contract_*.py`` mapper modules it orchestrates) when the "real
+    decision" IS the mapping/selection logic there (e.g. choosing which
+    person is primary vs. spouse from ``relationships[].type``, or computing
+    an age from a date) -- that is doing real work, not merely copying a key,
+    and the adapter is deliberately NOT in the excluded-loader set below
+    (unlike ``simulation_config.py``). For a leaf whose value flows
     through unchanged into an internal-shape field some pre-existing,
     already-verified downstream consumer reads, the citation points at that
     deeper, more specific consumer instead (more useful, matches this
@@ -44,7 +45,7 @@ GUARD 1 — every schema leaf is either consumed or explicitly allowlisted.
 
 GUARD 2 — unknown keys are rejected.
     Superseded by real, total ``additionalProperties: false`` JSON Schema
-    validation at the ONE loading boundary (``input_contract.
+    validation at the ONE loading boundary (``contract_schema.
     validate_contract``, called from ``SimulationConfig.from_json`` /
     every CLI script's ``--input`` flag via ``input_contract.load_and_map``)
     -- see ``tests/test_input_contract.py``'s ``RejectionTest`` class, which
@@ -373,7 +374,7 @@ DEAD_ALLOWLIST = {
     "properties[].value.as_of": ("#597", "same reasoning as accounts[].balance.as_of."),
     # NOTE (#695, epic #690 bite 4): the designated-year RANGES used to be dead
     # here -- only the designation's PRESENCE was read. They are now CONSUMED
-    # below: input_contract._map_pre_property_gains reads each period's from/to to
+    # below: contract_estate._map_pre_property_gains reads each period's from/to to
     # compute the per-property taxable fraction (ITA s.40(2)(b)). The SHIPPED
     # example's couple owns a single property, so the ranges cannot move a dollar
     # THERE (a fixture limit, recorded in test_contract_reachability.py's
@@ -523,12 +524,12 @@ CONSUMED = {
     "as_of": ("input_contract.py", "start_year = int(as_of[:4])"),
 
     # ── private_loans[] (issue #832: private loan from an individual) ──
-    "private_loans[].id": ("input_contract.py", '"id": loan["id"]'),
-    "private_loans[].lender": ("input_contract.py", 'lender = loan["lender"]'),
-    "private_loans[].lender.id": ("input_contract.py", 'lender_id = lender.get("id")'),
-    "private_loans[].borrower": ("input_contract.py", 'borrower = loan["borrower"]'),
-    "private_loans[].rate": ("input_contract.py", '"rate": float(loan["rate"])'),
-    "private_loans[].principal": ("input_contract.py", '"principal": float(loan["principal"])'),
+    "private_loans[].id": ("contract_transfers.py", '"id": loan["id"]'),
+    "private_loans[].lender": ("contract_transfers.py", 'lender = loan["lender"]'),
+    "private_loans[].lender.id": ("contract_transfers.py", 'lender_id = lender.get("id")'),
+    "private_loans[].borrower": ("contract_transfers.py", 'borrower = loan["borrower"]'),
+    "private_loans[].rate": ("contract_transfers.py", '"rate": float(loan["rate"])'),
+    "private_loans[].principal": ("contract_transfers.py", '"principal": float(loan["principal"])'),
     # epic #795 bite 4: the ITA payability/deductibility keywords moved out of
     # simulation.py into the Canada jurisdiction module (DP#10/DP#25).
     "private_loans[].use": ("countries/canada/private_loan_interest.py", "loan.get('use') == 'investment'"),
@@ -536,8 +537,8 @@ CONSUMED = {
     "private_loans[].interest": ("countries/canada/private_loan_interest.py", "loan.get('interest') == 'paid'"),
 
     # ── gifts[] (epic #841 bite 3: parent->child gift funds a child's room) ──
-    "gifts[].id": ("input_contract.py", '"id": gift["id"]'),
-    "gifts[].from": ("input_contract.py", 'donor = gift["from"]'),
+    "gifts[].id": ("contract_transfers.py", '"id": gift["id"]'),
+    "gifts[].from": ("contract_transfers.py", 'donor = gift["from"]'),
     "gifts[].to": ("simulation_state.py", "by_child[g['to']]"),
     "gifts[].amount": ("simulation_state.py", "float(g['amount'])"),
     # Issue #859 (Part A): repayable marks a gift as an intra-family LOAN --
@@ -549,26 +550,26 @@ CONSUMED = {
     "jurisdiction.province": ("simulation.py", "'non_reg', primary_marginal_rate, province"),
 
     # ── people[] ──
-    "people[].id": ("input_contract.py", "def _people_by_id(doc: Dict) -> Dict[str, Dict]"),
+    "people[].id": ("contract_people.py", "def _people_by_id(doc: Dict) -> Dict[str, Dict]"),
     "people[].label": ("simulation.py", "ch.get('name', 'Child')"),
-    "people[].birth_date": ("simulation_rules.py", "m.get('birth_year', 0)"),
-    "people[].relationships": ("input_contract.py", "for r in people[primary_id].get(\"relationships\", [])"),
-    "people[].relationships[].type": ("input_contract.py", "if r[\"type\"] == \"spouse_of\""),
-    "people[].relationships[].person": ("input_contract.py", "spouse_id = r[\"person\"]"),
-    "people[].incomes": ("input_contract.py", "for inc in person.get(\"incomes\", []):"),
-    "people[].incomes[].id": ("input_contract.py", "person_income_ids = {"),
-    "people[].incomes[].kind": ("input_contract.py", "if inc[\"kind\"] != \"employment\":"),
-    "people[].incomes[].amount": ("input_contract.py", "total += inc[\"amount\"]"),
-    "people[].incomes[].from": ("input_contract.py", "if inc[\"from\"] and inc[\"from\"] > as_of:"),
-    "people[].incomes[].to": ("input_contract.py", "if inc[\"to\"] and inc[\"to\"] < as_of:"),
+    "people[].birth_date": ("rules_retirement_income.py", "m.get('birth_year', 0)"),
+    "people[].relationships": ("contract_people.py", "for r in people[primary_id].get(\"relationships\", [])"),
+    "people[].relationships[].type": ("contract_people.py", "if r[\"type\"] == \"spouse_of\""),
+    "people[].relationships[].person": ("contract_people.py", "spouse_id = r[\"person\"]"),
+    "people[].incomes": ("contract_people.py", "for inc in person.get(\"incomes\", []):"),
+    "people[].incomes[].id": ("contract_decisions.py", "person_income_ids = {"),
+    "people[].incomes[].kind": ("contract_people.py", "if inc[\"kind\"] != \"employment\":"),
+    "people[].incomes[].amount": ("contract_people.py", "total += inc[\"amount\"]"),
+    "people[].incomes[].from": ("contract_people.py", "if inc[\"from\"] and inc[\"from\"] > as_of:"),
+    "people[].incomes[].to": ("contract_people.py", "if inc[\"to\"] and inc[\"to\"] < as_of:"),
     # Issue #767: employment-contract terms on an employment income. The
     # consumed scalar leaves drive the recovery-date clamp / notice-segment
     # model; scope/geography/probation_end are declared contract context that
     # reach no financial decision yet (see DEAD_ALLOWLIST). The container
     # objects `employment`/`non_compete` are not scalar leaves (the walker
     # treats them as containers), so only their scalar children are cited.
-    "people[].incomes[].employment.non_compete.months": ("input_contract.py", 'return nc["months"]'),
-    "people[].incomes[].employment.notice_days": ("input_contract.py", 'return emp.get("notice_days", 0)'),
+    "people[].incomes[].employment.non_compete.months": ("contract_decisions.py", 'return nc["months"]'),
+    "people[].incomes[].employment.notice_days": ("contract_decisions.py", 'return emp.get("notice_days", 0)'),
     "people[].benefits.cpp.start_date": ("optimize.py", "cpp_start_age = primary.get('cpp_start_age'"),
     "people[].benefits.cpp.monthly_amount": ("optimize.py", "cpp_monthly_estimated = primary.get('cpp_monthly_estimated'"),
     "people[].benefits.oas.start_date": ("optimize.py", "oas_start_age = primary.get('oas_start_age'"),
@@ -589,9 +590,9 @@ CONSUMED = {
     "accounts[kind=lif].lira.jurisdiction": ("simulation_state.py", "'jurisdiction': lira_cfg.get('jurisdiction'"),
     "accounts[kind=lira].lira.reference_rate": ("simulation_state.py", "'reference_rate': lira_cfg.get('reference_rate'"),
     "accounts[kind=lif].lira.reference_rate": ("simulation_state.py", "'reference_rate': lira_cfg.get('reference_rate'"),
-    "accounts[kind=resp].resp.contributions_total": ("input_contract.py", "total_contrib = sum(a[\"resp\"][\"contributions_total\"] for a in resp_accounts)"),
-    "accounts[kind=resp].resp.cesg_received": ("input_contract.py", "total_cesg = sum(a[\"resp\"][\"cesg_received\"] for a in resp_accounts)"),
-    "accounts[kind=resp].resp.qesi_received": ("input_contract.py", "total_qesi = sum(a[\"resp\"][\"qesi_received\"] for a in resp_accounts)"),
+    "accounts[kind=resp].resp.contributions_total": ("contract_accounts.py", "total_contrib = sum(a[\"resp\"][\"contributions_total\"] for a in resp_accounts)"),
+    "accounts[kind=resp].resp.cesg_received": ("contract_accounts.py", "total_cesg = sum(a[\"resp\"][\"cesg_received\"] for a in resp_accounts)"),
+    "accounts[kind=resp].resp.qesi_received": ("contract_accounts.py", "total_qesi = sum(a[\"resp\"][\"qesi_received\"] for a in resp_accounts)"),
     "accounts[kind=lsif].lsif.purchase_date": ("countries/canada/lsif_credit.py", "lsif.get(\"purchase_year\")"),
     "accounts[kind=lsif].lsif.purchase_province": ("countries/canada/lsif_credit.py", "is_quebec_resident=lsif.get(\"is_quebec_resident\""),
     "accounts[kind=lsif].lsif.federally_registered": ("countries/canada/lsif_credit.py", "federally_registered=lsif.get(\"federally_registered\""),
@@ -605,23 +606,23 @@ CONSUMED = {
     # ── estate.* + the designations that feed it (epic #603 Track C Phase 2c, #600).
     # These were the FIVE silent assumptions -- every one resolving in the favourable
     # direction -- that #600 was filed about. They are now real inputs: mapped by
-    # input_contract._map_estate, turned into an EstatePlan by objective.plan_from_config,
+    # contract_estate._map_estate, turned into an EstatePlan by objective.plan_from_config,
     # and consumed by countries/canada/estate.py's compute_estate.
-    "estate.default_spousal_rollover": ("input_contract.py", 'default_rollover = estate["default_spousal_rollover"]'),
-    "estate.rollover_overrides[].account": ("input_contract.py", 'overrides = {o["account"]: o["spousal_rollover"]'),
-    "estate.rollover_overrides[].spousal_rollover": ("input_contract.py", 'rolls = overrides[acc["id"]] if acc["id"] in overrides else default_rollover'),
-    "estate.life_insurance[].insured": ("input_contract.py", 'if pol["insured"] not in couple:'),
-    "estate.life_insurance[].face_amount": ("input_contract.py", 'death_benefit += pol["face_amount"]'),
-    "estate.life_insurance[].term_end_date": ("input_contract.py", 'if term_end is not None and horizon_date is not None and term_end < horizon_date:'),
-    "assumptions.mortality[].person": ("input_contract.py", 'mortality = {m["person"]: m for m in doc["assumptions"]["mortality"]}'),
-    "assumptions.mortality[].assumed_death_age": ("input_contract.py", 'age = m.get("assumed_death_age")'),
-    "assumptions.mortality[].assumed_death_date": ("input_contract.py", 'if m.get("assumed_death_date") is not None:'),
-    "accounts[kind=tfsa].successor_holder": ("input_contract.py", 'a.get("successor_holder") is not None for a in couple_tfsas'),
-    "accounts[kind=non_reg].owner.joint[].pct": ("input_contract.py", 'return {j["person"]: j["pct"] for j in owner["joint"]}'),
-    "accounts[kind=non_reg].owner.joint[].person": ("input_contract.py", 'return {j["person"]: j["pct"] for j in owner["joint"]}'),
-    "accounts[kind=resp].owner.joint[].person": ("input_contract.py", 'return {j["person"]: j["pct"] for j in owner["joint"]}'),
-    "properties[].owner.joint[].pct": ("input_contract.py", 'shares = _owner_shares(prop["owner"])'),
-    "properties[].owner.joint[].person": ("input_contract.py", 'shares = _owner_shares(prop["owner"])'),
+    "estate.default_spousal_rollover": ("contract_estate.py", 'default_rollover = estate["default_spousal_rollover"]'),
+    "estate.rollover_overrides[].account": ("contract_estate.py", 'overrides = {o["account"]: o["spousal_rollover"]'),
+    "estate.rollover_overrides[].spousal_rollover": ("contract_estate.py", 'rolls = overrides[acc["id"]] if acc["id"] in overrides else default_rollover'),
+    "estate.life_insurance[].insured": ("contract_estate.py", 'if pol["insured"] not in couple:'),
+    "estate.life_insurance[].face_amount": ("contract_estate.py", 'death_benefit += pol["face_amount"]'),
+    "estate.life_insurance[].term_end_date": ("contract_estate.py", 'if term_end is not None and horizon_date is not None and term_end < horizon_date:'),
+    "assumptions.mortality[].person": ("contract_estate.py", 'mortality = {m["person"]: m for m in doc["assumptions"]["mortality"]}'),
+    "assumptions.mortality[].assumed_death_age": ("contract_estate.py", 'age = m.get("assumed_death_age")'),
+    "assumptions.mortality[].assumed_death_date": ("contract_estate.py", 'if m.get("assumed_death_date") is not None:'),
+    "accounts[kind=tfsa].successor_holder": ("contract_estate.py", 'a.get("successor_holder") is not None for a in couple_tfsas'),
+    "accounts[kind=non_reg].owner.joint[].pct": ("contract_people.py", 'return {j["person"]: j["pct"] for j in owner["joint"]}'),
+    "accounts[kind=non_reg].owner.joint[].person": ("contract_people.py", 'return {j["person"]: j["pct"] for j in owner["joint"]}'),
+    "accounts[kind=resp].owner.joint[].person": ("contract_people.py", 'return {j["person"]: j["pct"] for j in owner["joint"]}'),
+    "properties[].owner.joint[].pct": ("contract_property.py", 'shares = _owner_shares(prop["owner"])'),
+    "properties[].owner.joint[].person": ("contract_property.py", 'shares = _owner_shares(prop["owner"])'),
     "properties[].designated_principal_residence_years": ("countries/canada/estate.py", 'if not plan.principal_residence_designated:'),
     # #695: the individual year ranges now move the tax -- pre_designation reads
     # each period's from/to to count a property's designated years, which sets its
@@ -636,31 +637,31 @@ CONSUMED = {
     # per-product loop.
 
     # ── properties[] ──
-    "properties[].id": ("input_contract.py", "def _find_property(doc: Dict, kind: str)"),
-    "properties[].kind": ("input_contract.py", "def _find_property(doc: Dict, kind: str)"),
+    "properties[].id": ("contract_property.py", "def _find_property(doc: Dict, kind: str)"),
+    "properties[].kind": ("contract_property.py", "def _find_property(doc: Dict, kind: str)"),
     "properties[].value.amount": ("optimize.py", "config.house_value"),
-    "properties[].acb": ("input_contract.py", 'other_acb += prop["acb"] * couple_share'),
+    "properties[].acb": ("contract_estate.py", 'other_acb += prop["acb"] * couple_share'),
 
     # ── cash_flows[] ──
-    "cash_flows[].id": ("input_contract.py", "for cf in doc.get(\"cash_flows\", [])"),
-    "cash_flows[].owner": ("input_contract.py", "for cf in doc.get(\"cash_flows\", [])"),
-    "cash_flows[].date": ("input_contract.py", "\"year\": int(cf[\"date\"][:4])"),
-    "cash_flows[].amount": ("input_contract.py", "\"amount\": cf[\"amount\"]"),
-    "cash_flows[].tax_treatment": ("input_contract.py", "\"non-taxable\" if cf[\"tax_treatment\"] == \"tax_free\" else \"post-tax\""),
-    "cash_flows[].description": ("input_contract.py", "for cf in doc.get(\"cash_flows\", [])"),
+    "cash_flows[].id": ("contract_transfers.py", "for cf in doc.get(\"cash_flows\", [])"),
+    "cash_flows[].owner": ("contract_transfers.py", "for cf in doc.get(\"cash_flows\", [])"),
+    "cash_flows[].date": ("contract_transfers.py", "\"year\": int(cf[\"date\"][:4])"),
+    "cash_flows[].amount": ("contract_transfers.py", "\"amount\": cf[\"amount\"]"),
+    "cash_flows[].tax_treatment": ("contract_transfers.py", "\"non-taxable\" if cf[\"tax_treatment\"] == \"tax_free\" else \"post-tax\""),
+    "cash_flows[].description": ("contract_transfers.py", "for cf in doc.get(\"cash_flows\", [])"),
 
     # ── assumptions.* (universal beliefs) ──
-    "assumptions.default_non_reg_yield": ("input_contract.py", "default_yield = assumptions[\"default_non_reg_yield\"]"),
+    "assumptions.default_non_reg_yield": ("contract_assumptions.py", "default_yield = assumptions[\"default_non_reg_yield\"]"),
     "assumptions.inflation": ("simulation.py", "self.config.inflation is not None"),
     "assumptions.salary_growth": ("simulation.py", "cfg.salary_growth"),
     "assumptions.savings_rate": ("simulation.py", "annual_savings = total_income * cfg.savings_rate"),
     "assumptions.time_step": ("simulation.py", "self.config.time_step =="),
     "assumptions.tax_law_overrides.capital_gains_inclusion": ("optimize.py", "config.capital_gains_inclusion"),
     "assumptions.tax_law_overrides.frozen_brackets": ("simulation.py", "self.config.frozen_brackets"),
-    "assumptions.tax_law_overrides.oas.disabled": ("input_contract.py", "retirement_out[\"oas_annual_max\"] = 0"),
-    "assumptions.tax_law_overrides.oas.annual_max_override": ("input_contract.py", "retirement_out[\"oas_annual_max\"] = oas_override[\"annual_max_override\"]"),
+    "assumptions.tax_law_overrides.oas.disabled": ("contract_assumptions.py", "retirement_out[\"oas_annual_max\"] = 0"),
+    "assumptions.tax_law_overrides.oas.annual_max_override": ("contract_assumptions.py", "retirement_out[\"oas_annual_max\"] = oas_override[\"annual_max_override\"]"),
     # ── assumptions.return_beliefs.* (issue #993, DP#21) ──
-    # The adapter passes the block through verbatim (input_contract.py maps it
+    # The adapter passes the block through verbatim (contract_assumptions.py maps it
     # onto assumptions_cfg["return_beliefs"]); the DECISION is risk_allocation's
     # blend: each sleeve belief weights the recommended mix's blended mean/sigma
     # that feeds StochasticReturn for the P10/P50/P90 metrics.
@@ -678,12 +679,12 @@ CONSUMED = {
     # its mortgage path is `fixed` -- .type/.rate -- and its heloc path is
     # `variable` -- .type/.path. `_rate_path_year0` reads whichever of .rate /
     # .path[0] the declared .type selects, so all four are load-bearing.)
-    "assumptions.rate_paths.mortgage.type": ("input_contract.py", "if path[\"type\"] == \"fixed\":"),
-    "assumptions.rate_paths.mortgage.rate": ("input_contract.py", "return path[\"rate\"]"),
-    "assumptions.rate_paths.heloc.type": ("input_contract.py", "if path[\"type\"] == \"fixed\":"),
-    "assumptions.rate_paths.heloc.path": ("input_contract.py", "series = path[\"path\"]"),
-    "assumptions.retirement.spending_target": ("input_contract.py", "if retirement_cfg.get(\"spending_target\") is not None:"),
-    "household_budget.annual_living_costs": ("input_contract.py", "if household_budget_cfg.get(\"annual_living_costs\") is not None:"),
+    "assumptions.rate_paths.mortgage.type": ("contract_liabilities.py", "if path[\"type\"] == \"fixed\":"),
+    "assumptions.rate_paths.mortgage.rate": ("contract_liabilities.py", "return path[\"rate\"]"),
+    "assumptions.rate_paths.heloc.type": ("contract_liabilities.py", "if path[\"type\"] == \"fixed\":"),
+    "assumptions.rate_paths.heloc.path": ("contract_liabilities.py", "series = path[\"path\"]"),
+    "assumptions.retirement.spending_target": ("contract_assumptions.py", "if retirement_cfg.get(\"spending_target\") is not None:"),
+    "household_budget.annual_living_costs": ("contract_assumptions.py", "if household_budget_cfg.get(\"annual_living_costs\") is not None:"),
     # Issue #761: the discretionary/non-discretionary split. Cited to the
     # ENGINE consumer (simulation_rules.apply_solvency), not the pure loader
     # (simulation_config.py is excluded by test_consumed_citations_avoid_the_pure_loader)
@@ -691,7 +692,7 @@ CONSUMED = {
     # same as the block reaching the engine (#665). apply_solvency reads
     # ctx.config.discretionary_fraction to compress the discretionary portion
     # to zero under a dated income shock, so the value reaches a real decision.
-    "household_budget.discretionary_fraction": ("simulation_rules.py", "frac = ctx.config.discretionary_fraction"),
+    "household_budget.discretionary_fraction": ("rules_solvency.py", "frac = ctx.config.discretionary_fraction"),
     # Issue #760: dated, finite-term living-cost segments. Each field is cited
     # to the ENGINE consumer (simulation_rules.apply_solvency + the pure
     # day-count helper it calls), not the pure loader (simulation_config.py is
@@ -701,18 +702,18 @@ CONSUMED = {
     # compresses under an income shock. `description` is a free-text record
     # (like cash_flows[].description above) whose terminal is the adapter
     # mapping.
-    "household_budget.expense_segments[].description": ("input_contract.py", '"description": seg["description"],'),
-    "household_budget.expense_segments[].amount": ("simulation_rules.py", "return segment['amount'] * days_active / days_in_year"),
-    "household_budget.expense_segments[].from": ("simulation_rules.py", "start = segment['from']"),
-    "household_budget.expense_segments[].to": ("simulation_rules.py", "end = segment['to']"),
-    "household_budget.expense_segments[].non_discretionary": ("simulation_rules.py", "if _seg['non_discretionary']:"),
+    "household_budget.expense_segments[].description": ("contract_assumptions.py", '"description": seg["description"],'),
+    "household_budget.expense_segments[].amount": ("rules_solvency.py", "return segment['amount'] * days_active / days_in_year"),
+    "household_budget.expense_segments[].from": ("rules_solvency.py", "start = segment['from']"),
+    "household_budget.expense_segments[].to": ("rules_solvency.py", "end = segment['to']"),
+    "household_budget.expense_segments[].non_discretionary": ("rules_solvency.py", "if _seg['non_discretionary']:"),
     # ── assumptions.emergency_reserve (issue #688) ──
-    "assumptions.emergency_reserve.target_months": ("input_contract.py", '"target_months": reserve_cfg["target_months"],'),
-    "assumptions.emergency_reserve.rate": ("input_contract.py", '"rate": reserve_cfg["rate"],'),
-    "assumptions.emergency_reserve.instrument": ("input_contract.py", '"instrument": reserve_cfg["instrument"],'),
-    "assumptions.emergency_reserve.held_in": ("input_contract.py", 'held_in_kind = hosts[0]["kind"]'),
-    "assumptions.retirement.drawdown_order": ("simulation_rules.py", "drawdown_order = ret.get('drawdown_order')"),
-    "assumptions.retirement.net_replacement_rate": ("simulation_rules.py", "net_replacement_rate = ret.get('net_replacement_rate'"),
+    "assumptions.emergency_reserve.target_months": ("contract_assumptions.py", '"target_months": reserve_cfg["target_months"],'),
+    "assumptions.emergency_reserve.rate": ("contract_assumptions.py", '"rate": reserve_cfg["rate"],'),
+    "assumptions.emergency_reserve.instrument": ("contract_assumptions.py", '"instrument": reserve_cfg["instrument"],'),
+    "assumptions.emergency_reserve.held_in": ("contract_assumptions.py", 'held_in_kind = hosts[0]["kind"]'),
+    "assumptions.retirement.drawdown_order": ("rules_retirement_income.py", "drawdown_order = ret.get('drawdown_order')"),
+    "assumptions.retirement.net_replacement_rate": ("rules_retirement_income.py", "net_replacement_rate = ret.get('net_replacement_rate'"),
     "assumptions.return_model.type": ("return_model.py", "rtype = data.get(\"type\", \"fixed\")"),
     "assumptions.return_model.rate": ("return_model.py", "rate=data.get(\"rate\", 0.07)"),
 
@@ -724,33 +725,31 @@ CONSUMED = {
     # study_periods and falls back to these household-wide age assumptions only
     # when nothing was declared (DP#13). They are still genuinely consumed --
     # as the fallback, and as the duration that closes an open-ended window.
-    "assumptions.resp.study_start_age": ("simulation_rules.py", "ctx.config.resp_study_start_age, ctx.config.resp_study_duration_years)"),
-    "assumptions.resp.study_duration_years": ("simulation_rules.py", "ctx.config.resp_study_start_age, ctx.config.resp_study_duration_years)"),
-    "assumptions.resp.used_for_education": ("simulation_rules.py", "if ctx.config.resp_used_for_education and in_study_year:"),
+    "assumptions.resp.study_start_age": ("rules_registered_plans.py", "ctx.config.resp_study_start_age, ctx.config.resp_study_duration_years)"),
+    "assumptions.resp.study_duration_years": ("rules_registered_plans.py", "ctx.config.resp_study_start_age, ctx.config.resp_study_duration_years)"),
+    "assumptions.resp.used_for_education": ("rules_registered_plans.py", "if ctx.config.resp_used_for_education and in_study_year:"),
 
     # ── decisions.* (universal, DP#5 anchor decisions) ──
-    "decisions.horizon.person": ("input_contract.py", "def _find_primary_and_spouse(doc: Dict)"),
+    "decisions.horizon.person": ("contract_people.py", "def _find_primary_and_spouse(doc: Dict)"),
     "decisions.horizon.until_age": ("input_contract.py", "assumptions_cfg[\"horizon_age\"] = horizon[\"until_age\"]"),
-    "decisions.retirement_age[].person": ("input_contract.py", "if cand[\"person\"] == person_id and cand[\"candidate_ages\"]:"),
+    "decisions.retirement_age[].person": ("contract_people.py", "if cand[\"person\"] == person_id and cand[\"candidate_ages\"]:"),
     "decisions.income[].id": ("scenario_discovery.py", "def _convert_income_scenarios"),
     "decisions.income[].label": ("scenario_discovery.py", "def _convert_income_scenarios"),
-    "decisions.income[].overrides": ("input_contract.py", "sc[\"overrides\"], people_by_id, person_income_ids"),
-    "decisions.income[].overrides[].income_id": ("input_contract.py", "owner_id = person_income_ids.get(ov[\"income_id\"])"),
-    "decisions.income[].overrides[].amount": ("input_contract.py", "\"gross_income\": ov[\"amount\"],"),
+    "decisions.income[].overrides": ("contract_decisions.py", "sc[\"overrides\"], people_by_id, person_income_ids"),
+    "decisions.income[].overrides[].income_id": ("contract_decisions.py", "owner_id = person_income_ids.get(ov[\"income_id\"])"),
+    "decisions.income[].overrides[].amount": ("contract_decisions.py", "\"gross_income\": ov[\"amount\"],"),
     # ── issue #674: kind/from/to travel with the amount now (dated,
     # kind-classified income shocks -- see simulation.py's
     # _income_components_for_year and simulation_rules.py's
     # apply_contribution_room, ITA s.146(1)) ──
-    "decisions.income[].overrides[].kind": ("input_contract.py", "\"kind\": ov[\"kind\"],"),
-    "decisions.income[].overrides[].from": ("input_contract.py", "\"from\": ov[\"from\"],"),
-    "decisions.income[].overrides[].to": ("input_contract.py", "\"to\": ov[\"to\"],"),
+    "decisions.income[].overrides[].kind": ("contract_decisions.py", "\"kind\": ov[\"kind\"],"),
+    "decisions.income[].overrides[].from": ("contract_decisions.py", "\"from\": ov[\"from\"],"),
+    "decisions.income[].overrides[].to": ("contract_decisions.py", "\"to\": ov[\"to\"],"),
     "decisions.mortgage.refinance_options[].id": ("scenario_discovery.py", "'id': scenario.get('id', 'unknown')"),
     "decisions.mortgage.refinance_options[].label": ("scenario_discovery.py", "'label': scenario.get('label', 'Refinance scenario')"),
     "decisions.mortgage.refinance_options[].cash_out": ("scenario_discovery.py", "cash_out = scenario.get('cash_out', 0)"),
-    "decisions.mortgage.refinance_options[].amortization_years": ("input_contract.py",
-        "prop_cfg[\"refinance_amortization_years\"] = refinance_options[0][\"amortization_years\"]"),
-    "decisions.mortgage.refinance_options[].advance_split.deductible_non_reg": ("input_contract.py",
-        "split_option[\"advance_split\"][\"deductible_non_reg\"]"),
+    "decisions.mortgage.refinance_options[].amortization_years": ("contract_decisions.py", "prop_cfg[\"refinance_amortization_years\"] = refinance_options[0][\"amortization_years\"]"),
+    "decisions.mortgage.refinance_options[].advance_split.deductible_non_reg": ("contract_decisions.py", "split_option[\"advance_split\"][\"deductible_non_reg\"]"),
     "decisions.mortgage.renewal_options[].label": ("optimize.py", "name = opt.get('name', f\"renew_{opt.get('type', 'unknown')}\")"),
     "decisions.mortgage.renewal_options[].rate": ("scenario_discovery.py", "'rate': option.get('rate', 0.05)"),
     "decisions.mortgage.renewal_options[].type": ("scenario_discovery.py", "'type': option.get('type', 'variable')"),
@@ -765,11 +764,11 @@ CONSUMED = {
     # whether a structure can be priced, DP#32/#654), and optimize.py's
     # sweep, which tags every ranked row with the structure's own fields
     # (the ranking IS the decision this data reaches).
-    "decisions.mortgage.structure_options[].id": ("input_contract.py", '"id": opt["id"], "label": opt["label"]'),
-    "decisions.mortgage.structure_options[].label": ("input_contract.py", '"id": opt["id"], "label": opt["label"]'),
+    "decisions.mortgage.structure_options[].id": ("contract_decisions.py", '"id": opt["id"], "label": opt["label"]'),
+    "decisions.mortgage.structure_options[].label": ("contract_decisions.py", '"id": opt["id"], "label": opt["label"]'),
     "decisions.mortgage.structure_options[].revolving_share": ("optimize.py", "structure.get('revolving_share')"),
     "decisions.mortgage.structure_options[].readvanceable": ("optimize.py", "structure.get('readvanceable')"),
-    "decisions.mortgage.structure_options[].revolving_rate": ("input_contract.py", 'revolving_rate = opt.get("revolving_rate")'),
+    "decisions.mortgage.structure_options[].revolving_rate": ("contract_decisions.py", 'revolving_rate = opt.get("revolving_rate")'),
     # ── decisions.contribution_strategy[] -- issue #713. The block was parsed
     # by the schema and dropped by the adapter, so a household's OWN authored
     # savings strategies never reached the optimizer: the ranked table they got
@@ -805,7 +804,7 @@ CONSUMED = {
     # rather than the strategy (SimulationConfig.deduct_later_bracket_target),
     # so the adapter lands it there too -- see input_contract.py's comment.
     "decisions.contribution_strategy[].deduct_later_bracket_target": (
-        "simulation_rules.py", "bracket_target=ctx.config.deduct_later_bracket_target,"),
+        "rules_contributions.py", "bracket_target=ctx.config.deduct_later_bracket_target,"),
 
     # ── people[].study_periods[] -- issue #714. Mapped into
     # child['study_periods'] and read by NOBODY: every beneficiary's RESP wound
@@ -880,32 +879,32 @@ _EXAMPLE_ACCOUNT_KINDS = sorted({a["kind"] for a in json.loads(EXAMPLE_PATH.read
 # balance reaches the internal shape (verified present by
 # test_consumed_citations_are_still_true, same as every other CONSUMED entry).
 _BALANCE_AMOUNT_CITATION = {
-    "rrsp": ("input_contract.py", "balances[owner][field] = balances[owner].get(field, 0) + amount"),
-    "tfsa": ("input_contract.py", "balances[owner][field] = balances[owner].get(field, 0) + amount"),
-    "spousal_rrsp": ("input_contract.py", 'balances[spouse_id]["spousal_rrsp_balance"] = ('),
-    "fhsa": ("input_contract.py", 'balances[owner]["fhsa_balance"] = balances[owner].get("fhsa_balance", 0) + amount'),
-    "non_reg": ("input_contract.py", '"balance": sum(a["balance"]["amount"] for a in non_reg_accounts),'),
-    "resp": ("input_contract.py", 'resp_balance = sum(a["balance"]["amount"] for a in resp_accounts)'),
-    "lira": ("input_contract.py", '"balance": sum(a["balance"]["amount"] for a in lira_accounts),'),
-    "lif": ("input_contract.py", '"balance": sum(a["balance"]["amount"] for a in lira_accounts),'),
-    "lsif": ("input_contract.py", 'purchase_amount = acc["balance"]["amount"]'),
+    "rrsp": ("contract_people.py", "balances[owner][field] = balances[owner].get(field, 0) + amount"),
+    "tfsa": ("contract_people.py", "balances[owner][field] = balances[owner].get(field, 0) + amount"),
+    "spousal_rrsp": ("contract_people.py", 'balances[spouse_id]["spousal_rrsp_balance"] = ('),
+    "fhsa": ("contract_people.py", 'balances[owner]["fhsa_balance"] = balances[owner].get("fhsa_balance", 0) + amount'),
+    "non_reg": ("contract_accounts.py", '"balance": sum(a["balance"]["amount"] for a in non_reg_accounts),'),
+    "resp": ("contract_accounts.py", 'resp_balance = sum(a["balance"]["amount"] for a in resp_accounts)'),
+    "lira": ("contract_accounts.py", '"balance": sum(a["balance"]["amount"] for a in lira_accounts),'),
+    "lif": ("contract_accounts.py", '"balance": sum(a["balance"]["amount"] for a in lira_accounts),'),
+    "lsif": ("contract_accounts.py", 'purchase_amount = acc["balance"]["amount"]'),
 }
 
 # kind.owner citation -- individual/registered kinds only (non_reg/resp use
 # owner.joint[] instead, cited separately above).
 _OWNER_CITATION = {
-    "rrsp": ("input_contract.py", 'owner = acc.get("owner")'),
-    "tfsa": ("input_contract.py", 'owner = acc.get("owner")'),
-    "spousal_rrsp": ("input_contract.py", 'owner = acc.get("owner")'),
-    "fhsa": ("input_contract.py", 'owner = acc.get("owner")'),
-    "lira": ("input_contract.py", '_people_by_id(doc)[first["owner"]]'),
-    "lif": ("input_contract.py", '_people_by_id(doc)[first["owner"]]'),
-    "lsif": ("input_contract.py", 'owner = _people_by_id(doc)[acc["owner"]]'),
+    "rrsp": ("contract_people.py", 'owner = acc.get("owner")'),
+    "tfsa": ("contract_people.py", 'owner = acc.get("owner")'),
+    "spousal_rrsp": ("contract_people.py", 'owner = acc.get("owner")'),
+    "fhsa": ("contract_people.py", 'owner = acc.get("owner")'),
+    "lira": ("contract_accounts.py", '_people_by_id(doc)[first["owner"]]'),
+    "lif": ("contract_accounts.py", '_people_by_id(doc)[first["owner"]]'),
+    "lsif": ("contract_accounts.py", 'owner = _people_by_id(doc)[acc["owner"]]'),
     # non_reg's owner may be a bare person id (single-owner) or a
     # {"joint": [...]} split (example.json's non_reg accounts include both
     # shapes) -- _owner_shares handles either, used by _ownership_share's
     # non_reg-primary-share computation (_map_estate).
-    "non_reg": ("input_contract.py", 'shares = _owner_shares(acc["owner"])'),
+    "non_reg": ("contract_estate.py", 'shares = _owner_shares(acc["owner"])'),
 }
 
 # kinds whose accounts[].id feeds the estate rollover-fraction lookup
@@ -914,7 +913,7 @@ _OWNER_CITATION = {
 _ROLLOVER_ID_KINDS = {"rrsp", "spousal_rrsp", "rrif", "lira", "lif", "dcpp", "dbpp", "lsif", "non_reg"}
 
 for _kind in _EXAMPLE_ACCOUNT_KINDS:
-    CONSUMED[f"accounts[kind={_kind}].kind"] = ("input_contract.py", 'kind = acc["kind"]')
+    CONSUMED[f"accounts[kind={_kind}].kind"] = ("contract_accounts.py", 'kind = acc["kind"]')
     DEAD_ALLOWLIST[f"accounts[kind={_kind}].balance.as_of"] = ("#597", "the per-account statement "
         "date is parsed (dated_amount) but only .amount is read -- the engine has one global as_of "
         "(the document root), not per-balance dating.")
@@ -931,8 +930,7 @@ for _kind in _EXAMPLE_ACCOUNT_KINDS:
         CONSUMED[f"accounts[kind={_kind}].owner"] = _OWNER_CITATION[_kind]
 
     if _kind in _ROLLOVER_ID_KINDS:
-        CONSUMED[f"accounts[kind={_kind}].id"] = ("input_contract.py",
-            'rolls = overrides[acc["id"]] if acc["id"] in overrides else default_rollover')
+        CONSUMED[f"accounts[kind={_kind}].id"] = ("contract_estate.py", 'rolls = overrides[acc["id"]] if acc["id"] in overrides else default_rollover')
     else:
         DEAD_ALLOWLIST[f"accounts[kind={_kind}].id"] = ("#600", "`.id` is read by "
             "_weighted_rolled_fraction (the estate rollover-fraction lookup) only for kinds in "
@@ -942,7 +940,7 @@ for _kind in _EXAMPLE_ACCOUNT_KINDS:
             "-- `.id` parses but reaches no decision.")
 
     if _kind == "non_reg":
-        CONSUMED[f"accounts[kind={_kind}].acb"] = ("input_contract.py", '"cost_basis": sum(declared_acbs)')
+        CONSUMED[f"accounts[kind={_kind}].acb"] = ("contract_accounts.py", '"cost_basis": sum(declared_acbs)')
         CONSUMED[f"accounts[kind={_kind}].holdings[].product"] = (
             "countries/canada/portfolio.py", "product = registry.get(holding['product'])")
         CONSUMED[f"accounts[kind={_kind}].holdings[].weight"] = (
@@ -962,8 +960,7 @@ for _kind in _EXAMPLE_ACCOUNT_KINDS:
             "see accounts[kind=" + _kind + "].holdings[].product above -- same non-consumption.")
 
     if _kind == "tfsa":
-        CONSUMED[f"accounts[kind={_kind}].successor_holder"] = (
-            "input_contract.py", 'a.get("successor_holder") is not None for a in couple_tfsas')
+        CONSUMED[f"accounts[kind={_kind}].successor_holder"] = ("contract_estate.py", 'a.get("successor_holder") is not None for a in couple_tfsas')
     else:
         DEAD_ALLOWLIST[f"accounts[kind={_kind}].successor_holder"] = ("#600", "`couple_tfsas` "
             "(the only reader of successor_holder) filters to kind=tfsa specifically -- "
@@ -998,7 +995,7 @@ for _kind in _EXAMPLE_LIABILITY_KINDS:
     # collecting a specific kind (#652: it collects ALL matches and refuses on >1, rather than
     # returning the first) -- car_loan's own `.kind` is evaluated (and rejected) exactly the same
     # way mortgage's/heloc's are matched. The discriminator is always consulted.
-    CONSUMED[f"liabilities[kind={_kind}].kind"] = ("input_contract.py", 'if liab["kind"] == kind')
+    CONSUMED[f"liabilities[kind={_kind}].kind"] = ("contract_liabilities.py", 'if liab["kind"] == kind')
     # `.balance.as_of` -- only the document's one global `as_of` dates the simulation; no
     # per-liability statement date is read, for any kind (same reasoning as accounts[].balance.as_of).
     DEAD_ALLOWLIST[f"liabilities[kind={_kind}].balance.as_of"] = ("#597", "only the document's "
@@ -1025,20 +1022,16 @@ if "mortgage" in _EXAMPLE_LIABILITY_KINDS:
         "#601", "see liabilities[kind=mortgage].owner.joint[].pct above.")
     # `.collateral` IS read for mortgage: _find_liability(doc, "mortgage", principal["id"]) filters
     # by it (falling back to an unfiltered lookup if that returns None).
-    CONSUMED["liabilities[kind=mortgage].collateral"] = (
-        "input_contract.py", 'liab.get("collateral") == collateral_id')
-    CONSUMED["liabilities[kind=mortgage].balance.amount"] = (
-        "input_contract.py", 'prop_cfg["mortgage_balance"] = mortgage["balance"]["amount"]')
-    CONSUMED["liabilities[kind=mortgage].rate"] = (
-        "input_contract.py", 'prop_cfg["mortgage_rate"] = mortgage["rate"]')
+    CONSUMED["liabilities[kind=mortgage].collateral"] = ("contract_liabilities.py", 'liab.get("collateral") == collateral_id')
+    CONSUMED["liabilities[kind=mortgage].balance.amount"] = ("contract_principal.py", 'prop_cfg["mortgage_balance"] = mortgage["balance"]["amount"]')
+    CONSUMED["liabilities[kind=mortgage].rate"] = ("contract_principal.py", 'prop_cfg["mortgage_rate"] = mortgage["rate"]')
     # mortgage's own rate_type is parsed but never read: the engine's rate path is built from
     # config.mortgage_rate alone (simulation.py) -- there is no "is this mortgage fixed or
     # variable" branch anywhere downstream of the mapping.
     DEAD_ALLOWLIST["liabilities[kind=mortgage].rate_type"] = ("#603", "the mortgage rate path "
         "(simulation.py's build_rate_path) is built from config.mortgage_rate alone -- "
         "rate_type is parsed but never read for the mortgage either.")
-    CONSUMED["liabilities[kind=mortgage].amortization.years"] = (
-        "input_contract.py", 'prop_cfg["amortization_years"] = mortgage["amortization"]["years"]')
+    CONSUMED["liabilities[kind=mortgage].amortization.years"] = ("contract_principal.py", 'prop_cfg["amortization_years"] = mortgage["amortization"]["years"]')
     DEAD_ALLOWLIST["liabilities[kind=mortgage].amortization.payment_monthly"] = ("#603",
         "maps to legacy property.current_payment_monthly, confirmed dead and deleted from the "
         "schema in Track C Phase 2a; still dead now (SimulationConfig.from_dict never reads "
@@ -1050,23 +1043,20 @@ if "mortgage" in _EXAMPLE_LIABILITY_KINDS:
         "property.contract_start_date -- same finding as liabilities[kind=mortgage].renewal_date.")
 
 if "heloc" in _EXAMPLE_LIABILITY_KINDS:
-    CONSUMED["liabilities[kind=heloc].collateral"] = (
-        "input_contract.py", 'liab.get("collateral") == collateral_id')
-    CONSUMED["liabilities[kind=heloc].limit"] = (
-        "input_contract.py", 'prop_cfg["margin_available"] = heloc["limit"]')
-    CONSUMED["liabilities[kind=heloc].readvanceable"] = (
-        "input_contract.py", 'prop_cfg["heloc_readvance"] = heloc.get("readvanceable", False)')
+    CONSUMED["liabilities[kind=heloc].collateral"] = ("contract_liabilities.py", 'liab.get("collateral") == collateral_id')
+    CONSUMED["liabilities[kind=heloc].limit"] = ("contract_principal.py", 'prop_cfg["margin_available"] = heloc["limit"]')
+    CONSUMED["liabilities[kind=heloc].readvanceable"] = ("contract_principal.py", 'prop_cfg["heloc_readvance"] = heloc.get("readvanceable", False)')
     # issue #577: the heloc's own opening/DRAWN balance never reaches SimState.initial() --
     # a draw is a simulation decision (FamilySimulation's lump_sum handling), never a fact
     # read off this field. See tests/architecture/test_contract_reachability.py.
-    # Issue #1036: this leaf is now READ by input_contract.py -- to REFUSE it
+    # Issue #1036: this leaf is now READ by contract_principal.py -- to REFUSE it
     # loudly when > 0 (the engine starts a HELOC undrawn by design, #577; a
     # declared opening drawn balance was silently dropped before #1036). A
     # balance of 0 (undrawn) is the documented accepted state and reaches no
     # decision, so the oracle measures it unprobeable (mutating 0 -> >0
     # raises ContractAdaptationError). Consumed by the refusal, not dead.
     CONSUMED["liabilities[kind=heloc].balance.amount"] = (
-        "input_contract.py", 'heloc["balance"]["amount"]')
+        "contract_principal.py", 'heloc["balance"]["amount"]')
     # issue #654: THE fix. heloc.rate now maps to property.heloc_rate -> SimulationConfig.
     # heloc_rate -> FamilySimulation's heloc_path, which honours it outright instead of
     # deriving a HELOC rate from the mortgage's rate path (the bug this issue closes).
@@ -1083,13 +1073,13 @@ if "heloc" in _EXAMPLE_LIABILITY_KINDS:
         "'variable' vs 'fixed' to switch on yet (that would be assumptions.rate_paths.heloc's "
         "job, which is itself unwired end-to-end -- see input_contract.py's heloc mapping "
         "comment). Genuinely parsed, not yet consumed.")
-    # Issue #1036: capitalize_interest is now READ -- mapped by input_contract.py to
+    # Issue #1036: capitalize_interest is now READ -- mapped by contract_principal.py to
     # property.capitalize_interest -> SimulationConfig.capitalize_interest, and consumed
-    # by simulation_rules.apply_margin_heloc_interest (false = service in cash, true =
+    # by rules_leverage.apply_margin_heloc_interest (false = service in cash, true =
     # capitalize up to the charge). Removed from DEAD_ALLOWLIST (it reaches a decision).
     CONSUMED["liabilities[kind=heloc].capitalize_interest"] = (
-        "simulation_rules.py", "ctx.config.capitalize_interest")
-    # Issue #1036: heloc.deductibility is now READ by input_contract.py -- to
+        "rules_leverage.py", "ctx.config.capitalize_interest")
+    # Issue #1036: heloc.deductibility is now READ by contract_principal.py -- to
     # REFUSE investment_portion > 0 loudly at load (the s.20(1)(c) trace is
     # COMPUTED from the borrowing's purpose, never a declared ratio on the HELOC
     # -- same stance as the consumer-loan path). The example declares
@@ -1097,7 +1087,7 @@ if "heloc" in _EXAMPLE_LIABILITY_KINDS:
     # measures it unprobeable (mutating 0 -> >0 raises ContractAdaptationError).
     # Consumed by the refusal, not dead.
     CONSUMED["liabilities[kind=heloc].deductibility.investment_portion"] = (
-        "input_contract.py", 'heloc_deductibility["investment_portion"]')
+        "contract_principal.py", 'heloc_deductibility["investment_portion"]')
     # personal_portion is part of the deductibility block (read by
     # heloc.get('deductibility')) but NOT consumed by name -- only
     # investment_portion drives the refusal (the trace is computed from the
@@ -1111,12 +1101,9 @@ if "line_of_credit" in _EXAMPLE_LIABILITY_KINDS:
     # Issue #689: THE fix -- a revolving, unsecured (or secured) credit
     # facility, distinct from heloc, now has a real legacy home
     # (SimulationConfig.credit_facility_limit/_rate/_rate_type/_secured).
-    CONSUMED["liabilities[kind=line_of_credit].collateral"] = (
-        "input_contract.py", 'credit_facility.get("collateral") == principal["id"]')
-    CONSUMED["liabilities[kind=line_of_credit].limit"] = (
-        "input_contract.py", 'prop_cfg["credit_facility_limit"] = credit_facility["limit"]')
-    CONSUMED["liabilities[kind=line_of_credit].rate"] = (
-        "input_contract.py", 'prop_cfg["credit_facility_rate"] = credit_facility["rate"]')
+    CONSUMED["liabilities[kind=line_of_credit].collateral"] = ("contract_principal.py", 'credit_facility.get("collateral") == principal["id"]')
+    CONSUMED["liabilities[kind=line_of_credit].limit"] = ("contract_principal.py", 'prop_cfg["credit_facility_limit"] = credit_facility["limit"]')
+    CONSUMED["liabilities[kind=line_of_credit].rate"] = ("contract_principal.py", 'prop_cfg["credit_facility_rate"] = credit_facility["rate"]')
     # .rate_type is mapped (property.credit_facility_rate_type ->
     # SimulationConfig.credit_facility_rate_type) for round-trip
     # completeness (DP#24), same reasoning as liabilities[kind=heloc]
@@ -1186,11 +1173,11 @@ if "car_loan" in _EXAMPLE_LIABILITY_KINDS:
     CONSUMED["liabilities[kind=car_loan].balance.amount"] = (
         "simulation_state.py", "loan['balance']")
     CONSUMED["liabilities[kind=car_loan].rate"] = (
-        "simulation_rules.py", "loan['rate']")
+        "rules_debt.py", "loan['rate']")
     CONSUMED["liabilities[kind=car_loan].amortization.payment_monthly"] = (
-        "simulation_rules.py", "loan['payment_monthly']")
+        "rules_debt.py", "loan['payment_monthly']")
     CONSUMED["liabilities[kind=car_loan].amortization.years"] = (
-        "simulation_rules.py", "loan['amortization_years']")
+        "rules_debt.py", "loan['amortization_years']")
     DEAD_ALLOWLIST["liabilities[kind=car_loan].collateral"] = ("#763",
         "consumer loans are modeled as UNSECURED -- a non-null collateral is "
         "REFUSED at load (input_contract.py, #763), so the null example value "

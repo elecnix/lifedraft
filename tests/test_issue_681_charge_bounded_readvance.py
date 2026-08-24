@@ -216,24 +216,23 @@ class TestInvariantRunsInProductionPath:
         away (restoring the #681 bug exactly -- unbounded re-borrowing) and
         confirm ``FamilySimulation.run()`` itself now REFUSES the trajectory,
         rather than returning it for ranking."""
-        import charge_limits
-        original = charge_limits.charge_room_for_readvance
-        import simulation_rules
+        import rules_leverage
+        original = rules_leverage.charge_room_for_readvance
         try:
             # The pre-#681 rule: infinite room, i.e. no bound at all.
-            simulation_rules.charge_room_for_readvance = (
+            rules_leverage.charge_room_for_readvance = (
                 lambda *a, **kw: float('inf'))
             with pytest.raises(InvariantBreachedError, match='charge limit'):
                 _household(ltv=0.0)
         finally:
-            simulation_rules.charge_room_for_readvance = original
+            rules_leverage.charge_room_for_readvance = original
 
     def test_optimizer_run_simulation_asserts_them(self):
         """The same guard on the OPTIMIZER's fold -- the path that actually
         RANKS scenarios. An invariant wired into only one of the two folds is
         exactly the half-enforcement #681 is about."""
-        import simulation_rules
-        original = simulation_rules.charge_room_for_readvance
+        import rules_leverage
+        original = rules_leverage.charge_room_for_readvance
         cfg = SimulationConfig(
             projection_years=10, house_value=HOUSE_VALUE, mortgage_balance=157_387,
             margin_available=400_000, mortgage_rate=0.05, heloc_rate=0.055,
@@ -247,13 +246,13 @@ class TestInvariantRunsInProductionPath:
         )
         opt = GridOptimizer(cfg)
         try:
-            simulation_rules.charge_room_for_readvance = (
+            rules_leverage.charge_room_for_readvance = (
                 lambda *a, **kw: float('inf'))
             with pytest.raises(InvariantBreachedError):
                 opt._run_simulation(cfg, STRATEGY_BALANCED, use_readvanceable=True,
                                      lump_sum=cfg.margin_available)
         finally:
-            simulation_rules.charge_room_for_readvance = original
+            rules_leverage.charge_room_for_readvance = original
 
     def test_assert_run_invariants_flags_the_exact_681_reproduction(self):
         """Issue #681's reported numbers, replayed as a raw trajectory."""

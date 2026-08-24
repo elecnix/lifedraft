@@ -68,8 +68,10 @@ import countries.canada  # noqa: F401 -- registers the Canada jurisdiction provi
 import input_contract as ic
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-from simulation_rules import _expense_segment_contribution_in_year
+from rules_solvency import _expense_segment_contribution_in_year
 from simulation_state import SimState, simulate_year_pure
+import contract_errors
+import contract_schema
 
 
 # ─── A one-year pure-step helper that varies ONLY the expense segments ─────
@@ -250,7 +252,7 @@ class TestSegmentCompressibility(unittest.TestCase):
 # ============================================================================
 
 def _example_doc():
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         return _two_generation_subset(json.load(fh))
 
 
@@ -290,7 +292,7 @@ class TestContractBoundary(unittest.TestCase):
             "annual_living_costs": None,
             "expense_segments": [_seg(amount=14_000, frm="2026-09-01", to=None)],
         }
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             self._map(doc)
         self.assertIn("annual_living_costs", str(cm.exception))
 
@@ -299,7 +301,7 @@ class TestContractBoundary(unittest.TestCase):
         never silently treated as a $0 segment (DP#32)."""
         doc = _doc_with_segments([
             _seg(amount=14_000, frm="2030-01-01", to="2028-01-01")])
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             self._map(doc)
 
 

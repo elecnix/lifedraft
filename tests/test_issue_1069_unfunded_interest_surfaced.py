@@ -88,15 +88,16 @@ def _evaporate_unfunded():
     where the unpayable slice silently vanishes. Wraps the real servicing
     rule and zeroes its report AFTER the fact -- the pots are still drained
     (or never touched), but nothing is reported."""
-    import simulation_rules
-    original = simulation_rules.RULES['heloc_interest_servicing']
+    import rule_registry
+    import simulation_rules  # noqa: F401 -- the import POPULATES RULES
+    original = rule_registry.RULES['heloc_interest_servicing']
 
     def _evaporating(ws, ctx):
         fired = bool(original(ws, ctx))
         ws.heloc_interest_unfunded = 0.0
         return fired
 
-    simulation_rules.RULES['heloc_interest_servicing'] = _evaporating
+    rule_registry.RULES['heloc_interest_servicing'] = _evaporating
     return original
 
 
@@ -164,13 +165,13 @@ class TestInvariantRunsInTheFold:
             with pytest.raises(InvariantBreachedError, match='unfunded'):
                 _household(projection_years=10)
         finally:
-            import simulation_rules
-            simulation_rules.RULES['heloc_interest_servicing'] = original
+            import rule_registry
+            rule_registry.RULES['heloc_interest_servicing'] = original
 
     def test_optimizer_fold_refuses_it_too(self):
         """The OPTIMIZER's fold ranks scenarios; an invariant wired into only
         one of the two folds is the half-enforcement #681 is about."""
-        import simulation_rules
+        import rule_registry
         original = _evaporate_unfunded()
         try:
             cfg = SimulationConfig(
@@ -189,7 +190,7 @@ class TestInvariantRunsInTheFold:
                 opt._run_simulation(cfg, strategy=STRATEGY_BALANCED, use_readvanceable=True,
                                     lump_sum=cfg.margin_available)
         finally:
-            simulation_rules.RULES['heloc_interest_servicing'] = original
+            rule_registry.RULES['heloc_interest_servicing'] = original
 
 
 # ============================================================================

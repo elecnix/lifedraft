@@ -35,7 +35,7 @@ from optimize import compute_net_benefit
 from objective import compute_after_tax_estate
 from simulation_config import SimulationConfig
 from year_result import YearResult
-from simulation_rules import RULES, RuleContext, YearWorkingState
+from rule_registry import RULES, RuleContext, YearWorkingState
 from tax_data import default_tax_provider
 
 

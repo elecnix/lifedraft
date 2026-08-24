@@ -73,6 +73,10 @@ dev = ["pytest>=7.0", "pytest-cov>=5.0", "pytest-xdist", "pandas>=2.0", "numpy>=
 [tool.setuptools]
 py-modules = [
     "charge_limits", "config_access", "config_serde",
+    "contract_accounts", "contract_assumptions", "contract_decisions",
+    "contract_errors", "contract_estate", "contract_liabilities",
+    "contract_people", "contract_principal", "contract_property",
+    "contract_schema", "contract_transfers",
     "decumulation", "dp_optimizer", "input_contract", "jurisdiction",
     "jurisdiction_providers", "liquidation_waterfall", "loop",
     "make_retirement_input", "model_fidelity", "module_registry",
@@ -82,6 +86,10 @@ py-modules = [
     "retirement_analysis", "return_model", "runway", "scenario_discovery",
     "scenario_overlay",
     "scipy_optimizer", "sensitivity", "session_log", "simulate",
+    "rule_registry", "rules_amt", "rules_contributions", "rules_debt",
+    "rules_disposition", "rules_drawdown", "rules_growth", "rules_leverage",
+    "rules_registered_plans", "rules_retirement_income", "rules_solvency",
+    "rules_tuition_credit",
     "simulation", "simulation_config", "simulation_rules",
     "simulation_state", "strategy", "stress_scenarios", "sweep",
     "tax_calculator", "tax_data", "trajectory_invariants", "voi",
@@ -94,7 +102,7 @@ exclude = ["countries.*.tests*", "tests*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.md"]
-"schema" = ["*.json", "countries/canada/*.json"]
+"schema" = ["*.json", "defs/*.json", "countries/canada/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "countries/canada/tests", "countries/canada/provinces/quebec/tests"]

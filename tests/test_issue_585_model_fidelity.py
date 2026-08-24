@@ -455,18 +455,18 @@ _CODE_ANCHORS = {
     # It is anchored all the same: delete the reconciliation and the caveat
     # can never fire, which is exactly the staleness this test exists to catch.
     'rate_path_contradicts_signed_rate': (
-        'input_contract.py', 'def _reconcile_rate_paths('),
+        'contract_liabilities.py', 'def _reconcile_rate_paths('),
     # Issue #707: a runtime ruin, not a code approximation -- but it is
     # produced by real code (the per-year shortfall recorded in
     # apply_retirement_drawdown), and this anchor proves that code still
     # exists. If the shortfall recording is removed, this caveat is stale.
     'decumulation_shortfall': (
-        'simulation_rules.py', 'ws.drawdown_shortfall = _gap'),
+        'rules_drawdown.py', 'ws.drawdown_shortfall = _gap'),
     # Issue #766: an input contradiction (two unreconciled spending figures),
     # same class as #685. Anchored to the reconciliation that produces the
     # records; delete it and the caveat can never fire.
     'spending_figures_unreconciled': (
-        'input_contract.py', 'def _reconcile_spending_figures('),
+        'contract_assumptions.py', 'def _reconcile_spending_figures('),
     # Issue #758: runway caveats. The two structural biases (all-spend-rigid,
     # contributions-counted) and the credit-line/waterfall-order findings are
     # produced by runway.compute_runway reading the #679 solvency verdict; the
@@ -475,7 +475,7 @@ _CODE_ANCHORS = {
     'runway_treats_all_spend_as_rigid': (
         'runway.py', 'def compute_runway('),
     'runway_compresses_discretionary_under_shock': (
-        'simulation_rules.py', 'frac = ctx.config.discretionary_fraction'),
+        'rules_solvency.py', 'frac = ctx.config.discretionary_fraction'),
     'runway_counts_contributions_as_committed': (
         'runway.py', 'def compute_runway('),
     'runway_relies_on_uncollateralized_credit': (
@@ -543,7 +543,7 @@ class TestSpendingFiguresReconciliation(unittest.TestCase):
     def test_no_conflict_for_benign_small_gap(self):
         # A retirement target 10% above working-life spend is legitimate; the
         # reconciliation band is +/-25%, so this must NOT be recorded.
-        from input_contract import _reconcile_spending_figures
+        from contract_assumptions import _reconcile_spending_figures
         self.assertEqual(
             _reconcile_spending_figures({}, 80000, 88000), [])
         # 80k vs 100k = 1.25x -- at the band edge, not outside it.
@@ -551,19 +551,19 @@ class TestSpendingFiguresReconciliation(unittest.TestCase):
             _reconcile_spending_figures({}, 80000, 100000), [])
 
     def test_conflict_recorded_for_material_gap(self):
-        from input_contract import _reconcile_spending_figures
+        from contract_assumptions import _reconcile_spending_figures
         rec = _reconcile_spending_figures({}, 80000, 125000)
         self.assertEqual(len(rec), 1)
         self.assertAlmostEqual(rec[0]['ratio'], 125000 / 80000)
         self.assertEqual(rec[0]['winner'], 'spending_target')
 
     def test_no_record_when_either_figure_absent(self):
-        from input_contract import _reconcile_spending_figures
+        from contract_assumptions import _reconcile_spending_figures
         self.assertEqual(_reconcile_spending_figures({}, None, 125000), [])
         self.assertEqual(_reconcile_spending_figures({}, 80000, None), [])
 
     def test_provenance_confidences_resolved_from_sidecar(self):
-        from input_contract import _reconcile_spending_figures
+        from contract_assumptions import _reconcile_spending_figures
         doc = {'provenance': {
             '/household_budget/annual_living_costs': {'confidence': 'derived'},
             '/assumptions/retirement/spending_target': {'confidence': 'assumed'},

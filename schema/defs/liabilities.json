@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/liabilities.json",
+  "title": "lifedraft input contract — universal $defs: the liabilities[] and private_loans[] blocks",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Owed money: the liability record and its kind/amortization/deductibility/cash-back sub-shapes, plus the private_loans[] family (lender identity, use, repayment and interest terms). Both blocks describe a debt the household owes, and share the deductibility question.",
+
+  "$defs": {
+
+    "liability_kind": { "type": "string", "enum": ["mortgage", "heloc", "line_of_credit", "car_loan", "student_loan", "personal_loan", "intergenerational_loan"],
+      "description": "'heloc' and 'line_of_credit' are the SAME mechanism (revolving, interest-only, has a `limit`) at two points on the `collateral` axis -- a HELOC is a line_of_credit secured by a property (#664/#681's charge applies to it); `line_of_credit` with `collateral: null` is the unsecured case a real signed facility can be (#689). They stay two enum values rather than collapsing to one because `heloc` alone carries the mortgage-paired readvance mechanic (`readvanceable`/`capitalize_interest`, below) that only makes sense wired to a specific mortgaged property; a `line_of_credit` never has those two fields, secured or not." },
+
+    "amortization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["years", "payment_monthly"],
+      "properties": {
+        "years": { "type": "number", "exclusiveMinimum": 0 },
+        "payment_monthly": { "$ref": "#/$defs/money" }
+      }
+    },
+
+    "deductibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["investment_portion", "personal_portion"],
+      "properties": {
+        "investment_portion": { "$ref": "#/$defs/percent0to1" },
+        "personal_portion": { "$ref": "#/$defs/percent0to1" }
+      },
+      "description": "Traced fractions (e.g. ITA §20(1)(c) in Canada), not derived — the schema records the tracing state directly rather than reconstructing it from a single blended rate (#601)."
+    },
+
+    "cash_back": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "clawback_rate", "term_years"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/money", "description": "The cash-back the lender pays the household AT ORIGINATION (a positive inflow to the household). Small relative to the tranche (e.g. $1,200 for a $600k+ house tranche). The adapter credits it as an origination_cash_back cash-flow in the projection's first year." },
+        "clawback_rate": { "$ref": "#/$defs/percent0to1", "description": "The FRACTION of the cash-back repaid to the lender if the mortgage is FULLY prepaid before term_years elapse (e.g. 0.5 = half). A contingent charge, not an accrual: it is owed only on an early full prepayment, and the engine does not model that event for a year-0 mortgage yet (#1075 optimizer half)." },
+        "term_years": { "type": "number", "exclusiveMinimum": 0, "description": "The cash-back's retention term: if the mortgage is fully prepaid within this many years of origination, clawback_rate of the amount is owed back to the lender; after it, the cash-back is fully vested." },
+        "min_house_amount": { "$ref": "#/$defs/money", "description": "Issue #1075 (optimizer half): the MINIMUM house tranche amount this cash-back is conditional on (e.g. 600000 — the same $600k a $1,200 cash-back program prices). The 3-tranche sweep may set the house mortgage BELOW its tranche's declared min_amount, forgoing this incentive; the origination inflow is credited only for a swept house amount >= this threshold. ABSENT = credited at origination unconditionally (the pre-#1075 behaviour, byte-identical — DP#13: absence is not an opinion)." }
+      },
+      "description": "Issue #1075: a lender cash-back incentive on a kind=mortgage liability. Modelled as an UPFRONT cash inflow at origination plus a CONTINGENT clawback charge if the mortgage is fully prepaid before the retention term elapses. Kept as a small, documented contingent item — the schema records the terms so the clawback can be priced later, while the engine's only present effect is the origination inflow (the year-0 mortgage amortizes on a fixed schedule the engine cannot early-break, so the clawback event cannot arise yet; pricing it is the optimizer half of #1075). The inflow may be CONDITIONAL on the house tranche amount (min_house_amount) — the sweep's question is whether FORGOING the incentive by putting the house mortgage below the threshold improves the outcome."
+    },
+
+    "liability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner", "kind", "balance", "rate", "rate_type", "collateral"],
+      "properties": {
+        "id": { "$ref": "#/$defs/liability_id" },
+        "owner": { "$ref": "#/$defs/owner_ref", "description": "The borrower(s). Interest deductibility and the reduction of terminal estate are THIS person's — for a joint liability, split per the declared percentages (#601)." },
+        "kind": { "$ref": "#/$defs/liability_kind" },
+        "balance": { "$ref": "#/$defs/dated_amount", "description": "The DRAWN amount. Always distinct from `limit` — the whole fix for #577 (undrawn HELOC room booked as debt)." },
+        "limit": { "$ref": "#/$defs/money", "description": "Required only for revolving kinds (heloc, line_of_credit); forbidden otherwise (see allOf below)." },
+        "rate": { "$ref": "#/$defs/rate",
+          "x-uncertainty": {
+            "resolvability": "document",
+            "plausible_range": [0.03, 0.08],
+            "resolved_by": "Your mortgage/HELOC statement, or the lender's current renewal offer.",
+            "question": "What interest rate does this debt actually carry?"
+          } },
+        "rate_type": { "type": "string", "enum": ["fixed", "variable"] },
+        "amortization": { "$ref": "#/$defs/amortization", "description": "Required only for closed-end kinds (mortgage, car_loan, student_loan, personal_loan, intergenerational_loan)." },
+        "renewal_date": { "$ref": "#/$defs/date", "description": "Required only for mortgage." },
+        "term_start_date": { "$ref": "#/$defs/date", "description": "Required only for mortgage." },
+        "deductibility": { "$ref": "#/$defs/deductibility" },
+        "collateral": { "anyOf": [{ "$ref": "#/$defs/property_id" }, { "type": "null" }], "description": "The property this debt is registered against, or null for genuinely unsecured debt (#689). This is the ONE axis that decides whether a revolving facility counts against that property's OSFI B-20 charge limit (#664/#681) and whether it survives a sale of the property -- not the liability `kind`." },
+        "readvanceable": { "type": "boolean", "description": "Required only for kind=heloc: whether the credit limit re-grows automatically as the paired mortgage's principal is paid down (the product mechanic the Smith Manoeuvre needs — DP#7: model the mechanism, not the branded product)." },
+        "capitalize_interest": { "type": "boolean", "description": "Required only for kind=heloc: whether unpaid interest is added to the balance rather than paid in cash." },
+        "deductible": { "type": "boolean", "description": "Issue #1075: optional, permitted only on kind=mortgage. Whether THIS tranche's interest is deductible under ITA s.20(1)(c) — the funds were borrowed for an income-producing non-registered investment, not for the house. Absent means false (non-deductible, DP#32: absence is not an opinion, and a plain home mortgage is the ordinary case). The adapter sums the balances of every deductible tranche into property.deductible_mortgage_balance, and their exact annual interest (each balance × its own rate) into property.deductible_mortgage_interest — the true s.20(1)(c) interest base for the #850 pricing, which must NOT be derived from the blended mortgage_rate (that equals the own-rate sum only when every tranche shares one rate); the pricing itself is the optimizer half of #1075." },
+        "cash_back": { "$ref": "#/$defs/cash_back", "description": "Issue #1075: optional, permitted only on kind=mortgage. A lender cash-back incentive paid at origination (e.g. $1,200 for a $600k+ house tranche) and clawed back pro-rata if the mortgage is fully prepaid before term_years elapse. The adapter credits the declared amount as an origination_cash_back cash-flow in the projection's first year (positive to the household, non-taxable — a lender rebate, not income); the clawback-on-early-full-prepayment pricing is the optimizer half of #1075 (the year-0 mortgage here amortizes on a fixed schedule the engine cannot early-break)." },
+        "open": { "type": "boolean", "description": "Issue #651: whether the mortgage TERM is open — repayable or refinanceable at any time with NO prepayment penalty. Optional and permitted only on kind=mortgage; absent means CLOSED (the default), which triggers a break penalty of max(3 months' interest, IRD) on an early break (countries/canada/ird_penalty.compute_breakage_penalty). Openness is ORTHOGONAL to rate_type: a term can be open-fixed, open-variable, closed-fixed or closed-variable, so this is a separate axis from fixed/variable and NOT derivable from it. When true, the break penalty is a DECLARED zero (DP#32) — not the accidental zero of an unpriced or mis-typed term. A revolving line (heloc/line_of_credit) has no term to break, so `open` is forbidden there (see allOf below)." }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "enum": ["heloc", "line_of_credit"] } } },
+          "then": { "required": ["limit"],
+                    "allOf": [{ "not": { "required": ["amortization"] } }, { "not": { "required": ["renewal_date"] } }, { "not": { "required": ["term_start_date"] } }] },
+          "else": { "not": { "required": ["limit"] } } },
+        { "if": { "properties": { "kind": { "const": "heloc" } } },
+          "then": { "required": ["readvanceable", "capitalize_interest"] },
+          "else": { "allOf": [{ "not": { "required": ["readvanceable"] } }, { "not": { "required": ["capitalize_interest"] } }] } },
+        { "if": { "properties": { "kind": { "enum": ["mortgage", "car_loan", "student_loan", "personal_loan", "intergenerational_loan"] } } },
+          "then": { "required": ["amortization"] } },
+        { "if": { "properties": { "kind": { "const": "mortgage" } } },
+          "then": { "required": ["renewal_date", "term_start_date"] },
+          "else": { "allOf": [{ "not": { "required": ["renewal_date"] } }, { "not": { "required": ["term_start_date"] } }, { "not": { "required": ["open"] } }, { "not": { "required": ["deductible"] } }, { "not": { "required": ["cash_back"] } }] } }
+      ]
+    },
+
+    "loan_use": { "type": "string", "enum": ["investment", "consumption"], "description": "Issue #813: what the borrowed funds are USED FOR. 'investment' = the proceeds earn income (e.g. buy non-reg securities), so the interest the borrower pays is deductible under ITA s.20(1)(c) (the deductible-investment-interest trace). 'consumption' = the proceeds finance personal spending, so the interest is NOT deductible." },
+
+    "private_loan_lender": {
+      "oneOf": [
+        { "$ref": "#/$defs/person_id" },
+        { "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Issue #832: stable identifier for an individual OUTSIDE the household people[] who lends the principal (a grandparent, a friend, an adult child not in people[]). Not resolved against people[] -- the lender is not a simulated household member." },
+            "relationship": { "type": "string", "description": "Issue #832: free-text relationship of the external lender to the household (e.g. 'grandparent', 'friend'). Informational only; not consumed by the engine. Kept so the contract records WHO the individual is without forcing them into people[]." }
+          },
+          "description": "Issue #832: an inline lightweight identity for a lender who is an individual outside the household. The engine cannot tax an external individual (they are not a simulated member), so when interest IS paid the lender's income is NOT modelled in the household's tax -- only the borrower's s.20(1)(c) deduction applies (the lender-side tax is outside this engine's scope, like a bank's)."
+        }
+      ],
+      "description": "Issue #832: the lender is either a declared household member (a person_id string, resolved and taxed in their bracket; minor-lender s.74.2 attribution keys on their age) OR an individual outside the household (an inline {id, relationship?} object, NOT resolved against people[])."
+    },
+
+    "loan_repayment": { "type": "string", "enum": ["on_demand", "amortizing"], "description": "Issue #832: the capital repayment terms. 'on_demand' = the borrower has NO obligation to pay capital unless the lender asks (a demand loan); 'amortizing' = scheduled principal-and-interest payments. Default on_demand (a private loan is typically a demand loan). When on_demand AND interest is not payable this year, the loan is modeled as interest-free financing (no tax flow)." },
+
+    "loan_interest": { "type": "string", "enum": ["on_demand", "paid"], "description": "Issue #832: whether interest is actually PAID/PAYABLE each year (drives the s.20(1)(c) borrower deduction and the lender's taxable income) vs stated-but-not-demanded. 'paid' = interest is paid or payable this year (the tax split applies: lender income + borrower deduction when use=investment). 'on_demand' = interest is not demanded this year -> NO interest tax flow at all (no deduction, no lender income); the loan is interest-free financing this year. Default on_demand." },
+
+    "private_loan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "lender", "borrower", "rate", "principal", "use"],
+      "description": "Issue #832: a private loan from an individual. The lender is either a declared household member (taxed in their bracket; minor-lender attribution ITA s.74.2) or an individual outside the household (inline identity, not taxed here). The borrower's interest is deductible under ITA s.20(1)(c) only when use=investment AND interest is actually paid/payable (interest=paid, or repayment=amortizing which implies paid). When repayment=on_demand and interest=on_demand, NO interest tax flow applies -- the loan is interest-free financing (no deduction, no lender income). Supersedes the narrow #813 family_loans design.",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Issue #832: stable identifier for this private loan." },
+        "lender": { "$ref": "#/$defs/private_loan_lender" },
+        "borrower": { "$ref": "#/$defs/person_id", "description": "Issue #832: the household MEMBER who receives the principal and pays the interest. Must be a declared person (DP#32: an unresolvable reference is refused loudly). The interest is DEDUCTIBLE from the borrower's income only when use=investment AND interest is paid/payable (ITA s.20(1)(c))." },
+        "rate": { "$ref": "#/$defs/rate", "description": "Issue #832: the annual interest rate on the loan (0.05 = 5%). Applied as a tax flow only when interest is paid/payable this year; otherwise it is the stated rate on an interest-free (not-yet-demanded) demand loan." },
+        "principal": { "$ref": "#/$defs/money", "description": "Issue #832: the loan principal. Interest = rate x principal per year, applied only when interest is paid/payable." },
+        "use": { "$ref": "#/$defs/loan_use", "description": "Issue #832: investment (deductible interest, when paid) or consumption (not deductible)." },
+        "repayment": { "$ref": "#/$defs/loan_repayment", "default": "on_demand", "description": "Issue #832: capital repayment terms. Default on_demand (a demand loan)." },
+        "interest": { "$ref": "#/$defs/loan_interest", "default": "on_demand", "description": "Issue #832: whether interest is paid/payable this year. Default on_demand (not demanded -> no tax flow, interest-free financing)." }
+      }
+    }
+
+  }
+}

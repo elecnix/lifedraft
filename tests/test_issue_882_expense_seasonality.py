@@ -52,13 +52,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 import countries.canada  # noqa: F401 -- registers the Canada jurisdiction providers
 import input_contract as ic
 from simulation_config import SimulationConfig
-from simulation_rules import _expense_segment_contribution_in_year
+from rules_solvency import _expense_segment_contribution_in_year
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
 
 # Reuse the #760 one-year pure-step harness and its RUIN_* fixtures verbatim --
 # the seasonality axis is layered on the SAME expense_segment plumbing.
 from test_issue_760_finite_term_living_costs import _one_year, _seg
 from test_issue_679_solvency import RUIN_LIVING_COSTS
+import contract_errors
+import contract_schema
 
 
 def _sseg(*, amount, frm="2020-01-01", to=None, active_months,
@@ -191,7 +193,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
 # ============================================================================
 
 def _example_doc():
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         return _two_generation_subset(json.load(fh))
 
 
@@ -225,7 +227,7 @@ class TestContractBoundary(unittest.TestCase):
         (DP#32)."""
         doc = _doc_with_segments([
             _sseg(amount=8_000, frm="2026-01-01", to=None, active_months=[])])
-        with self.assertRaises(ic.ContractValidationError):
+        with self.assertRaises(contract_errors.ContractValidationError):
             self._map(doc)
 
     def test_duplicate_active_month_is_refused(self):
@@ -234,7 +236,7 @@ class TestContractBoundary(unittest.TestCase):
         doc = _doc_with_segments([
             _sseg(amount=8_000, frm="2026-01-01", to=None,
                   active_months=[7, 7])])
-        with self.assertRaises(ic.ContractValidationError):
+        with self.assertRaises(contract_errors.ContractValidationError):
             self._map(doc)
 
 

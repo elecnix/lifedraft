@@ -37,20 +37,23 @@ import input_contract as ic
 from scenario_overlay import ScenarioOverlay, apply_overlay
 from simulation_config import SimulationConfig
 from simulation_state import SimState, simulate_year_pure
-from simulation_rules import (
-    RULES, RULE_ORDER, RuleContext, YearWorkingState,
-    apply_deposit_product_growth, _deposit_product_after_tax_rate,
+from rule_registry import RULES, RuleContext, YearWorkingState
+from simulation_rules import RULE_ORDER
+from rules_growth import (
+    apply_deposit_product_growth,
+    _deposit_product_after_tax_rate,
     _deposit_rate_at,
 )
 from scenario_discovery import discover_anchors
 from simulate import enumerate_overlays
+import contract_schema
 
 
 def _load_example_doc():
     """The shipped contract example, trimmed to the two-generation subset the
     adapter maps (same helper tests/test_input_contract.py / test_issue_823
     use -- the 4-generation full doc is refused by the N-adult uncap)."""
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = json.load(f)
     doc = copy.deepcopy(doc)
     keep = {"p1", "p2", "ca", "cb"}

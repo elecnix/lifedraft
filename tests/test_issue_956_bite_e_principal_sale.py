@@ -7,7 +7,7 @@ proceeds are invested into the portfolio, and money is conserved.
 This is the correctness-critical layer built ON TOP of the mechanical
 foundation (the schema ``sale`` leaf on a ``kind="principal"`` property -- the
 SAME ``property_sale`` block Bite B defines, reused verbatim -- the
-``input_contract._map_principal_sale`` mapper carrying the sale onto
+``contract_principal._map_principal_sale`` mapper carrying the sale onto
 ``cfg['property']['principal_sale']``, and the
 ``SimulationConfig.principal_sale`` field). The crux this file verifies is the
 CONSERVATION IDENTITY (the spec's gate), adapted from Bite B for the principal
@@ -83,9 +83,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
-from simulation_rules import _principal_disposition_for
+from rules_disposition import _principal_disposition_for
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_errors
+import contract_schema
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -108,7 +110,7 @@ def _base_doc():
     """The shipped two-generation example, validated (the sub-family the
     adapter can honestly map onto the two-adults-plus-children engine)."""
     doc = _two_generation_subset(_load_example())
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -130,7 +132,7 @@ def _add_principal_sale(doc, sale):
 def _run(doc):
     """Validate -> map to internal config -> run the real engine (which
     enforces the money-conservation invariant suite on every run)."""
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run()
@@ -586,7 +588,7 @@ class ConservationHoldsAcrossBothLegs(unittest.TestCase):
         the mapper never produces, but the helper must handle without dividing
         by zero). A sale with empty owner_roles -> couple_share = 0 -> 0 tax,
         regardless of the gain."""
-        from simulation_rules import _disposition_gain_tax
+        from rules_disposition import _disposition_gain_tax
         sale = {
             'year': 2026, 'selling_costs': 30_000.0,
             'owner_roles': {},   # no owners -> couple_share = 0
@@ -630,7 +632,7 @@ class ConservationHoldsAcrossBothLegs(unittest.TestCase):
         to band the gain -- the rule raises loudly rather than silently
         under-taxing the gain. The no-sale / pre-sale / post-sale paths do NOT
         need brackets and do not raise."""
-        from simulation_rules import RuleContext, YearWorkingState, RULES
+        from rule_registry import RuleContext, YearWorkingState, RULES
         from simulation_state import SimState, _default_canada_state
         sale = {
             'year': 2026, 'selling_costs': 30_000.0,
@@ -692,20 +694,20 @@ class RuleFiresAndIsRegistered(unittest.TestCase):
         sale household's sale-year total_assets WITHOUT the invested proceeds
         -- a money-LOSING path the rule exists to prevent. This is the
         output-depends-on-it test the spec requires (DP#18)."""
-        import simulation_rules
+        import rule_registry
         base = _base_doc()
         sell = _run(_add_principal_sale(base, _SALE_2031))
         n = _SALE_YEAR_INDEX
-        original = simulation_rules.RULES['principal_disposition']
+        original = rule_registry.RULES['principal_disposition']
         try:
             # Disable the rule -> the sale's proceeds are NOT invested and
             # the mortgage/HELOC are NOT discharged (the amortization schedule
             # keeps running); the household does NOT realize the home's value.
-            simulation_rules.RULES['principal_disposition'] = (
+            rule_registry.RULES['principal_disposition'] = (
                 lambda ws, ctx: False)
             sell_disabled = _run(_add_principal_sale(base, _SALE_2031))
         finally:
-            simulation_rules.RULES['principal_disposition'] = original
+            rule_registry.RULES['principal_disposition'] = original
         # With the rule: the sale-year total_assets includes the invested
         # P_net (principal_sale_proceeds_invested > 0). Without the rule: no
         # proceeds invested and the mortgage/HELOC stay (the household keeps
@@ -752,7 +754,7 @@ class RuleFiresAndIsRegistered(unittest.TestCase):
 class ContractSurfaceMapsAndRoundTrips(unittest.TestCase):
     """The principal residence's declared `sale` (the SAME `property_sale`
     schema block Bite B defines, on a `kind="principal"` property) is mapped
-    by `input_contract._map_principal_sale` onto
+    by `contract_principal._map_principal_sale` onto
     `cfg['property']['principal_sale']`, read by `SimulationConfig.from_dict`
     into the `principal_sale` field, and re-emitted by `to_dict` (DP#24:
     a load -> modify -> save cycle does not silently drop the sale)."""
@@ -823,7 +825,7 @@ class ContractSurfaceMapsAndRoundTrips(unittest.TestCase):
         # contract adapter refuses a mortgage against an absent property).
         doc["liabilities"] = [l for l in doc["liabilities"]
                               if l.get("collateral") != "principal_residence"]
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         # No principal -> no principal_sale (the helper returned None).
         self.assertNotIn('principal_sale', legacy['property'],
@@ -853,8 +855,8 @@ class ContractSurfaceMapsAndRoundTrips(unittest.TestCase):
         # for this test's purpose, so remove the secured liabilities.
         doc["liabilities"] = [l for l in doc["liabilities"]
                               if l.get("collateral") != "principal_residence"]
-        ic.validate_contract(doc)
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        contract_schema.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             ic.to_internal_config(doc)
         self.assertIn("0 share", str(cm.exception))
 
