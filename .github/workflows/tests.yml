@@ -3,8 +3,20 @@ name: Tests
 on:
   push:
     branches: [main, refactor-modular-libraries]
-  pull_request:
-    branches: [main]
+  # No `branches:` filter here. `pull_request.branches` matches the PR's BASE
+  # ref, and the maintainer routinely stacks PRs (base = another open PR's
+  # branch, not `main`). `branches: [main]` silently dropped this job from
+  # every stacked PR's checks -- not "skipped", *absent*, because the trigger
+  # never matched, so no run (and no red X) was ever created. Worse, the miss
+  # was non-deterministic: a PR picked up the full suite only if its head SHA
+  # happened to be pushed *before* its base was retargeted into the stack, and
+  # lost it if retargeted first -- same operation, coin-flip outcome, with the
+  # PR checks tab looking identical (just fewer rows) either way. A stacked PR
+  # silently carrying zero Tests runs is exactly the "confident wrong number"
+  # failure class this repo exists to catch, so correctness wins over the
+  # cost this filter was presumably trying to save; see the workflow's
+  # `concurrency` block below for how that cost is bounded instead.
+  pull_request: {}
   # The full support matrix runs here, nightly, instead of on every merge. 07:00 UTC
   # is ~02:00-03:00 in the maintainer's timezone, i.e. while the workstation is idle.
   schedule:

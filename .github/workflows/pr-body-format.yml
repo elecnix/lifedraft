@@ -24,7 +24,13 @@ name: PR body format
 # the `edited` runs where the author fixed (or broke) the description.
 on:
   pull_request:
-    branches: [main]
+    # No `branches:` filter: see tests.yml's `pull_request:` comment -- that
+    # filter matches the PR's BASE ref, and matching only `main` silently
+    # dropped this job from every stacked PR (base = another open PR's
+    # branch). This job is the cheapest one in the repo (no checkout, no
+    # runtime setup), so unlike Tests/secret-scan/clone-detection there was
+    # never a real cost case for restricting it to `main` in the first place.
+    #
     # `edited` re-runs the check once the author fixes the body — without it
     # the original red result stands.
     types: [opened, edited, reopened, synchronize]
