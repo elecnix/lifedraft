@@ -7,7 +7,7 @@ proceeds are invested into the portfolio, and money is conserved.
 This is the correctness-critical layer built ON TOP of the mechanical
 foundation (the schema ``sale`` leaf on a ``kind="principal"`` property -- the
 SAME ``property_sale`` block Bite B defines, reused verbatim -- the
-``input_contract._map_principal_sale`` mapper carrying the sale onto
+``contract_principal._map_principal_sale`` mapper carrying the sale onto
 ``cfg['property']['principal_sale']``, and the
 ``SimulationConfig.principal_sale`` field). The crux this file verifies is the
 CONSERVATION IDENTITY (the spec's gate), adapted from Bite B for the principal
@@ -86,6 +86,8 @@ from simulation import FamilySimulation
 from rules_disposition import _principal_disposition_for
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_errors
+import contract_schema
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -108,7 +110,7 @@ def _base_doc():
     """The shipped two-generation example, validated (the sub-family the
     adapter can honestly map onto the two-adults-plus-children engine)."""
     doc = _two_generation_subset(_load_example())
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -130,7 +132,7 @@ def _add_principal_sale(doc, sale):
 def _run(doc):
     """Validate -> map to internal config -> run the real engine (which
     enforces the money-conservation invariant suite on every run)."""
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run()
@@ -752,7 +754,7 @@ class RuleFiresAndIsRegistered(unittest.TestCase):
 class ContractSurfaceMapsAndRoundTrips(unittest.TestCase):
     """The principal residence's declared `sale` (the SAME `property_sale`
     schema block Bite B defines, on a `kind="principal"` property) is mapped
-    by `input_contract._map_principal_sale` onto
+    by `contract_principal._map_principal_sale` onto
     `cfg['property']['principal_sale']`, read by `SimulationConfig.from_dict`
     into the `principal_sale` field, and re-emitted by `to_dict` (DP#24:
     a load -> modify -> save cycle does not silently drop the sale)."""
@@ -823,7 +825,7 @@ class ContractSurfaceMapsAndRoundTrips(unittest.TestCase):
         # contract adapter refuses a mortgage against an absent property).
         doc["liabilities"] = [l for l in doc["liabilities"]
                               if l.get("collateral") != "principal_residence"]
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         # No principal -> no principal_sale (the helper returned None).
         self.assertNotIn('principal_sale', legacy['property'],
@@ -853,8 +855,8 @@ class ContractSurfaceMapsAndRoundTrips(unittest.TestCase):
         # for this test's purpose, so remove the secured liabilities.
         doc["liabilities"] = [l for l in doc["liabilities"]
                               if l.get("collateral") != "principal_residence"]
-        ic.validate_contract(doc)
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        contract_schema.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             ic.to_internal_config(doc)
         self.assertIn("0 share", str(cm.exception))
 

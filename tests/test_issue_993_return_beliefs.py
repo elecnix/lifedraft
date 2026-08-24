@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
                                 "tests", "architecture"))
 
 import input_contract as ic
+import contract_schema
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
 
 import risk_allocation
@@ -60,7 +61,7 @@ def _document_with_beliefs(beliefs=None):
     """The two-generation example document, optionally declaring a
     ``return_beliefs`` block (``None`` removes it entirely -- the pre-#993
     shape)."""
-    doc = _two_generation_subset(json.loads(ic.EXAMPLE_PATH.read_text()))
+    doc = _two_generation_subset(json.loads(contract_schema.EXAMPLE_PATH.read_text()))
     doc = copy.deepcopy(doc)
     if beliefs is None:
         doc["assumptions"].pop("return_beliefs", None)
@@ -74,7 +75,7 @@ class DocumentLoadTest(unittest.TestCase):
 
     def test_declared_block_loads_and_maps_verbatim(self):
         doc = _document_with_beliefs(DECLARED_BELIEFS)
-        ic.validate_contract(doc)  # must not refuse the block
+        contract_schema.validate_contract(doc)  # must not refuse the block
         cfg = ic.to_internal_config(doc)
         self.assertEqual(cfg["assumptions"]["return_beliefs"], DECLARED_BELIEFS)
 
@@ -86,25 +87,25 @@ class DocumentLoadTest(unittest.TestCase):
 
     def test_partial_declaration_maps_just_what_was_declared(self):
         doc = _document_with_beliefs({"equity_mean": 0.09})
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
         self.assertEqual(cfg["assumptions"]["return_beliefs"], {"equity_mean": 0.09})
 
     def test_unknown_key_inside_the_block_is_refused(self):
         doc = _document_with_beliefs(dict(DECLARED_BELIEFS, small_cap_mean=0.09))
         with self.assertRaises(Exception):
-            ic.validate_contract(doc)
+            contract_schema.validate_contract(doc)
 
     def test_negative_sigma_is_refused(self):
         doc = _document_with_beliefs(dict(DECLARED_BELIEFS, equity_sigma=-0.1))
         with self.assertRaises(Exception):
-            ic.validate_contract(doc)
+            contract_schema.validate_contract(doc)
 
     def test_negative_mean_is_a_legal_belief(self):
         """A deflationary/crash belief for a sleeve is representable, not a
         schema error (DP#32: zero and below-zero are values)."""
         doc = _document_with_beliefs(dict(DECLARED_BELIEFS, fixed_income_mean=-0.01))
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
         self.assertEqual(cfg["assumptions"]["return_beliefs"]["fixed_income_mean"], -0.01)
 
@@ -184,7 +185,7 @@ class BeliefsReachTheRecommendationTest(unittest.TestCase):
         """The shipped example instantiates the block AT the engine defaults --
         behaviour-neutral by construction, present so the guards measure the
         mapping."""
-        doc = json.loads(ic.EXAMPLE_PATH.read_text())
+        doc = json.loads(contract_schema.EXAMPLE_PATH.read_text())
         self.assertEqual(doc["assumptions"]["return_beliefs"],
                          risk_allocation._DEFAULT_RETURN_BELIEFS)
 

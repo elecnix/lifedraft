@@ -19,7 +19,7 @@ load-bearing and false once ``net_estate`` goes negative.
    the mortgage + HELOC AND zeroes ``house_value`` in the estate
    (``objective.py``'s ``_estate_call_args``), plus ``liquidate_to_target``
    (#1009, on main) spending the drawable financial accounts to zero -- runs
-   it through ``ic.validate_contract`` -> ``to_internal_config`` -> the
+   it through ``contract_schema.validate_contract`` -> ``to_internal_config`` -> the
    engine, and gets ``net_estate = -50,000`` (the example's $250k tax-free
    life-insurance death benefit less the $300k surviving personal loan). The
    PRE-fix ``min_after_tax_estate`` score is ``+50,000`` -- the fabricated
@@ -93,6 +93,7 @@ from objective import (
 )
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
+import contract_schema
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ def _run_contract(doc):
     (results, internal_cfg)."""
     logging.disable(logging.WARNING)
     try:
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
         return FamilySimulation(SimulationConfig.from_dict(cfg)).run(), cfg
     finally:

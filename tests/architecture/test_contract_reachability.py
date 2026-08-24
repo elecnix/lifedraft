@@ -101,6 +101,8 @@ from test_dp_income_scenario_reaches_engine import _two_generation_subset
 
 sys.path.insert(0, os.path.join(repo_scan.ROOT, "tests"))
 import test_schema_coverage as tsc
+import contract_errors
+import contract_schema
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -146,7 +148,7 @@ DECISIONS_NOT_WIRED = {
 NOT_EXERCISED_BY_EXAMPLE = {
     "estate.rollover_overrides[].spousal_rollover": (
         "#600",
-        "GENUINELY CONSUMED (input_contract._weighted_rolled_fraction's "
+        "GENUINELY CONSUMED (contract_estate._weighted_rolled_fraction's "
         "`rolls = overrides[acc['id']] ...`), but schema/example.json's only override names "
         "`spousal_rrsp_p2`, an account owned by p2 -- while assumptions.mortality makes p1 the "
         "first to die. Only the FIRST-TO-DIE's accounts can roll, so this override can never "
@@ -154,7 +156,7 @@ NOT_EXERCISED_BY_EXAMPLE = {
     ),
     "properties[].designated_principal_residence_years[].from": (
         "#695",
-        "GENUINELY CONSUMED (input_contract._map_pre_property_gains -> "
+        "GENUINELY CONSUMED (contract_estate._map_pre_property_gains -> "
         "countries.canada.pre_designation reads each period's from/to to count a property's "
         "designated years and set its per-property taxable fraction, ITA s.40(2)(b)). But the "
         "per-year PRE allocation only ENGAGES when the COUPLE owns two or more properties: with a "
@@ -181,7 +183,16 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # makes for the same reason. input_contract.py is the WRITER: it is excluded
 # from the reader set because a key the adapter writes and only the adapter
 # names is, by definition, a dead write.
-_WRITER = {"input_contract.py"}
+# Every ``contract_*`` mapper is part of the same WRITER (the adapter was split
+# out of input_contract.py by module; a key one of them writes and only they
+# name is still, by definition, a dead write).
+_WRITER = {"input_contract.py"} | {
+    f"contract_{_part}.py" for _part in (
+        "accounts", "assumptions", "decisions", "errors", "estate",
+        "liabilities", "people", "principal", "property", "schema",
+        "transfers",
+    )
+}
 _PURE_LOADER = {"simulation_config.py"}
 
 
@@ -325,7 +336,7 @@ class Verdicts:
     def __init__(self) -> None:
         logging.disable(logging.WARNING)  # the adapter warns about far-future tax years
         try:
-            with open(ic.EXAMPLE_PATH) as fh:
+            with open(contract_schema.EXAMPLE_PATH) as fh:
                 doc = json.load(fh)
             # #598: to_internal_config REFUSES a 4-generation document outright
             # (loudly -- which is correct). The two-generation couple is the
@@ -385,7 +396,7 @@ class Verdicts:
                     # No change => this is the ACCUSATION path, so now it must
                     # be proven that a real user could have authored this value.
                     try:
-                        ic.validate_contract(mutant)
+                        contract_schema.validate_contract(mutant)
                     except Exception:
                         continue  # illegal value: proves nothing
                     probed.add(name)
@@ -658,7 +669,9 @@ class OracleIsActuallyLookingTest(unittest.TestCase):
 # engine OR refused loudly -- never silently dropped.
 # ═══════════════════════════════════════════════════════════════════════════
 
-_SCHEMA_ENUM = json.loads(ic.UNIVERSAL_SCHEMA_PATH.read_text())[
+# Read the ASSEMBLED schema, not the root file: the universal schema's $defs
+# live in the x-schema-parts fragments, so the spine on its own has none.
+_SCHEMA_ENUM = contract_schema.load_universal_schema()[
     "$defs"]["liability_kind"]["enum"]
 
 # Kinds whose material facts reach the engine through the property block
@@ -693,11 +706,6 @@ def _valid_liability_for_kind(kind: str) -> Dict:
     if kind == "heloc":
         liab["readvanceable"] = False
         liab["capitalize_interest"] = False
-        # Issue #1036: the engine refuses a heloc opening balance > 0 loudly
-        # (a draw is a simulation decision, #577); balance = 0 (undrawn) is the
-        # documented accepted state, so the gate still tests heloc CONSUMPTION
-        # (its rate reaches the property block) rather than the refusal path.
-        liab["balance"] = {"amount": 0, "as_of": "2026-01-01"}
     if kind == "mortgage":
         liab["collateral"] = "principal_residence"
         liab["amortization"] = {"years": 20, "payment_monthly": 800}
@@ -725,7 +733,7 @@ class EveryLiabilityKindIsConsumedOrRefusedTest(unittest.TestCase):
     """
 
     def _doc_with_one_liability(self, kind: str) -> Dict:
-        doc = _two_generation_subset(json.loads(ic.EXAMPLE_PATH.read_text()))
+        doc = _two_generation_subset(json.loads(contract_schema.EXAMPLE_PATH.read_text()))
         liab = _valid_liability_for_kind(kind)
         # Keep the example's mortgage only when testing a NON-mortgage kind,
         # so a mortgage kind fixture replaces it rather than colliding.
@@ -745,12 +753,12 @@ class EveryLiabilityKindIsConsumedOrRefusedTest(unittest.TestCase):
                 liab = next(l for l in doc["liabilities"] if l["kind"] == kind)
                 try:
                     cfg = ic.to_internal_config(doc)
-                except ic.ContractAdaptationError:
+                except contract_errors.ContractAdaptationError:
                     # Refused loudly is an acceptable terminal state (DP#32) --
                     # the kind is not silently dropped. intergenerational_loan
                     # is the current refusal (#703 lender field).
                     continue
-                except ic.ContractValidationError as e:
+                except contract_errors.ContractValidationError as e:
                     self.fail(
                         f"liability kind {kind!r} produced a schema validation "
                         f"error from a fixture this gate believes is valid -- "
@@ -868,7 +876,7 @@ class ChildOwnedAccountReachesTheEngineTest(unittest.TestCase):
         doc["accounts"].append(_child_owned_account("rrsp", "undeclared_owner"))
         logging.disable(logging.WARNING)
         try:
-            with self.assertRaises(ic.ContractAdaptationError):
+            with self.assertRaises(contract_errors.ContractAdaptationError):
                 ic.to_internal_config(doc)
         finally:
             logging.disable(logging.NOTSET)

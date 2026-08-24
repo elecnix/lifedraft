@@ -38,6 +38,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import unittest
 
 import input_contract as ic
+import contract_errors
+import contract_schema
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
@@ -75,7 +77,7 @@ def _opening_position_doc(drawn=65_000, portion=0.6, limit=150_000):
 
 
 def _load(doc):
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return ic.to_internal_config(doc)
 
 
@@ -211,14 +213,14 @@ class TestAbsenceStaysLoud(unittest.TestCase):
         must refuse, not default its trace."""
         doc = _opening_position_doc()
         del _heloc(doc)["deductibility"]
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _load(doc)
         self.assertIn("OPENING DRAWN balance", str(cm.exception))
         self.assertIn("deductibility", str(cm.exception))
 
     def test_drawn_above_own_limit_refuses(self):
         doc = _opening_position_doc(drawn=160_000, limit=150_000)
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _load(doc)
         self.assertIn("above its own limit", str(cm.exception))
 
@@ -231,7 +233,7 @@ class TestAbsenceStaysLoud(unittest.TestCase):
         h = _heloc(doc)
         assert h["balance"]["amount"] == 0
         h["deductibility"] = {"investment_portion": 0.6, "personal_portion": 0.4}
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _load(doc)
         self.assertIn("deductibility", str(cm.exception))
 
@@ -262,7 +264,7 @@ class TestChargeCrossCheck(unittest.TestCase):
         # -- mortgage + limit <= charge -- still passes at exactly $520k:
         # this isolates the OPENING POSITION breach, not a limit breach.)
         doc = _opening_position_doc(drawn=190_000, limit=180_000)
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             _load(doc)
         msg = str(cm.exception)
         self.assertIn("opening drawn balance", msg)

@@ -50,6 +50,8 @@ import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation_state import SimState, simulate_year_pure
 from trajectory_invariants import assert_invariant, run_invariant
+import contract_errors
+import contract_schema
 
 
 # ============================================================================
@@ -120,7 +122,7 @@ def _minimal_liability(kind, **overrides):
 class TestSchemaRepresentability(unittest.TestCase):
 
     def _minimal_doc(self):
-        doc = copy.deepcopy(ic._default_example())
+        doc = copy.deepcopy(contract_schema._default_example())
         # Trim to the two-generation subset the legacy adapter can map, same
         # technique as tests/test_input_contract.py -- irrelevant to schema
         # VALIDATION (this class never calls to_internal_config), but keeps
@@ -135,8 +137,8 @@ class TestSchemaRepresentability(unittest.TestCase):
         doc = self._minimal_doc()
         doc["liabilities"].append(_minimal_liability(
             "personal_loan", limit=30_000))
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_unsecured_revolving_line_of_credit_validates(self):
         """The actual #689 fix: revolving (has a `limit`, no
@@ -144,7 +146,7 @@ class TestSchemaRepresentability(unittest.TestCase):
         the (revolving, unsecured) quadrant that used to not exist."""
         doc = self._minimal_doc()
         doc["liabilities"].append(_contract_liability())
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
 
     def test_secured_revolving_line_of_credit_also_validates(self):
         """A line_of_credit MAY be secured too (collateral set) -- `heloc`
@@ -153,7 +155,7 @@ class TestSchemaRepresentability(unittest.TestCase):
         doc = self._minimal_doc()
         doc["liabilities"].append(
             _contract_liability(collateral="principal_residence"))
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
 
     def test_line_of_credit_still_forbids_amortization(self):
         """Still a revolving kind: an amortization schedule on it is
@@ -161,8 +163,8 @@ class TestSchemaRepresentability(unittest.TestCase):
         doc = self._minimal_doc()
         doc["liabilities"].append(_contract_liability(
             amortization={"years": 5, "payment_monthly": 500}))
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
 
 # ============================================================================
@@ -407,7 +409,7 @@ class TestChargeLimitBothSides(unittest.TestCase):
         huge_limit = principal["value"]["amount"] * 2
         doc["liabilities"].append(_contract_liability(
             collateral=principal["id"], limit=huge_limit))
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_contract_load_time_unsecured_facility_never_refused_by_charge(self):

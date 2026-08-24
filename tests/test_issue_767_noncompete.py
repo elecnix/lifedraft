@@ -33,12 +33,15 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import input_contract as ic
-from input_contract import (
+from contract_decisions import (
     _apply_non_compete_to_overrides,
     _apply_notice_segments,
     _add_months,
 )
 from datetime import date
+import contract_errors
+import contract_people
+import contract_schema
 
 
 def _owner_ids(owner):
@@ -78,7 +81,7 @@ def _example_doc():
     """schema/example.json, whose p1_employment income now declares a
     12-month non-compete (months=12, notice_days=0) -- the fixture this
     file's assertions hinge on."""
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         return json.load(f)
 
 
@@ -89,7 +92,7 @@ def _runnable_doc():
 
 
 def _people_by_id(doc):
-    return ic._people_by_id(doc)
+    return contract_people._people_by_id(doc)
 
 
 def _person_income_ids(doc):
@@ -208,7 +211,7 @@ class TestNonCompeteClampsRecovery(unittest.TestCase):
              "amount": 20_000, "from": "2027-07-01", "to": None},
         ]
         import logging
-        with self.assertNoLogs("input_contract", level="WARNING"):
+        with self.assertNoLogs("contract_decisions", level="WARNING"):
             out = _apply_non_compete_to_overrides(overrides, people, pids, "sc1")
         # Both EI segments are unchanged (no recovery to clamp, no shock `to`
         # to extend -- the second EI is open-ended).
@@ -268,8 +271,8 @@ class TestPartialNonCompeteFailsLoudly(unittest.TestCase):
         inc["employment"]["non_compete"] = {
             "scope": "payments technology", "geography": "Canada",
         }  # months intentionally omitted
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_months_without_scope_is_rejected(self):
         doc = _example_doc()
@@ -277,8 +280,8 @@ class TestPartialNonCompeteFailsLoudly(unittest.TestCase):
         inc["employment"]["non_compete"] = {
             "months": 12, "geography": "Canada",
         }  # scope intentionally omitted
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -295,7 +298,7 @@ class TestNoEmploymentBlockIsBackwardCompatible(unittest.TestCase):
         # Remove the employment block from p1_employment.
         inc = next(i for i in doc["people"] if i["id"] == "p1")["incomes"][0]
         inc["employment"] = None
-        ic.validate_contract(doc)  # must not raise
+        contract_schema.validate_contract(doc)  # must not raise
         people = _people_by_id(doc)
         pids = _person_income_ids(doc)
         overrides = [

@@ -835,7 +835,7 @@ def test_every_rule_fires_somewhere_in_representative_households():
     # precomputed annual amortization schedule is built by the same pure
     # helper input_contract uses, so the servicing reads one spelling. Round
     # numbers, role-based names (DP#4/#15).
-    from input_contract import _annual_amortization_schedule
+    from contract_property import _annual_amortization_schedule
     financed_schedule = _annual_amortization_schedule(
         principal=300_000.0, annual_rate=0.05,
         amortization_years=25, origination_year=2026,

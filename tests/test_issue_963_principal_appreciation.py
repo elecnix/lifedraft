@@ -49,6 +49,7 @@ from objective import compute_after_tax_estate
 
 from test_input_contract import _load_example, _two_generation_subset
 from test_golden_trajectory_581 import golden_household_config, _run
+import contract_schema
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ def _base_doc():
     """The shipped two-generation example, validated (the sub-family the
     adapter can honestly map onto the two-adults-plus-children engine)."""
     doc = _two_generation_subset(_load_example())
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 
@@ -93,7 +94,7 @@ def _add_principal_sale(doc, sale):
 def _run_doc(doc):
     """Validate -> map to internal config -> run the real engine (which
     enforces the money-conservation invariant suite on every run)."""
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run(), legacy
@@ -183,7 +184,7 @@ class MapperCarriesRate(unittest.TestCase):
 #     pointer to the property block.
 # ============================================================================
 class EstateBlockCarriesRate(unittest.TestCase):
-    """``input_contract._map_estate`` carries the principal's
+    """``contract_estate._map_estate`` carries the principal's
     ``appreciation_rate`` onto the estate block as
     ``principal_residence_appreciation_rate`` and into the ``property_gains``
     principal entry, only when declared; absent => not carried (DP#32). The
@@ -252,7 +253,7 @@ def _two_property_doc(rate):
             p["acb"] = 400_000
             if rate is not None:
                 p["appreciation_rate"] = rate
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     return doc
 
 

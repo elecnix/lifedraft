@@ -47,13 +47,14 @@ from rules_growth import (
 )
 from scenario_discovery import discover_anchors
 from simulate import enumerate_overlays
+import contract_schema
 
 
 def _load_example_doc():
     """The shipped contract example, trimmed to the two-generation subset the
     adapter maps (same helper tests/test_input_contract.py / test_issue_823
     use -- the 4-generation full doc is refused by the N-adult uncap)."""
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = json.load(f)
     doc = copy.deepcopy(doc)
     keep = {"p1", "p2", "ca", "cb"}

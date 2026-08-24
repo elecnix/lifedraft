@@ -36,6 +36,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+import contract_schema  # noqa: E402
 from countries.canada.adapter import CanadaAdapter  # noqa: E402
 from countries.canada.strategies import STRATEGIES  # noqa: E402
 from simulation import FamilySimulation  # noqa: E402
@@ -321,7 +322,7 @@ def test_input_contract_maps_a_declared_split_into_the_internal_property_key():
     reads onto the config field). This is the schema-coverage-relevant hop:
     the leaf is consumed here, not merely parsed."""
     doc = _example_doc_with_first_refinance_declaring_split(250_000.0)
-    ic.validate_contract(doc)  # the contract is schema-valid with advance_split
+    contract_schema.validate_contract(doc)  # the contract is schema-valid with advance_split
     legacy = ic.to_internal_config(doc)
     assert legacy["property"]["refinance_advance_deductible_non_reg"] == 250_000.0
     # and it loads onto a SimulationConfig that carries the field
@@ -382,7 +383,7 @@ def test_contract_advance_split_provably_changes_the_invested_non_reg_lump():
     doc["decisions"]["mortgage"]["refinance_options"][0]["cash_out"] = 150_000
     doc["decisions"]["mortgage"]["refinance_options"][0]["ltv"] = 0.75
     doc["decisions"]["mortgage"]["refinance_options"][0]["amortization_years"] = 25
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     # HOP 1: the leaf reached the internal config key the optimizer reads
     assert legacy["property"]["refinance_advance_deductible_non_reg"] == 250_000.0

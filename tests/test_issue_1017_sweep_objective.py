@@ -31,16 +31,16 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import input_contract as ic
 import sweep
 from objective import MAX_NET_BENEFIT, MIN_AFTER_TAX_ESTATE
+import contract_schema
 
 
 def _couple_doc() -> dict:
     """The shipped example trimmed to the couple + their children -- the shape
     the Phase-1 engine can actually simulate (#598). Mirrors
     ``test_issue_771_generalized_sweeps._couple_doc``."""
-    with open(ic.EXAMPLE_PATH) as fh:
+    with open(contract_schema.EXAMPLE_PATH) as fh:
         doc = json.load(fh)
     keep = {"p1", "p2", "ca", "cb"}
 

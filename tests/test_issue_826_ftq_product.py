@@ -32,12 +32,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from countries.canada import fonds_ftq
 from simulation_config import SimulationConfig
+import contract_errors
+import contract_schema
 
 
 def _load_example_doc():
     """The shipped contract example, trimmed to the two-generation subset the
     adapter maps (same helper tests/test_input_contract.py uses)."""
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = json.load(f)
     doc = copy.deepcopy(doc)
     keep = {"p1", "p2", "ca", "cb"}
@@ -120,7 +122,7 @@ class TestProductResolution(unittest.TestCase):
         # No explicit expected_return / locked_until on the account.
         rrsp.pop("expected_return", None)
         rrsp.pop("locked_until", None)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = SimulationConfig.from_dict(ic.to_internal_config(doc))
         # The rrsp override pot is populated at the module's 7.3%.
         self.assertIn("rrsp", cfg.account_return_overrides)
@@ -145,7 +147,7 @@ class TestProductResolution(unittest.TestCase):
         rrsp["product"] = "fonds_ftq"
         rrsp["expected_return"] = 0.05  # explicit, beats the 7.3% default
         rrsp.pop("locked_until", None)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = SimulationConfig.from_dict(ic.to_internal_config(doc))
         ov = cfg.account_return_overrides["rrsp"]
         self.assertAlmostEqual(ov["weighted_rate_sum"],
@@ -159,7 +161,7 @@ class TestProductResolution(unittest.TestCase):
         rrsp["product"] = "fonds_ftq"
         rrsp.pop("expected_return", None)
         rrsp["locked_until"] = {"age": 55}  # explicit, beats the 65 default
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = SimulationConfig.from_dict(ic.to_internal_config(doc))
         entry = cfg.account_locked["rrsp"][0]
         self.assertEqual(entry["unlock_age"], 55)
@@ -174,7 +176,7 @@ class TestProductResolution(unittest.TestCase):
         rrsp["product"] = "fonds_ftq"
         rrsp["expected_return"] = None  # explicit null = no opinion
         rrsp["locked_until"] = None
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = SimulationConfig.from_dict(ic.to_internal_config(doc))
         # The product default (7.3%) still applies.
         ov = cfg.account_return_overrides["rrsp"]
@@ -201,7 +203,7 @@ class TestProductResolution(unittest.TestCase):
         p1_rrsp["product"] = "fonds_ftq"
         p1_rrsp.pop("expected_return", None)
         p1_rrsp.pop("locked_until", None)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = SimulationConfig.from_dict(ic.to_internal_config(doc))
         ov = cfg.account_return_overrides["rrsp"]
         # Only p1's flagged balance is in the override; the weighted rate sum
@@ -217,18 +219,18 @@ class TestProductSchema(unittest.TestCase):
     def test_valid_product_accepted(self):
         doc = _load_example_doc()
         _p1_rrsp(doc)["product"] = "fonds_ftq"
-        ic.validate_contract(doc)  # no exception
+        contract_schema.validate_contract(doc)  # no exception
 
     def test_unknown_product_rejected(self):
         doc = _load_example_doc()
         _p1_rrsp(doc)["product"] = "not_a_product"
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_null_product_accepted(self):
         doc = _load_example_doc()
         _p1_rrsp(doc)["product"] = None
-        ic.validate_contract(doc)  # no exception
+        contract_schema.validate_contract(doc)  # no exception
 
 
 if __name__ == "__main__":

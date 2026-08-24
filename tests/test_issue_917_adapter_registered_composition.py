@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import input_contract as ic
 from countries.canada.portfolio import PortfolioConfig
+import contract_schema
 
 
 FOREIGN_PRODUCT = "synthetic_global_equity_index"   # US+intl equity, foreign_income
@@ -45,7 +46,7 @@ def _example_couple() -> dict:
     """The shipped contract example, trimmed to the p1/p2 couple + their two
     children + their own accounts (the same trimming tests/test_issue_691_mer.py
     uses)."""
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = copy.deepcopy(json.load(f))
     keep = {"p1", "p2", "ca", "cb"}
     doc["people"] = [p for p in doc["people"] if p["id"] in keep]
@@ -91,7 +92,7 @@ class TestRegisteredCompositionReachesEngine:
         doc = _example_couple()
         _set_holdings(doc, "rrsp", FOREIGN_PRODUCT)
         _set_holdings(doc, "tfsa", FOREIGN_PRODUCT)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
 
         accounts = cfg["portfolio"]["accounts"]
@@ -108,7 +109,7 @@ class TestRegisteredCompositionReachesEngine:
         doc = _example_couple()
         _set_holdings(doc, "rrsp", FOREIGN_PRODUCT)
         _set_holdings(doc, "tfsa", FOREIGN_PRODUCT)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
 
         drag = PortfolioConfig.from_dict(cfg["portfolio"]).registered_wht_drag()
@@ -130,7 +131,7 @@ class TestAssetLocationReachableFromContract:
         doc = _example_couple()
         _set_holdings(doc, "rrsp", FOREIGN_PRODUCT)
         _set_holdings(doc, "tfsa", DOMESTIC_PRODUCT)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
 
         placements = discover_placements(cfg)
@@ -148,7 +149,7 @@ class TestAbsenceIsNoOp:
         doc = _example_couple()
         _drop_holdings(doc, "rrsp")
         _drop_holdings(doc, "tfsa")
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
 
         accounts = cfg["portfolio"].get("accounts", {})
@@ -159,7 +160,7 @@ class TestAbsenceIsNoOp:
         doc = _example_couple()
         _set_holdings(doc, "rrsp", DOMESTIC_PRODUCT)
         _set_holdings(doc, "tfsa", DOMESTIC_PRODUCT)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
 
         drag = PortfolioConfig.from_dict(cfg["portfolio"]).registered_wht_drag()
@@ -172,7 +173,7 @@ class TestAbsenceIsNoOp:
         doc = _example_couple()
         _drop_holdings(doc, "rrsp")
         _drop_holdings(doc, "tfsa")
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         cfg = ic.to_internal_config(doc)
 
         assert len(discover_placements(cfg)) == 1

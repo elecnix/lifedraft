@@ -427,7 +427,7 @@ class TestInputSchemaIntegration:
     (DP#9): the input contract is now ``schema/input_schema.json`` (a real
     JSON Schema, not an instance to grep for keys) plus
     ``schema/countries/canada/input_schema.json``, composed and validated by
-    ``input_contract.compose_schema``/``validate_contract``
+    ``contract_schema.compose_schema``/``validate_contract``
     (``tests/test_input_contract.py`` covers that shape). What remains here
     is the one assertion that was never about the schema FILE at all — it
     exercises ``SimulationConfig.from_dict``'s internal-shape parsing

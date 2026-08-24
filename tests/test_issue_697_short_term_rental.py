@@ -40,6 +40,7 @@ from countries.canada.short_term_rental import (
 )
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_schema
 
 
 def _add_owned_str(doc, gross_rent, expenses, jurisdiction, citq_registered,
@@ -147,12 +148,12 @@ class ShortTermRentalLegalityGate(unittest.TestCase):
 class ShortTermRentalReachesTheEngine(unittest.TestCase):
     def setUp(self):
         self.base = _two_generation_subset(_load_example())  # no rental
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_permitted_str_carries_business_income_and_gst_flag(self):
         doc = _add_owned_str(self.base, gross_rent=40000, expenses=8000,
                              jurisdiction="montreal_verdun", citq_registered=True)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         st = next(p["rental"]["short_term"] for p in legacy["properties"]
                   if p.get("rental", {}).get("short_term"))
@@ -166,7 +167,7 @@ class ShortTermRentalReachesTheEngine(unittest.TestCase):
         ordinary income, so it is also inside net_rental_income (not double)."""
         doc = _add_owned_str(self.base, gross_rent=40000, expenses=8000,
                              jurisdiction="montreal_verdun", citq_registered=True)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         yr = _first_year(doc)
         self.assertAlmostEqual(yr.str_business_income, 32000.0, places=6)
         self.assertTrue(yr.gst_hst_registration_required)
@@ -178,7 +179,7 @@ class ShortTermRentalReachesTheEngine(unittest.TestCase):
         between the two cases, not the income."""
         doc = _add_owned_str(self.base, gross_rent=20000, expenses=5000,
                              jurisdiction="montreal_verdun", citq_registered=True)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         yr = _first_year(doc)
         self.assertAlmostEqual(yr.str_business_income, 15000.0, places=6)
         self.assertFalse(yr.gst_hst_registration_required)
@@ -186,14 +187,14 @@ class ShortTermRentalReachesTheEngine(unittest.TestCase):
     def test_banned_borough_str_is_refused_at_load(self):
         doc = _add_owned_str(self.base, gross_rent=40000, expenses=8000,
                              jurisdiction="montreal_lachine", citq_registered=True)
-        ic.validate_contract(doc)  # schema-valid; the REFUSAL is a legality rule
+        contract_schema.validate_contract(doc)  # schema-valid; the REFUSAL is a legality rule
         with self.assertRaises(ShortTermRentalNotPermitted):
             ic.to_internal_config(doc)
 
     def test_unregistered_str_is_refused_at_load(self):
         doc = _add_owned_str(self.base, gross_rent=40000, expenses=8000,
                              jurisdiction="montreal_verdun", citq_registered=False)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         with self.assertRaises(ShortTermRentalNotPermitted):
             ic.to_internal_config(doc)
 
@@ -205,7 +206,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())  # principal only
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_long_term_rental_has_no_short_term_marker(self):
         doc = copy.deepcopy(self.base)
@@ -220,7 +221,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
             "rental": {"gross_rent_annual": 40000, "expenses_annual": 8000,
                        "as_of": "2026-06-30"},
         })
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         for prop in legacy["properties"]:
             self.assertNotIn("short_term", prop.get("rental", {}))

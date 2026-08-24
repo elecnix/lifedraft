@@ -38,6 +38,7 @@ from simulation_config import SimulationConfig
 from countries.canada.adapter import CanadaAdapter
 
 import input_contract as ic
+import contract_schema
 
 
 def _make_config(mortgage_rate, heloc_rate, margin_available=100_000):
@@ -152,7 +153,7 @@ class ContractDrivenHelocRateTest(unittest.TestCase):
     a real (fabricated) contract document's HELOC rate reaches the engine."""
 
     def setUp(self):
-        with open(ic.EXAMPLE_PATH) as f:
+        with open(contract_schema.EXAMPLE_PATH) as f:
             doc = json.load(f)
         # Trim to the two-adults-plus-children sub-family the legacy engine
         # can represent (same fixture-shrinking helper test_input_contract.py
@@ -176,7 +177,7 @@ class ContractDrivenHelocRateTest(unittest.TestCase):
         ]
         doc["estate"]["life_insurance"] = [i for i in doc["estate"]["life_insurance"] if i["owner"] in keep]
         doc["assumptions"]["mortality"] = [m for m in doc["assumptions"]["mortality"] if m["person"] in keep]
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         self.doc = doc
 
     def test_issue_body_repro_is_fixed(self):

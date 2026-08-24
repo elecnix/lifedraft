@@ -39,6 +39,8 @@ from output_plugins import (
 
 # Sibling-import the #674 fixture (no `tests.` prefix per repo convention).
 from test_issue_674_income_shocks import _job_loss_household, _run
+import contract_errors
+import contract_schema
 
 
 def _grant(*, strike=None, owner='primary', gid='primary_options_2026'):
@@ -87,11 +89,10 @@ class TestEquityGrantContractLoads(unittest.TestCase):
     def test_unknown_key_is_rejected(self):
         """additionalProperties:false -- a typo (equity_grantz) is a load error."""
         import jsonschema
-        import input_contract as ic
         doc = json.loads(json.dumps(_load_example_for_schema()))
         doc['equity_grantz'] = []
         with self.assertRaises(jsonschema.ValidationError):
-            jsonschema.validate(doc, ic.compose_schema())
+            jsonschema.validate(doc, contract_schema.compose_schema())
 
     def test_owner_that_names_no_person_is_refused(self):
         """DP#32: an owner typo is refused loudly, not a silently-dropped grant."""
@@ -99,7 +100,7 @@ class TestEquityGrantContractLoads(unittest.TestCase):
         from test_input_contract import _load_example, _two_generation_subset
         doc = _two_generation_subset(_load_example())
         doc['equity_grants'] = [_grant(owner='nobody')]
-        with self.assertRaises(ic.ContractAdaptationError) as cm:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as cm:
             ic.to_internal_config(doc)
         msg = str(cm.exception).lower()
         self.assertIn('equity grant', msg)

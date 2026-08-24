@@ -23,12 +23,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import input_contract as ic
 from simulation_config import SimulationConfig
+import contract_errors
+import contract_people
+import contract_schema
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load_example():
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         return json.load(f)
 
 
@@ -76,12 +79,12 @@ def _owner_ids(owner):
 class SchemaCompositionTest(unittest.TestCase):
 
     def test_composed_schema_is_valid_draft_2020_12(self):
-        schema = ic.compose_schema()
+        schema = contract_schema.compose_schema()
         import jsonschema
         jsonschema.Draft202012Validator.check_schema(schema)
 
     def test_overlay_tightens_account_kind_to_a_closed_enum(self):
-        schema = ic.compose_schema()
+        schema = contract_schema.compose_schema()
         self.assertEqual(
             set(schema["$defs"]["account_kind"]["enum"]),
             {"rrsp", "spousal_rrsp", "tfsa", "fhsa", "rrif", "lif", "lira",
@@ -89,15 +92,15 @@ class SchemaCompositionTest(unittest.TestCase):
         )
 
     def test_overlay_tightens_province_to_a_closed_enum(self):
-        schema = ic.compose_schema()
+        schema = contract_schema.compose_schema()
         self.assertIn("quebec", schema["$defs"]["province"]["enum"])
         self.assertEqual(len(schema["$defs"]["province"]["enum"]), 13)
 
     def test_overlay_cannot_invent_a_new_root_key(self):
-        universal = json.loads(ic.UNIVERSAL_SCHEMA_PATH.read_text())
+        universal = json.loads(contract_schema.UNIVERSAL_SCHEMA_PATH.read_text())
         bad_overlay = {"properties": {"not_a_real_root_key": {"type": "string"}}}
-        with self.assertRaises(ic.ContractValidationError):
-            ic.compose_schema(universal, bad_overlay)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.compose_schema(universal, bad_overlay)
 
 
 class ExampleValidationTest(unittest.TestCase):
@@ -106,7 +109,7 @@ class ExampleValidationTest(unittest.TestCase):
 
     def test_example_validates_with_zero_errors(self):
         doc = _load_example()
-        ic.validate_contract(doc)  # raises on any violation
+        contract_schema.validate_contract(doc)  # raises on any violation
 
     def test_example_has_four_generations(self):
         doc = _load_example()
@@ -151,47 +154,47 @@ class RejectionTest(unittest.TestCase):
     def test_unknown_top_level_key_is_rejected(self):
         doc = self._valid()
         doc["totally_made_up_key"] = 1
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_unknown_key_nested_in_person_is_rejected(self):
         doc = self._valid()
         doc["people"][0]["mebmers_typo"] = 1
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_missing_required_key_is_rejected(self):
         doc = self._valid()
         del doc["as_of"]
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_birth_year_instead_of_birth_date_is_rejected(self):
         """#597: birth_year is gone -- only birth_date (a real date) exists."""
         doc = self._valid()
         del doc["people"][0]["birth_date"]
         doc["people"][0]["birth_year"] = 1980
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_rate_entered_as_percent_instead_of_fraction_is_rejected(self):
         doc = self._valid()
         doc["assumptions"]["inflation"] = 2.5  # should be 0.025
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_bad_account_kind_enum_is_rejected(self):
         doc = self._valid()
         doc["accounts"][0]["kind"] = "not_a_real_kind"
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_bad_province_short_form_is_rejected(self):
         """#595/#596: 'qc' is not valid -- long form only."""
         doc = self._valid()
         doc["jurisdiction"]["province"] = "qc"
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_heloc_without_limit_is_rejected(self):
         """#577/#601: limit is required for revolving liability kinds."""
@@ -199,8 +202,8 @@ class RejectionTest(unittest.TestCase):
         for liab in doc["liabilities"]:
             if liab["kind"] == "heloc":
                 del liab["limit"]
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_mortgage_may_be_declared_open(self):
         """#651: openness is a first-class, orthogonal fact — a mortgage term
@@ -209,7 +212,7 @@ class RejectionTest(unittest.TestCase):
         for liab in doc["liabilities"]:
             if liab["kind"] == "mortgage":
                 liab["open"] = True
-        ic.validate_contract(doc)  # raises on any violation
+        contract_schema.validate_contract(doc)  # raises on any violation
 
     def test_open_is_optional_on_mortgage(self):
         """#651/DP#32: absence is the closed default — a mortgage with no
@@ -218,7 +221,7 @@ class RejectionTest(unittest.TestCase):
         for liab in doc["liabilities"]:
             if liab["kind"] == "mortgage":
                 self.assertNotIn("open", liab)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
 
     def test_open_rejected_on_revolving_kind(self):
         """#651: a HELOC/line has no term to break, so `open` is meaningless
@@ -227,14 +230,14 @@ class RejectionTest(unittest.TestCase):
         for liab in doc["liabilities"]:
             if liab["kind"] == "heloc":
                 liab["open"] = True
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
     def test_real_dollars_without_base_year_is_rejected(self):
         doc = self._valid()
         doc["dollars"] = "real"
-        with self.assertRaises(ic.ContractValidationError):
-            ic.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractValidationError):
+            contract_schema.validate_contract(doc)
 
 
 class AdapterTest(unittest.TestCase):
@@ -245,7 +248,7 @@ class AdapterTest(unittest.TestCase):
 
     def setUp(self):
         self.doc = _two_generation_subset(_load_example())
-        ic.validate_contract(self.doc)  # sanity: the fixture itself is valid
+        contract_schema.validate_contract(self.doc)  # sanity: the fixture itself is valid
 
     def test_adapts_to_a_loadable_legacy_dict(self):
         legacy = ic.to_internal_config(self.doc)
@@ -330,7 +333,7 @@ class AdapterTest(unittest.TestCase):
         plausible-but-wrong answer; #901 is the ticket that flips this test to a
         successful run (a retired-extra decumulation run)."""
         full_doc = _load_example()
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(full_doc)
         msg = str(ctx.exception)
         self.assertIn("ADULT", msg)
@@ -358,7 +361,7 @@ class MultiGenerationBoundaryTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def _add_dependent_grandchild(self, doc):
         """A grandchild `gc` -- child of `ca` (an extra generation of pure
@@ -400,7 +403,7 @@ class MultiGenerationBoundaryTest(unittest.TestCase):
         loads: the dependent is present as a child with their own account
         attributed, and the household still simulates end-to-end."""
         doc = self._add_dependent_grandchild(self.base)
-        ic.validate_contract(doc)
+        contract_schema.validate_contract(doc)
         legacy = ic.to_internal_config(doc)
         children = {c["id"]: c for c in legacy["family"]["children"]}
         # The extra generation composes: gc is a child, its TFSA attributed to
@@ -435,8 +438,8 @@ class MultiGenerationBoundaryTest(unittest.TestCase):
                          "oas": {"start_date": "2020-02-01", "defer_months": 0}},
             "room": {"rrsp": None, "tfsa": None, "fhsa": None, "resp": None},
         })
-        ic.validate_contract(doc)
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        contract_schema.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("gp", msg)
@@ -461,8 +464,8 @@ class MultiGenerationBoundaryTest(unittest.TestCase):
         for m in doc["assumptions"]["mortality"]:
             if m["person"] in ("p1", "p2"):
                 m["assumed_death_date"] = "2080-01-01"
-        ic.validate_contract(doc)  # schema allows null birth_date
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        contract_schema.validate_contract(doc)  # schema allows null birth_date
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("p1", msg)
@@ -482,11 +485,11 @@ class NeedsAdultComputeTest(unittest.TestCase):
 
     def test_spouse_pairing_needs_adult_compute(self):
         person = {"relationships": [{"type": "spouse_of", "person": "y"}]}
-        self.assertTrue(ic._needs_adult_compute(self._doc(), "x", person))
+        self.assertTrue(contract_people._needs_adult_compute(self._doc(), "x", person))
 
     def test_retirement_benefit_needs_adult_compute(self):
         person = {"relationships": [], "benefits": {"oas": {"defer_months": 0}}}
-        self.assertTrue(ic._needs_adult_compute(self._doc(), "x", person))
+        self.assertTrue(contract_people._needs_adult_compute(self._doc(), "x", person))
 
     def test_future_salary_needs_adult_compute(self):
         """A future-dated employment segment is adult-only -- _map_child keeps
@@ -494,7 +497,7 @@ class NeedsAdultComputeTest(unittest.TestCase):
         person = {"relationships": [], "benefits": {},
                   "incomes": [{"kind": "employment", "amount": 50000,
                                "from": "2030-01-01", "to": None}]}
-        self.assertTrue(ic._needs_adult_compute(self._doc(), "x", person))
+        self.assertTrue(contract_people._needs_adult_compute(self._doc(), "x", person))
 
     def test_plain_dependent_does_not_need_adult_compute(self):
         """No adult-only fact (a current-salary-only, unpaired dependent) -- the
@@ -503,7 +506,7 @@ class NeedsAdultComputeTest(unittest.TestCase):
                   "incomes": [{"kind": "employment", "amount": 8000,
                                "from": "2020-01-01", "to": None}]}
         doc = self._doc([{"person": "someone_else", "candidate_ages": [65]}])
-        self.assertFalse(ic._needs_adult_compute(doc, "x", person))
+        self.assertFalse(contract_people._needs_adult_compute(doc, "x", person))
 
 
 class AccountKindCoverageTest(unittest.TestCase):
@@ -515,7 +518,7 @@ class AccountKindCoverageTest(unittest.TestCase):
 
     def setUp(self):
         self.doc = _two_generation_subset(_load_example())
-        ic.validate_contract(self.doc)
+        contract_schema.validate_contract(self.doc)
 
     def _account(self, **overrides):
         """A syntactically valid rrsp-shaped account, overridden per test."""
@@ -574,19 +577,19 @@ class AccountKindCoverageTest(unittest.TestCase):
     def test_rrif_account_is_loudly_refused(self):
         doc = copy.deepcopy(self.doc)
         doc["accounts"].append(self._account(id="p1_rrif", kind="rrif"))
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_dcpp_account_is_loudly_refused(self):
         doc = copy.deepcopy(self.doc)
         doc["accounts"].append(self._account(id="p1_dcpp", kind="dcpp"))
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_dbpp_account_is_loudly_refused(self):
         doc = copy.deepcopy(self.doc)
         doc["accounts"].append(self._account(id="p1_dbpp", kind="dbpp"))
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     # ── per-owner limits the engine's household-singleton pots impose ──
@@ -598,7 +601,7 @@ class AccountKindCoverageTest(unittest.TestCase):
         wrong person or vanish."""
         doc = copy.deepcopy(self.doc)
         doc["accounts"].append(self._account(id="p1_spousal_rrsp", kind="spousal_rrsp", owner="p1"))
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_fhsa_owned_by_both_spouses_reaches_both_members(self):
@@ -644,7 +647,7 @@ class AccountKindCoverageTest(unittest.TestCase):
         doc = copy.deepcopy(self.doc)
         doc["accounts"].append(
             self._account(id="ghost_rrsp", kind="rrsp", owner="nobody_declared"))
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     # ── second-of-a-kind: aggregate correctly, or refuse -- never drop it ──
@@ -659,7 +662,7 @@ class AccountKindCoverageTest(unittest.TestCase):
         second["owner"] = "p2"
         second["balance"]["amount"] = 999999
         doc["accounts"].append(second)
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_second_lira_with_disagreeing_jurisdiction_is_loudly_refused(self):
@@ -674,7 +677,7 @@ class AccountKindCoverageTest(unittest.TestCase):
         second["owner"] = "p1"  # different owner -> different birth year
         second["balance"]["amount"] = 999999
         doc["accounts"].append(second)
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
     def test_second_lira_agreeing_on_every_fact_sums_the_balance(self):
@@ -825,9 +828,9 @@ class AuthoredContributionStrategiesTest(unittest.TestCase):
         for s in strategies:
             if s["id"] != "other_deduct_later" and s["deduct_later"]:
                 s["deduct_later_bracket_target"] = 117045
-        ic.validate_contract(doc)  # the CONTRACT is legal; the ambiguity is ours to refuse
+        contract_schema.validate_contract(doc)  # the CONTRACT is legal; the ambiguity is ours to refuse
 
-        with self.assertRaises(ic.ContractAdaptationError):
+        with self.assertRaises(contract_errors.ContractAdaptationError):
             ic.to_internal_config(doc)
 
 
@@ -888,7 +891,7 @@ class TuitionMappingTest(unittest.TestCase):
         doc = copy.deepcopy(self.doc)
         p2 = next(p for p in doc["people"] if p["id"] == "p2")
         p2["study_periods"] = [self._study("2026-09-01", "2026-12-31", 3000)]
-        with self.assertNoLogs("input_contract", level="WARNING"):
+        with self.assertNoLogs("contract_people", level="WARNING"):
             self._members(doc)
 
     def test_child_tuition_is_recorded_for_transfer_not_warned(self):
@@ -899,7 +902,7 @@ class TuitionMappingTest(unittest.TestCase):
         ca = next(p for p in doc["people"] if p["id"] == "ca")
         ca["study_periods"] = [self._study("2026-09-01", "2026-12-31", 2000)]
         # No warning fires (transfer is now modelled).
-        with self.assertNoLogs("input_contract", level="WARNING"):
+        with self.assertNoLogs("contract_people", level="WARNING"):
             children = self._child_members(doc)
         child = next(c for c in children if c.get("tuition_by_year"))
         self.assertEqual(child["tuition_by_year"], {2026: 2000.0})
@@ -908,7 +911,7 @@ class TuitionMappingTest(unittest.TestCase):
         # Issue #785: a child's study_period declaring `transfer_to` (the
         # supporting parent's person_id) is parsed onto the child config as
         # `tuition_transfer_to`, so the simulation prologue can resolve it to
-        # the right taxed member. Exercises input_contract._tuition_transfer_to
+        # the right taxed member. Exercises contract_people._tuition_transfer_to
         # and the child extraction path (DP#15: fabricated round numbers).
         doc = copy.deepcopy(self.doc)
         ca = next(p for p in doc["people"] if p["id"] == "ca")

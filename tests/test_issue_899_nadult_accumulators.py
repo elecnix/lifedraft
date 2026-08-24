@@ -31,10 +31,13 @@ from simulation import FamilySimulation
 from simulation_config import SimulationConfig
 from member_config import adult_members
 from simulation_state import step_extra_adult_accounts
+import contract_errors
+import contract_people
+import contract_schema
 
 
 def _load_example():
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         return json.load(f)
 
 
@@ -94,7 +97,7 @@ class AccumulatorAdultAdmittedTest(unittest.TestCase):
     def setUp(self):
         base = _two_generation_subset(_load_example())
         self.doc = _add_accumulator_adult(base)
-        ic.validate_contract(self.doc)
+        contract_schema.validate_contract(self.doc)
 
     def test_third_adult_is_mapped_as_an_adult_member(self):
         legacy = ic.to_internal_config(self.doc)
@@ -160,8 +163,8 @@ class RetiredExtraAdultRefusedTest(unittest.TestCase):
                     "as_of": "2019-01-01"},
             "oas": {"start_date": "2020-02-01", "defer_months": 0},
         })
-        ic.validate_contract(doc)
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        contract_schema.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         msg = str(ctx.exception)
         self.assertIn("ac", msg)
@@ -173,8 +176,8 @@ class RetiredExtraAdultRefusedTest(unittest.TestCase):
         # Retirement age 60 -> 1996+60 = 2056, well inside the 2075 horizon:
         # they DECUMULATE mid-horizon, which #899-part-a does not model.
         doc = _add_accumulator_adult(base, retirement_ages=(60,))
-        ic.validate_contract(doc)
-        with self.assertRaises(ic.ContractAdaptationError) as ctx:
+        contract_schema.validate_contract(doc)
+        with self.assertRaises(contract_errors.ContractAdaptationError) as ctx:
             ic.to_internal_config(doc)
         self.assertIn("#901", str(ctx.exception))
 
@@ -217,21 +220,21 @@ class IsPureAccumulatorBranchTest(unittest.TestCase):
         doc = {"accounts": [{"owner": "ac", "kind": "rrif"}],
                "decisions": {"retirement_age": []}}
         person = {"birth_date": "1996-05-01"}
-        self.assertFalse(ic._is_pure_accumulator(doc, "ac", person, 2075))
+        self.assertFalse(contract_people._is_pure_accumulator(doc, "ac", person, 2075))
 
     def test_unknown_birth_year_cannot_be_proven_accumulator(self):
         # No benefits, no decumulation account, but no birth_date -- DP#32:
         # absence fails loudly rather than being coerced.
         doc = {"accounts": [], "decisions": {"retirement_age": []}}
         person = {"birth_date": None}
-        self.assertFalse(ic._is_pure_accumulator(doc, "ac", person, 2075))
+        self.assertFalse(contract_people._is_pure_accumulator(doc, "ac", person, 2075))
 
     def test_clean_accumulator_retiring_beyond_horizon_is_admitted(self):
         # Positive control / boundary: born 1996, default retirement age 65 ->
         # reaches retirement in 2061, strictly after a 2050 horizon end.
         doc = {"accounts": [], "decisions": {"retirement_age": []}}
         person = {"birth_date": "1996-05-01"}
-        self.assertTrue(ic._is_pure_accumulator(doc, "ac", person, 2050))
+        self.assertTrue(contract_people._is_pure_accumulator(doc, "ac", person, 2050))
 
 
 class HorizonEndYearBranchTest(unittest.TestCase):
@@ -241,17 +244,17 @@ class HorizonEndYearBranchTest(unittest.TestCase):
     def test_horizon_dated_against_a_non_primary_is_undatable(self):
         doc = {"people": [{"id": "p1", "birth_date": "1980-01-01"}],
                "decisions": {"horizon": {"person": "other", "until_age": 95}}}
-        self.assertIsNone(ic._horizon_end_year(doc, "p1"))
+        self.assertIsNone(contract_people._horizon_end_year(doc, "p1"))
 
     def test_primary_without_birth_date_is_undatable(self):
         doc = {"people": [{"id": "p1", "birth_date": None}],
                "decisions": {"horizon": {"person": "p1", "until_age": 95}}}
-        self.assertIsNone(ic._horizon_end_year(doc, "p1"))
+        self.assertIsNone(contract_people._horizon_end_year(doc, "p1"))
 
     def test_horizon_end_year_is_primary_birth_year_plus_until_age(self):
         doc = {"people": [{"id": "p1", "birth_date": "1980-06-15"}],
                "decisions": {"horizon": {"person": "p1", "until_age": 95}}}
-        self.assertEqual(ic._horizon_end_year(doc, "p1"), 2075)
+        self.assertEqual(contract_people._horizon_end_year(doc, "p1"), 2075)
 
 
 class AdultMembersUncapTest(unittest.TestCase):

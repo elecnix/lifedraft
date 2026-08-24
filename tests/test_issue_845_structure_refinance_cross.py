@@ -43,6 +43,7 @@ from simulation_config import (
     apply_sourcing_overlay, apply_structure_overlay,
 )
 from simulation_state import margin_draw_for_lump_sum
+import contract_schema
 
 
 # ── Fabricated household (DP#15) ────────────────────────────────────────────
@@ -215,7 +216,7 @@ def _doc(refinance_options, structure_options):
     """The shipped example trimmed to the sub-family the engine represents
     (same technique as tests/test_issue_687_mortgage_structure.py), re-based
     onto this file's fabricated property and decisions."""
-    with open(ic.EXAMPLE_PATH) as f:
+    with open(contract_schema.EXAMPLE_PATH) as f:
         doc = copy.deepcopy(json.load(f))
     keep = {"p1", "p2", "ca", "cb"}
     doc["people"] = [p for p in doc["people"] if p["id"] in keep]

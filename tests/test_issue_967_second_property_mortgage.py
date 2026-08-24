@@ -41,11 +41,12 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import input_contract as ic
-from input_contract import _annual_amortization_schedule
+from contract_property import _annual_amortization_schedule
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
 
 from test_input_contract import _load_example, _two_generation_subset
+import contract_schema
 
 
 # The example projects 50 years from start_year 2026, so results[i] is calendar
@@ -107,7 +108,7 @@ def _add_cottage(doc, financing=None, purchase=None):
 
 
 def _run(doc):
-    ic.validate_contract(doc)
+    contract_schema.validate_contract(doc)
     legacy = ic.to_internal_config(doc)
     cfg = SimulationConfig.from_dict(legacy)
     return FamilySimulation(cfg).run()
@@ -118,7 +119,7 @@ class ContractMappingTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_financing_maps_to_internal_config(self):
         doc = _add_rental(self.base, financing=_FINANCING)
@@ -175,7 +176,7 @@ class AbsenceIsByteIdenticalTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_no_financing_trajectory_matches_equity_financed(self):
         equity = _run(_add_rental(self.base))
@@ -202,7 +203,7 @@ class MortgageOriginationAndServicingTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
         self.results = _run(_add_rental(self.base, financing=_FINANCING))
 
     def test_no_mortgage_before_purchase_year(self):
@@ -272,7 +273,7 @@ class RentalInterestDeductionTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_rental_deducts_financed_interest(self):
         results = _run(_add_rental(self.base, financing=_FINANCING))
@@ -309,7 +310,7 @@ class CottageInterestNonDeductibleTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_cottage_mortgage_originates_and_services(self):
         """The cottage's mortgage originates and services exactly like the
@@ -374,7 +375,7 @@ class MoneyConservationTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_purchase_year_not_ruined_by_the_down_payment(self):
         """The down payment (100000) + closing costs (10000) leave the
@@ -450,7 +451,7 @@ class HalfOwnerFinancingTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_financing_taken_at_couples_share(self):
         half_owner = {"joint": [{"person": "p1", "pct": 0.25},
@@ -545,6 +546,12 @@ class ProjectionYearsFallbackTest(unittest.TestCase):
         doc = _add_rental(_two_generation_subset(_load_example()),
                          financing=_FINANCING)
         import input_contract as ic_mod
+        # Patch the binding `to_internal_config` actually looks up. The helper
+        # is DEFINED in contract_people, but input_contract imported it by name
+        # (`from contract_people import _horizon_end_year`), so rebinding
+        # contract_people's attribute would leave the orchestrator calling the
+        # original -- a patch that silently does nothing, and a test that
+        # verifies nothing while staying green (DP#32).
         orig = ic_mod._horizon_end_year
         ic_mod._horizon_end_year = lambda d, pid: None
         try:
@@ -563,7 +570,7 @@ class ServicingRuleEdgeCasesTest(unittest.TestCase):
 
     def setUp(self):
         self.base = _two_generation_subset(_load_example())
-        ic.validate_contract(self.base)
+        contract_schema.validate_contract(self.base)
 
     def test_mismatched_state_config_raises(self):
         """A length mismatch between the config's properties and the SimState's
