@@ -20,6 +20,8 @@ ranker a spread can only ever cost; these tests pin exactly that honest
 pricing.
 """
 
+from typing import Optional
+
 import pytest
 
 from deployment_lag import (
@@ -83,7 +85,7 @@ def _household(revolving_share: float = 0.5) -> dict:
     }
 
 
-def _run(schedule_years: int, monthly: bool = False,
+def _run(schedule_years: Optional[int], monthly: bool = False,
          revolving_share: float = 0.5):
     cfg_dict = _household(revolving_share)
     if monthly:
@@ -192,9 +194,14 @@ class TestEnginePricesStaggeredDeployment:
     cost must match the pure function."""
 
     def test_one_year_schedule_is_byte_identical_to_no_dimension(self):
+        # A 1-year schedule deploys the whole lump at year 0, so it must be
+        # byte-identical to a run that declares NO schedule dimension at all
+        # (deployment_schedule_years=None -> the seam no-ops, DP#32). The
+        # previous form compared _run(1) against _run(1) -- identical args --
+        # which could never detect a regression in the no-dimension path.
         base = _run(1)
         assert base[0].deployment_lag_cost == 0.0
-        assert repr(base[-1].total_assets) == repr(_run(1)[-1].total_assets)
+        assert repr(base[-1].total_assets) == repr(_run(None)[-1].total_assets)
 
     def test_longer_schedules_cost_more_terminal_wealth(self):
         terminals = {n: _run(n)[-1].total_assets for n in (1, 2, 3, 4)}
