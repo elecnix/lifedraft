@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
-from simulation_rules import _disposition_gain_tax
+from rules_disposition import _disposition_gain_tax
 from countries.canada.pre_designation import (
     designated_years, family_window_years, family_year_conflict,
     taxable_gain_fraction)

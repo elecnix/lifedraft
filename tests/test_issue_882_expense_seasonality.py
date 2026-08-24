@@ -52,7 +52,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 import countries.canada  # noqa: F401 -- registers the Canada jurisdiction providers
 import input_contract as ic
 from simulation_config import SimulationConfig
-from simulation_rules import _expense_segment_contribution_in_year
+from rules_solvency import _expense_segment_contribution_in_year
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
 
 # Reuse the #760 one-year pure-step harness and its RUIN_* fixtures verbatim --

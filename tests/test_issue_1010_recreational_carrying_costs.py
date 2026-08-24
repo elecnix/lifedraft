@@ -39,10 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
-from simulation_rules import (
-    _property_carrying_cost_in_year,
-    _total_carrying_cost_in_year,
-)
+from rules_solvency import _property_carrying_cost_in_year, _total_carrying_cost_in_year
 
 from test_input_contract import _load_example, _two_generation_subset
 import contract_errors

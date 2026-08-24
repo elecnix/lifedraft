@@ -42,8 +42,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from simulation import FamilySimulation
-from simulation_rules import (
-    _principal_value_for_year, _principal_disposition_for, charge_room_for_readvance)
+from rules_leverage import _principal_value_for_year
+from rules_disposition import _principal_disposition_for
+from simulation_config import charge_room_for_readvance
 from objective import compute_after_tax_estate
 
 from test_input_contract import _load_example, _two_generation_subset

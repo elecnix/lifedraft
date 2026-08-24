@@ -68,7 +68,7 @@ import countries.canada  # noqa: F401 -- registers the Canada jurisdiction provi
 import input_contract as ic
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-from simulation_rules import _expense_segment_contribution_in_year
+from rules_solvency import _expense_segment_contribution_in_year
 from simulation_state import SimState, simulate_year_pure
 import contract_errors
 import contract_schema

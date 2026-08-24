@@ -132,15 +132,15 @@ class TestFederalSliceUncapped:
         path values the capped amount at the combined brackets -- exactly the
         pre-#1035 spelling), the leveraged QC household's side-credit is
         SMALLER than with the federal slice uncapped."""
-        import simulation_rules
+        import rules_leverage
         cfg = _cfg(province="qc", projection_years=8)
         rs_new = _run(cfg)
-        original = simulation_rules._year_split_brackets_for
-        simulation_rules._year_split_brackets_for = lambda ctx: (None, None)
+        original = rules_leverage._year_split_brackets_for
+        rules_leverage._year_split_brackets_for = lambda ctx: (None, None)
         try:
             rs_old = _run(cfg)
         finally:
-            simulation_rules._year_split_brackets_for = original
+            rules_leverage._year_split_brackets_for = original
         saved_new = sum(r.readvance_tax_savings + r.traced_borrowing_tax_savings
                         for r in rs_new)
         saved_old = sum(r.readvance_tax_savings + r.traced_borrowing_tax_savings
@@ -314,8 +314,9 @@ class TestSplitFallbackBranches:
     crashes a run that the combined brackets could price)."""
 
     def test_year_split_brackets_falls_back_without_config(self):
-        import simulation_rules
-        ctx = simulation_rules.RuleContext(
+        import rule_registry
+        import rules_leverage
+        ctx = rule_registry.RuleContext(
             year=0, calendar_year=2026, allocations={}, config=None,
             investment_return=0.0, mortgage_rate=0.0, heloc_rate=0.0,
             mortgage_data=None, use_readvanceable=False, deduct_later=False,
@@ -327,15 +328,16 @@ class TestSplitFallbackBranches:
             rrif_min_rate_primary=0.0, rrif_min_rate_spouse=0.0,
             drawdown_net_target=0.0, retiree_marginal_rate=0.0,
             drawdown_bracket_target=None, drawdown_other_taxable_income=0.0)
-        assert simulation_rules._year_split_brackets_for(ctx) == (None, None)
+        assert rules_leverage._year_split_brackets_for(ctx) == (None, None)
 
     def test_year_split_brackets_falls_back_when_provider_has_no_data(self):
-        import simulation_rules
+        import rule_registry
+        import rules_leverage
         class _NoDataProvider:
             def get_split_brackets(self, year, province="quebec"):
                 raise ValueError(f"No tax data for {year}")
         cfg = SimulationConfig.from_dict(_cfg(projection_years=2))
-        ctx = simulation_rules.RuleContext(
+        ctx = rule_registry.RuleContext(
             year=0, calendar_year=2026, allocations={}, config=cfg,
             investment_return=0.0, mortgage_rate=0.0, heloc_rate=0.0,
             mortgage_data=None, use_readvanceable=False, deduct_later=False,
@@ -348,7 +350,7 @@ class TestSplitFallbackBranches:
             drawdown_net_target=0.0, retiree_marginal_rate=0.0,
             drawdown_bracket_target=None, drawdown_other_taxable_income=0.0,
             tax_provider=_NoDataProvider())
-        assert simulation_rules._year_split_brackets_for(ctx) == (None, None)
+        assert rules_leverage._year_split_brackets_for(ctx) == (None, None)
 
     def test_qc_provincial_brackets_returns_none_without_data(self):
         from objective import _qc_provincial_brackets

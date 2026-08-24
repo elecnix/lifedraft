@@ -58,7 +58,11 @@ import pytest
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-import simulation_rules
+import rule_registry
+# Importing the fold is what POPULATES ``rule_registry.RULES`` (each
+# ``rules_*`` module's ``@rule(...)`` decorators run at import); the registry
+# itself is read from the module that defines it (DP#9 -- no re-export layer).
+import simulation_rules  # noqa: F401
 
 # ── The fabricated retired household (DP#15) ────────────────────────────────
 # Mortgage-free, LOW cpp/pension (the #1033 review fixture's floor case:
@@ -170,18 +174,18 @@ def _run_without_nondrawdown_routing(cfg_dict, lump_sum=LUMP_SUM):
     ``apply_retirement_drawdown`` fires). #1033's drawdown-base routing and
     the accumulation side-credit are untouched, so the A/B difference
     isolates exactly the remainder routing this issue adds."""
-    original = simulation_rules.RULES["retirement_drawdown"]
+    original = rule_registry.RULES["retirement_drawdown"]
 
     def patched(ws, ctx):
         fired = original(ws, ctx)
         ws.sm_interest_nondrawdown_tax_saving = 0.0
         return fired
 
-    simulation_rules.RULES["retirement_drawdown"] = patched
+    rule_registry.RULES["retirement_drawdown"] = patched
     try:
         return _run(cfg_dict, lump_sum=lump_sum)
     finally:
-        simulation_rules.RULES["retirement_drawdown"] = original
+        rule_registry.RULES["retirement_drawdown"] = original
 
 
 # ============================================================================
@@ -378,7 +382,7 @@ class TestNoDoubleCount:
         brackets and takes the bracket-fill path, covered above). Drives the
         production rule directly (DP#11), mirroring #1033's own
         TestBaseFlooredAtZero harness."""
-        from simulation_rules import YearWorkingState, RuleContext, RULES
+        from rule_registry import YearWorkingState, RuleContext, RULES
         ws = YearWorkingState(year=0)
         ws.drawdown_other_taxable_income = 2_400.0
         ws.drawdown_other_taxable_income_primary = 2_400.0

@@ -28,13 +28,9 @@ import contract_errors
 import contract_schema
 import input_contract as ic
 from simulation_config import SimulationConfig
-from simulation_rules import (
-    RULES,
-    RuleContext,
-    YearWorkingState,
-    _blended_pot_rate,
-    _still_locked,
-)
+from rule_registry import RULES, RuleContext, YearWorkingState
+from rules_contributions import _blended_pot_rate
+from rules_solvency import _still_locked
 
 
 def _load_example_doc():
