@@ -680,7 +680,9 @@ def apply_property_funding_overlay(cfg: dict, assignment: Dict[str, Dict]) -> di
     passed through here -- the exploration is gated on a declaration, so the
     golden trajectory never reaches this function.
     """
-    from input_contract import _annual_amortization_schedule
+    # The amortization schedule moved out of input_contract when the adapter
+    # was split per contract namespace (DP#9 -- re-pointed, not re-exported).
+    from contract_property import _annual_amortization_schedule
 
     cfg = deepcopy(cfg)
     props = cfg.get('properties', [])
