@@ -669,7 +669,9 @@ class OracleIsActuallyLookingTest(unittest.TestCase):
 # engine OR refused loudly -- never silently dropped.
 # ═══════════════════════════════════════════════════════════════════════════
 
-_SCHEMA_ENUM = json.loads(contract_schema.UNIVERSAL_SCHEMA_PATH.read_text())[
+# Read the ASSEMBLED schema, not the root file: the universal schema's $defs
+# live in the x-schema-parts fragments, so the spine on its own has none.
+_SCHEMA_ENUM = contract_schema.load_universal_schema()[
     "$defs"]["liability_kind"]["enum"]
 
 # Kinds whose material facts reach the engine through the property block
@@ -704,11 +706,6 @@ def _valid_liability_for_kind(kind: str) -> Dict:
     if kind == "heloc":
         liab["readvanceable"] = False
         liab["capitalize_interest"] = False
-        # Issue #1036: the engine refuses a heloc opening balance > 0 loudly
-        # (a draw is a simulation decision, #577); balance = 0 (undrawn) is the
-        # documented accepted state, so the gate still tests heloc CONSUMPTION
-        # (its rate reaches the property block) rather than the refusal path.
-        liab["balance"] = {"amount": 0, "as_of": "2026-01-01"}
     if kind == "mortgage":
         liab["collateral"] = "principal_residence"
         liab["amortization"] = {"years": 20, "payment_monthly": 800}

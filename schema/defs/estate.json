@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/estate.json",
+  "title": "lifedraft input contract — universal $defs: the estate block",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Estate FACTS in force: the estate record, its rollover election override and the life-insurance policies. Mortality is a BELIEF and lives in assumptions.json instead.",
+
+  "$defs": {
+
+    "insurance_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner", "insured", "beneficiary", "kind", "face_amount", "premium_annual", "as_of", "term_end_date"],
+      "properties": {
+        "id": { "type": "string" },
+        "owner": { "$ref": "#/$defs/person_id" },
+        "insured": { "$ref": "#/$defs/person_id" },
+        "beneficiary": { "$ref": "#/$defs/person_id" },
+        "kind": { "type": "string", "enum": ["term", "permanent"] },
+        "face_amount": { "$ref": "#/$defs/money" },
+        "premium_annual": { "$ref": "#/$defs/money" },
+        "as_of": { "$ref": "#/$defs/date" },
+        "term_end_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "null for permanent policies." }
+      }
+    },
+
+    "rollover_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account", "spousal_rollover"],
+      "$comment": "x-uncertainty on .spousal_rollover below: same domain question as estate.default_spousal_rollover, asked per-account (#671).",
+      "properties": {
+        "account": { "$ref": "#/$defs/account_id" },
+        "spousal_rollover": { "type": "boolean",
+          "x-uncertainty": {
+            "resolvability": "document",
+            "domain": [true, false],
+            "resolved_by": "Read the will and this account's beneficiary designation.",
+            "question": "Is a spousal rollover elected on this specific account?"
+          } }
+      }
+    },
+
+    "estate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_spousal_rollover", "rollover_overrides", "life_insurance"],
+      "properties": {
+        "default_spousal_rollover": { "type": "boolean", "description": "The spousal-rollover election in force by default for every account with a spousal beneficiary/successor_holder (in Canada: ITA s.146(8.1)/s.70(6)). Not rolling over is sometimes optimal (uses the first spouse's low brackets) — this is a FACT about what the current will/beneficiary designations say, not a decision; the sweep across rollover-vs-not lives in decisions.estate_elections. THIS IS THE FIELD THAT MAKES 'not rolling over' EXPRESSIBLE — #600's headline six-figure silent assumption.",
+          "x-uncertainty": {
+            "resolvability": "document",
+            "domain": [true, false],
+            "resolved_by": "Read the will and the plan beneficiary designations. In Quebec this designation can only live there.",
+            "question": "Is a spousal rollover elected on the registered plans?"
+          } },
+        "rollover_overrides": { "type": "array", "items": { "$ref": "#/$defs/rollover_override" }, "description": "Per-account exceptions to default_spousal_rollover." },
+        "life_insurance": { "type": "array", "items": { "$ref": "#/$defs/insurance_policy" } }
+      }
+    }
+
+  }
+}

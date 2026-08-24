@@ -279,9 +279,10 @@ class SaleAndPurchaseGatesCompose(unittest.TestCase):
 
 class SchemaCarriesPropertySaleDef(unittest.TestCase):
     def test_schema_loads_and_has_property_sale(self):
-        with open(os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), "schema", "input_schema.json")) as f:
-            schema = json.load(f)
+        # The universal schema is composed from schema/input_schema.json (spine)
+        # plus its x-schema-parts $defs fragments; load_universal_schema()
+        # returns exactly the object the single file used to be.
+        schema = ic.load_universal_schema()
         self.assertIn("property_sale", schema["$defs"])
         sale_def = schema["$defs"]["property_sale"]
         # #956 bite C: `date` is no longer top-level-required -- the def now
@@ -304,9 +305,10 @@ class SchemaCarriesPropertySaleDef(unittest.TestCase):
         self.assertTrue(any(t.get("type") == "null" for t in sc_any))
 
     def test_property_def_has_sale_slot(self):
-        with open(os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), "schema", "input_schema.json")) as f:
-            schema = json.load(f)
+        # The universal schema is composed from schema/input_schema.json (spine)
+        # plus its x-schema-parts $defs fragments; load_universal_schema()
+        # returns exactly the object the single file used to be.
+        schema = ic.load_universal_schema()
         self.assertIn("sale", schema["$defs"]["property"]["properties"])
         slot = schema["$defs"]["property"]["properties"]["sale"]
         self.assertEqual(len(slot["anyOf"]), 2)

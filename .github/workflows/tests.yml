@@ -33,7 +33,11 @@ jobs:
   test:
     # Self-hosted: GitHub-hosted minutes are exhausted, so a GitHub-hosted job
     # fails immediately with zero steps executed.
-    runs-on: arc-runners
+    # The coverage-instrumented full suite is the memory peak in this repo, so it
+    # runs on the DEDICATED 8 GB scale set (7Gi request/limit, cap 2) rather than
+    # sharing the general `arc-runners` pool (3-4Gi, cap 4). `quick-tests` below
+    # stays on the shared pool: it is not the job that was being evicted.
+    runs-on: arc-8gb
     strategy:
       # Don't cancel 3.10 because 3.12 failed -- we want the full picture on main.
       fail-fast: false
@@ -168,13 +172,84 @@ jobs:
           # break the test job itself (defensive: fall back to a bare run).
           TIME=""
           command -v /usr/bin/time >/dev/null 2>&1 && TIME="/usr/bin/time -v -o rss.txt"
+          # WORKER COUNT IS BOUNDED BY MEMORY, NOT BY CPU (2026-08-24).
+          #
+          # `-n auto` asks xdist for one worker per CPU. Inside a container that
+          # count comes from the NODE, not the pod, and nothing in it knows about
+          # RAM -- so on an 8 GB CX33 runner it fanned out far enough that each
+          # worker's copy of the engine plus coverage instrumentation exhausted
+          # the node. Two runner pods were OOMKilled, ARC never reaped them, the
+          # nodes never scaled down, and the Tests workflow failed repo-wide --
+          # including on `main` -- annotated "The self-hosted runner lost
+          # communication with the server".
+          #
+          # The tell is the step's conclusion: `null`, never `failure`. The tests
+          # did not fail, the runner disappeared. Reading a null as a test
+          # failure sends you hunting a bug that is not there.
+          #
+          # READ THE CGROUP LIMIT FIRST, NOT /proc/meminfo. Inside a container
+          # /proc/meminfo reports the NODE's RAM -- the exact mistake `-n auto`
+          # makes about CPUs, and using it here would reintroduce the bug one
+          # resource over. cgroup v2 exposes memory.max ("max" when unlimited),
+          # v1 memory.limit_in_bytes (a huge sentinel when unlimited); fall back
+          # to /proc/meminfo only when neither gives a real number.
+          #
+          # THE BUDGET IS NOT A MEASUREMENT OF ONE WORKER. Measured on this suite:
+          # 4 workers peak at 2364 MB for the whole process tree, i.e. ~590 MB
+          # per worker, suite in 4m15s. So a single pod running `-n auto` on an
+          # 8-vCPU node is ~4.7 GB -- which FITS in 8 GB and would not have OOMed
+          # on its own.
+          #
+          # The eviction was CO-TENANCY: the node that OOMKilled was running a
+          # second runner pod alongside the one that died, and two pods at 4.7 GB
+          # on an 8 GB node is ~9.4 GB. No per-worker measurement predicts that.
+          #
+          # That is now fixed where it belongs, in ARC rather than here: this job
+          # runs on a dedicated `arc-8gb` scale set (7Gi request AND limit, so
+          # the pod owns its node). With co-tenancy gone the budget no longer has
+          # to buy headroom for a neighbour, so 1024 MB -- still ~1.7x the
+          # measured footprint -- replaces the 2048 MB that only ever made sense
+          # against a co-tenant. On the 7Gi pod that yields 7 workers.
+          #
+          # PYTEST_MEM_BUDGET_MB caps the RAM the computation may assume, for a
+          # machine where the limit you care about is not the machine's total
+          # (a shared workstation: `PYTEST_MEM_BUDGET_MB=8192` keeps a local run
+          # at 4 workers / ~2.4 GB measured). PYTEST_WORKER_MEM_MB tunes the
+          # per-worker share; PYTEST_WORKERS overrides the whole computation.
+          #
+          # The `Peak memory (RSS)` step reports what the run ACTUALLY used, which
+          # closes the loop. Do not restore `-n auto` -- it is the one setting
+          # that cannot respond to any of these numbers.
+          MEM_MB=""
+          if [ -r /sys/fs/cgroup/memory.max ]; then
+            v=$(cat /sys/fs/cgroup/memory.max)
+            [ "$v" != "max" ] && MEM_MB=$((v / 1024 / 1024))
+          fi
+          if [ -z "$MEM_MB" ] && [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
+            v=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+            [ "$v" -lt 1000000000000 ] 2>/dev/null && MEM_MB=$((v / 1024 / 1024))
+          fi
+          if [ -z "$MEM_MB" ]; then
+            MEM_MB=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) / 1024 ))
+            echo "note: no cgroup memory limit found; falling back to node RAM"
+          fi
+          if [ -n "${PYTEST_MEM_BUDGET_MB:-}" ] && [ "$PYTEST_MEM_BUDGET_MB" -lt "$MEM_MB" ]; then
+            MEM_MB=$PYTEST_MEM_BUDGET_MB
+            echo "note: memory budget capped to ${MEM_MB}MB by PYTEST_MEM_BUDGET_MB"
+          fi
+          PER_WORKER_MB=${PYTEST_WORKER_MEM_MB:-1024}
+          BY_MEM=$((MEM_MB / PER_WORKER_MB))
+          BY_CPU=$(nproc)
+          WORKERS=${PYTEST_WORKERS:-$([ "$BY_MEM" -lt "$BY_CPU" ] && echo "$BY_MEM" || echo "$BY_CPU")}
+          [ "$WORKERS" -lt 1 ] && WORKERS=1
+          echo "xdist workers: $WORKERS (mem ${MEM_MB}MB / ${PER_WORKER_MB}MB = $BY_MEM, cpu = $BY_CPU)"
           if [ "${{ matrix.python-version }}" = "3.12" ]; then
             $TIME python -m pytest -q --cov \
               --cov-report=json:coverage.json \
               --cov-report=term-missing:skip-covered --durations=25 \
-              -n auto --dist worksteal
+              -n "$WORKERS" --dist worksteal
           else
-            python -m pytest -q --durations=25 -n auto --dist worksteal
+            python -m pytest -q --durations=25 -n "$WORKERS" --dist worksteal
           fi
 
       - name: Peak memory (RSS) -> job summary

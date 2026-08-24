@@ -258,9 +258,9 @@ class SchemaCarriesYearLeaf(unittest.TestCase):
     ``year`` property (integer | null), and the ``oneOf`` date-xor-year."""
 
     def setUp(self):
-        with open(os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), "schema", "input_schema.json")) as f:
-            self.schema = json.load(f)
+        # Composed from schema/input_schema.json + its x-schema-parts $defs
+        # fragments -- the same object the single file used to be.
+        self.schema = ic.load_universal_schema()
 
     def _check_year_leaf(self, def_name):
         d = self.schema["$defs"][def_name]

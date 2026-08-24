@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifedraft.local/schema/defs/properties.json",
+  "title": "lifedraft input contract — universal $defs: the properties[] and first_home_purchases[] blocks",
+  "$comment": "Fragment of the universal input contract, merged into schema/input_schema.json by input_contract.load_universal_schema() -- see that function and compose_schema() for the exact, total merge rule. This file is a FRAGMENT, not a standalone schema: its \"#/$defs/...\" references resolve only in the composed document. Real property: the property record, its purchase/financing/funding/sale/carrying-cost sub-shapes, the principal-residence designation periods, and the rental/short-term/CCA facts that attach to one. first_home_purchases[] lives here because it is a dated property acquisition event.",
+
+  "$defs": {
+
+    "designation_period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "$ref": "#/$defs/date" },
+        "to": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "null = designation still in effect as of the document's as_of (not yet closed out)." }
+      }
+    },
+
+    "rental_facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gross_rent_annual", "expenses_annual", "as_of"],
+      "properties": {
+        "gross_rent_annual": { "$ref": "#/$defs/money" },
+        "expenses_annual": { "$ref": "#/$defs/money" },
+        "as_of": { "$ref": "#/$defs/date" },
+        "cca": { "anyOf": [{ "$ref": "#/$defs/cca_election" }, { "type": "null" }], "description": "Optional (#694): the household's election to claim Capital Cost Allowance (depreciation) against this rental's income. Omitted/null = no CCA claimed (byte-identical to #693). Its presence commits the deferred recapture on disposition (ITA s.13(1)): CCA lowers taxable rental income now, and the previously-claimed CCA is clawed back as ordinary income at death's deemed disposition." },
+        "short_term": { "anyOf": [{ "$ref": "#/$defs/short_term_facts" }, { "type": "null" }], "description": "Optional (#697): non-null marks this as a SHORT-TERM rental (Airbnb-style), a legally and fiscally different animal from a long-term rental. Its income is ACTIVE business income (ITA s.9) not passive property income (T776); gross above the $30k small-supplier threshold (ETA s.148) triggers GST/HST/QST registration; and it is subject to a jurisdictional legality gate (countries/canada/short_term_rental.py) that REFUSES to model income where the tool cannot confirm the use is permitted. Omitted/null = a long-term rental (byte-identical to #693)." }
+      }
+    },
+
+    "short_term_facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jurisdiction", "citq_registered"],
+      "description": "The jurisdiction/registration facts a short-term rental MUST declare so the engine can rule on its legality (#697). Both required — the tool refuses to model STR income without them (DP#32: no silent 'assume legal').",
+      "properties": {
+        "jurisdiction": { "type": "string", "description": "The municipality/borough this STR operates in (e.g. 'montreal_plateau_mont_royal', 'montreal_lachine'). Matched against countries/canada/short_term_rental.STR_BANNED_JURISDICTIONS; a borough on that fully-banned list refuses income outright." },
+        "citq_registered": { "type": "boolean", "description": "Whether a valid CITQ (Corporation de l'industrie touristique du Québec) registration is held (Loi 67). false = the tool cannot confirm the use is permitted and refuses to model STR income." }
+      }
+    },
+
+    "cca_election": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rate", "capital_cost", "opening_ucc"],
+      "description": "A Capital Cost Allowance election on a rental building (#694). The class/rate is CONFIGURATION, not a hardcoded 4%, because the correct class (build type, acquisition date, accelerated-investment eligibility) depends on facts this tool does not collect (DP#2/DP#12).",
+      "properties": {
+        "rate": { "$ref": "#/$defs/percent0to1", "description": "Declining-balance CCA rate (0.04 for Class 1 residential rental)." },
+        "capital_cost": { "$ref": "#/$defs/money", "description": "Original capital cost of the DEPRECIABLE building (land is not depreciable) — the recapture ceiling on disposition." },
+        "opening_ucc": { "$ref": "#/$defs/money", "description": "Undepreciated capital cost at the projection start (= capital_cost if no CCA was ever claimed before; less if depreciation has already been taken)." }
+      }
+    },
+
+    "property_purchase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["closing_costs"],
+      "oneOf": [{ "required": ["date"] }, { "required": ["year"] }],
+      "description": "A dated mid-horizon acquisition of this property (#696, epic #690 bite 5). Its presence means the property is BOUGHT on `date` (or in `year`, #956 bite C), not held from year 0: it contributes no equity, rent, or CCA before then, and in the purchase year the household funds the down payment (value − the mortgage originated against it, at the couple's share) plus `closing_costs` out of cash. Omitted = held from the projection's first year (byte-identical to #692). Exactly one of `date` or `year` must be given (`year` is a sweepable numeric leaf, DP#32).",
+      "properties": {
+        "date": { "$ref": "#/$defs/date", "description": "The acquisition date; the property enters the balance sheet (and its mortgage originates) in this calendar year." },
+        "year": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "description": "OPTIONAL (#956 bite C): the purchase/sale calendar YEAR as a numeric leaf, a sweepable alternative to `date`. When present it is used directly; sweep it via sensitivity.sweeps (e.g. properties.N.purchase.year: [2028, 2030, 2032]) to rank timings. Exactly one of `date` or `year` must be given." },
+        "closing_costs": { "$ref": "#/$defs/money", "description": "Land-transfer tax, notary, inspection and other one-time acquisition costs — a real expense in the purchase year (not recoverable equity). The couple's share is taken." },
+        "financing": { "$ref": "#/$defs/property_financing", "description": "OPTIONAL (#967): a MORTGAGE originated against this property at the purchase year. Absent = the purchase is equity-financed (the full value leaves the portfolio as the down payment), byte-identical to #696. When present, only the DOWN PAYMENT (value − mortgage_amount, couple share) leaves the portfolio; the mortgage funds the rest, originates as a serviced secured liability in the purchase year, and its interest is deductible when the property is a rental (ITA s.20(1)(c)) and non-deductible for a recreational/personal property. Mutually exclusive with `funding_options`: `financing` is the single fixed way the purchase is funded, while `funding_options` asks the optimizer to RANK alternatives (DP#22). Declaring both is a load error -- a purchase cannot be both fixed and swept." },
+        "funding_options": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/property_funding_option" }, "description": "OPTIONAL (#1011): candidate FUNDING METHODS for this purchase the optimizer ENUMERATES and RANKS by the active objective (DP#22) -- 'buy this home and let the engine choose how to fund it' rather than hand-building one contract variant per funding method. Absent = the purchase is funded the single fixed way `financing` declares (or equity-financed when `financing` is absent too), byte-identical to #967/#696. When present, `financing` MUST be omitted: a purchase is either funded one fixed way or swept across alternatives, never both. At least two options are required -- a single-option `funding_options` is not a sweep, it is a (mis-)spelled `financing` and is refused at load (DP#32). Each option is one way to fund the SAME purchase (same `date`/`year`, `closing_costs`, property); the optimizer re-optimises per option and ranks by objective, so a household reads the objective-best funding in one run." }
+      },
+      "allOf": [
+        { "if": { "required": ["funding_options"] }, "then": { "not": { "required": ["financing"] } } }
+      ]
+    },
+
+    "property_funding_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "method"],
+      "discriminator": { "propertyName": "method" },
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Stable identifier for this funding candidate, tagged onto every ranked result row the optimizer produces for it (e.g. 'all_cash', 'mortgage_20'). Referenced by the report to name the objective-winner." },
+        "label": { "type": "string", "description": "Human-readable label for the report's ranked table." },
+        "method": { "type": "string", "enum": ["all_cash", "mortgage"], "description": "How this candidate funds the purchase. 'all_cash' = no originated mortgage; the full value (couple share) is drawn through the liquidation waterfall as the down payment, byte-identical to #696's equity-financed behaviour. 'mortgage' = a down payment (down_pct of value) is drawn through the waterfall AND a mortgage is originated for the rest (value * (1 - down_pct)), serviced from the purchase year to payoff, interest deductible when the property is a rental (ITA s.20(1)(c)) and non-deductible otherwise -- the deductibility follows the property's `kind`, exactly like the fixed `financing` block (#967)." },
+        "down_pct": { "$ref": "#/$defs/percent0to1", "description": "Required when method=mortgage: the down payment as a fraction of the property's value (0.20 = 20% down). The originated mortgage_amount is value * (1 - down_pct), at the couple's share. 1.0 = a 100% down payment (equity-financed, equivalent to all_cash but spelled as a mortgage candidate with no originated debt -- the engine treats it identically)." },
+        "rate": { "$ref": "#/$defs/rate", "description": "Required when method=mortgage: the annual interest rate as a fraction (0.05, not 5), held to payoff (a renewal schedule is a follow-up, mirroring the fixed `financing` block)." },
+        "rate_type": { "type": "string", "enum": ["fixed", "variable"], "description": "Required when method=mortgage: fixed or variable, held to payoff (mirrors the fixed `financing` block)." },
+        "amortization_years": { "type": "number", "exclusiveMinimum": 0, "description": "Required when method=mortgage: the amortization period in years, serviced to a zero balance from the purchase year (mirrors the fixed `financing` block)." }
+      },
+      "allOf": [
+        { "if": { "properties": { "method": { "const": "mortgage" } } }, "then": { "required": ["down_pct", "rate", "rate_type", "amortization_years"] } },
+        { "if": { "properties": { "method": { "const": "all_cash" } } }, "then": { "not": { "anyOf": [{ "required": ["down_pct"] }, { "required": ["rate"] }, { "required": ["rate_type"] }, { "required": ["amortization_years"] }] } } }
+      ],
+      "description": "Issue #1011: ONE candidate way to fund a mid-horizon property PURCHASE, for the optimizer to sweep and rank. `all_cash` draws the full value through the waterfall (no originated mortgage); `mortgage` draws a down payment and originates a mortgage for the rest. The deductibility of the mortgage interest follows the property's `kind` (rental => deductible, ITA s.20(1)(c)), never a declared tracing -- mirroring the fixed `financing` block (#967)."
+    },
+
+    "property_financing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mortgage_amount", "rate", "rate_type", "amortization_years"],
+      "description": "Issue #967: a MORTGAGE originated against a property at its mid-horizon purchase year. Unlike the year-0 liabilities (which are opening balances), this liability ORIGINATES in the purchase year: its principal is an inflow that funds the purchase (only the down payment leaves the portfolio), and it is serviced (principal + interest) from the purchase year to its payoff, joining the cash-flow identity's debt-service term. The mortgage is secured by the property (collateral = the property), and its interest is deductible under ITA s.20(1)(c) when the property earns income (kind=rental) and NON-deductible for a personal/recreational property -- the deductibility follows the property's kind, not a declared tracing, mirroring how _map_owned_properties prices rental interest today. All fields required when financing is declared: a mortgage with no amount, rate, or term is not a mortgage (DP#32 -- absence fails loudly, never defaults to a guessed term).",
+      "properties": {
+        "mortgage_amount": { "$ref": "#/$defs/money", "description": "The principal originated at the purchase year (the drawn amount). The couple's share is taken, mirroring liability.balance. Must be less than or equal to the property's value (a mortgage larger than the purchase price is a different, unmodelled product)." },
+        "rate": { "$ref": "#/$defs/rate", "description": "The annual interest rate as a fraction (0.05, not 5). A fixed-rate mortgage holds this rate to its payoff this bite (no renewal schedule -- the existing amortization_schedule renewal machinery is the principal mortgage's; a mid-horizon mortgage carries a single rate, modelled on the consumer-loan servicing which amortizes at the loan's own declared rate)." },
+        "rate_type": { "type": "string", "enum": ["fixed", "variable"], "description": "fixed or variable. This bite holds the declared `rate` to payoff (a renewal schedule is a follow-up); the field is required and recorded so a future renewal path can be added without a schema change (DP#9 -- one live shape)." },
+        "amortization_years": { "type": "number", "exclusiveMinimum": 0, "description": "The amortization period in years. The mortgage is serviced to a zero balance over this term from the purchase year, mirroring how the closed-end consumer loans (apply_consumer_loans) amortize at their own declared payment/term." }
+      }
+    },
+
+    "property_sale": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [{ "required": ["date"] }, { "required": ["year"] }],
+      "description": "A dated mid-horizon voluntary SALE of this property (#956 bite B), the symmetric inverse of `property_purchase` (#696). Its presence means the property LEAVES the balance sheet in the calendar year of `date` (or `year`, #956 bite C): it contributes its normal equity up to (but not including) the sale year, then zero from the sale year onward -- in the sale year itself the net proceeds (value less the secured mortgage, `selling_costs`, and the disposition tax) replace it in the portfolio, invested by the sale-year handler. Omitted/null = the property is held to the horizon (byte-identical to #692/#696). `selling_costs` is optional: a sale with no realtor/notary/inspection costs is a legitimate null, distinct from a sale that has not been priced (DP#32). Exactly one of `date` or `year` must be given (`year` is a sweepable numeric leaf, DP#32).",
+      "properties": {
+        "date": { "$ref": "#/$defs/date", "description": "The disposition date; the property leaves the balance sheet in this calendar year and its net proceeds enter the portfolio." },
+        "year": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "description": "OPTIONAL (#956 bite C): the purchase/sale calendar YEAR as a numeric leaf, a sweepable alternative to `date`. When present it is used directly; sweep it via sensitivity.sweeps (e.g. properties.N.sale.year: [2028, 2030, 2032]) to rank timings. Exactly one of `date` or `year` must be given." },
+        "selling_costs": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "Realtor commission, notary, staging and other one-time disposition costs — a real expense that reduces the net proceeds (not recoverable equity). The couple's share is taken. Absent/null = $0 in selling costs (a real declarable value, not an unknown — DP#32)." }
+      }
+    },
+
+    "property_carrying_costs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Issue #1010 (epic #956): a property's RECURRING carrying costs -- property tax, maintenance, insurance, condo/HOA fees, utilities -- the holding cost of owning the home, modelled as a per-property attribute the way `rental_facts.expenses_annual` models a rental's T776 operating expenses. Active over the OWNERSHIP WINDOW (the purchase year if bought mid-horizon, else the projection start, through the sale year if sold) and charged each year as an annual cash outflow through the solvency liquidation waterfall (simulation_rules.apply_solvency), conserving money (DP#18). For a non-rental (recreational/vacant_land) this is the WHOLE holding cost; for a rental it composes with `rental_facts.expenses_annual` (the T776 net-rent expense). Both fields OPTIONAL -- a declared `{}` is a legitimate $0 (a real zero, not an unknown -- DP#32). Absent the whole block => $0 => byte-identical to today (DP#32: zero is a value, not a fallback). The flat `annual_amount` is taken at the couple's ownership share (mirroring `purchase.closing_costs`); `fraction_of_value` is applied to the couple's share of the property's CURRENT (appreciating) gross value. NOT permitted on the principal residence: its recurring costs already live in `household_budget.annual_living_costs`, so declaring them here would be a silent dead read -- the schema forbids it loudly (the allOf gate on `$defs/property`) rather than dropping it (DP#32).",
+      "properties": {
+        "annual_amount": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "A flat annual dollar amount of recurring carrying cost (property tax + maintenance + insurance + ...). The couple's ownership share is taken. Absent/null = $0 from this component (a real zero, not an unknown -- DP#32)." },
+        "fraction_of_value": { "anyOf": [{ "type": "number" }, { "type": "null" }], "description": "A fraction of the property's CURRENT gross value per year (e.g. 0.015 for 1.5%/yr -- property tax is often assessed on value). Applied to the couple's share of the appreciated gross value (so it composes with `appreciation_rate`). Absent/null = $0 from this component (DP#32). A sweepable numeric leaf: range it via sensitivity.sweeps." }
+      }
+    },
+
+    "property": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "owner", "kind", "value", "acb", "designated_principal_residence_years"],
+      "properties": {
+        "id": { "$ref": "#/$defs/property_id" },
+        "owner": { "$ref": "#/$defs/owner_ref" },
+        "kind": { "type": "string", "enum": ["principal", "rental", "recreational", "vacant_land"] },
+        "value": { "$ref": "#/$defs/dated_amount" },
+        "appreciation_rate": { "anyOf": [{ "type": "number" }, { "type": "null" }], "description": "OPTIONAL (#956 bite A): the property's REAL annual appreciation rate (dimensionless, e.g. 0.03 for 3%/yr; negative allowed). Absent/null = a static value, byte-identical to #692/#696 (DP#32). Its gross value compounds from the ownership year (the purchase year if dated, else the projection start), and equity = appreciated value - the secured mortgage (held static this bite; amortization is a follow-up). A sweepable numeric leaf: range it via sensitivity.sweeps (e.g. properties.N.appreciation_rate: [0, 0.03, 0.05]) so a purchase-timing conclusion is robust to the assumption rather than hostage to one guess." },
+        "acb": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }] },
+        "designated_principal_residence_years": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/designation_period" },
+          "description": "A principal-residence exemption is typically claimed per property per year, by family unit; a family with >1 property allocates which years apply to which property here (#601)."
+        },
+        "rental": { "anyOf": [{ "$ref": "#/$defs/rental_facts" }, { "type": "null" }], "description": "Non-null only for kind=rental. Its presence is what auto-includes cash-damming (DP#16), replacing rental_properties.properties[] and the top-level rental_income trigger." },
+        "purchase": { "anyOf": [{ "$ref": "#/$defs/property_purchase" }, { "type": "null" }], "description": "Optional (#696): a dated mid-horizon purchase. Omitted/null = the property is held from the projection's first year (byte-identical to #692)." },
+        "sale": { "anyOf": [{ "$ref": "#/$defs/property_sale" }, { "type": "null" }], "description": "OPTIONAL (#956 bite B): a dated mid-horizon voluntary SALE. Omitted/null = the property is held to the horizon (byte-identical to #692/#696). When present, the property leaves the balance sheet in the sale year (equity gates to zero from that year on, see `_property_equity_for_year`) and its net proceeds (value less mortgage, selling costs, and disposition tax) are invested — see the sale-year handler." },
+        "carrying_costs": { "anyOf": [{ "$ref": "#/$defs/property_carrying_costs" }, { "type": "null" }], "description": "OPTIONAL (#1010): the property's RECURRING carrying costs (property tax, maintenance, insurance) charged each year over the ownership window through the solvency waterfall. Omitted/null = $0 => byte-identical to today (DP#32). Forbidden on the principal residence (its costs live in household_budget.annual_living_costs; declaring them here would be a silent dead read)." }
+      },
+      "allOf": [
+        { "if": { "not": { "properties": { "kind": { "const": "rental" } } } }, "then": { "properties": { "rental": { "const": null } } } },
+        { "if": { "properties": { "kind": { "const": "principal" } } }, "then": { "properties": { "carrying_costs": { "type": "null" } } }, "description": "Issue #1010: carrying_costs is forbidden on the principal residence -- its recurring costs are already household_budget.annual_living_costs, so a declaration here would be a silent dead read. The schema forces it to null (absent), refusing a real value loudly (DP#32), never dropping it." }
+      ]
+    },
+
+    "first_home_purchase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["buyer", "year"],
+      "description": "Issue #704: a declared member's FIRST-TIME HOME PURCHASE in a given year. In that year the member's own FHSA is drained by a tax-free qualifying withdrawal (the account closes) and up to $60,000 is withdrawn non-taxably from their own RRSP under the HBP (15-year repayment). Both proceeds fund the down payment; net worth is conserved (countries/canada/fhsa.py, hbp_rules.py).",
+      "properties": {
+        "buyer": { "$ref": "#/$defs/person_id", "description": "Issue #704: the first-time home buyer -- a declared CHILD of the household, whose OWN FHSA/RRSP fund the purchase. Must resolve to a declared child (DP#32: an unresolvable reference, or a buyer who is not a declared child, is refused loudly rather than silently dropped). Adult first-home wiring reuses the household's existing FHSA store / RRSP pots and is a follow-up." },
+        "year": { "type": "integer", "description": "Issue #704: the calendar year of the first-home purchase. The FHSA qualifying withdrawal and the HBP RRSP withdrawal both fire this year; the HBP's 15-year repayment schedule is measured from it." }
+      }
+    }
+
+  }
+}
