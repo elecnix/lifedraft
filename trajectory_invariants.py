@@ -256,6 +256,9 @@ _ALL_NUMERIC_FIELDS = _BALANCE_FIELDS + [
     'after_tax_income', 'living_costs', 'debt_service', 'contributions_total',
     'solvency_shortfall', 'solvency_covered', 'forced_liquidation_tax',
     'forced_liquidation_realized_loss',
+    # issue #170: the refused-contribution disclosures are flows too -- a NaN
+    # there would poison any consumer that sums them.
+    'rrsp_contribution_refused_own', 'rrsp_contribution_refused_spousal',
 ]
 
 
