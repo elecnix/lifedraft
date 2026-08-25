@@ -818,26 +818,40 @@ register(Approximation(
 # the console header, TXT, JSON, and HTML -- one spelling (DP#9), every
 # surface (DP#32).
 
-def decumulation_shortfall_summary(cfg: dict) -> Dict:
-    """The worst-case decumulation shortfall recorded on the run's config by
-    the caller (``optimize.main``), or an all-False summary when no scenario
-    exhausted its assets. Recorded as data, not recomputed here -- the
-    registry is built at import time and an Approximation is frozen, so it
-    can only read what the run wrote onto the cfg (#685's same bridge for
-    run-specific findings: ``assumptions.rate_path_conflicts`` is the
-    established home for run-recorded findings this registry surfaces, so
-    this lives at ``assumptions.decumulation_shortfall`` -- one spelling)."""
+def _run_recorded_summary(cfg: dict, key: str, all_clear: Dict) -> Dict:
+    """The ONE reader behind every run-recorded fidelity caveat (the #685/
+    #707 bridge): the optimize caller writes a findings summary onto the
+    cfg's ``assumptions`` block; the registry is built at import time and an
+    Approximation is frozen, so a caveat can only READ what the run wrote.
+    This helper is that read -- key and all-clear defaults supplied by each
+    delegate (``decumulation_shortfall_summary`` / ``runway_summary`` /
+    ``rrsp_refusal_summary``), which exist to give the shared mechanics a
+    named, documented home per finding.
+
+    Returns a FRESH copy of ``all_clear`` when nothing was recorded, so a
+    caller mutating the returned dict cannot corrupt another reader or a
+    later call (DP#3); a recorded summary is returned as recorded, never
+    merged with or overwritten by the defaults."""
     assumptions = cfg.get('assumptions') if isinstance(cfg, dict) else None
     if assumptions is None:
         assumptions = {}
-    summary = assumptions.get('decumulation_shortfall')
-    if summary is None:
-        summary = {
-            'engaged': False, 'exhausted': False,
-            'first_shortfall_year': None, 'first_shortfall_gap': 0.0,
-            'shortfall_years': 0, 'total_unmet': 0.0,
-        }
-    return summary
+    recorded = assumptions.get(key)
+    if recorded is None:
+        return dict(all_clear)
+    return recorded
+
+
+def decumulation_shortfall_summary(cfg: dict) -> Dict:
+    """The worst-case decumulation shortfall recorded on the run's config by
+    the caller (``optimize.main``), or an all-False summary when no scenario
+    exhausted its assets. Recorded as data, not recomputed here -- see
+    ``_run_recorded_summary`` for the bridge; this lives at
+    ``assumptions.decumulation_shortfall`` -- one spelling."""
+    return _run_recorded_summary(cfg, 'decumulation_shortfall', {
+        'engaged': False, 'exhausted': False,
+        'first_shortfall_year': None, 'first_shortfall_gap': 0.0,
+        'shortfall_years': 0, 'total_unmet': 0.0,
+    })
 
 
 def _describe_decumulation_shortfall(ctx: FidelityContext) -> List[str]:
@@ -910,18 +924,13 @@ def runway_summary(cfg: dict) -> Dict:
     """The worst-case (shortest-runway) scenario's verdict recorded on the run's
     config by optimize.main (runway.worst_runway_summary), or an all-False
     summary when no scenario engaged. Recorded as data, not recomputed here
-    -- same bridge as assumptions.decumulation_shortfall (#707), one spelling."""
-    assumptions = cfg.get('assumptions') if isinstance(cfg, dict) else None
-    if assumptions is None:
-        assumptions = {}
-    summary = assumptions.get('runway')
-    if summary is None:
-        summary = {
-            'engaged': False, 'runway_months': None,
-            'relies_on_credit_facility': False, 'drew_registered': False,
-            'scenario_label': None,
-        }
-    return summary
+    -- see ``_run_recorded_summary`` for the bridge; this lives at
+    ``assumptions.runway`` -- one spelling."""
+    return _run_recorded_summary(cfg, 'runway', {
+        'engaged': False, 'runway_months': None,
+        'relies_on_credit_facility': False, 'drew_registered': False,
+        'scenario_label': None,
+    })
 
 
 def _has_engaged_runway(ctx: FidelityContext) -> bool:
@@ -1115,19 +1124,12 @@ register(Approximation(
 def rrsp_refusal_summary(cfg: dict) -> Dict:
     """The run-recorded RRSP-refusal summary (written by the optimize caller
     onto ``assumptions.rrsp_contribution_refused``), or an all-clear summary
-    when no contribution was refused. Recorded as data, not recomputed here --
-    the registry is built at import time and an Approximation is frozen, so it
-    can only read what the run wrote onto the cfg (the #685/#707 bridge)."""
-    assumptions = cfg.get('assumptions') if isinstance(cfg, dict) else None
-    if assumptions is None:
-        assumptions = {}
-    summary = assumptions.get('rrsp_contribution_refused')
-    if summary is None:
-        summary = {
-            'engaged': False, 'first_refused_year': None,
-            'refused_own_total': 0.0, 'refused_spousal_total': 0.0,
-        }
-    return summary
+    when no contribution was refused. Recorded as data, not recomputed here
+    -- see ``_run_recorded_summary`` for the bridge (#685/#707)."""
+    return _run_recorded_summary(cfg, 'rrsp_contribution_refused', {
+        'engaged': False, 'first_refused_year': None,
+        'refused_own_total': 0.0, 'refused_spousal_total': 0.0,
+    })
 
 
 def _has_rrsp_refusal(ctx: FidelityContext) -> bool:
