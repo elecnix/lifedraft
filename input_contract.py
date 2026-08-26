@@ -100,6 +100,7 @@ from contract_transfers import (
     map_cash_flows, map_equity_grants, map_installments, _map_first_home_purchases,
     _map_gifts, _map_private_loans, _map_zev_purchases,
 )
+from contract_transaction_costs import map_transaction_costs
 
 
 def to_internal_config(doc: Dict) -> Dict:
@@ -192,9 +193,19 @@ def to_internal_config(doc: Dict) -> Dict:
     account_overrides = _map_account_overrides(doc)
     accounts_cfg["return_overrides"] = account_overrides["return_overrides"]
     accounts_cfg["locked"] = account_overrides["locked"]
-    # Issue #691: per-account MER fees, pot-keyed, subtracted from the gross
-    # growth rate. Empty when no account declares a `mer` (golden: fee-free).
+    # Issue #691/#136: per-account MER fees, pot-keyed. The growth rule
+    # subtracts mer_rate from the pot's gross rate (net = gross - mer_rate).
+    # Empty when no account declares a `mer` (golden: fee-free).
     accounts_cfg["mer_drag"] = account_overrides["mer_drag"]
+    # Issue #136: the mixed-pot-zero limitation -- when a kind has BOTH a
+    # $0-opening MER-flagged account and a non-MER account, the flagged
+    # accounts' fee is unmodeled for the whole run (mer_rate = 0.0). Recorded
+    # onto assumptions so model_fidelity.mer_mixed_pot() can disclose it on
+    # every output surface (mirrors #685's rate_path_conflicts bridge). Only
+    # written when the limitation actually bites, so a config without it
+    # carries no key (DP#32: absence is absence, not a silent zero).
+    if account_overrides["mer_mixed_pot"]:
+        assumptions_cfg["mer_mixed_pot"] = account_overrides["mer_mixed_pot"]
 
     horizon = doc["decisions"]["horizon"]  # schema-required
     if horizon["person"] == primary_id:
@@ -213,6 +224,22 @@ def to_internal_config(doc: Dict) -> Dict:
     household_budget_out = map_household_budget(doc)
     reserve_out = map_emergency_reserve(doc, spouse_id)
     legacy_cash_flows = map_cash_flows(doc, mortgage, start_year)
+
+    # Issue #139: the general one-time transaction-cost/credit mechanism.
+    # A refinance_origination LUMP at year 0 -> a signed net year-0 cost
+    # written onto property.transaction_cost_year0 (the year-0-equivalent
+    # deployable-principal reduction seam #137's deployment-lag carry uses --
+    # reused, not reinvented). Installments and non-year-0-lump entries ->
+    # dated cash flows appended to the cash_flows list (an installment is
+    # NOT a year-0 lump; it projects to a different trajectory). Both are
+    # 0.0 / empty when the household declares no transaction_costs (the
+    # golden household), so the internal shape carries no key and round-
+    # trips byte-identically (DP#24/DP#32).
+    txn_year0_net, txn_cash_flows = map_transaction_costs(doc, as_of)
+    if txn_year0_net != 0.0:
+        prop_cfg["transaction_cost_year0"] = txn_year0_net
+    if txn_cash_flows:
+        legacy_cash_flows = legacy_cash_flows + txn_cash_flows
 
     legacy: Dict[str, Any] = {
         "assumptions": assumptions_cfg,

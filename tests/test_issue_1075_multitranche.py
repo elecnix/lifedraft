@@ -38,7 +38,6 @@ DP#4/DP#15: every figure below is fabricated and round; every name is
 role-based. No real household's data appears here.
 """
 import copy
-import json
 import os
 import sys
 import unittest
@@ -52,7 +51,7 @@ import input_contract as ic
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-from test_dp_income_scenario_reaches_engine import _two_generation_subset
+from _example_doc import minimal_example
 import contract_errors
 import contract_schema
 
@@ -64,8 +63,17 @@ CHARGE_HEADROOM = 30_000
 
 
 def _load_doc():
-    with open(contract_schema.EXAMPLE_PATH) as fh:
-        return _two_generation_subset(json.load(fh))
+    # Issue #139: load the shipped example via the shared minimal_example()
+    # helper (tests/_example_doc.py), which trims to the two-generation
+    # sub-family AND strips every optional illustrative block (the example's
+    # transaction_costs, deployment_lag_months, parking_rate, advance_split)
+    # in ONE place -- so these #1075 tests run on a transaction-cost-free,
+    # lag-free, split-free example and their byte-identical cash_flows /
+    # mortgage-mapping expectations are not confounded by an illustration a
+    # future feature adds to the example. Previously this hand-stripped only
+    # transaction_costs; the shared helper is the single place a new
+    # illustrative block gets stripped.
+    return minimal_example()
 
 
 def _mortgage(doc):

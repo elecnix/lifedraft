@@ -127,6 +127,26 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         heloc_ltv_limit=prop.get('heloc_ltv_limit', OSFI_B20_REVOLVING_LTV_MAX),
         refinance_amortization_years=prop.get('refinance_amortization_years'),
         refinance_advance_deductible_non_reg=prop.get('refinance_advance_deductible_non_reg'),
+        # Issue #137: absence-safe -- .get with no default returns 0 (the
+        # documented no-lag state) on a genuinely absent key, never coerces a
+        # declared value (DP#32). A household that declares no deployment_lag
+        # round-trips byte-identical (0 = no lag = today's behaviour).
+        deployment_lag_months=prop.get('deployment_lag_months', 0),
+        deployment_lag_parking_rate=prop.get('deployment_lag_parking_rate', 0.0),
+        # Issue #74: absence-safe -- .get with no default returns 0 (the
+        # documented no-schedule state) on a genuinely absent key, never
+        # coerces a declared value (DP#32). A household that declares no
+        # deployment_schedule round-trips byte-identical (0 = no schedule =
+        # today's behaviour). A deployment SCHEDULE (years) and a LAG (months)
+        # are rival timings; the adapter (contract_decisions) refuses both
+        # on the same option before this key is ever set.
+        deployment_schedule_years=prop.get('deployment_schedule_years', 0),
+        deployment_schedule_parking_rate=prop.get('deployment_schedule_parking_rate', 0.0),
+        # Issue #139: absence-safe -- .get with no default returns 0.0 on a
+        # genuinely absent key, never coerces a declared value (DP#32). A
+        # household that declares no transaction_costs round-trips byte-
+        # identical (0.0 = no net year-0 cost = today's behaviour).
+        transaction_cost_year0=prop.get('transaction_cost_year0', 0.0),
         heloc_readvance=prop.get('heloc_readvance', False),
         # Issue #956 bite E: the principal residence's declared sale
         # (absence-safe -- .get with no default returns None on a
@@ -333,6 +353,36 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
             **({'refinance_advance_deductible_non_reg':
                     config.refinance_advance_deductible_non_reg}
                if config.refinance_advance_deductible_non_reg is not None else {}),
+            # Issue #137 (DP#24): only re-emit the deployment lag when declared
+            # -- 0 round-trips to 'absent' (no lag, byte-identical to the
+            # pre-feature path), the same absence-safe convention
+            # refinance_amortization_years (None -> absent) uses above. A
+            # declared lag > 0 must survive a load->modify->save cycle.
+            **({'deployment_lag_months': config.deployment_lag_months}
+               if config.deployment_lag_months else {}),
+            # Issue #137 (DP#24): only re-emit a non-default parking_rate -- 0.0
+            # round-trips to 'absent' (idle cash earning nothing, the ordinary
+            # case), so a no-parking-rate household round-trips byte-identical.
+            **({'deployment_lag_parking_rate': config.deployment_lag_parking_rate}
+               if config.deployment_lag_parking_rate else {}),
+            # Issue #74 (DP#24): only re-emit the deployment schedule when
+            # declared -- 0/1 round-trips to 'absent' (no staggering, byte-
+            # identical to the pre-feature path), the same absence-safe
+            # convention deployment_lag_months uses above. A declared schedule
+            # > 1 must survive a load->modify->save cycle.
+            **({'deployment_schedule_years': config.deployment_schedule_years}
+               if config.deployment_schedule_years > 1 else {}),
+            # Issue #74 (DP#24): only re-emit a non-default parking_rate -- 0.0
+            # round-trips to 'absent' (idle cash earning nothing), the same
+            # convention deployment_lag_parking_rate uses above.
+            **({'deployment_schedule_parking_rate': config.deployment_schedule_parking_rate}
+               if config.deployment_schedule_parking_rate else {}),
+            # Issue #139 (DP#24): only re-emit the net year-0 transaction
+            # cost when non-zero -- 0.0 round-trips to 'absent' (no net year-0
+            # refinance origination cost, the ordinary case), so a household
+            # that declares no transaction_costs round-trips byte-identical.
+            **({'transaction_cost_year0': config.transaction_cost_year0}
+               if config.transaction_cost_year0 else {}),
             # issue #654: only re-emitted when actually declared --
             # None means "never declared" (DP#32), not a value to
             # round-trip as an explicit null.

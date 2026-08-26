@@ -1182,3 +1182,200 @@ register(Approximation(
     applies=_has_rrsp_refusal,
     findings=_describe_rrsp_refusal,
 ))
+
+
+# ── Issue #136: mixed-pot MER limitation ───────────────────────────────────
+#
+# When a household declares `mer` on accounts of a growth-pot kind where OTHER
+# accounts of the same kind declare no `mer`, AND every MER-flagged account
+# opens at $0, the loader sets that kind's `mer_rate` to 0.0 (#136's
+# mixed-pot-zero fallback). The engine tracks per-owner pots, not per-account
+# sub-balances, so the loader cannot know what share of future contributions
+# flows to the flagged vs non-flagged accounts — charging the whole pot the
+# flagged rate would tax the non-flagged money a fee it never declared.
+# Setting mer_rate = 0.0 is the honest (smallest-bias) mechanism: the flagged
+# accounts have B=0, so fee = 0 (correct by definition), and the non-flagged
+# money is fee-free (correct — it declared no fee). But the limitation is
+# real and must surface, not stay silent: the flagged accounts' fee is
+# unmodeled for the whole run, so any ranking or figure that depends on the
+# flagged accounts' net growth is biased (the fees those accounts WOULD pay
+# once funded are absent).
+#
+# Recorded by contract_accounts._map_account_overrides onto the run's
+# assumptions (assumptions.mer_mixed_pot), mirroring the #685/#707 bridge: the
+# loader is the only place that sees both the per-account `mer` declarations
+# and the per-account opening balances, so it records the disclosure and
+# this registry reads it back. Direction is UNKNOWN because the unmodeled
+# fee could sit either side of the figure the household needs (it depends on
+# how much of the pot the flagged accounts would eventually hold, which the
+# engine cannot know).
+
+def mer_mixed_pot(cfg: dict) -> List[Dict]:
+    """Kinds where the #136 mixed-pot-zero fallback fired: a growth-pot kind
+    with at least one MER-flagged account opening at $0 alongside at least
+    one non-MER account of the same kind. Recorded by
+    `contract_accounts._map_account_overrides` onto
+    `assumptions.mer_mixed_pot`; read here so every output surface names the
+    same accounts and kinds the load-time fallback handled silently."""
+    cfg = {} if cfg is None else cfg
+    assumptions = cfg.get('assumptions')
+    if assumptions is None:
+        return []
+    records = assumptions.get('mer_mixed_pot')
+    return [] if records is None else list(records)
+
+
+def _has_mer_mixed_pot(ctx: FidelityContext) -> bool:
+    return bool(mer_mixed_pot(ctx.cfg))
+
+
+def _describe_mer_mixed_pot(ctx: FidelityContext) -> List[str]:
+    out = []
+    for r in mer_mixed_pot(ctx.cfg):
+        kind = r.get('kind')
+        flagged = r.get('flagged_account_ids', [])
+        non_flagged = r.get('non_flagged_account_ids', [])
+        out.append(
+            f"kind {kind!r}: MER-flagged account(s) {flagged} open at $0 "
+            f"alongside non-MER account(s) {non_flagged} of the same kind -- "
+            f"the flagged accounts' fee (mer_rate set to 0.0) is unmodeled "
+            f"for the whole run; the engine's per-owner-pot model cannot "
+            f"route future contributions to the flagged sub-account"
+        )
+    return out
+
+
+register(Approximation(
+    id='mer_mixed_pot_zero_fee_unmodeled',
+    summary=("A growth-pot kind has both a MER-flagged account opening at $0 "
+             "and a non-MER account of the same kind, so the loader set that "
+             "kind's MER rate to 0.0 (the #136 mixed-pot fallback): the "
+             "flagged accounts' fee is unmodeled for the whole run because "
+             "the engine tracks per-owner pots, not per-account sub-balances, "
+             "and charging the non-flagged money would tax it a fee it never "
+             "declared"),
+    biased_figure=("any account balance, terminal wealth, or ranking whose "
+                   "flagged accounts' net growth matters -- the fees those "
+                   "accounts WOULD pay once funded are absent"),
+    direction=Direction.UNKNOWN,
+    detail=("contract_accounts._map_account_overrides: when every "
+            "MER-flagged account of a kind opens at $0 and a non-MER account "
+            "of the same kind coexists, mer_rate is set to 0.0 (the smallest "
+            "honest mechanism — the flagged accounts have B=0 so fee=0 by "
+            "definition, and the non-flagged money is fee-free). This is "
+            "honest but the limitation must be disclosed, not silent: the "
+            "flagged accounts' future fee share is unknowable at load time. "
+            "Recorded onto assumptions.mer_mixed_pot and surfaced on every "
+            "report. If the household's intent is that all future "
+            "contributions flow to the flagged account, declare the MER on a "
+            "single-account pot or on the funded account so the fee is "
+            "modeled."),
+    issue='#136',
+    applies=_has_mer_mixed_pot,
+    findings=_describe_mer_mixed_pot,
+))
+
+
+# ── Issue #137: deployment-lag disclosures (findings #4 multi-option bleed,
+# #5 linear-carry window). The lag is a single scalar from the first option
+# that declares one, applied across the refinance sweep (a continuous cash_out)
+# and priced as a linear (non-compounded) opportunity cost over the window.
+# Both are approximations the output must disclose, not bury in a docstring.
+
+def _deployment_lag_declared(ctx: FidelityContext) -> bool:
+    """True when the contract declared a deployment lag on a refinance option
+    (property.deployment_lag_months > 0). The no-lag path carries no cost and
+    no approximation to disclose."""
+    if not isinstance(ctx.cfg, dict):
+        return False
+    prop = ctx.cfg.get('property')
+    if not isinstance(prop, dict):
+        return False
+    return bool(prop.get('deployment_lag_months', 0))
+
+
+def _deployment_lag_multi_option_bleed(ctx: FidelityContext) -> bool:
+    """Finding #4: the lag is a single scalar from the FIRST option that
+    declares one, applied across the refinance sweep (a continuous cash_out,
+    not a specific chosen option). The bleed bites when there are two or more
+    CASH-OUT refinance options (a later option's different lag is not
+    distinguishable through the single scalar and is dropped), OR when the
+    booked cash_out differs from the declaring option's cash_out (the lag is
+    priced on a lump the declaring option never stated it for). The no_refi
+    baseline (cash_out 0) carries no lag cost and is not counted as a cash-out
+    option."""
+    if not _deployment_lag_declared(ctx):
+        return False
+    prop = ctx.cfg.get('property')
+    scenarios = ctx.cfg.get('scenarios')
+    refi = scenarios.get('refinance') if isinstance(scenarios, dict) else None
+    if not isinstance(refi, list):
+        refi = []
+    cash_out_opts = [
+        o for o in refi if isinstance(o, dict) and o.get('cash_out', 0) > 0]
+    if len(cash_out_opts) >= 2:
+        return True
+    declared = prop.get('deployment_lag_declared_cash_out')
+    if declared is None:
+        # DP#32: cannot determine the declaring option's cash_out (e.g. an
+        # in-memory config that set the lag directly on property without the
+        # contract path) -- disclose rather than silently exonerate.
+        return True
+    booked = prop.get('cash_out', 0)
+    return declared != booked
+
+
+register(Approximation(
+    id='deployment_lag_multi_option_bleed',
+    summary=("The deployment-lag carry is a single scalar from the FIRST "
+             "refinance option that declares one, applied across the "
+             "refinance sweep -- a continuous cash_out, not a specific "
+             "chosen option. When two or more cash-out options declare "
+             "different lags, only the first's is carried; and when the "
+             "sweep books a cash_out other than the declaring option's, the "
+             "lag is priced on a lump that option never stated it for. The "
+             "carry is therefore an approximation: the per-option lag the "
+             "household declared is not distinguished across the sweep"),
+    biased_figure=('deployment lag carry cost, and every objective that folds '
+                   'the year-0 deployable principal (terminal wealth, net '
+                   'benefit, after-tax estate)'),
+    direction=Direction.UNKNOWN,
+    detail=("contract_decisions.map_mortgage_decisions carries one "
+            "deployment_lag_months scalar from the first option that "
+            "declares one, the same first-option-wins shape "
+            "refinance_amortization_years / refinance_advance_deductible_non_reg "
+            "already use. The LTV-exploration path sweeps a continuous cash_out "
+            "rather than a specific chosen option, so a single scalar is all one "
+            "option's worth of lag can be -- a contract offering refinance "
+            "options with genuinely different lags across cash-out levels is "
+            "not distinguishable through this scalar. That is real, separate "
+            "follow-up work, surfaced here rather than silently absorbed."),
+    issue='#137',
+    applies=_deployment_lag_multi_option_bleed,
+))
+
+
+register(Approximation(
+    id='deployment_lag_carry_is_linear',
+    summary=("The deployment-lag carry is priced as simple (non-compounded) "
+             "interest over the lag window: lump * (investment_return - "
+             "parking_rate) * (months / 12). The true cost compounds over the "
+             "window, so this linear estimate understates the carry for any "
+             "non-trivial window and spread"),
+    biased_figure=('deployment lag carry cost, and every objective that folds '
+                   'the year-0 deployable principal (terminal wealth, net '
+                   'benefit, after-tax estate)'),
+    direction=Direction.UNDERSTATES,
+    detail=("deployment_lag.deployment_lag_cost multiplies the lump by the "
+            "annual spread and the month fraction -- the interest the idle "
+            "window earns/loses is modelled linearly, not compounded. Over a "
+            "few months at a few percent the difference is small (and the "
+            "window is bounded by the declared lag), but the reported carry is "
+            "a slight underestimate of the compounded cost. Direction is "
+            "UNDERSTATES for the positive-carry case (parking < investment "
+            "return); for a negative carry (parking > investment return) the "
+            "deployable principal is capped at the lump (finding #6), so the "
+            "linear window does not inflate invested principal either way."),
+    issue='#137',
+    applies=_deployment_lag_declared,
+))

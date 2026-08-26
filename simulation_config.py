@@ -258,6 +258,108 @@ class SimulationConfig:
     # StrategyEngine.fill_room.
     refinance_advance_deductible_non_reg: Optional[float] = None
 
+    # Issue #137: a DECLARED deployment lag on the refinance cash-out advance.
+    # The engine's default assumes borrowed money is deployed the instant it
+    # is borrowed; declaring a lag opts into pricing the delay's opportunity
+    # cost (the foregone investment return net of parking earnings over the lag
+    # window -- NOT the debt's interest spread: the borrowed lump is already on
+    # the mortgage and accrues interest there regardless of the lag). Sourced
+    # from the first declared
+    # decisions.mortgage.refinance_options[].deployment_lag_months (the
+    # household's stated deployment timing, applied across the refinance sweep
+    # -- the same single-scalar-from-the-declared-option shape
+    # refinance_amortization_years / refinance_advance_deductible_non_reg
+    # already use). 0 (the default, and the value when no option declares a
+    # lag) means no lag -- year-0 deployment exactly as today, byte-identical
+    # (DP#32: 0 is a value, not a fallback; the no-lag path is the pre-feature
+    # behaviour, and a declared 0 round-trips to absent by design). The lag
+    # applies to the cash_out advance only; a margin draw (a separate facility)
+    # is deployed same-day and carries no lag, so a no-refinance scenario
+    # (cash_out 0) carries no cost regardless of this field. Consumed by
+    # FamilySimulation's year-0 deployment (the carry reduces the deployable
+    # principal passed to fill_room).
+    deployment_lag_months: int = 0
+    # Issue #137: the annual rate the idle cash-out lump earns while waiting
+    # to be deployed during the declared deployment_lag_months. 0.0 (the
+    # default, and the value when no option declares a parking_rate) means idle
+    # cash earning nothing -- the ordinary case. A declared 0 is the same
+    # value, honoured explicitly. The carry is
+    # lump * (investment_return - parking_rate) * (lag_months / 12), where
+    # investment_return is the portfolio's year-0 return; a parking_rate above
+    # the investment return is a real, representable scenario (idle money
+    # earning more than the portfolio would) and yields a negative carry, not
+    # floored at zero -- though the deployable principal is CAPPED at the lump
+    # so a negative carry cannot inflate invested principal above what was
+    # borrowed (finding #6).
+    deployment_lag_parking_rate: float = 0.0
+
+    # Issue #74: a DECLARED staggered deployment schedule on the refinance
+    # cash-out advance. The engine's default (and the deployment-lag layer's
+    # short-months-window carry) assumes the advance deploys as a year-0
+    # lump; declaring a schedule opts into pricing the opportunity cost of
+    # dripping the advance in equal annual tranches over that many years
+    # instead -- the undeployed tranches sit at parking_rate instead of being
+    # invested at the portfolio's year-0 return, and the foregone return net
+    # of parking earnings (summed linearly over the window) is applied as a
+    # year-0-equivalent reduction of the deployable principal (the SAME seam
+    # deployment_lag_cost and transaction_cost_year0 use). Sourced from the
+    # first declared
+    # decisions.mortgage.refinance_options[].deployment_schedule_years (the
+    # household's stated deployment schedule, applied across the refinance
+    # sweep -- the same single-scalar-from-the-declared-option shape
+    # deployment_lag_months / refinance_amortization_years already use). 0
+    # (the default, and the value when no option declares a schedule) or 1
+    # means no staggering -- year-0 deployment exactly as today, byte-
+    # identical (DP#32: 0/1 is a value, not a fallback; the no-schedule path
+    # is the pre-feature behaviour, and a declared 0 or 1 round-trips to
+    # absent by design). A deployment SCHEDULE (years) and a deployment LAG
+    # (months) are rival timings of the same money -- declaring both (on the
+    # same option OR across different options) is refused loudly at the
+    # contract mapping boundary (contract_decisions.map_mortgage_decisions,
+    # DP#32/DP#5). Consumed by FamilySimulation's
+    # year-0 deployment (the cost reduces the deployable principal passed to
+    # fill_room).
+    deployment_schedule_years: int = 0
+    # Issue #74: the annual rate the undeployed tranches earn while waiting to
+    # be deployed during the declared deployment_schedule_years. 0.0 (the
+    # default, and the value when no option declares a parking_rate for its
+    # schedule) means idle cash earning nothing -- the ordinary case. A
+    # declared 0 is the same value, honoured explicitly. The cost is
+    # lump * (return_rate - parking_rate) * (years - 1) / 2, where return_rate
+    # is the portfolio's year-0 return; a parking_rate above the return rate
+    # is a real, representable scenario (idle money earning more than the
+    # portfolio would) and yields a negative cost, not floored at zero --
+    # though the deployable principal is CAPPED at the lump so a negative
+    # cost cannot inflate invested principal above what was borrowed (the
+    # same cap deployment_lag_cost applies to a negative carry).
+    deployment_schedule_parking_rate: float = 0.0
+
+    # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
+    # (one-time transaction costs and credits attached to a financial event --
+    # the general mechanism the engine previously had only two ad-hoc members
+    # of: a property sale's selling_costs and a mortgage's cash_back
+    # origination credit, #1075). Sourced from the declared
+    # ``transaction_costs[]`` entries whose ``event`` is ``refinance_origination``
+    # and which carry NO installment schedule (a LUMP, paid at the year-0
+    # anchor or a year-0 date); costs subtract, credits add. The engine
+    # applies the FLOORED value (max(net, 0.0)) as a year-0-equivalent
+    # reduction of the deployable principal -- the SAME seam #137's
+    # deployment-lag carry uses (see FamilySimulation's year-0 fill_room call),
+    # reused rather than reinvented: positive = a net cost that REDUCES the
+    # deployable principal so NET proceeds are what deploys; a net CREDIT is
+    # FLOORED to 0.0 at the seam so the deployable principal can never exceed
+    # the borrowed lump (DP#18 money conservation) -- the excess credit is
+    # routed as a year-0 SAVINGS cash flow by the adapter instead. 0.0 (the
+    # default, and the value when no refinance origination lumps are declared,
+    # costs offset credits, or a net credit is floored) = byte-identical to
+    # the pre-feature path (DP#32). Installment entries
+    # and account_transfer_in entries flow as dated cash flows (the existing
+    # cash_flows mechanism), NOT this seam -- an installment is NOT a year-0
+    # lump. Consumed by FamilySimulation's year-0 deployment (the net cost
+    # reduces the deployable principal passed to fill_room) and surfaced on
+    # the year-0 YearResult so the gross-vs-net gap is visible in output.
+    transaction_cost_year0: float = 0.0
+
     # Family
     family_members: List[Dict] = field(default_factory=list)
     children: List[Dict] = field(default_factory=list)
@@ -574,14 +676,14 @@ class SimulationConfig:
     account_return_overrides: Dict = field(default_factory=dict)
     account_locked: Dict = field(default_factory=dict)
 
-    # Issue #691: per-account MER fees, pot-keyed. Defaults to empty -- a
-    # household that declares no `mer` grows at the fee-free global rate
+    # Issue #691/#136: per-account MER fees, pot-keyed. Defaults to empty --
+    # a household that declares no `mer` grows at the fee-free global rate
     # (today's behaviour; keeps the golden invariant unchanged, DP#32: an
-    # absent fee is not a zero fee). The growth rule subtracts the balance-
-    # weighted fee from the pot's gross rate (net = gross - weighted_mer_sum /
-    # pot_total).
-    #   mer_drag[kind] = {'mer_balance': float,
-    #                     'weighted_mer_sum': float}  # sum(bal*mer)
+    # absent fee is not a zero fee). The growth rule subtracts the MER rate
+    # from the pot's gross rate (net = gross - mer_rate) so the fee is
+    # mer_rate * pot_total each year — dynamic, not frozen at the opening
+    # balance (issue #136 fixes the silent-zero and fee-decay defects).
+    #   mer_drag[kind] = {'mer_rate': float}  # balance-weighted avg MER
     account_mer_drag: Dict = field(default_factory=dict)
 
     @classmethod

@@ -293,19 +293,31 @@ def test_e2e_declared_split_displaces_registered_fill_when_it_exceeds_room():
 # ============================================================ contract mapping (input_contract)
 import copy  # noqa: E402
 
-from test_input_contract import _load_example, _two_generation_subset  # noqa: E402
+from _example_doc import minimal_example  # noqa: E402
 
 import input_contract as ic  # noqa: E402
 
 
 def _example_doc_with_first_refinance_declaring_split(amount: float) -> dict:
-    """Load the shipped example, trim to the two-generation sub-family
-    the Phase 1 adapter can map (see test_input_contract.
-    _two_generation_subset), and put `advance_split.deductible_non_reg`
-    on the FIRST refinance option (the one input_contract reads -- it
-    takes refinance_options[0]). The shipped first option is `no_refi`
-    (no split); this adds one. Fabricated amount, DP#15."""
-    doc = _two_generation_subset(_load_example())
+    """Load a MINIMAL (illustrative-block-free) example and put
+    `advance_split.deductible_non_reg` on the FIRST refinance option (the one
+    input_contract reads -- it takes refinance_options[0]). The shipped
+    first option is `no_refi` (no split); this adds one. Fabricated amount,
+    DP#15.
+
+    The shared minimal_example() helper (tests/_example_doc.py) trims to the
+    two-generation sub-family AND strips every optional illustrative block
+    (the example's transaction_costs (#139), deployment_lag_months,
+    parking_rate, advance_split, deployment_schedule_years (#137/#74/#792))
+    in ONE place, so this
+    advance-split test doc is transaction-cost-free / lag-free / split-free
+    until THIS function adds the split it tests -- the net year-0 refinance
+    origination cost and the deployment lag would otherwise reduce the
+    year-0 deployable principal and confound the non-reg-lump assertion
+    below. Previously this hand-stripped deployment_lag/parking_rate/
+    transaction_costs; the shared helper is the single place a new
+    illustrative block gets stripped."""
+    doc = minimal_example()
     refi = copy.deepcopy(doc["decisions"]["mortgage"]["refinance_options"])
     refi[0]["advance_split"] = {"deductible_non_reg": amount}
     doc["decisions"]["mortgage"]["refinance_options"] = refi
@@ -334,11 +346,11 @@ def test_input_contract_omits_the_key_when_no_split_is_declared():
     behaviour), never a fabricated 0. (The split is read from whichever
     option declares one, not just the first -- so removing it from every
     option is what makes the key absent.)"""
-    doc = _two_generation_subset(_load_example())
-    # strip advance_split from every option (the shipped example has one on
-    # refi_50k; removing all of them is the true 'absent' state)
-    for opt in doc["decisions"]["mortgage"]["refinance_options"]:
-        opt.pop("advance_split", None)
+    # minimal_example() already strips advance_split / deployment_lag /
+    # parking_rate / transaction_costs from every refinance option in ONE
+    # place (tests/_example_doc.py), so this is the true no-split / no-lag /
+    # no-txn-cost contract.
+    doc = minimal_example()
     legacy = ic.to_internal_config(doc)
     assert "refinance_advance_deductible_non_reg" not in legacy["property"]
     cfg = SimulationConfig.from_dict(legacy)
@@ -401,9 +413,12 @@ def test_contract_advance_split_provably_changes_the_invested_non_reg_lump():
     # and the SAME contract with NO advance_split produces a DIFFERENT
     # (registered-first) year-0 non-reg lump, proving the lever -- not
     # something else -- moved it.
-    doc_none = _two_generation_subset(_load_example())
-    for opt in doc_none["decisions"]["mortgage"]["refinance_options"]:
-        opt.pop("advance_split", None)
+    # minimal_example() strips advance_split / deployment_lag / parking_rate
+    # / transaction_costs in ONE place, so the no-split comparison run is
+    # split-free / lag-free / transaction-cost-free -- the relative assertion
+    # below must compare the split lever alone, not a split-vs-(split+txn-cost
+    # / lag) difference.
+    doc_none = minimal_example()
     doc_none["decisions"]["mortgage"]["refinance_options"][0]["cash_out"] = 150_000
     doc_none["decisions"]["mortgage"]["refinance_options"][0]["ltv"] = 0.75
     doc_none["decisions"]["mortgage"]["refinance_options"][0]["amortization_years"] = 25
