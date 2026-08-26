@@ -63,6 +63,23 @@ class TestApproximationConstructionIsGuarded(unittest.TestCase):
         a = Approximation(id='ok', summary='s', biased_figure='f', direction=Direction.UNKNOWN)
         self.assertEqual(a.direction, Direction.UNKNOWN)
 
+    def test_registering_a_duplicate_id_with_different_content_raises(self):
+        # register() refuses to silently overwrite an already-registered id
+        # with different content (the guard against two approximations
+        # colliding on one id). Covers register()'s duplicate branch.
+        dup = Approximation(id='terminal_wealth_is_pretax', summary='dup',
+                            biased_figure='x', direction=Direction.OVERSTATES)
+        with self.assertRaises(ValueError):
+            model_fidelity.register(dup)
+
+    def test_registering_the_same_content_twice_is_idempotent(self):
+        # Re-registering the IDENTICAL Approximation is a no-op (no raise), so
+        # a module re-import or a test re-registering the real entry does not
+        # trip the duplicate guard.
+        real = next(a for a in model_fidelity.all_approximations()
+                    if a.id == 'terminal_wealth_is_pretax')
+        model_fidelity.register(real)  # no raise
+
 
 # ── 2. Known approximations reach every output surface ─────────────────────
 
@@ -493,6 +510,17 @@ _CODE_ANCHORS = {
     # site that records the disclosure; delete it and the caveat can never fire.
     'mer_mixed_pot_zero_fee_unmodeled': (
         'contract_accounts.py', 'mer_mixed_pot.append('),
+    # Issue #137 (finding #4): the multi-option bleed -- the lag is a single
+    # scalar from the first declaring option, applied across a continuous
+    # cash_out sweep. Anchored to the scalar-carry site; delete it and the
+    # bleed (and the caveat) cannot arise.
+    'deployment_lag_multi_option_bleed': (
+        'contract_decisions.py', 'lag_option = next('),
+    # Issue #137 (finding #5): the linear (non-compounded) carry window.
+    # Anchored to the pure seam's linear formula; delete it and the linear
+    # approximation (and the caveat) cannot arise.
+    'deployment_lag_carry_is_linear': (
+        'deployment_lag.py', 'lump * rate_spread * (months / 12.0)'),
     # unlabeled_dollar_basis is a config-shape gap, not a code path — it has
     # no anchor and is exempt below.
 }

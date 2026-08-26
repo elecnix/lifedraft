@@ -1169,7 +1169,9 @@
           "amortization_years": 25,
           "advance_split": {
             "deductible_non_reg": 25000
-          }
+          },
+          "deployment_lag_months": 3,
+          "parking_rate": 0.015
         }
       ],
       "renewal_options": [

@@ -304,9 +304,17 @@ def _example_doc_with_first_refinance_declaring_split(amount: float) -> dict:
     _two_generation_subset), and put `advance_split.deductible_non_reg`
     on the FIRST refinance option (the one input_contract reads -- it
     takes refinance_options[0]). The shipped first option is `no_refi`
-    (no split); this adds one. Fabricated amount, DP#15."""
+    (no split); this adds one. Fabricated amount, DP#15.
+
+    Issue #137: also strip any deployment lag the shipped example now carries
+    on refi_50k (finding #3) so this advance-split test doc is lag-free --
+    the lag would otherwise reduce the year-0 deployable principal and
+    confound the non-reg-lump assertion below."""
     doc = _two_generation_subset(_load_example())
     refi = copy.deepcopy(doc["decisions"]["mortgage"]["refinance_options"])
+    for opt in refi:
+        opt.pop("deployment_lag_months", None)
+        opt.pop("parking_rate", None)
     refi[0]["advance_split"] = {"deductible_non_reg": amount}
     doc["decisions"]["mortgage"]["refinance_options"] = refi
     return doc
@@ -336,9 +344,14 @@ def test_input_contract_omits_the_key_when_no_split_is_declared():
     option is what makes the key absent.)"""
     doc = _two_generation_subset(_load_example())
     # strip advance_split from every option (the shipped example has one on
-    # refi_50k; removing all of them is the true 'absent' state)
+    # refi_50k; removing all of them is the true 'absent' state). Issue #137:
+    # also strip the deployment lag the shipped example now carries on refi_50k
+    # (finding #3) exactly the way advance_split is stripped, so this is the
+    # true no-split / no-lag contract.
     for opt in doc["decisions"]["mortgage"]["refinance_options"]:
         opt.pop("advance_split", None)
+        opt.pop("deployment_lag_months", None)
+        opt.pop("parking_rate", None)
     legacy = ic.to_internal_config(doc)
     assert "refinance_advance_deductible_non_reg" not in legacy["property"]
     cfg = SimulationConfig.from_dict(legacy)
@@ -404,6 +417,8 @@ def test_contract_advance_split_provably_changes_the_invested_non_reg_lump():
     doc_none = _two_generation_subset(_load_example())
     for opt in doc_none["decisions"]["mortgage"]["refinance_options"]:
         opt.pop("advance_split", None)
+        opt.pop("deployment_lag_months", None)
+        opt.pop("parking_rate", None)
     doc_none["decisions"]["mortgage"]["refinance_options"][0]["cash_out"] = 150_000
     doc_none["decisions"]["mortgage"]["refinance_options"][0]["ltv"] = 0.75
     doc_none["decisions"]["mortgage"]["refinance_options"][0]["amortization_years"] = 25

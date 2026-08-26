@@ -492,6 +492,24 @@ class YearResult:
     # but a purchase year, and for a household with no financing (DP#32).
     second_property_mortgage_originated: float = 0.0
 
+    # Issue #137: the year-0 opportunity cost of a declared deployment lag on
+    # the refinance cash-out advance. During the lag window the lump sits in
+    # cash earning parking_rate instead of being invested at the portfolio's
+    # year-0 return; the foregone return net of parking earnings is applied as
+    # a year-0-equivalent reduction of the deployable principal, so it flows
+    # into every objective the way other one-time year-0 costs do. Surfaced so
+    # output plugins can render the cost of the delay (DP#32: a cost the run
+    # silently modelled as $0 is the founding defect this field exists to make
+    # visible). The value is the RAW carry (signed): positive when the
+    # portfolio's return exceeds parking (a real cost), negative when parking
+    # exceeds the portfolio's return (a real gain) -- the deployable principal
+    # is CAPPED at the borrowed lump either way (finding #6), so a negative
+    # carry is surfaced here for observability but does not invent invested
+    # principal. 0.0 in every year but year 0, and in year 0 for a household
+    # that declared no lag (the golden household included) -- inert,
+    # byte-identical (DP#32).
+    deployment_lag_cost: float = 0.0
+
     # True only when the waterfall exhausted every source and the household
     # is STILL short this year -- a hard ruin, not a modeled cost (DP#32:
     # this must be checked explicitly by any caller reporting a terminal

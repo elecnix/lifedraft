@@ -350,6 +350,51 @@ def map_mortgage_decisions(doc: Dict, prop_cfg: Dict[str, Any]) -> List[Dict[str
                 split_option["advance_split"]["deductible_non_reg"]
             )
 
+        # Issue #137: a DECLARED deployment lag on the refinance cash-out
+        # advance. The engine's default assumes borrowed money is deployed the
+        # instant it is borrowed; declaring a lag opts into pricing the delay's
+        # opportunity cost (the foregone investment return net of parking
+        # earnings over the lag window -- NOT the debt's interest spread: the
+        # borrowed lump is already on the mortgage and accrues interest there
+        # regardless of when the money is deployed, so the borrowing rate is not
+        # part of the lag cost). The lag is a household-stated fact about
+        # deployment timing (how many months the cash-out lump sits idle before
+        # being invested), so -- like refinance_amortization_years /
+        # refinance_advance_deductible_non_reg above -- it is carried as a single
+        # scalar from the option that declares one, applied across the
+        # refinance sweep (the LTV exploration sweeps a continuous cash_out
+        # rather than a specific chosen option, so one option's stated lag is
+        # all one option's worth the sweep can carry; a contract offering
+        # refinance options with genuinely different lags across cash-out
+        # levels is not distinguishable through this single scalar -- the
+        # same real, separate follow-up work refinance_amortization_years
+        # already notes). Absent on every option means "no lag declared" --
+        # year-0 deployment exactly as today (byte-identical, DP#32). A
+        # declared 0 is a real value (no lag) and is carried as 0 -- it
+        # round-trips to absent by design (0 is the canonical no-lag state).
+        # The schema (minimum 0) and the pure carry function
+        # (deployment_lag.deployment_lag_cost) both refuse a negative value
+        # loudly. parking_rate is optional; absent = 0 (idle cash earning
+        # nothing), carried as 0.0 -- explicit absence test, never an `or`
+        # coercion (DP#32: a declared 0 is the same value, honoured explicitly).
+        lag_option = next(
+            (o for o in refinance_options if "deployment_lag_months" in o),
+            None,
+        )
+        if lag_option is not None:
+            prop_cfg["deployment_lag_months"] = lag_option["deployment_lag_months"]
+            # Carry the declaring option's own cash_out so a downstream
+            # model_fidelity predicate can detect the multi-option bleed (the
+            # lag is a scalar from this one option, applied across a sweep that
+            # explores a continuous cash_out -- when the booked cash_out is not
+            # this option's, the lag is priced on a lump the declaring option
+            # never stated it for). Internal-only key (not a contract leaf, not
+            # re-emitted by config_serde); consumed only by model_fidelity.
+            prop_cfg["deployment_lag_declared_cash_out"] = lag_option.get("cash_out", 0)
+            parking_rate = lag_option.get("parking_rate")
+            if parking_rate is not None:
+                prop_cfg["deployment_lag_parking_rate"] = parking_rate
+
     # ── decisions.mortgage.structure_options -- issue #687. A household
     # facing a refinance/renewal may be choosing between genuinely different
     # STRUCTURES against the SAME registered charge (all-mortgage vs.

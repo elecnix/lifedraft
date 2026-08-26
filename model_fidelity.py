@@ -1274,3 +1274,108 @@ register(Approximation(
     applies=_has_mer_mixed_pot,
     findings=_describe_mer_mixed_pot,
 ))
+
+
+# ── Issue #137: deployment-lag disclosures (findings #4 multi-option bleed,
+# #5 linear-carry window). The lag is a single scalar from the first option
+# that declares one, applied across the refinance sweep (a continuous cash_out)
+# and priced as a linear (non-compounded) opportunity cost over the window.
+# Both are approximations the output must disclose, not bury in a docstring.
+
+def _deployment_lag_declared(ctx: FidelityContext) -> bool:
+    """True when the contract declared a deployment lag on a refinance option
+    (property.deployment_lag_months > 0). The no-lag path carries no cost and
+    no approximation to disclose."""
+    if not isinstance(ctx.cfg, dict):
+        return False
+    prop = ctx.cfg.get('property')
+    if not isinstance(prop, dict):
+        return False
+    return bool(prop.get('deployment_lag_months', 0))
+
+
+def _deployment_lag_multi_option_bleed(ctx: FidelityContext) -> bool:
+    """Finding #4: the lag is a single scalar from the FIRST option that
+    declares one, applied across the refinance sweep (a continuous cash_out,
+    not a specific chosen option). The bleed bites when there are two or more
+    CASH-OUT refinance options (a later option's different lag is not
+    distinguishable through the single scalar and is dropped), OR when the
+    booked cash_out differs from the declaring option's cash_out (the lag is
+    priced on a lump the declaring option never stated it for). The no_refi
+    baseline (cash_out 0) carries no lag cost and is not counted as a cash-out
+    option."""
+    if not _deployment_lag_declared(ctx):
+        return False
+    prop = ctx.cfg.get('property')
+    scenarios = ctx.cfg.get('scenarios')
+    refi = scenarios.get('refinance') if isinstance(scenarios, dict) else None
+    if not isinstance(refi, list):
+        refi = []
+    cash_out_opts = [
+        o for o in refi if isinstance(o, dict) and o.get('cash_out', 0) > 0]
+    if len(cash_out_opts) >= 2:
+        return True
+    declared = prop.get('deployment_lag_declared_cash_out')
+    if declared is None:
+        # DP#32: cannot determine the declaring option's cash_out (e.g. an
+        # in-memory config that set the lag directly on property without the
+        # contract path) -- disclose rather than silently exonerate.
+        return True
+    booked = prop.get('cash_out', 0)
+    return declared != booked
+
+
+register(Approximation(
+    id='deployment_lag_multi_option_bleed',
+    summary=("The deployment-lag carry is a single scalar from the FIRST "
+             "refinance option that declares one, applied across the "
+             "refinance sweep -- a continuous cash_out, not a specific "
+             "chosen option. When two or more cash-out options declare "
+             "different lags, only the first's is carried; and when the "
+             "sweep books a cash_out other than the declaring option's, the "
+             "lag is priced on a lump that option never stated it for. The "
+             "carry is therefore an approximation: the per-option lag the "
+             "household declared is not distinguished across the sweep"),
+    biased_figure=('deployment lag carry cost, and every objective that folds '
+                   'the year-0 deployable principal (terminal wealth, net '
+                   'benefit, after-tax estate)'),
+    direction=Direction.UNKNOWN,
+    detail=("contract_decisions.map_mortgage_decisions carries one "
+            "deployment_lag_months scalar from the first option that "
+            "declares one, the same first-option-wins shape "
+            "refinance_amortization_years / refinance_advance_deductible_non_reg "
+            "already use. The LTV-exploration path sweeps a continuous cash_out "
+            "rather than a specific chosen option, so a single scalar is all one "
+            "option's worth of lag can be -- a contract offering refinance "
+            "options with genuinely different lags across cash-out levels is "
+            "not distinguishable through this scalar. That is real, separate "
+            "follow-up work, surfaced here rather than silently absorbed."),
+    issue='#137',
+    applies=_deployment_lag_multi_option_bleed,
+))
+
+
+register(Approximation(
+    id='deployment_lag_carry_is_linear',
+    summary=("The deployment-lag carry is priced as simple (non-compounded) "
+             "interest over the lag window: lump * (investment_return - "
+             "parking_rate) * (months / 12). The true cost compounds over the "
+             "window, so this linear estimate understates the carry for any "
+             "non-trivial window and spread"),
+    biased_figure=('deployment lag carry cost, and every objective that folds '
+                   'the year-0 deployable principal (terminal wealth, net '
+                   'benefit, after-tax estate)'),
+    direction=Direction.UNDERSTATES,
+    detail=("deployment_lag.deployment_lag_cost multiplies the lump by the "
+            "annual spread and the month fraction -- the interest the idle "
+            "window earns/loses is modelled linearly, not compounded. Over a "
+            "few months at a few percent the difference is small (and the "
+            "window is bounded by the declared lag), but the reported carry is "
+            "a slight underestimate of the compounded cost. Direction is "
+            "UNDERSTATES for the positive-carry case (parking < investment "
+            "return); for a negative carry (parking > investment return) the "
+            "deployable principal is capped at the lump (finding #6), so the "
+            "linear window does not inflate invested principal either way."),
+    issue='#137',
+    applies=_deployment_lag_declared,
+))

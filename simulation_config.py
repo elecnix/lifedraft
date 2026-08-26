@@ -258,6 +258,41 @@ class SimulationConfig:
     # StrategyEngine.fill_room.
     refinance_advance_deductible_non_reg: Optional[float] = None
 
+    # Issue #137: a DECLARED deployment lag on the refinance cash-out advance.
+    # The engine's default assumes borrowed money is deployed the instant it
+    # is borrowed; declaring a lag opts into pricing the delay's opportunity
+    # cost (the foregone investment return net of parking earnings over the lag
+    # window -- NOT the debt's interest spread: the borrowed lump is already on
+    # the mortgage and accrues interest there regardless of the lag). Sourced
+    # from the first declared
+    # decisions.mortgage.refinance_options[].deployment_lag_months (the
+    # household's stated deployment timing, applied across the refinance sweep
+    # -- the same single-scalar-from-the-declared-option shape
+    # refinance_amortization_years / refinance_advance_deductible_non_reg
+    # already use). 0 (the default, and the value when no option declares a
+    # lag) means no lag -- year-0 deployment exactly as today, byte-identical
+    # (DP#32: 0 is a value, not a fallback; the no-lag path is the pre-feature
+    # behaviour, and a declared 0 round-trips to absent by design). The lag
+    # applies to the cash_out advance only; a margin draw (a separate facility)
+    # is deployed same-day and carries no lag, so a no-refinance scenario
+    # (cash_out 0) carries no cost regardless of this field. Consumed by
+    # FamilySimulation's year-0 deployment (the carry reduces the deployable
+    # principal passed to fill_room).
+    deployment_lag_months: int = 0
+    # Issue #137: the annual rate the idle cash-out lump earns while waiting
+    # to be deployed during the declared deployment_lag_months. 0.0 (the
+    # default, and the value when no option declares a parking_rate) means idle
+    # cash earning nothing -- the ordinary case. A declared 0 is the same
+    # value, honoured explicitly. The carry is
+    # lump * (investment_return - parking_rate) * (lag_months / 12), where
+    # investment_return is the portfolio's year-0 return; a parking_rate above
+    # the investment return is a real, representable scenario (idle money
+    # earning more than the portfolio would) and yields a negative carry, not
+    # floored at zero -- though the deployable principal is CAPPED at the lump
+    # so a negative carry cannot inflate invested principal above what was
+    # borrowed (finding #6).
+    deployment_lag_parking_rate: float = 0.0
+
     # Family
     family_members: List[Dict] = field(default_factory=list)
     children: List[Dict] = field(default_factory=list)
