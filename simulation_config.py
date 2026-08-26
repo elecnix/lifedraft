@@ -293,6 +293,47 @@ class SimulationConfig:
     # borrowed (finding #6).
     deployment_lag_parking_rate: float = 0.0
 
+    # Issue #74: a DECLARED staggered deployment schedule on the refinance
+    # cash-out advance. The engine's default (and the deployment-lag layer's
+    # short-months-window carry) assumes the advance deploys as a year-0
+    # lump; declaring a schedule opts into pricing the opportunity cost of
+    # dripping the advance in equal annual tranches over that many years
+    # instead -- the undeployed tranches sit at parking_rate instead of being
+    # invested at the portfolio's year-0 return, and the foregone return net
+    # of parking earnings (summed linearly over the window) is applied as a
+    # year-0-equivalent reduction of the deployable principal (the SAME seam
+    # deployment_lag_cost and transaction_cost_year0 use). Sourced from the
+    # first declared
+    # decisions.mortgage.refinance_options[].deployment_schedule_years (the
+    # household's stated deployment schedule, applied across the refinance
+    # sweep -- the same single-scalar-from-the-declared-option shape
+    # deployment_lag_months / refinance_amortization_years already use). 0
+    # (the default, and the value when no option declares a schedule) or 1
+    # means no staggering -- year-0 deployment exactly as today, byte-
+    # identical (DP#32: 0/1 is a value, not a fallback; the no-schedule path
+    # is the pre-feature behaviour, and a declared 0 or 1 round-trips to
+    # absent by design). A deployment SCHEDULE (years) and a deployment LAG
+    # (months) are rival timings of the same money -- declaring both (on the
+    # same option OR across different options) is refused loudly at the
+    # contract mapping boundary (contract_decisions.map_mortgage_decisions,
+    # DP#32/DP#5). Consumed by FamilySimulation's
+    # year-0 deployment (the cost reduces the deployable principal passed to
+    # fill_room).
+    deployment_schedule_years: int = 0
+    # Issue #74: the annual rate the undeployed tranches earn while waiting to
+    # be deployed during the declared deployment_schedule_years. 0.0 (the
+    # default, and the value when no option declares a parking_rate for its
+    # schedule) means idle cash earning nothing -- the ordinary case. A
+    # declared 0 is the same value, honoured explicitly. The cost is
+    # lump * (return_rate - parking_rate) * (years - 1) / 2, where return_rate
+    # is the portfolio's year-0 return; a parking_rate above the return rate
+    # is a real, representable scenario (idle money earning more than the
+    # portfolio would) and yields a negative cost, not floored at zero --
+    # though the deployable principal is CAPPED at the lump so a negative
+    # cost cannot inflate invested principal above what was borrowed (the
+    # same cap deployment_lag_cost applies to a negative carry).
+    deployment_schedule_parking_rate: float = 0.0
+
     # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
     # (one-time transaction costs and credits attached to a financial event --
     # the general mechanism the engine previously had only two ad-hoc members

@@ -510,6 +510,29 @@ class YearResult:
     # byte-identical (DP#32).
     deployment_lag_cost: float = 0.0
 
+    # Issue #74: the year-0-equivalent opportunity cost of a declared
+    # staggered deployment schedule on the refinance cash-out advance.
+    # Instead of deploying the whole advance as a year-0 lump, the household
+    # drips it in equal annual tranches over N years; the undeployed tranches
+    # sit at parking_rate instead of being invested at the portfolio's year-0
+    # return, and the foregone return net of parking earnings (summed linearly
+    # over the window) is applied as a year-0-equivalent reduction of the
+    # deployable principal -- the SAME seam deployment_lag_cost and
+    # transaction_cost_year0 use. Surfaced so output plugins can render the
+    # cost of staggering (DP#32: a cost the run silently modelled as $0 is
+    # the founding defect this field exists to make visible). The value is
+    # the RAW cost (signed): positive when the portfolio's return exceeds
+    # parking (a real cost), negative when parking exceeds the portfolio's
+    # return (a real gain) -- the deployable principal is CAPPED at the
+    # borrowed lump either way, so a negative cost is surfaced here for
+    # observability but does not invent invested principal. 0.0 in every
+    # year but year 0, and in year 0 for a household that declared no
+    # schedule (the golden household included) -- inert, byte-identical
+    # (DP#32). A deployment SCHEDULE (years) and a LAG (months) are rival
+    # timings of the same money; declaring both on the same option is
+    # refused loudly at the contract boundary.
+    deployment_schedule_cost: float = 0.0
+
     # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
     # (one-time transaction costs and credits attached to a financial
     # event). During origination the declared year-0 refinance_origination

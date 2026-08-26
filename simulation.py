@@ -132,6 +132,19 @@ class SimulationContext:
     # (borrowing_purpose still traces the full borrowed lump). 0.0 when no lag
     # is declared (golden).
     deployment_lag_cost: float = 0.0
+    # Issue #74: the year-0-equivalent opportunity cost of a declared
+    # staggered deployment schedule on the refinance cash-out advance.
+    # Computed once in FamilySimulation.__init__ from the portfolio's year-0
+    # investment return and the declared parking rate (NOT the borrowing rate
+    # -- the debt's interest accrues on the mortgage regardless of the
+    # schedule, so it is not an input to the opportunity cost). At year 0 the
+    # deployment subtracts this from the lump passed to fill_room (the
+    # deployable principal), so the cost flows into every objective the way
+    # other one-time year-0 costs do; the full borrowed lump stays on the
+    # debt side and the year-0 purpose tracing is untouched. 0.0 when no
+    # schedule is declared (golden). A SCHEDULE (years) and a LAG (months)
+    # are rival timings; the adapter refuses both on the same option.
+    deployment_schedule_cost: float = 0.0
     # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
     # (one-time transaction costs and credits attached to a financial event).
     # Computed once in FamilySimulation.__init__ from the declared
@@ -1560,7 +1573,7 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         # contract_transaction_costs.map_transaction_costs). 0.0 when none
         # declared (golden no-op, DP#32). Installments and account_transfer_in
         # entries flow as dated cash flows, NOT this seam.
-        deployable_lump = ctx.lump_sum - max(ctx.deployment_lag_cost, 0.0) - max(ctx.transaction_cost_year0, 0.0)
+        deployable_lump = max(0.0, ctx.lump_sum - max(ctx.deployment_lag_cost, 0.0) - max(ctx.deployment_schedule_cost, 0.0) - max(ctx.transaction_cost_year0, 0.0))
         lump_alloc = engine.fill_room(
             deployable_lump, family_state,
             deductible_non_reg_first=ctx.config.refinance_advance_deductible_non_reg,
@@ -1759,6 +1772,11 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         # year-0 result so output plugins can render it. 0.0 in every year but
         # year 0 (this is the yearly path; the carry is a year-0 fact).
         deployment_lag_cost=ctx.deployment_lag_cost if year == 0 else 0.0,
+        # Issue #74: surface the year-0 staggered-deployment schedule cost on
+        # the year-0 result so output plugins can render the cost of
+        # staggering. 0.0 in every year but year 0 (this is the yearly path;
+        # the schedule cost is a year-0-equivalent fact).
+        deployment_schedule_cost=ctx.deployment_schedule_cost if year == 0 else 0.0,
         # Issue #139: surface the year-0 net refinance-origination
         # transaction cost/credit on the year-0 result so output plugins can
         # render the gross-vs-net gap. 0.0 in every year but year 0 (this is
@@ -2009,6 +2027,41 @@ class FamilySimulation:
             parking_rate=config.deployment_lag_parking_rate,
         )
 
+        # Issue #74: the year-0-equivalent opportunity cost of a declared
+        # staggered deployment schedule on the refinance cash-out advance.
+        # Computed ONCE here (AFTER the return model is resolved, since the
+        # year-0 investment return is the rate the deployed lump would
+        # compound at) and applied at year 0 as a reduction of the deployable
+        # principal passed to fill_room, so it flows into every objective the
+        # way other one-time year-0 costs do. The cost is the foregone
+        # investment return net of parking earnings, summed linearly over the
+        # N-1 years of staggering: lump * (return_rate - parking_rate) * (years
+        # - 1) / 2 (the average tranche waits (years-1)/2 years). NOT the
+        # debt's interest spread: the borrowed lump is already on the mortgage
+        # and accrues interest there regardless of the schedule, so charging
+        # the borrowing rate would double-count the debt cost the mortgage
+        # already pays -- the same reasoning deployment_lag_cost uses. The
+        # return_rate is the portfolio's year-0 return (the same return model
+        # the deployed lump compounds at). The schedule applies to the cash_out
+        # advance only (a margin draw is a separate facility deployed same-day);
+        # a no-refinance scenario (cash_out 0) carries no cost. The full
+        # borrowed lump stays on the debt side and the year-0 purpose tracing
+        # is untouched. 0.0 when no schedule is declared -- byte-for-byte the
+        # pre-feature path (golden no-op, DP#32). A negative cost (parking >
+        # return rate) is returned as-is but the deployable principal is CAPPED
+        # at the lump (see the year-0 deployment) so the stagger cannot inflate
+        # invested principal above what was actually borrowed. A SCHEDULE
+        # (years) and a LAG (months) are rival timings; the adapter
+        # (contract_decisions) refuses both on the same option before this is
+        # ever computed.
+        from deployment_schedule import schedule_cost as _schedule_cost
+        self.deployment_schedule_cost = _schedule_cost(
+            lump=config.cash_out,
+            years=config.deployment_schedule_years,
+            parking_rate=config.deployment_schedule_parking_rate,
+            return_rate=self.return_model.return_for_year(0),
+        )
+
         # Issue #139: the signed NET year-0 LUMP cost of a refinance
         # origination (one-time transaction costs and credits attached to a
         # financial event). Read straight off the config field the adapter
@@ -2239,6 +2292,7 @@ class FamilySimulation:
             deduct_later=self.deduct_later,
             lump_sum=self.lump_sum,
             deployment_lag_cost=self.deployment_lag_cost,
+            deployment_schedule_cost=self.deployment_schedule_cost,
             transaction_cost_year0=self.transaction_cost_year0,
             free_cash=self.free_cash,
             return_model=self.return_model,
@@ -2401,7 +2455,7 @@ class FamilySimulation:
             # credit as a year-0 savings cash flow instead. 0.0 when none
             # declared (golden no-op, DP#32); installments and account_transfer_in
             # flow as dated cash flows, not this seam.
-            deployable_lump = self.lump_sum - max(self.deployment_lag_cost, 0.0) - max(self.transaction_cost_year0, 0.0)
+            deployable_lump = max(0.0, self.lump_sum - max(self.deployment_lag_cost, 0.0) - max(self.deployment_schedule_cost, 0.0) - max(self.transaction_cost_year0, 0.0))
             lump_alloc = engine.fill_room(
                 deployable_lump, lump_state,
                 deductible_non_reg_first=self.config.refinance_advance_deductible_non_reg,
@@ -2473,6 +2527,10 @@ class FamilySimulation:
                 # Issue #137: surface the year-0 deployment-lag carry cost on
                 # the year-0 result (this is the monthly path's year-0 step).
                 deployment_lag_cost=self.deployment_lag_cost,
+                # Issue #74: surface the year-0 staggered-deployment
+                # schedule cost on the monthly path's year-0 step (mirrors
+                # the yearly path's field).
+                deployment_schedule_cost=self.deployment_schedule_cost,
                 # Issue #139: surface the year-0 net refinance-origination
                 # transaction cost/credit on the monthly path's year-0 step
                 # too (mirrors the yearly path's field below).
@@ -2922,6 +2980,13 @@ class FamilySimulation:
                 # carry was applied -- the cost would be paid but invisible.
                 deployment_lag_cost=(
                     self.deployment_lag_cost if year == 0 else 0.0),
+                # Issue #74: surface the year-0 staggered-deployment schedule
+                # cost on this per-year step's result, mirroring the yearly
+                # path. The monthly path's pre-projection step computes a
+                # year-0 result0 that is NOT appended, so this per-year loop
+                # is where the year-0 schedule cost must surface.
+                deployment_schedule_cost=(
+                    self.deployment_schedule_cost if year == 0 else 0.0),
                 # Issue #139: surface the year-0 net refinance-origination
                 # transaction cost/credit on this per-year step's result,
                 # mirroring the yearly path. The monthly path's pre-projection

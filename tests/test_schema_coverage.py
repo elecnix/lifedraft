@@ -778,6 +778,7 @@ CONSUMED = {
     "decisions.mortgage.refinance_options[].advance_split.deductible_non_reg": ("contract_decisions.py", "split_option[\"advance_split\"][\"deductible_non_reg\"]"),
     "decisions.mortgage.refinance_options[].deployment_lag_months": ("contract_decisions.py", "lag_option[\"deployment_lag_months\"]"),
     "decisions.mortgage.refinance_options[].parking_rate": ("contract_decisions.py", "lag_option.get(\"parking_rate\")"),
+    "decisions.mortgage.refinance_options[].deployment_schedule_years": ("contract_decisions.py", "schedule_option[\"deployment_schedule_years\"]"),
     "decisions.mortgage.renewal_options[].label": ("optimize.py", "name = opt.get('name', f\"renew_{opt.get('type', 'unknown')}\")"),
     "decisions.mortgage.renewal_options[].rate": ("scenario_discovery.py", "'rate': option.get('rate', 0.05)"),
     "decisions.mortgage.renewal_options[].type": ("scenario_discovery.py", "'type': option.get('type', 'variable')"),

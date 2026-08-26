@@ -1223,7 +1223,15 @@
           "advance_split": {
             "deductible_non_reg": 25000
           },
-          "deployment_lag_months": 3,
+          "deployment_lag_months": 0
+        },
+        {
+          "id": "refi_100k",
+          "label": "Refinance, cash out $100k, staggered deployment",
+          "cash_out": 100000,
+          "ltv": 0.68,
+          "amortization_years": 25,
+          "deployment_schedule_years": 4,
           "parking_rate": 0.015
         }
       ],

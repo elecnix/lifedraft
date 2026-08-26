@@ -22,6 +22,7 @@
     "contract_principal.py": 1,
     "contract_property.py": 0,
     "contract_schema.py": 0,
+    "contract_transaction_costs.py": 0,
     "contract_transfers.py": 0,
     "countries/__init__.py": 3,
     "countries/canada/__init__.py": 0,
@@ -76,6 +77,7 @@
     "countries/canada/tax_calc.py": 19,
     "countries/canada/zev_incentive.py": 0,
     "decumulation.py": 0,
+    "deployment_lag.py": 0,
     "dp_optimizer.py": 15,
     "input_contract.py": 0,
     "jurisdiction.py": 0,
@@ -84,7 +86,7 @@
     "loop.py": 85,
     "make_retirement_input.py": 10,
     "member_config.py": 0,
-    "model_fidelity.py": 6,
+    "model_fidelity.py": 5,
     "module_registry.py": 24,
     "money.py": 0,
     "monte_carlo_optimizer.py": 5,
@@ -129,6 +131,7 @@
     "tax_calculator.py": 6,
     "tax_data.py": 19,
     "trajectory_invariants.py": 16,
+    "transaction_costs.py": 0,
     "voi.py": 42,
     "year_result.py": 0
   }

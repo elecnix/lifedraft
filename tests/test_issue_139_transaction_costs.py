@@ -795,7 +795,7 @@ def _example_doc_with_transaction_costs() -> dict:
 
     minimal_example() (tests/_example_doc.py) strips EVERY optional
     illustrative block (transaction_costs, deployment_lag_months,
-    parking_rate, advance_split) in ONE place so a future feature's
+    parking_rate, advance_split, deployment_schedule_years) in ONE place so a future feature's
     illustration cannot confound this test; this function adds back ONLY the
     block it tests (the example's declared transaction_costs), so the
     contract-mapping assertions pin transaction_costs alone, not

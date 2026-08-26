@@ -308,7 +308,8 @@ def _example_doc_with_first_refinance_declaring_split(amount: float) -> dict:
     The shared minimal_example() helper (tests/_example_doc.py) trims to the
     two-generation sub-family AND strips every optional illustrative block
     (the example's transaction_costs (#139), deployment_lag_months,
-    parking_rate, advance_split (#137/#792)) in ONE place, so this
+    parking_rate, advance_split, deployment_schedule_years (#137/#74/#792))
+    in ONE place, so this
     advance-split test doc is transaction-cost-free / lag-free / split-free
     until THIS function adds the split it tests -- the net year-0 refinance
     origination cost and the deployment lag would otherwise reduce the

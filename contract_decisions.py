@@ -377,6 +377,32 @@ def map_mortgage_decisions(doc: Dict, prop_cfg: Dict[str, Any]) -> List[Dict[str
         # loudly. parking_rate is optional; absent = 0 (idle cash earning
         # nothing), carried as 0.0 -- explicit absence test, never an `or`
         # coercion (DP#32: a declared 0 is the same value, honoured explicitly).
+        #
+        # Issue #74: AMBIGUITY GUARD (DP#32/DP#5). A deployment LAG (months)
+        # and a deployment SCHEDULE (years) are rival timings of the same
+        # borrowed money: declaring both on the SAME option is a contradiction
+        # (the advance cannot both sit idle for N months AND drip in over N
+        # years), and if both were carried both costs would fire and
+        # double-count the same opportunity cost. Refuse loudly at this
+        # ingestion boundary -- the single place every refinance option is
+        # iterated -- so a contract that declares both never reaches the
+        # engine. Absence of either never conflicts (DP#32: the no-declaration
+        # path is byte-identical, and a schedule-only or lag-only declaration
+        # routes to its own pricing without conflict).
+        for opt in refinance_options:
+            if ("deployment_lag_months" in opt
+                    and "deployment_schedule_years" in opt):
+                raise ContractAdaptationError(
+                    f"decisions.mortgage.refinance_options[id={opt['id']!r}] "
+                    f"declares both deployment_lag_months and "
+                    f"deployment_schedule_years. A deployment LAG (months) and "
+                    f"a deployment SCHEDULE (years) are rival timings of the "
+                    f"same borrowed money -- the advance cannot both sit idle "
+                    f"for a short window AND drip in over several years. "
+                    f"Declaring both would double-count the same opportunity "
+                    f"cost. Declare ONE timing dimension per option "
+                    f"(DP#32/DP#5)."
+                )
         lag_option = next(
             (o for o in refinance_options if "deployment_lag_months" in o),
             None,
@@ -394,6 +420,74 @@ def map_mortgage_decisions(doc: Dict, prop_cfg: Dict[str, Any]) -> List[Dict[str
             parking_rate = lag_option.get("parking_rate")
             if parking_rate is not None:
                 prop_cfg["deployment_lag_parking_rate"] = parking_rate
+
+        # Issue #74: a DECLARED staggered deployment schedule on the refinance
+        # cash-out advance. The engine's default (and the lag layer's short-
+        # months-window carry) assumes the advance deploys as a year-0 lump;
+        # declaring a schedule opts into pricing the opportunity cost of
+        # dripping the advance in equal annual tranches over N years instead
+        # -- the undeployed tranches sit at parking_rate instead of being
+        # invested at the portfolio's year-0 return. The cost is applied as a
+        # year-0-equivalent reduction of the deployable principal (the SAME
+        # seam deployment_lag_cost uses), so it flows into every objective.
+        # Carried as a single scalar from the first option that declares one,
+        # applied across the refinance sweep -- the same single-scalar shape
+        # deployment_lag_months / refinance_amortization_years already use
+        # (the LTV sweep explores a continuous cash_out, so one option's
+        # stated schedule is all the sweep can carry). Absent on every option
+        # means "no schedule declared" -- year-0 deployment exactly as today
+        # (byte-identical, DP#32). A declared 0 or 1 is a real value (no
+        # staggering = single tranche = today's lump) and round-trips to
+        # absent by design. The AMBIGUITY GUARD above already refused both
+        # lag and schedule on the same option; the CROSS-OPTION GUARD below
+        # refuses both carried from different options. This block maps the
+        # schedule independently -- each declared dimension routes to its
+        # own pricing (DP#5: dispatch), and the cross-option guard ensures
+        # only one dimension is ever carried across the whole list.
+        schedule_option = next(
+            (o for o in refinance_options
+             if "deployment_schedule_years" in o),
+            None,
+        )
+        if schedule_option is not None:
+            prop_cfg["deployment_schedule_years"] = (
+                schedule_option["deployment_schedule_years"]
+            )
+            parking_rate = schedule_option.get("parking_rate")
+            if parking_rate is not None:
+                prop_cfg["deployment_schedule_parking_rate"] = parking_rate
+
+        # Issue #74: CROSS-OPTION AMBIGUITY GUARD (DP#32/DP#5). The
+        # same-option guard above refuses both dimensions on one option.
+        # But the single-scalar design carries deployment_lag_months from
+        # whichever option declares one and deployment_schedule_years from
+        # whichever option declares one -- INDEPENDENTLY. When an ACTIVE lag
+        # (months > 0) is on option A and an ACTIVE schedule (years > 1) is
+        # on option B, BOTH costs fire on every sweep candidate (both
+        # scalars land on prop_cfg, both are read by the engine's year-0
+        # deployment), double-counting the same opportunity cost of the
+        # same borrowed advance. Refuse loudly at this CONTRACT level --
+        # after both blocks have run, if BOTH dimensions were carried with
+        # ACTIVE values (from any options), the contract is declaring rival
+        # timings of the same money across options and must not coexist.
+        # A no-op value (lag 0, schedule 0/1) is carried but inert (its cost
+        # is a hard zero), so the guard only fires when both would actually
+        # price a cost -- the same "both costs fire" condition the Finding
+        # identifies. A contract that declares only one active dimension
+        # routes cleanly to its own pricing.
+        if (prop_cfg.get("deployment_lag_months", 0) > 0
+                and prop_cfg.get("deployment_schedule_years", 0) > 1):
+            raise ContractAdaptationError(
+                f"decisions.mortgage.refinance_options[] carries BOTH an "
+                f"active deployment_lag_months (from one option) AND an "
+                f"active deployment_schedule_years (from another). A "
+                f"deployment LAG (months) and a deployment SCHEDULE (years) "
+                f"are rival timings of the same borrowed advance -- both "
+                f"costs would fire on every sweep candidate and double-count "
+                f"the same opportunity cost. Declare ONE active timing "
+                f"dimension across the entire refinance_options list, not "
+                f"one per option (DP#32/DP#5)."
+            )
 
     # ── decisions.mortgage.structure_options -- issue #687. A household
     # facing a refinance/renewal may be choosing between genuinely different

@@ -352,9 +352,15 @@ def _example_doc_with_lag(months: int, parking_rate: float) -> dict:
     """Load the shipped example, trim to the two-generation sub-family the
     adapter can map, and declare a deployment lag + parking_rate on a
     refinance option with a cash_out (the refi_50k option -- the one whose
-    advance is actually lagged). Fabricated values, DP#15."""
+    advance is actually lagged). Fabricated values, DP#15.
+
+    Strips any deployment_schedule_years the shipped example carries on
+    refi_100k (#74) so the cross-option ambiguity guard does not fire when
+    this helper adds a lag -- the #137 test suite exercises lag-only contracts."""
     doc = _two_generation_subset(_load_example())
     refi = copy.deepcopy(doc["decisions"]["mortgage"]["refinance_options"])
+    for opt in refi:
+        opt.pop("deployment_schedule_years", None)
     for opt in refi:
         if opt.get("cash_out", 0) > 0:
             opt["deployment_lag_months"] = months
@@ -439,9 +445,14 @@ def _two_lag_options_doc(first_months: int, second_months: int) -> dict:
     """A contract with TWO cash-out refinance options each declaring a
     deployment lag, so the single-scalar carry cannot represent both. The
     FIRST declaring option's lag is the one carried (first-option-wins, the
-    same shape refinance_amortization_years uses). Fabricated, DP#15."""
+    same shape refinance_amortization_years uses). Fabricated, DP#15.
+
+    Strips any deployment_schedule_years the shipped example carries on
+    refi_100k (#74) so the cross-option ambiguity guard does not fire."""
     doc = _two_generation_subset(_load_example())
     refi = copy.deepcopy(doc["decisions"]["mortgage"]["refinance_options"])
+    for opt in refi:
+        opt.pop("deployment_schedule_years", None)
     # Ensure at least two CASH-OUT options (the lag applies to cash-out advances
     # only; the no_refi baseline with cash_out 0 carries no lag cost).
     cash_out_opts = [o for o in refi if o.get("cash_out", 0) > 0]
@@ -494,6 +505,13 @@ class DeploymentLagMultiOptionBleedTest(unittest.TestCase):
         cash_out IS the declaring option's cash_out, the bleed does not bite
         -- the lag is priced on exactly the lump the option stated it for."""
         doc = _example_doc_with_lag(months=4, parking_rate=0.0)
+        # Ensure only ONE cash-out option (the shipped example now carries a
+        # second cash-out option, refi_100k, for the #74 schedule illustration;
+        # strip it so this test exercises a single-cash-out-option contract).
+        refi = doc["decisions"]["mortgage"]["refinance_options"]
+        cash_out_opts = [o for o in refi if o.get("cash_out", 0) > 0]
+        for opt in cash_out_opts[1:]:
+            opt["cash_out"] = 0
         legacy = ic.to_internal_config(doc)
         declared = legacy["property"]["deployment_lag_declared_cash_out"]
         # Book exactly the declaring option's cash_out so the two match, and

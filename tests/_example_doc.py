@@ -25,8 +25,9 @@ feature X starts from a clean slate and declares X, not a slate that already
 quietly declares X, Y, and Z).
 
 The blocks stripped are the OPTIONAL illustrative ones (the example's
-``transaction_costs`` (#139), and the ``refi_50k`` refinance option's
-``deployment_lag_months`` / ``parking_rate`` / ``advance_split`` (#137/#792)).
+``transaction_costs`` (#139), the ``refi_50k`` refinance option's
+``advance_split`` (#792), and the ``refi_100k`` refinance option's
+``deployment_schedule_years`` / ``parking_rate`` (#74)).
 A block a test is actively testing is added back BY THE TEST after the strip,
 never left to the example's illustration. The two-generation sub-family trim
 (``_two_generation_subset``) is applied first (the adapter only maps the
@@ -77,16 +78,19 @@ def minimal_example() -> Dict:
     doc = _two_generation_subset(_load_example())
     # Top-level illustrative block: the one-time transaction_costs (#139).
     doc.pop("transaction_costs", None)
-    # The refi_50k refinance option's illustrative deployment-lag /
-    # parking-rate / advance-split block (#137/#792). Stripped from EVERY
-    # refinance option (the shipped example carries it on refi_50k only;
-    # stripping all is defensive and matches the "clean slate" contract).
+    # The refinance options' illustrative deployment-timing / parking-rate /
+    # advance-split blocks (#74/#137/#792). Stripped from EVERY refinance
+    # option (the shipped example carries advance_split on refi_50k and a
+    # deployment schedule on refi_100k; stripping all is defensive and
+    # matches the "clean slate" contract -- a test that needs one adds it
+    # back explicitly).
     refi_opts = doc.get("decisions", {}).get("mortgage", {}).get(
         "refinance_options", [])
     for opt in refi_opts:
         opt.pop("deployment_lag_months", None)
         opt.pop("parking_rate", None)
         opt.pop("advance_split", None)
+        opt.pop("deployment_schedule_years", None)
     # Defensive: strip any illustrative per-liability cash_back block (#1075)
     # the example may later carry, so a test that pins the multitranche /
     # cash_back feature adds it back explicitly rather than inheriting the

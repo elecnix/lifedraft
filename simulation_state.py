@@ -2714,6 +2714,18 @@ def simulate_year_pure(
     # finding #6); this parameter only surfaces it on the result for
     # observability.
     deployment_lag_cost: float = 0.0,
+    # Issue #74: the year-0-equivalent opportunity cost of a declared
+    # staggered deployment schedule on the refinance cash-out advance,
+    # surfaced on the year-0 YearResult so output plugins can render the cost
+    # of staggering. 0.0 in every year but year 0 and in year 0 for a
+    # household that declared no schedule (the golden path) -- inert,
+    # byte-identical (DP#32). Computed by FamilySimulation (which knows the
+    # portfolio's year-0 investment return and the declared cash_out -- NOT
+    # the borrowing rate, since the debt's interest accrues on the mortgage
+    # regardless of the schedule) and applied there as a reduction of the
+    # deployable principal (capped at the lump for a negative cost); this
+    # parameter only surfaces it on the result for observability.
+    deployment_schedule_cost: float = 0.0,
     # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
     # (one-time transaction costs and credits attached to a financial event),
     # surfaced on the year-0 YearResult so output plugins can render the
@@ -3615,6 +3627,11 @@ def simulate_year_pure(
         # by FamilySimulation and passed through here) so output plugins can
         # render it. 0.0 in every year but year 0 (DP#32).
         deployment_lag_cost=deployment_lag_cost,
+        # Issue #74: surface the year-0 staggered-deployment schedule cost
+        # (computed by FamilySimulation and passed through here) so output
+        # plugins can render the cost of staggering. 0.0 in every year but
+        # year 0 (DP#32).
+        deployment_schedule_cost=deployment_schedule_cost,
         # Issue #139: surface the year-0 net refinance-origination
         # transaction cost/credit (computed by FamilySimulation and passed
         # through here) so output plugins can render the gross-vs-net gap.
