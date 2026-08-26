@@ -60,14 +60,18 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
 
     Returns ``{'return_overrides': {kind: {override_balance, weighted_rate_sum}},
     'locked': {kind: [{balance, unlock_age, owner_birth_year}]},
-    'mer_drag': {kind: {mer_balance, weighted_mer_sum}}}``.
+    'mer_drag': {kind: {mer_rate}}}``.
 
-    - ``mer_drag[kind]`` (issue #691): the summed balance of accounts of ``kind``
-      that declared a `mer` fee, plus the balance-weighted fee sum
-      (`sum(balance * mer)`). The growth rule subtracts this from the pot's
-      gross rate: ``net = gross - weighted_mer_sum / pot_total`` -- so a declared
-      fee reduces the compounded balance (composing on top of the expected_return
-      blend). A null/absent `mer` records nothing (fee-free global rate, golden);
+    - ``mer_drag[kind]`` (issue #691/#136): the balance-weighted average MER
+      rate of accounts of ``kind`` that declared a `mer` fee. The growth rule
+      subtracts this rate from the pot's gross rate: ``net = gross - mer_rate``
+      -- so the fee is ``mer_rate * pot_total`` each year, dynamic (not frozen
+      at the opening balance). When every MER-flagged account opens at $0,
+      ``mer_rate`` falls back to the max declared MER for a SINGLE-flagged pot
+      (every account of the kind declares a MER — the pot IS the flagged money),
+      or 0.0 for a MIXED pot (non-flagged money coexists — charging it would tax
+      money that never declared a fee). A null/absent `mer` records nothing
+      (fee-free global rate, golden);
       an explicit 0.0 is recorded (a declared fact, DP#32) but moves no rate.
 
     - ``return_overrides[kind]``: the summed balance of accounts of ``kind``
@@ -102,11 +106,39 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
     return_overrides: Dict[str, Dict[str, float]] = {}
     locked: Dict[str, List[Dict[str, Any]]] = {}
     mer_drag: Dict[str, Dict[str, float]] = {}
+    # Issue #136: total opening balance of ALL accounts of each growth-pot
+    # kind (not just MER-flagged ones). Used to compute mer_rate as
+    # weighted_mer_sum / kind_total so the fee is correct in year 1 (the rate
+    # times the opening pot equals the frozen weighted_mer_sum) and does not
+    # decay in year 2+ (the rate is constant, applied to the current pot).
+    # This year-1 equality holds for the weighted-average path; the $0-fallback
+    # path (see below) intentionally diverges — it cannot use the weighted
+    # average because the numerator is 0, so it uses a different mechanism.
+    kind_totals: Dict[str, float] = {}
+    # Issue #136: kinds that have at least one NON-MER-declaring account (an
+    # account whose `mer` is null/absent). This distinguishes a SINGLE-flagged
+    # pot (every account of the kind declares a MER — the pot IS the flagged
+    # money) from a MIXED pot (some accounts declare no MER — the pot contains
+    # non-flagged money that must NOT be charged the fee).
+    has_non_mer: Dict[str, bool] = {}
+    # Issue #136: per-kind account-id lists, collected so the mixed-pot-zero
+    # fallback (below) can record a model-fidelity disclosure naming the
+    # affected accounts. flagged_ids = accounts that declared a `mer`;
+    # non_flagged_ids = accounts of the same kind that declared no `mer`.
+    # The disclosure fires only when a kind has BOTH (a $0-opening flagged
+    # account) and (a non-flagged account) -- the engine's per-owner-pot
+    # model cannot route future contributions to the flagged sub-account, so
+    # its fee is unmodeled for the whole run and the limitation must surface
+    # on every output report (model_fidelity.py, #136).
+    flagged_ids: Dict[str, List[str]] = {}
+    non_flagged_ids: Dict[str, List[str]] = {}
+    mer_mixed_pot: List[Dict[str, Any]] = []
     for acc in doc.get("accounts", []):
         kind = acc["kind"]
         if kind not in _GROWTH_POT_KINDS:
             continue
         amount = acc["balance"]["amount"]
+        kind_totals[kind] = kind_totals.get(kind, 0.0) + amount
         # Issue #826 (DP#7/#10/#12/#13): a product flag resolves the
         # product module's well-known rules as DEFAULTS for expected_return /
         # locked_until. An EXPLICIT account.expected_return / account.locked_until
@@ -123,20 +155,50 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
                                                         "weighted_rate_sum": 0.0})
             entry["override_balance"] += amount
             entry["weighted_rate_sum"] += amount * er
-        # Issue #691: a per-account MER (management-expense-ratio) fee, summed
-        # balance-weighted into its pot so the growth rule subtracts it from the
-        # gross rate (net = gross - sum(balance*mer)/pot_total). DP#32: an
-        # explicit 0.0 IS a declared fact (fee-free), recorded here (mer_balance
-        # counted, weighted_mer_sum contributes 0) and distinct from a null/
-        # absent MER, which records nothing and leaves today's global-rate
-        # behaviour untouched (golden). This is the ONE engine-read fee spelling
-        # (DP#8); it composes on top of the #823 expected_return blend above.
+        # Issue #691/#136: a per-account MER (management-expense-ratio) fee.
+        # The fee is a RATE (mer_rate), not a frozen weighted sum: the growth
+        # rule subtracts mer_rate from the pot's gross rate (net = gross -
+        # mer_rate) so the fee is mer_rate * pot_total each year — dynamic, not
+        # frozen at the opening balance. This fixes two defects:
+        #   1. An account that opens at $0 with a declared MER paid ZERO fee
+        #      forever (weighted_mer_sum = 0 * mer = 0). Now mer_rate = mer even
+        #      when the opening balance is $0, so once contributions fund the
+        #      account it pays mer * balance each year (DP#32: the zero was a
+        #      silent fallback, not a declared value).
+        #   2. A funded account's fee numerator was frozen at load time while
+        #      the pot total grew, so the effective fee rate decayed toward
+        #      zero. Now mer_rate is a constant rate applied to the current
+        #      pot total, so the fee grows proportionally — no decay.
+        # DP#32: an explicit 0.0 IS a declared fact (fee-free), recorded here
+        # (mer_rate = 0.0) and distinct from a null/absent MER, which records
+        # nothing and leaves today's global-rate behaviour untouched (golden).
+        # This is the ONE engine-read fee spelling (DP#8); it composes on top
+        # of the #823 expected_return blend above.
+        #
+        # mer_rate is the balance-weighted average of the declared MERs when
+        # any MER-flagged account has a non-zero opening balance; when every
+        # MER-flagged account opens at $0, mer_rate falls back to the max
+        # declared MER for a SINGLE-flagged pot (every account is flagged — the
+        # pot IS the flagged money), or 0.0 for a MIXED pot (non-flagged money
+        # coexists — charging it would tax money that never declared a fee).
+        # See the collapse loop below for the full reasoning.
         mer = acc.get("mer")
         if mer is not None:
-            m = mer_drag.setdefault(kind, {"mer_balance": 0.0,
-                                           "weighted_mer_sum": 0.0})
-            m["mer_balance"] += amount
-            m["weighted_mer_sum"] += amount * mer
+            m = mer_drag.setdefault(kind, {"_mer_balance": 0.0,
+                                           "_weighted_mer_sum": 0.0,
+                                           "_max_mer": 0.0})
+            m["_mer_balance"] += amount
+            m["_weighted_mer_sum"] += amount * mer
+            if mer > m["_max_mer"]:
+                m["_max_mer"] = mer
+            flagged_ids.setdefault(kind, []).append(acc["id"])
+        else:
+            # This account declares no MER — it is non-flagged money in its
+            # kind's pot. Record that so the $0-fallback (below) can tell a
+            # mixed pot (has non-flagged money) from a single-flagged pot
+            # (every account is flagged — the pot IS the flagged money).
+            has_non_mer[kind] = True
+            non_flagged_ids.setdefault(kind, []).append(acc["id"])
         lu = acc.get("locked_until")
         if lu is None and product_rules is not None:
             lu = product_rules.locked_until
@@ -175,8 +237,77 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
             locked.setdefault(kind, []).append(
                 {"balance": amount, "unlock_age": unlock_age,
                  "owner_birth_year": owner_birth_year})
+    # Issue #136: collapse the intermediate collection into the final
+    # {mer_rate: float} structure the growth rule reads. mer_rate is
+    # weighted_mer_sum / kind_total (the opening pot total of ALL accounts of
+    # this kind, not just MER-flagged ones). This makes the fee correct in year
+    # 1 (mer_rate * opening_pot = weighted_mer_sum) and constant in year 2+
+    # (the rate does not decay as the pot grows — the fee is mer_rate *
+    # current_pot, which grows proportionally).
+    #
+    # The $0-fallback (every MER-flagged account opens at $0, so
+    # _weighted_mer_sum = 0 and the weighted average is 0/0) splits on whether
+    # the pot is SINGLE-flagged or MIXED:
+    #
+    #   * SINGLE-flagged pot (has_non_mer[kind] is falsy — every account of
+    #     the kind declares a MER, so the pot IS the flagged money): mer_rate
+    #     = max_mer. This is exact: when B=0 the fee is max_mer * 0 = 0
+    #     (correct — B=0 means fee=0 by definition, not a silent zero); once
+    #     contributions fund the pot, the fee is max_mer * B (the whole pot is
+    #     flagged money). This preserves the #136 fix for defect #1 (silent
+    #     zero on a $0-opening single account).
+    #
+    #   * MIXED pot (has_non_mer[kind] is True — the pot contains non-flagged
+    #     money): mer_rate = 0.0. At load time we cannot know what share of
+    #     future contributions flows to the flagged vs non-flagged accounts
+    #     (the engine tracks per-owner pots, not per-account sub-balances), so
+    #     we cannot invent a rate for the whole pot — that would charge the
+    #     non-flagged money a fee it never declared (the #136 review's $1.76M
+    #     terminal-asset drop). Setting mer_rate = 0.0 is the smallest honest
+    #     mechanism: the flagged accounts have B=0, so fee = 0 * anything = 0
+    #     (correct — B=0 means fee=0 by definition); the non-flagged money is
+    #     not charged (correct — it declared no fee). This is NOT a silent
+    #     zero: the flagged accounts genuinely have $0 (the engine's per-owner-
+    #     pot model cannot route contributions to a specific $0 sub-account),
+    #     so fee=0 is the honest answer, not a formula that produces 0 from a
+    #     funded balance. If the household's intent is that ALL future
+    #     contributions go to the flagged account, the contract should declare
+    #     the MER on the funded account (or declare a single-account pot).
+    #
+    # An explicit 0.0 MER yields mer_rate = 0.0 via the weighted-average path
+    # (weighted_mer_sum = balance * 0.0 = 0.0, so mer_rate = 0.0 / kind_total =
+    # 0.0), which is fee-free — a declared fact distinct from null/absent.
+    for kind, m in mer_drag.items():
+        if m["_mer_balance"] > 0:
+            # _mer_balance is a subset of kind_totals (MER-flagged accounts
+            # are a subset of all accounts of this kind), so total > 0 here.
+            m["mer_rate"] = m["_weighted_mer_sum"] / kind_totals[kind]
+        elif has_non_mer.get(kind):
+            # MIXED pot: non-flagged money coexists with $0 flagged accounts.
+            # Do not charge the non-flagged money (see the block comment above).
+            m["mer_rate"] = 0.0
+            # Issue #136: record the mixed-pot-zero limitation so model_fidelity
+            # can disclose it (#136). The flagged accounts open at $0 and the
+            # engine tracks per-owner pots (not per-account sub-balances), so
+            # their future share — and thus their fee — is unknowable at load
+            # time and unmodeled for the whole run. This is honest (charging the
+            # non-flagged money would be wrong) but must not be silent.
+            mer_mixed_pot.append({
+                "kind": kind,
+                "flagged_account_ids": list(flagged_ids.get(kind, [])),
+                "non_flagged_account_ids": list(non_flagged_ids.get(kind, [])),
+            })
+        else:
+            # SINGLE-flagged pot: every account of this kind declares a MER,
+            # so the pot IS the flagged money. mer_rate = max_mer so the fee
+            # is not silently zero once the pot is funded.
+            m["mer_rate"] = m["_max_mer"]
+        del m["_mer_balance"]
+        del m["_weighted_mer_sum"]
+        del m["_max_mer"]
     return {"return_overrides": return_overrides, "locked": locked,
-            "mer_drag": mer_drag}
+            "mer_drag": mer_drag,
+            "mer_mixed_pot": mer_mixed_pot}
 
 
 #: Issue #917: the registered kinds whose composition the engine reads back --

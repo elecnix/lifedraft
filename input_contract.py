@@ -192,9 +192,19 @@ def to_internal_config(doc: Dict) -> Dict:
     account_overrides = _map_account_overrides(doc)
     accounts_cfg["return_overrides"] = account_overrides["return_overrides"]
     accounts_cfg["locked"] = account_overrides["locked"]
-    # Issue #691: per-account MER fees, pot-keyed, subtracted from the gross
-    # growth rate. Empty when no account declares a `mer` (golden: fee-free).
+    # Issue #691/#136: per-account MER fees, pot-keyed. The growth rule
+    # subtracts mer_rate from the pot's gross rate (net = gross - mer_rate).
+    # Empty when no account declares a `mer` (golden: fee-free).
     accounts_cfg["mer_drag"] = account_overrides["mer_drag"]
+    # Issue #136: the mixed-pot-zero limitation -- when a kind has BOTH a
+    # $0-opening MER-flagged account and a non-MER account, the flagged
+    # accounts' fee is unmodeled for the whole run (mer_rate = 0.0). Recorded
+    # onto assumptions so model_fidelity.mer_mixed_pot() can disclose it on
+    # every output surface (mirrors #685's rate_path_conflicts bridge). Only
+    # written when the limitation actually bites, so a config without it
+    # carries no key (DP#32: absence is absence, not a silent zero).
+    if account_overrides["mer_mixed_pot"]:
+        assumptions_cfg["mer_mixed_pot"] = account_overrides["mer_mixed_pot"]
 
     horizon = doc["decisions"]["horizon"]  # schema-required
     if horizon["person"] == primary_id:

@@ -489,6 +489,10 @@ _CODE_ANCHORS = {
         'runway.py', 'def compute_runway('),
     'runway_months_is_linear_interpolation': (
         'runway.py', 'frac = max(0.0, min(1.0, covered_r / shortfall_r))'),
+    # Issue #136: the mixed-pot-zero MER fallback. Anchored to the collapse-loop
+    # site that records the disclosure; delete it and the caveat can never fire.
+    'mer_mixed_pot_zero_fee_unmodeled': (
+        'contract_accounts.py', 'mer_mixed_pot.append('),
     # unlabeled_dollar_basis is a config-shape gap, not a code path — it has
     # no anchor and is exempt below.
 }
