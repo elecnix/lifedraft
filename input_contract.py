@@ -100,6 +100,7 @@ from contract_transfers import (
     map_cash_flows, map_equity_grants, map_installments, _map_first_home_purchases,
     _map_gifts, _map_private_loans, _map_zev_purchases,
 )
+from contract_transaction_costs import map_transaction_costs
 
 
 def to_internal_config(doc: Dict) -> Dict:
@@ -223,6 +224,22 @@ def to_internal_config(doc: Dict) -> Dict:
     household_budget_out = map_household_budget(doc)
     reserve_out = map_emergency_reserve(doc, spouse_id)
     legacy_cash_flows = map_cash_flows(doc, mortgage, start_year)
+
+    # Issue #139: the general one-time transaction-cost/credit mechanism.
+    # A refinance_origination LUMP at year 0 -> a signed net year-0 cost
+    # written onto property.transaction_cost_year0 (the year-0-equivalent
+    # deployable-principal reduction seam #137's deployment-lag carry uses --
+    # reused, not reinvented). Installments and non-year-0-lump entries ->
+    # dated cash flows appended to the cash_flows list (an installment is
+    # NOT a year-0 lump; it projects to a different trajectory). Both are
+    # 0.0 / empty when the household declares no transaction_costs (the
+    # golden household), so the internal shape carries no key and round-
+    # trips byte-identically (DP#24/DP#32).
+    txn_year0_net, txn_cash_flows = map_transaction_costs(doc, as_of)
+    if txn_year0_net != 0.0:
+        prop_cfg["transaction_cost_year0"] = txn_year0_net
+    if txn_cash_flows:
+        legacy_cash_flows = legacy_cash_flows + txn_cash_flows
 
     legacy: Dict[str, Any] = {
         "assumptions": assumptions_cfg,

@@ -2714,6 +2714,20 @@ def simulate_year_pure(
     # finding #6); this parameter only surfaces it on the result for
     # observability.
     deployment_lag_cost: float = 0.0,
+    # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
+    # (one-time transaction costs and credits attached to a financial event),
+    # surfaced on the year-0 YearResult so output plugins can render the
+    # gross-vs-net gap. 0.0 in every year but year 0 and in year 0 for a
+    # household that declared no refinance origination lumps (the golden path)
+    # -- inert, byte-identical (DP#32). Computed by FamilySimulation from the
+    # declared transaction_costs[] entries (costs minus credits, year-0 lumps
+    # only, FLOORED at zero so a net credit never inflates the deployable
+    # principal above the borrowed lump -- DP#18 money conservation; the
+    # excess credit is routed as a year-0 savings cash flow by the adapter)
+    # and applied there as a reduction of the deployable principal (the SAME
+    # seam #137's deployment-lag carry uses); this parameter only surfaces it
+    # on the result for observability.
+    transaction_cost_year0: float = 0.0,
     # Issue #343: calendar year for date-computed gates (LIRA→LIF conversion at
     # age 71, LIF min/max factor lookups). `year` is a 0-based projection index;
     # the locked-in-account rules are date-computed from birth_year and therefore
@@ -3601,6 +3615,11 @@ def simulate_year_pure(
         # by FamilySimulation and passed through here) so output plugins can
         # render it. 0.0 in every year but year 0 (DP#32).
         deployment_lag_cost=deployment_lag_cost,
+        # Issue #139: surface the year-0 net refinance-origination
+        # transaction cost/credit (computed by FamilySimulation and passed
+        # through here) so output plugins can render the gross-vs-net gap.
+        # 0.0 in every year but year 0 (DP#32).
+        transaction_cost_year0=transaction_cost_year0,
     )
 
     return result, new_state

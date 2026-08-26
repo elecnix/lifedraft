@@ -650,6 +650,32 @@ CONSUMED = {
     "cash_flows[].tax_treatment": ("contract_transfers.py", "\"non-taxable\" if cf[\"tax_treatment\"] == \"tax_free\" else \"post-tax\""),
     "cash_flows[].description": ("contract_transfers.py", "for cf in doc.get(\"cash_flows\", [])"),
 
+    # ── transaction_costs[] -- issue #139. The general one-time transaction
+    # cost/credit mechanism. A refinance_origination LUMP at year 0 reaches
+    # the deployable-principal reduction seam (transaction_costs.py
+    # .year0_net_refinance_cost -> SimulationConfig.transaction_cost_year0 ->
+    # FamilySimulation's year-0 fill_room, the SAME seam #137's deployment-
+    # lag carry uses); installments and account_transfer_in entries reach the
+    # existing cash_flows mechanism (transaction_costs.installment_cash_flows
+    # / lump_cash_flow -> contract_transaction_costs.map_transaction_costs ->
+    # the internal cash_flows list -> simulation.py's `for cf in cfg.cash_flows`).
+    # The adapter (contract_transaction_costs.py) is the ingestion boundary
+    # that validates every entry loudly and splits lumps from installments;
+    # the pure module (transaction_costs.py) is where each leaf reaches a real
+    # decision (the net-cost computation, the installment aggregation, the
+    # loud refusals). `label` is a free-text itemization record (like
+    # cash_flows[].description) -- cited at the adapter's iteration, the same
+    # convention description uses.
+    "transaction_costs[].id": ("transaction_costs.py", "entry.get('id')!r"),
+    "transaction_costs[].event": ("transaction_costs.py", 'entry["event"]'),
+    "transaction_costs[].amount": ("transaction_costs.py", 'float(entry["amount"])'),
+    "transaction_costs[].direction": ("transaction_costs.py", 'entry["direction"]'),
+    "transaction_costs[].anchor": ("transaction_costs.py", 'entry["anchor"]'),
+    "transaction_costs[].date": ("transaction_costs.py", 'entry["date"]'),
+    "transaction_costs[].tax_treatment": ("transaction_costs.py", 'entry.get("tax_treatment", DEFAULT_TAX_TREATMENT)'),
+    "transaction_costs[].label": ("contract_transaction_costs.py", "for entry in entries"),
+    "transaction_costs[].installments.months": ("transaction_costs.py", 'entry["installments"]["months"]'),
+
     # ── assumptions.* (universal beliefs) ──
     "assumptions.default_non_reg_yield": ("contract_assumptions.py", "default_yield = assumptions[\"default_non_reg_yield\"]"),
     "assumptions.inflation": ("simulation.py", "self.config.inflation is not None"),

@@ -857,6 +857,59 @@
       "description": "Contracted retention bonus, payable 2027-03-01."
     }
   ],
+  "transaction_costs": [
+    {
+      "id": "refi_discharge_fee",
+      "event": "refinance_origination",
+      "amount": 1200,
+      "direction": "cost",
+      "date": "2026-07-15",
+      "label": "discharge/quittance fee"
+    },
+    {
+      "id": "refi_notary_legal",
+      "event": "refinance_origination",
+      "amount": 1800,
+      "direction": "cost",
+      "anchor": "year_0",
+      "label": "notary and legal"
+    },
+    {
+      "id": "refi_title_insurance",
+      "event": "refinance_origination",
+      "amount": 600,
+      "direction": "cost",
+      "anchor": "year_0",
+      "label": "title insurance"
+    },
+    {
+      "id": "transfer_in_fee_out",
+      "event": "account_transfer_in",
+      "amount": 150,
+      "direction": "cost",
+      "anchor": "year_0",
+      "label": "transfer-out fee"
+    },
+    {
+      "id": "transfer_in_reimbursement",
+      "event": "account_transfer_in",
+      "amount": 150,
+      "direction": "credit",
+      "anchor": "year_0",
+      "tax_treatment": "non_taxable",
+      "label": "incoming-institution fee reimbursement"
+    },
+    {
+      "id": "transfer_in_match_bonus",
+      "event": "account_transfer_in",
+      "amount": 2400,
+      "direction": "credit",
+      "anchor": "year_0",
+      "tax_treatment": "post_tax",
+      "label": "match bonus",
+      "installments": { "months": 12 }
+    }
+  ],
   "household_budget": {
     "annual_living_costs": 78000,
     "discretionary_fraction": 0.25,

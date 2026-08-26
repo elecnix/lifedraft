@@ -510,6 +510,30 @@ class YearResult:
     # byte-identical (DP#32).
     deployment_lag_cost: float = 0.0
 
+    # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
+    # (one-time transaction costs and credits attached to a financial
+    # event). During origination the declared year-0 refinance_origination
+    # costs (discharge/quittance, notary/legal, title insurance, appraisal)
+    # and credits (a lender credit) net to a single signed figure. The
+    # deployable seam applies the FLOORED value (max(net, 0.0)) -- a net cost
+    # reduces the deployable principal at year 0 (so NET proceeds are what
+    # deploys), and a net credit is floored to 0.0 so the deployable principal
+    # never exceeds the borrowed lump (DP#18 money conservation); the excess
+    # credit is routed as a year-0 SAVINGS cash flow by the adapter instead.
+    # So the gross-vs-net gap is visible in output (the gross cash-out advance
+    # is the year-0 lump_sum; net = lump_sum - max(deployment_lag_cost, 0) -
+    # max(transaction_cost_year0, 0)). Surfaced so output plugins can render
+    # the cost of origination (DP#32: a cost the run silently modelled as
+    # zero is the founding defect this field exists to make visible). The
+    # value is the FLOORED deployable-seam net (non-negative): the net cost
+    # when costs exceed credits; 0.0 when costs offset credits, a net credit
+    # (floored), or none declared. 0.0 in every year but year 0, and in year
+    # 0 for a household that declared no refinance origination lumps (the
+    # golden household included) -- inert, byte-identical (DP#32). Installments and account_transfer_in entries
+    # flow as dated cash flows (the existing cash_flows mechanism), NOT this
+    # field -- an installment is NOT a year-0 lump.
+    transaction_cost_year0: float = 0.0
+
     # True only when the waterfall exhausted every source and the household
     # is STILL short this year -- a hard ruin, not a modeled cost (DP#32:
     # this must be checked explicitly by any caller reporting a terminal

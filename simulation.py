@@ -132,6 +132,20 @@ class SimulationContext:
     # (borrowing_purpose still traces the full borrowed lump). 0.0 when no lag
     # is declared (golden).
     deployment_lag_cost: float = 0.0
+    # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
+    # (one-time transaction costs and credits attached to a financial event).
+    # Computed once in FamilySimulation.__init__ from the declared
+    # transaction_costs[] entries (costs minus credits, year-0 lumps only) and
+    # applied at year 0 as a reduction of the deployable principal passed to
+    # fill_room -- the SAME seam #137's deployment-lag carry uses, reused
+    # rather than reinvented. Positive = a net cost that REDUCES the deployable
+    # principal so NET proceeds are what deploys; a net CREDIT is FLOORED to
+    # 0.0 at the seam (max(..., 0.0)) so the deployable principal can never
+    # exceed the borrowed lump (DP#18 money conservation) -- the excess credit
+    # is routed as a year-0 SAVINGS cash flow by the adapter instead. 0.0 when
+    # none declared (golden no-op, DP#32). Installments and account_transfer_in
+    # entries flow as dated cash flows, NOT this seam.
+    transaction_cost_year0: float = 0.0
 
 
 def _year_brackets_for(sim_year: int, *, frozen_brackets: bool, brackets: list,
@@ -1534,7 +1548,19 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         # here (capping is preferred over a separate inflow line -- the excess
         # is a small, short-window figure and routing it would widen the
         # solvency identity for a negligible effect).
-        deployable_lump = ctx.lump_sum - max(ctx.deployment_lag_cost, 0.0)
+        # Issue #139: the signed NET year-0 refinance-origination transaction
+        # cost/credit is subtracted (a net cost) at the SAME seam -- reused,
+        # not reinvented. A net cost reduces the deployable principal so NET
+        # proceeds are what deploys. The value is FLOORED at zero
+        # (max(..., 0.0)) so a net CREDIT can never inflate the deployable
+        # principal above the borrowed lump while the debt side stays at the
+        # full lump (DP#18 money conservation: $X of invested principal must
+        # not appear from nowhere). The adapter routes any excess net credit
+        # as a year-0 SAVINGS cash flow instead (see
+        # contract_transaction_costs.map_transaction_costs). 0.0 when none
+        # declared (golden no-op, DP#32). Installments and account_transfer_in
+        # entries flow as dated cash flows, NOT this seam.
+        deployable_lump = ctx.lump_sum - max(ctx.deployment_lag_cost, 0.0) - max(ctx.transaction_cost_year0, 0.0)
         lump_alloc = engine.fill_room(
             deployable_lump, family_state,
             deductible_non_reg_first=ctx.config.refinance_advance_deductible_non_reg,
@@ -1733,6 +1759,11 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         # year-0 result so output plugins can render it. 0.0 in every year but
         # year 0 (this is the yearly path; the carry is a year-0 fact).
         deployment_lag_cost=ctx.deployment_lag_cost if year == 0 else 0.0,
+        # Issue #139: surface the year-0 net refinance-origination
+        # transaction cost/credit on the year-0 result so output plugins can
+        # render the gross-vs-net gap. 0.0 in every year but year 0 (this is
+        # the yearly path; the net cost is a year-0 fact).
+        transaction_cost_year0=ctx.transaction_cost_year0 if year == 0 else 0.0,
         # Epic #841 bite 2 / issue #812: the strategy's child-allocation targets
         # drive where each child's OWN savings land (the contract's opinion,
         # DP#13). Passing them (vs None) is what makes the fold MODEL the child
@@ -1977,6 +2008,28 @@ class FamilySimulation:
             investment_return=self.return_model.return_for_year(0),
             parking_rate=config.deployment_lag_parking_rate,
         )
+
+        # Issue #139: the signed NET year-0 LUMP cost of a refinance
+        # origination (one-time transaction costs and credits attached to a
+        # financial event). Read straight off the config field the adapter
+        # (contract_transaction_costs.map_transaction_costs) writes from the
+        # declared transaction_costs[] entries -- no per-year recomputation:
+        # the net year-0 lump is a YEAR-0 fact, computed once at contract load
+        # from the declared year-0 refinance_origination lumps (costs minus
+        # credits). Applied at year 0 as a reduction of the deployable
+        # principal passed to fill_room -- the SAME seam #137's deployment-lag
+        # carry uses, reused rather than reinvented. A net CREDIT is FLOORED
+        # to 0.0 at the seam so the deployable principal can never exceed the
+        # borrowed lump (DP#18 money conservation); the excess credit is
+        # routed as a year-0 SAVINGS cash flow by the adapter instead. The
+        # full borrowed lump stays on the debt side and the year-0 purpose
+        # tracing is untouched (borrowing_purpose still traces the full
+        # borrowed lump). 0.0 when no refinance origination lumps are
+        # declared -- byte-for-byte the pre-feature path (golden no-op,
+        # DP#32). Installment entries and account_transfer_in entries flow as
+        # dated cash flows (the existing cash_flows mechanism), NOT this
+        # seam -- an installment is NOT a year-0 lump.
+        self.transaction_cost_year0 = config.transaction_cost_year0
         
         # DP#27: Portfolio composition for income-type-specific after-tax returns.
         # When portfolio_data is present in config, non-reg investments grow
@@ -2186,6 +2239,7 @@ class FamilySimulation:
             deduct_later=self.deduct_later,
             lump_sum=self.lump_sum,
             deployment_lag_cost=self.deployment_lag_cost,
+            transaction_cost_year0=self.transaction_cost_year0,
             free_cash=self.free_cash,
             return_model=self.return_model,
             tax_provider=self.tax_provider,
@@ -2339,7 +2393,15 @@ class FamilySimulation:
             # earning more than the investment return) cannot inflate invested
             # principal above the borrowed lump; the raw negative carry is still
             # surfaced on the year-0 result for observability.
-            deployable_lump = self.lump_sum - max(self.deployment_lag_cost, 0.0)
+            # Issue #139: the signed NET year-0 refinance-origination transaction
+            # cost/credit is subtracted (a net cost) at the SAME seam (reused,
+            # not reinvented). FLOORED at zero (max(..., 0.0)) so a net credit
+            # never inflates the deployable principal above the borrowed lump
+            # (DP#18 money conservation); the adapter routes any excess net
+            # credit as a year-0 savings cash flow instead. 0.0 when none
+            # declared (golden no-op, DP#32); installments and account_transfer_in
+            # flow as dated cash flows, not this seam.
+            deployable_lump = self.lump_sum - max(self.deployment_lag_cost, 0.0) - max(self.transaction_cost_year0, 0.0)
             lump_alloc = engine.fill_room(
                 deployable_lump, lump_state,
                 deductible_non_reg_first=self.config.refinance_advance_deductible_non_reg,
@@ -2411,6 +2473,10 @@ class FamilySimulation:
                 # Issue #137: surface the year-0 deployment-lag carry cost on
                 # the year-0 result (this is the monthly path's year-0 step).
                 deployment_lag_cost=self.deployment_lag_cost,
+                # Issue #139: surface the year-0 net refinance-origination
+                # transaction cost/credit on the monthly path's year-0 step
+                # too (mirrors the yearly path's field below).
+                transaction_cost_year0=self.transaction_cost_year0,
             )
             # Lump sum uses year 0 result; don't append to results (it's pre-projection)
 
@@ -2856,6 +2922,13 @@ class FamilySimulation:
                 # carry was applied -- the cost would be paid but invisible.
                 deployment_lag_cost=(
                     self.deployment_lag_cost if year == 0 else 0.0),
+                # Issue #139: surface the year-0 net refinance-origination
+                # transaction cost/credit on this per-year step's result,
+                # mirroring the yearly path. The monthly path's pre-projection
+                # step computes a year-0 result0 that is NOT appended, so this
+                # per-year loop is where the year-0 net cost must surface.
+                transaction_cost_year0=(
+                    self.transaction_cost_year0 if year == 0 else 0.0),
             )
             # Issue #693 (epic #690 bite 2): surface this year's rental income
             # (see simulate_year's identical block). Issue #694 (bite 3): the

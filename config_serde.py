@@ -133,6 +133,11 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         # round-trips byte-identical (0 = no lag = today's behaviour).
         deployment_lag_months=prop.get('deployment_lag_months', 0),
         deployment_lag_parking_rate=prop.get('deployment_lag_parking_rate', 0.0),
+        # Issue #139: absence-safe -- .get with no default returns 0.0 on a
+        # genuinely absent key, never coerces a declared value (DP#32). A
+        # household that declares no transaction_costs round-trips byte-
+        # identical (0.0 = no net year-0 cost = today's behaviour).
+        transaction_cost_year0=prop.get('transaction_cost_year0', 0.0),
         heloc_readvance=prop.get('heloc_readvance', False),
         # Issue #956 bite E: the principal residence's declared sale
         # (absence-safe -- .get with no default returns None on a
@@ -351,6 +356,12 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
             # case), so a no-parking-rate household round-trips byte-identical.
             **({'deployment_lag_parking_rate': config.deployment_lag_parking_rate}
                if config.deployment_lag_parking_rate else {}),
+            # Issue #139 (DP#24): only re-emit the net year-0 transaction
+            # cost when non-zero -- 0.0 round-trips to 'absent' (no net year-0
+            # refinance origination cost, the ordinary case), so a household
+            # that declares no transaction_costs round-trips byte-identical.
+            **({'transaction_cost_year0': config.transaction_cost_year0}
+               if config.transaction_cost_year0 else {}),
             # issue #654: only re-emitted when actually declared --
             # None means "never declared" (DP#32), not a value to
             # round-trip as an explicit null.

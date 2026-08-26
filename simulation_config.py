@@ -293,6 +293,32 @@ class SimulationConfig:
     # borrowed (finding #6).
     deployment_lag_parking_rate: float = 0.0
 
+    # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
+    # (one-time transaction costs and credits attached to a financial event --
+    # the general mechanism the engine previously had only two ad-hoc members
+    # of: a property sale's selling_costs and a mortgage's cash_back
+    # origination credit, #1075). Sourced from the declared
+    # ``transaction_costs[]`` entries whose ``event`` is ``refinance_origination``
+    # and which carry NO installment schedule (a LUMP, paid at the year-0
+    # anchor or a year-0 date); costs subtract, credits add. The engine
+    # applies the FLOORED value (max(net, 0.0)) as a year-0-equivalent
+    # reduction of the deployable principal -- the SAME seam #137's
+    # deployment-lag carry uses (see FamilySimulation's year-0 fill_room call),
+    # reused rather than reinvented: positive = a net cost that REDUCES the
+    # deployable principal so NET proceeds are what deploys; a net CREDIT is
+    # FLOORED to 0.0 at the seam so the deployable principal can never exceed
+    # the borrowed lump (DP#18 money conservation) -- the excess credit is
+    # routed as a year-0 SAVINGS cash flow by the adapter instead. 0.0 (the
+    # default, and the value when no refinance origination lumps are declared,
+    # costs offset credits, or a net credit is floored) = byte-identical to
+    # the pre-feature path (DP#32). Installment entries
+    # and account_transfer_in entries flow as dated cash flows (the existing
+    # cash_flows mechanism), NOT this seam -- an installment is NOT a year-0
+    # lump. Consumed by FamilySimulation's year-0 deployment (the net cost
+    # reduces the deployable principal passed to fill_room) and surfaced on
+    # the year-0 YearResult so the gross-vs-net gap is visible in output.
+    transaction_cost_year0: float = 0.0
+
     # Family
     family_members: List[Dict] = field(default_factory=list)
     children: List[Dict] = field(default_factory=list)
