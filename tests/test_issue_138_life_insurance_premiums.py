@@ -168,5 +168,69 @@ class TestMapInsurancePremiums(unittest.TestCase):
                 primary_id="p1", start_year=2026)
 
 
+# ============================================================================
+# 2. The death-benefit side: renewal moves the estate cliff
+# ============================================================================
+
+class TestRenewalMovesDeathBenefit(unittest.TestCase):
+
+    def _mapped_benefit(self, policy):
+        doc = minimal_example()
+        doc["estate"]["life_insurance"] = [policy]
+        return ic.to_internal_config(doc)["estate"]["life_insurance_death_benefit"]
+
+    def test_unrenewed_term_lapsing_before_the_horizon_pays_nothing(self):
+        # Horizon: p1 reaches age 95 in 2075; the term ends 2036 -> lapsed at
+        # valuation -> excluded from the terminal estate.
+        self.assertEqual(self._mapped_benefit(_policy()), 0.0)
+
+    def test_declared_renewal_keeps_the_face_amount_in_the_estate(self):
+        benefit = self._mapped_benefit(
+            _policy(term_end="2036-06-30", renewal_end="2085-06-30"))
+        self.assertEqual(benefit, 500_000)
+
+    def test_renewal_still_short_of_the_horizon_lapses(self):
+        benefit = self._mapped_benefit(
+            _policy(term_end="2036-06-30", renewal_end="2060-06-30"))
+        self.assertEqual(benefit, 0.0)
+
+
+# ============================================================================
+# 3. Adapter composition: legs fold into cfg.cash_flows (one channel)
+# ============================================================================
+
+class TestAdapterFoldsPremiumLegs(unittest.TestCase):
+
+    def test_premium_legs_join_the_dated_cash_flow_channel(self):
+        doc = minimal_example()
+        doc["estate"]["life_insurance"] = [
+            _policy(pol_id="term_only", term_end="2036-06-30")]
+        cfg = ic.to_internal_config(doc)
+        legs = [cf for cf in cfg["cash_flows"] if cf.get("id") == "term_only"]
+        self.assertEqual([(leg["year"], leg["amount"]) for leg in legs],
+                         [(y, -1200.0) for y in range(2026, 2037)])
+
+    def test_no_policies_map_cash_flows_exactly_as_before(self):
+        """DP#32 at the adapter: emptying life_insurance restores the exact
+        pre-feature cash_flows list -- nothing added, nothing reshaped."""
+        doc = minimal_example()
+        baseline = ic.to_internal_config(doc)["cash_flows"]
+        doc["estate"]["life_insurance"] = []
+        stripped = ic.to_internal_config(doc)["cash_flows"]
+        self.assertEqual(stripped, [cf for cf in baseline
+                                    if cf.get("label")
+                                    != "life insurance premium"])
+
+    def test_schema_validates_a_renewed_policy_and_refuses_unknown_keys(self):
+        doc = minimal_example()
+        doc["estate"]["life_insurance"] = [
+            _policy(term_end="2036-06-30", renewal_end="2046-06-30")]
+        validate_contract(doc)
+        bad = copy.deepcopy(doc)
+        bad["estate"]["life_insurance"][0]["not_a_field"] = True
+        with self.assertRaises(Exception):
+            validate_contract(bad)
+
+
 if __name__ == "__main__":
     unittest.main()
