@@ -43,9 +43,11 @@ from test_issue_679_solvency import (
 
 # ── A trajectory whose income collapses in year 2 (0-based), reusing the
 #    #679 golden fixture's fabricated round numbers (DP#9: one fixture).
-def _collapse_trajectory(collapse_year: int = 2, n_years: int = 5):
+def _collapse_trajectory(collapse_year: int = 2, n_years: int = 5,
+                         living_costs: float = None):
     return _run_income_collapse_trajectory(
-        collapse_year=collapse_year, n_years=n_years)
+        collapse_year=collapse_year, n_years=n_years,
+        living_costs=living_costs)
 
 
 class TestComputeRunwayEngagedAndLoudAbsence(unittest.TestCase):
@@ -54,11 +56,11 @@ class TestComputeRunwayEngagedAndLoudAbsence(unittest.TestCase):
     partial outflow list."""
 
     def test_unengaged_trajectory_reports_absence_not_zero(self):
-        results = _collapse_trajectory(collapse_year=99, n_years=3)
-        # The #679 fixture sets living_costs=0 only in the un-engaged test
-        # helper; here we strip it to simulate a contract with NO budget.
-        for r in results:
-            r.living_costs = 0.0
+        # The genuinely un-engaged case: no budget AND no third-party
+        # obligation, so the #195 narrowed gate never fires the identity
+        # (DP#16: explicit zero budget is byte-identical to absent).
+        results = _collapse_trajectory(collapse_year=99, n_years=3,
+                                       living_costs=0.0)
         runway = compute_runway(results, shock_date=date(2026, 1, 1),
                                 start_year=2026)
         self.assertFalse(runway.engaged)
