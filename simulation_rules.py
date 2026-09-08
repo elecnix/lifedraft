@@ -122,6 +122,7 @@ import rules_management_fee   # noqa: F401
 import rules_registered_plans  # noqa: F401
 import rules_retirement_income  # noqa: F401
 import rules_solvency         # noqa: F401
+import rules_superficial_loss  # noqa: F401
 import rules_tuition_credit   # noqa: F401
 
 
@@ -311,6 +312,21 @@ RULE_ORDER: tuple = (
     # 'solvency'; it is placed here to sit beside the rule that reads it.
     'tuition_credit',
     'solvency',
+    # Issue #141: ITA s.53(1)(c) superficial-loss anti-avoidance. Runs AFTER
+    # 'solvency' (whose forced-liquidation waterfall is one of the two
+    # security-disposition paths whose signed realized figure can carry a
+    # loss subject to the window -- the other is 'sm_unwind', which has
+    # already run above) and BEFORE 'capital_loss' (whose settlement must
+    # see the position NET of what this rule intercepted: it reads
+    # `ws.superficial_loss_position_adjustment` and folds it in). Denied
+    # dollars are added to the repurchased pot's ACB under s.53(1)(f) -- the
+    # loss is DEFERRED into cost base, never destroyed. The 61-day statutory
+    # window is evaluated at annual-step granularity (disclosed via
+    # model_fidelity, id 'superficial_loss_annual_window'); both directions
+    # of the abstraction err toward denial. A strict no-op for a household
+    # with no realized security loss (the golden fixture) -- the golden
+    # invariant is unchanged by construction (DP#32).
+    'superficial_loss',
     # Issue #140: the capital-loss carry-forward ledger. Settles the year's
     # SIGNED net capital position (drawdown + forced-liquidation waterfall +
     # property sales + HELOC-servicing + SM-unwind dispositions) against the
