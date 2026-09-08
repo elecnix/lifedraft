@@ -47,7 +47,8 @@ def _tomllib_import_files() -> list[str]:
                 continue
             rel = os.path.relpath(os.path.join(dirpath, fn), REPO_ROOT)
             try:
-                tree = ast.parse(open(os.path.join(dirpath, fn), encoding="utf-8").read())
+                with open(os.path.join(dirpath, fn), encoding="utf-8") as f:
+                    tree = ast.parse(f.read())
             except (OSError, SyntaxError):
                 continue
             for node in ast.walk(tree):
