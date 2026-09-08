@@ -3410,6 +3410,7 @@ def simulate_year_pure(
         # of silently booking $0.
         rrsp_contribution_refused_own=ws.rrsp_refused_own,
         rrsp_contribution_refused_spousal=ws.rrsp_refused_spousal,
+        rrsp_contribution_refused_spouse_own=ws.spouse_rrsp_refused,
         primary_rrsp=ws.new_rrsp_bal,
         spousal_rrsp=ws.new_spousal_rrsp_bal,
         spouse_rrsp=ws.new_spouse_rrsp_bal,

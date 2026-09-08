@@ -34,6 +34,10 @@ class YearResult:
     # shows what was declined; 0.0 on every within-room year (golden no-op).
     rrsp_contribution_refused_own: float = 0.0
     rrsp_contribution_refused_spousal: float = 0.0
+    # Issue #176: the spouse's own-RRSP refusal -- a declared contribution to
+    # the spouse's OWN RRSP above the spouse's own room. Same refusal, third
+    # role; mirrors the two #170 fields exactly.
+    rrsp_contribution_refused_spouse_own: float = 0.0
 
     # Account balances (end of year)
     primary_rrsp: float = 0.0
