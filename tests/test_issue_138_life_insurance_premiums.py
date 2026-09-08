@@ -232,5 +232,63 @@ class TestAdapterFoldsPremiumLegs(unittest.TestCase):
             validate_contract(bad)
 
 
+# ============================================================================
+# 4. The engine fold: premiums leave the household every year they fire
+# ============================================================================
+
+from simulation import FamilySimulation
+from simulation_config import SimulationConfig
+
+
+def _run(doc, years=None):
+    cfg = ic.to_internal_config(doc)
+    sim_cfg = SimulationConfig.from_dict(cfg)
+    if years is not None:
+        sim_cfg = SimulationConfig(**{**sim_cfg.__dict__,
+                                      "projection_years": years})
+    return FamilySimulation(sim_cfg).run()
+
+
+class TestEnginePricesPremiums(unittest.TestCase):
+
+    def test_premium_drops_the_fire_year_savings_channel_exactly(self):
+        doc = minimal_example()
+        doc["estate"]["life_insurance"] = []
+        baseline = _run(doc, years=2)
+        doc["estate"]["life_insurance"] = [_policy()]
+        with_policy = _run(doc, years=2)
+        self.assertAlmostEqual(
+            baseline[0].annual_savings - with_policy[0].annual_savings,
+            1200.0, places=2,
+            msg="a $1,200/yr premium must drop the first year's savings "
+                "channel by exactly that amount -- otherwise the cost of "
+                "coverage is still invisible to every objective")
+
+    def test_terminal_total_assets_decline_with_coverage_cost(self):
+        """The premium stream survives to the horizon: the uninsured run's
+        terminal total_assets must EXCEED the insured run's (both runs carry
+        the same estate, so this isolates the living cost)."""
+        doc = minimal_example()
+        doc["estate"]["life_insurance"] = []
+        baseline = _run(doc)
+        doc["estate"]["life_insurance"] = [_policy()]
+        insured = _run(doc)
+        self.assertGreater(baseline[-1].total_assets,
+                           insured[-1].total_assets)
+
+    def test_golden_household_is_byte_identical_with_no_policies(self):
+        """DP#32 (the crux): the golden household declares no life insurance,
+        so the terminal invariant must be bit-for-bit unchanged."""
+        from test_golden_trajectory_581 import (
+            golden_household_config, _run as _run_golden,
+        )
+        TERMINAL_TOTAL_ASSETS = 9709753.139463063
+        terminal = _run_golden(golden_household_config())[-1].total_assets
+        self.assertEqual(
+            terminal, TERMINAL_TOTAL_ASSETS,
+            f"golden terminal total_assets MOVED: {terminal!r} != "
+            f"{TERMINAL_TOTAL_ASSETS!r}")
+
+
 if __name__ == "__main__":
     unittest.main()
