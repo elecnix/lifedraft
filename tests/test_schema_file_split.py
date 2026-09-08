@@ -107,12 +107,31 @@ class PartRegistrationTest(unittest.TestCase):
         """A fragment that git tracks but setuptools does not copy is missing
         from every non-editable install -- the schema composes in the repo and
         raises FileNotFoundError for anyone who `pip install`ed it."""
-        import tomllib
-        pyproject = SCHEMA_DIR.parent / "pyproject.toml"
-        package_data = tomllib.loads(pyproject.read_text())["tool"]["setuptools"][
-            "package-data"]
-        patterns = set(package_data.get("schema", [])) | set(package_data.get("*", []))
+        # Stdlib-only, no TOML parser: tomllib is 3.11+ and these tests must
+        # run on 3.10 (house pattern, see test_numpy_runtime_dependency.py).
+        # The slice we need is the [tool.setuptools.package-data] table's two
+        # "key = [glob...]" lines -- parse it with a regex, and fail LOUDLY
+        # if the table shape ever changes (DP#32: absence must not silently
+        # yield an empty pattern set that vacuously passes).
+        import re
         import fnmatch
+        pyproject = (SCHEMA_DIR.parent / "pyproject.toml").read_text()
+        block = re.search(
+            r"(?m)^\[tool\.setuptools\.package-data\]\s*$(.*?)(?=^\[|\Z)",
+            pyproject, re.S,
+        )
+        assert block, (
+            "no [tool.setuptools.package-data] table found in pyproject.toml"
+        )
+        patterns = set()
+        for line in block.group(1).splitlines():
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip().strip('"') not in ("schema", "*"):
+                continue
+            patterns.update(re.findall(r'"([^"]+)"', value))
         for rel in _root_spine()[ic.UNIVERSAL_PARTS_KEY]:
             with self.subTest(part=rel):
                 self.assertTrue(
