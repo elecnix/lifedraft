@@ -38,20 +38,25 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
     comparison, so they are deliberately not pulled in here (their own wiring is
     #745).
 
-    WHY THE REALIZED-CAPITAL-GAIN GATE IS THE WHOLE STORY (#754). With a correct
-    s.127.52(1) base, the ONLY add-back big enough to lift AMTI above regular
-    taxable income far enough to clear the basic exemption ABOVE regular tax is
-    the 100% capital-gains inclusion (s.127.52(1)(d)): carrying charges are only
-    half added back, the RRSP deduction is not an add-back at all, and the fold
-    surfaces no stock-option benefit or loss carryover. So in a year the fold
-    realizes NO capital gain, AMTI equals regular taxable income and the minimum
-    amount can never exceed regular tax -- the surcharge is identically 0. The
-    early return on ``realized_gain <= 0`` is that arithmetic, not a silent
-    "assume no AMT" default (DP#32): it is the exact set of years in which AMT
-    provably cannot bite, and it makes the assessment a strict no-op for every
-    household the fold surfaces no realized gain for (e.g. the #581 golden
-    household, which realizes 0 gains in all 46 years -> the golden invariant is
-    unmoved by construction).
+    WHY THE REALIZED-CAPITAL-GAIN GATE IS (ALMOST) THE WHOLE STORY (#754). With a
+    correct s.127.52(1) base, the ONLY add-back big enough to lift AMTI above
+    regular taxable income far enough to clear the basic exemption ABOVE regular
+    tax is the 100% capital-gains inclusion (s.127.52(1)(d)): carrying charges
+    are only half added back, the RRSP deduction is not an add-back at all, and
+    the fold surfaces no stock-option benefit or loss carryover. (Issue #142:
+    the year's booked s.20(1)(c) deductions -- ``ws.sm_interest_deduction`` --
+    ARE now surfaced as the s.127.52(1)(j)(ii) half-add-back, so a no-gain year
+    with a large carrying-charge deduction can also trigger the assessment; the
+    gate below includes it. The golden household books 0 every year.) So in a
+    year the fold realizes NO capital gain AND books no carrying-charge
+    deduction, AMTI equals regular taxable income and the minimum amount can
+    never exceed regular tax -- the surcharge is identically 0. The early return
+    on ``realized_gain <= 0 and sm_interest_deduction <= 0`` is that arithmetic,
+    not a silent "assume no AMT" default (DP#32): it is the exact set of years
+    in which AMT provably cannot bite, and it makes the assessment a strict
+    no-op for every household the fold surfaces no realized gain or carrying
+    charge for (e.g. the #581 golden household, which realizes 0 gains in all 46
+    years -> the golden invariant is unmoved by construction).
 
     MODELLED as of #747 (the three #710 deferrals, all cross-year/parallel):
       * the 50%-of-non-refundable-credits reduction to the minimum amount
@@ -67,7 +72,9 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
         with its own carry-forward, when the household is a Quebec resident.
 
     Reads: ``drawdown_realized_capital_gain`` + ``solvency_realized_gain`` (the
-    year's 100%-inclusion realized gain, #754), ``drawdown_taxable`` /
+    year's 100%-inclusion realized gain, #754), ``sm_interest_deduction`` (the
+    year's booked s.20(1)(c) deductions, half added back -- #142),
+    ``drawdown_taxable`` /
     ``lif_withdrawal`` / government retirement income (already on ws), this
     year's grown employment income off ``ctx``, and the opening minimum-tax
     credit balances (``ctx.amt_credit_opening`` / ``ctx.qc_imr_credit_opening``).
@@ -92,7 +99,8 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # with no gain has AMTI == regular taxable income, so the minimum cannot
     # exceed regular tax; with no opening credit there is nothing to recover).
     # The golden household hits this every one of its 46 years (DP#32).
-    if realized_gain <= 0 and not ctx.amt_credit_opening and not ctx.qc_imr_credit_opening:
+    if realized_gain <= 0 and ws.sm_interest_deduction <= 0 \
+            and not ctx.amt_credit_opening and not ctx.qc_imr_credit_opening:
         return False
 
     # AMT parameters are year-versioned and only defined for a real tax year;
@@ -171,6 +179,15 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
         taxable_income=taxable_income,
         taxable_capital_gains=taxable_capital_gains,
         capital_gains_inclusion=inclusion,
+        # Issue #142 (a PRE-EXISTING bug fixed in passing): the year's booked
+        # s.20(1)(c) deductions (``ws.sm_interest_deduction`` -- the SM
+        # readvance line + the mortgage advance + the drawn margin + the
+        # non-reg management fee) are an s.127.52(1)(j)(ii) add-back: HALF
+        # returns to the AMT base. Omitting it understated AMTI for EVERY
+        # carrying-charge household -- an SM-interest payer's minimum tax was
+        # computed as if the deduction never happened. 0.0 for a household
+        # with no traced borrowing (the golden path) -> unchanged (DP#32).
+        carrying_charges=ws.sm_interest_deduction,
         nonrefundable_credits=nr_credits,
         params=AMTParameters.for_year(year, provider),
     )
