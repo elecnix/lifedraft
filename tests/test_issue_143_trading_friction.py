@@ -272,3 +272,99 @@ class TestWaterfallCommissionGrossUp:
         result = run_waterfall(10_000.0, self._sources(cost))
         step = result.steps[0]
         assert step.friction == pytest.approx(step.gross_drawn * 5.0 / BPS + 9.95)
+
+
+# ============================================================================
+# Part 2 wiring -- the DECLARED block reaches the engine fold
+# ============================================================================
+
+import countries.canada  # noqa: F401 -- registers the Canada jurisdiction providers
+from dataclasses import replace
+
+from simulation_config import SimulationConfig
+from simulation_state import SimState, simulate_year_pure
+
+
+def _roundtrip_config(**overrides):
+    """A minimal SimulationConfig with fabricated round numbers (DP#13/DP#15)."""
+    defaults = dict(
+        projection_years=5, investment_return=0.07,
+        family_members=[
+            {'role': 'primary', 'gross_income': 120_000,
+             'rrsp_room_accumulated': 50_000, 'tfsa_room_accumulated': 20_000},
+        ],
+        children=[], mortgage_balance=0, mortgage_rate=0.05,
+        house_value=0,
+    )
+    defaults.update(overrides)
+    return SimulationConfig(**defaults)
+
+
+class TestDeclaredBlockReachesTheConfig:
+    """The declared ``assumptions.trading_friction`` block flows through the
+    internal config (DP#24): absent -> None and not re-emitted; declared
+    (even all-zero) -> a model that round-trips verbatim."""
+
+    def test_absent_block_is_none_and_not_emitted(self):
+        cfg = _roundtrip_config()
+        assert cfg.trading_friction is None
+        assert 'trading_friction' not in cfg.to_dict()['assumptions']
+
+    def test_declared_block_round_trips(self):
+        cfg = replace(_roundtrip_config(), trading_friction=FULL_MODEL)
+        d = cfg.to_dict()
+        assert d['assumptions']['trading_friction'] == {
+            'spread_bps': 5.0, 'commission_per_trade': 9.95}
+        cfg2 = SimulationConfig.from_dict(d)
+        assert cfg2.trading_friction == FULL_MODEL
+
+
+class TestSolvencyFoldChargesFriction:
+    """The fold's forced-liquidation waterfall (``rules_solvency``) prices the
+    declared model on its SALES: each step grosses up so the household still
+    nets its target AFTER friction, and the friction leaves the household
+    inside the gross draw (the balance drops by the full gross)."""
+
+    def _run(self, trading_friction=None, *, living_costs=50_000.0,
+             after_tax_income=58_000.0, non_reg=1_000_000.0):
+        """A household whose only liquid asset is a non-reg pot at cost basis
+        (no gain -> no tax), facing a $10,000 shortfall (living costs + the
+        $18,000 mortgage payment minus $58,000 after-tax income)."""
+        cfg = _roundtrip_config(
+            investment_return=0.0, mortgage_balance=300_000,
+            trading_friction=trading_friction)
+        state = SimState(non_reg_balance=non_reg, non_reg_acb=non_reg)
+        return simulate_year_pure(
+            state=state, year=0,
+            allocations={'_primary_income': 95_000, '_annual_savings': 0},
+            config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
+            mortgage_data={'end_balance': 294_000.0, 'total_payment': 18_000.0,
+                           'total_interest': 12_000.0, 'total_principal': 6_000.0},
+            living_costs=living_costs, after_tax_income=after_tax_income,
+        )
+
+    def test_no_model_is_byte_identical_plain(self):
+        result, new_state = self._run()
+        event = result.forced_liquidation_events[0]
+        assert event['source'] == 'non_reg'
+        assert event['gross_drawn'] == pytest.approx(10_000.0, abs=1e-6)
+        assert event.get('friction', 0.0) == 0.0
+        assert new_state.non_reg_balance == pytest.approx(990_000.0, abs=1e-6)
+
+    def test_spread_grosses_up_and_leaves_inside_the_draw(self):
+        result, new_state = self._run(trading_friction=SPREAD_MODEL)
+        event = result.forced_liquidation_events[0]
+        expected_gross = 10_000.0 / (1.0 - 5.0 / BPS)
+        assert event['gross_drawn'] == pytest.approx(expected_gross, rel=1e-9)
+        # The household still nets its target AFTER friction -- the shortfall
+        # is fully covered, same as the frictionless run.
+        assert result.solvency_covered == pytest.approx(10_000.0, abs=1e-6)
+        assert not result.ruined
+        # Step-level conservation: gross = net + tax + friction.
+        assert event['gross_drawn'] == pytest.approx(
+            event['net_proceeds'] + event['tax'] + event['friction'], abs=1e-6)
+        # The friction LEFT the household: the pot dropped by the full gross,
+        # which is the frictionless drop PLUS the friction.
+        _, plain_state = self._run()
+        assert new_state.non_reg_balance == pytest.approx(
+            plain_state.non_reg_balance - event['friction'], abs=1e-6)
