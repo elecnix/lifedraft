@@ -590,6 +590,21 @@ class YearResult:
     capital_loss_offset_applied: float = 0.0
     capital_loss_offset_priced: float = 0.0
 
+    # Issue #141: the superficial-loss window (ITA s.53(1)(c)/(f)),
+    # evaluated at annual-step granularity -- see superficial_loss.py.
+    # ``superficial_loss_denied`` is the raw dollars denied this step (a
+    # same- or prior-step identical repurchase caught the loss);
+    # ``superficial_loss_acb_added`` is the equal-sized s.53(1)(f) ACB
+    # deferral into the repurchased property (the loss is deferred, not
+    # destroyed); ``superficial_loss_pended``/``..._released`` are the raw
+    # dollars held over to next step / released from last step (the
+    # annualized window's Y+1 limb). All 0.0 for a household that never
+    # realizes a security loss (the golden fixture).
+    superficial_loss_denied: float = 0.0
+    superficial_loss_acb_added: float = 0.0
+    superficial_loss_pended: float = 0.0
+    superficial_loss_released: float = 0.0
+
     # Epic #841 bite 4: end-of-year snapshot of each child's OWN accounts (the
     # bite-2 child_accounts list -- one dict per child with rrsp/tfsa/fhsa/
     # non_reg balances and their room/acb). Threaded here as REPORTING data so

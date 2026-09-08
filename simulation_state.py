@@ -3158,6 +3158,11 @@ def simulate_year_pure(
         # net capital gain). 0.0 for a household with no losses (the golden
         # path).
         'capital_loss_carryforward': ws.new_capital_loss_carryforward,
+        # Issue #141: write the superficial-loss rule's pending ledger to
+        # jurisdiction_state (losses realized this step whose window is
+        # still open, resolved next step). [] for a household with no
+        # realized security loss (the golden path).
+        'superficial_loss_pending': ws.new_superficial_loss_pending,
         # Issue #700/#643/#704: write the single-slot WorkingState scalars back
         # into FRESH per-adult FHSA/LIRA/LIF stores carrying the prior ids/order.
         # A second adult's FHSA (slot 1) compounds at the same investment_return
@@ -3651,6 +3656,15 @@ def simulate_year_pure(
         capital_loss_carryforward=ws.new_capital_loss_carryforward,
         capital_loss_offset_applied=ws.capital_loss_offset_applied,
         capital_loss_offset_priced=ws.cg_loss_offset_used,
+        # Issue #141: the superficial-loss window surfaced for transparency
+        # (raw dollars denied this step, the equal-sized s.53(1)(f) ACB
+        # deferral, and the pended/released splits of the annualized
+        # window). All 0.0 for a household with no realized security loss
+        # (the golden path).
+        superficial_loss_denied=ws.superficial_loss_denied,
+        superficial_loss_acb_added=ws.superficial_loss_acb_added,
+        superficial_loss_pended=ws.superficial_loss_pended,
+        superficial_loss_released=ws.superficial_loss_released,
         # Issue #137: surface the year-0 deployment-lag carry cost (computed
         # by FamilySimulation and passed through here) so output plugins can
         # render it. 0.0 in every year but year 0 (DP#32).

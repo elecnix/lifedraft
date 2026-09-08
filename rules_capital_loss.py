@@ -42,6 +42,15 @@ def apply_capital_loss(ws: YearWorkingState, ctx: RuleContext) -> bool:
     - ``ws.sm_unwind_realized_gain`` -- the liquidate-to-target SM unwind
       (#1017).
 
+    Issue #141: the `superficial_loss` rule (which runs immediately before
+    this one) intercepts the security-loss slice of that position under
+    ITA s.53(1)(c): losses denied or pended for the annualized window are
+    removed from the raw position, and prior-step pended losses released
+    this year are added back into it (one step late -- the disclosed
+    abstraction). ``ws.superficial_loss_position_adjustment`` carries that
+    net correction; 0.0 (a household with no realized security loss) keeps
+    the position byte-identical to the pre-#141 settlement.
+
     The PRINCIPAL residence's pre-apportioned sale figure
     (``ws.principal_sale_realized_gain``, #956 bite E) is deliberately NOT
     part of the position: its exempt fraction is not a capital gain for
@@ -73,7 +82,8 @@ def apply_capital_loss(ws: YearWorkingState, ctx: RuleContext) -> bool:
                 + ws.sale_realized_gain
                 + ws.heloc_servicing_realized_gain
                 + ws.sm_unwind_realized_gain
-                - ws.cg_loss_offset_used / inclusion)
+                - ws.cg_loss_offset_used / inclusion
+                + ws.superficial_loss_position_adjustment)
     pool_net_of_pricing = ws.opening_capital_loss_carryforward - ws.cg_loss_offset_used
 
     pool_after, offset_applied = settle_year(
