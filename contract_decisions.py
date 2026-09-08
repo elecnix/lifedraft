@@ -911,3 +911,63 @@ def map_borrow_to_invest(doc: Dict, heloc: Optional[Dict]) -> List[Dict[str, Any
             btv_entry["hold_draw"] = True
         btv_options.append(btv_entry)
     return btv_options
+
+
+def map_superficial_loss(doc: Dict) -> List[List[str]]:
+    """``decisions.superficial_loss.substitute_pairs`` ->
+    ``legacy['superficial_loss_substitute_pairs']``.
+
+    Issue #141: the household's declaration that its superficial-loss-window
+    repurchases are of NON-identical substitute securities (e.g. XEQT vs
+    VEQT -- different issuers, ITA s.53(1)(c)'s "same or identical" limb not
+    met). The engine tracks pot balances, not per-security holdings, so the
+    declaration is the assertion of fact the window evaluation reads: a
+    non-empty list allows a loss a same-step repurchase would otherwise deny
+    (see superficial_loss.py). ABSENT the block, the conservative default
+    holds -- any repurchase in the window is treated as identical.
+
+    DP#32 boundary refusals (a malformed declaration must FAIL LOUDLY,
+    never silently coerce):
+
+    * every pair must be exactly two non-empty strings;
+    * a pair naming the same security twice (``["XEQT", "XEQT"]``) is
+      refused -- a security is trivially identical to itself, so declaring
+      it a "substitute" of itself would assert a falsehood to dodge the
+      window.
+
+    Returns ``[]`` when the household declares no block or an empty pair
+    list: the caller keeps the key out of the internal shape entirely so a
+    no-declaration household round-trips byte-identically (DP#24/DP#32).
+    """
+    block = doc["decisions"].get("superficial_loss")
+    if not block:
+        return []
+    if not isinstance(block, dict):
+        raise ValueError(
+            f"decisions.superficial_loss must be an object, got "
+            f"{type(block).__name__}: {block!r}")
+    declared = block.get("substitute_pairs")
+    if declared is None:
+        raise ValueError(
+            "decisions.superficial_loss present but substitute_pairs is "
+            "absent -- declare [] (or omit the block) for no substitutes; "
+            "a partial declaration is refused (DP#32)")
+    if not isinstance(declared, list):
+        raise ValueError(
+            f"decisions.superficial_loss.substitute_pairs must be a list, "
+            f"got {type(declared).__name__}: {declared!r}")
+    pairs: List[List[str]] = []
+    for pair in declared:
+        if (not isinstance(pair, list) or len(pair) != 2
+                or not all(isinstance(s, str) and s for s in pair)):
+            raise ValueError(
+                f"decisions.superficial_loss.substitute_pairs entry "
+                f"{pair!r} must be exactly two non-empty strings")
+        if pair[0] == pair[1]:
+            raise ValueError(
+                f"decisions.superficial_loss.substitute_pairs entry "
+                f"{pair!r} names the same security twice -- a security is "
+                f"identical to itself; declaring it a non-identical "
+                f"substitute of itself is refused (DP#32)")
+        pairs.append([pair[0], pair[1]])
+    return pairs
