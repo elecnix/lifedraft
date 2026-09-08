@@ -95,6 +95,7 @@ EXPECTED_RULE_NAMES = frozenset({
     'property_disposition',        # issue #956 bite B: a declared mid-horizon property SALE settles in its sale year (net proceeds invested post-growth, gain taxed + PRE-apportioned, conservation identity Δtotal_assets = -(selling_costs + T))
     'tuition_credit',              # epic #795 bite 3: federal (+ QC) tuition tax credit (own credit + #784 carry-forward + #785 transfers) -- was inline in the fold's prologue
     'solvency',                    # issue #679: cash-flow identity + forced-liquidation waterfall
+    'superficial_loss',            # issue #141: ITA s.53(1)(c) deny a loss whose household repurchase lands in the annualized window + defer the denial into the repurchased pot's ACB under s.53(1)(f)
     'capital_loss',                # issue #140: settle the year's signed net capital position against the capital-loss carry-forward pool (same-year offset + carry-forward; never against ordinary income)
     'amt',                         # issue #710: year-end Alternative Minimum Tax assessment (max(regular, AMT)) over the year's realized capital gains
 })
@@ -206,6 +207,16 @@ EXPECTED_RULE_ORDER = (
     # after-tax income. Was inline in the fold's prologue (two spellings).
     'tuition_credit',
     'solvency',
+    # issue #141: ITA s.53(1)(c) superficial-loss anti-avoidance. Runs AFTER
+    # 'solvency' (whose forced-liquidation waterfall is one of the two
+    # security-disposition paths whose signed realized figure can carry a
+    # loss) and BEFORE 'capital_loss' (whose settlement must see the position
+    # NET of what this rule intercepted: denied + pended removed, released
+    # added back one step late). Denies a loss whose household repurchase
+    # lands in the same or the immediately following annual step (the
+    # annualized 61-day window, disclosed in model_fidelity) and defers the
+    # denial into the repurchased pot's ACB under s.53(1)(f).
+    'superficial_loss',
     # issue #140: the capital-loss carry-forward ledger settles the year's
     # SIGNED net capital position against the pool. Runs AFTER 'solvency'
     # (the waterfall's forced liquidations are the last dispositions whose
@@ -915,6 +926,32 @@ def test_every_rule_fires_somewhere_in_representative_households():
             primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
             year_brackets=_default_tax_provider_combined_brackets(),
             primary_taxable_income=130_000.0, spouse_taxable_income=50_000.0,
+        )
+    _merge(fired)
+
+    # ── Scenario Q: a household holding a non-reg pot BELOW its cost base
+    # that suffers a solvency shortfall (issue #141: the `superficial_loss`
+    # rule). The forced-liquidation waterfall sells securities below ACB and
+    # realizes a genuine loss, and the same step books an explicit `non_reg`
+    # contribution into the same pot -- an in-window repurchase, so absent a
+    # declared substitute pair the loss is DENIED and deferred into the
+    # repurchased pot's ACB. Deliberately separate from every scenario above:
+    # none of them combine a below-ACB non-reg pot with a same-step non-reg
+    # contribution, so the rule correctly stays a strict no-op (fired=False)
+    # everywhere else -- which is what keeps the golden invariant unchanged
+    # by construction. Round numbers, role-based names (DP#4/#15).
+    superficial_state = SimState(
+        non_reg_balance=400_000.0, non_reg_acb=500_000.0,
+        jurisdiction_state={'canada': _default_canada_state()},
+    )
+    with trace_firing() as fired:
+        simulate_year_pure(
+            state=superficial_state, year=0,
+            allocations={'_primary_income': 130_000, 'non_reg': 10_000,
+                         '_annual_savings': 10_000},
+            config=_make_config(), investment_return=0.06,
+            primary_marginal_rate=0.30,
+            living_costs=60_000, after_tax_income=45_000,
         )
     _merge(fired)
 
