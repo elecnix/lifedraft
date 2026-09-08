@@ -10,9 +10,17 @@ and NEVER deducts against ordinary income.
 Carryback is deliberately out of scope: this is a forward-only projection.
 """
 
+import os
+import sys
+import unittest
+
 import pytest
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from capital_loss_carryforward import settle_year
+import rules_capital_loss  # noqa: F401  (registers the `capital_loss` rule)
+from rule_registry import RULES, RuleContext, YearWorkingState
 
 INCLUSION = 0.5
 
@@ -123,4 +131,142 @@ class TestNeverAgainstOrdinaryIncome:
             opening_pool=1_000_000.0, net_capital_position=2_000.0,
             inclusion=INCLUSION)
         assert loss_offset == pytest.approx(1_000.0)
+
+
+class TestCapitalLossRule(unittest.TestCase):
+    """The registered `capital_loss` rule: settle the year's signed net
+    capital position against the pool, net of what the pricing layer
+    already sheltered (consumed exactly once). Driven directly, as the
+    epic-#795 bite tests drive their registered rules."""
+
+    @staticmethod
+    def _ctx(inclusion=INCLUSION):
+        from simulation_config import SimulationConfig
+        cfg = SimulationConfig.from_dict({
+            'assumptions': {'start_year': 2026, 'investment_return': 0.05,
+                            'inflation': 0.02, 'horizon_age': 95},
+            'property': {'house_value': 500000, 'mortgage_balance': 0,
+                         'margin_available': 0, 'ltv_max': 0.80,
+                         'amortization_years': 25, 'mortgage_rate': 0.045},
+            'family': {'members': [{'role': 'primary', 'id': 'p',
+                                    'birth_date': '1976-01-01'}],
+                       'children': []},
+            'accounts': {},
+            'tax': {'province': 'qc'},
+        })
+        return RuleContext(
+            year=0, calendar_year=2026, allocations={}, config=cfg,
+            investment_return=0.0, mortgage_rate=0.0, heloc_rate=0.0,
+            mortgage_data=None, use_readvanceable=False, deduct_later=False,
+            primary_marginal_rate=0.0, spouse_marginal_rate=0.0, resp_data=None,
+            fhsa_contribution=0.0, rrsp_annual_limit=None,
+            tfsa_annual_limit=None, fhsa_annual_limit=None,
+            non_reg_after_tax_return=None, cpp_income=0.0, oas_income=0.0,
+            pension_income=0.0, drawdown_order=None,
+            rrif_min_rate_primary=0.0, rrif_min_rate_spouse=0.0,
+            drawdown_net_target=0.0, retiree_marginal_rate=0.0,
+            drawdown_bracket_target=None, drawdown_other_taxable_income=0.0)
+
+    def test_loss_year_grows_the_pool(self):
+        # A below-ACB forced liquidation (solvency_realized_gain, signed)
+        # settles into the pool: $40k raw loss -> $20k includable added.
+        ws = YearWorkingState(year=0)
+        ws.solvency_realized_gain = -40_000.0
+        ws.opening_capital_loss_carryforward = 0.0
+        fired = RULES['capital_loss'](ws, self._ctx())
+        assert ws.new_capital_loss_carryforward == pytest.approx(20_000.0)
+        assert ws.capital_loss_offset_applied == 0.0
+        assert fired is True
+
+    def test_pricing_consumed_slice_is_settled_once(self):
+        # The drawdown's lead tax-free slice already consumed $6k of the
+        # $10k pool against a $20k raw drawdown gain ($10k includable).
+        # Both the pool and the position enter settle_year net of the
+        # sheltered slice: pool 4k, position 20k - 12k = 8k raw ($4k
+        # includable) -> the remaining pool exactly exhausts against it.
+        ws = YearWorkingState(year=0)
+        ws.drawdown_realized_capital_gain = 20_000.0
+        ws.opening_capital_loss_carryforward = 10_000.0
+        ws.cg_loss_offset_used = 6_000.0
+        fired = RULES['capital_loss'](ws, self._ctx())
+        assert ws.new_capital_loss_carryforward == pytest.approx(0.0)
+        assert ws.capital_loss_offset_applied == pytest.approx(4_000.0)
+        assert fired is True
+
+    def test_empty_pool_no_dispositions_is_a_strict_noop(self):
+        # The golden path: nothing realized, nothing carried -> 0.0/0.0,
+        # rule reports not-fired (DP#32: a strict no-op, byte-identical).
+        ws = YearWorkingState(year=0)
+        fired = RULES['capital_loss'](ws, self._ctx())
+        assert ws.new_capital_loss_carryforward == 0.0
+        assert ws.capital_loss_offset_applied == 0.0
+        assert fired is False
+
+
+class TestDrawdownPricingSeam(unittest.TestCase):
+    """The carry-forward pool's cash value: the non-reg draw's lead tax-free
+    slice in plan_drawdown_net (cg_loss_offset)."""
+
+    def test_lead_slice_delivered_tax_free(self):
+        from countries.canada.retirement_transition import plan_drawdown_net
+        # Non-reg pot at 100k with a 50k ACB (gain_frac 0.5); inclusion
+        # 0.5 -> every gross dollar is 0.25 taxable. A $10k net need from a
+        # $5k includable offset: the whole draw lands in the lead tax-free
+        # slice -- nothing recognized as taxable income, and the consumed
+        # offset is exactly the draw's taxable slice.
+        canada = {'tfsa_primary_balance': 0}
+        plan = plan_drawdown_net(
+            10_000, ['non_reg'], canada, non_reg_balance=100_000,
+            non_reg_acb=50_000, marginal_rate=0.40,
+            cg_loss_offset=5_000.0)
+        assert plan.net_delivered == pytest.approx(10_000.0)
+        assert plan.total_withdrawn == pytest.approx(10_000.0)
+        assert plan.taxable_withdrawn == pytest.approx(0.0)
+        assert plan.cg_loss_offset_used == pytest.approx(2_500.0)
+        # The gain is still REALIZED (sheltering is a tax effect, not an
+        # erasure): 10k gross x 0.5 gain_frac.
+        assert plan.realized_capital_gain == pytest.approx(5_000.0)
+
+    def test_offset_capped_at_the_draws_taxable_slice(self):
+        from countries.canada.retirement_transition import plan_drawdown_net
+        # A larger pool than the draw needs: only the draw's taxable slice
+        # is sheltered; the unused offset is NOT consumed.
+        canada = {'tfsa_primary_balance': 0}
+        plan = plan_drawdown_net(
+            10_000, ['non_reg'], canada, non_reg_balance=100_000,
+            non_reg_acb=50_000, marginal_rate=0.40,
+            cg_loss_offset=50_000.0)
+        assert plan.net_delivered == pytest.approx(10_000.0)
+        assert plan.taxable_withdrawn == pytest.approx(0.0)
+        assert plan.cg_loss_offset_used == pytest.approx(2_500.0)
+
+    def test_partial_shelter(self):
+        from countries.canada.retirement_transition import plan_drawdown_net
+        # A $1k includable offset shelters the FIRST $1k of the draw's
+        # taxable slice; the rest is priced at the flat rate.
+        canada = {'tfsa_primary_balance': 0}
+        plan = plan_drawdown_net(
+            10_000, ['non_reg'], canada, non_reg_balance=100_000,
+            non_reg_acb=50_000, marginal_rate=0.40,
+            cg_loss_offset=1_000.0)
+        # Lead slice: 1k/0.25 = 4k gross delivers 4k tax-free. Remaining
+        # 6k net at 1 - 0.25*0.40 = 0.90 net per gross -> 6,666.67 gross.
+        assert plan.cg_loss_offset_used == pytest.approx(1_000.0)
+        assert plan.total_withdrawn == pytest.approx(4_000.0 + 20_000.0 / 3.0)
+        assert plan.taxable_withdrawn == pytest.approx(20_000.0 / 3.0 * 0.25)
+        assert plan.net_delivered == pytest.approx(10_000.0)
+
+    def test_no_offset_is_byte_identical_to_pre_140(self):
+        from countries.canada.retirement_transition import plan_drawdown_net
+        canada = {'tfsa_primary_balance': 0}
+        baseline = plan_drawdown_net(
+            10_000, ['non_reg'], canada, non_reg_balance=100_000,
+            non_reg_acb=50_000, marginal_rate=0.40)
+        explicit_zero = plan_drawdown_net(
+            10_000, ['non_reg'], canada, non_reg_balance=100_000,
+            non_reg_acb=50_000, marginal_rate=0.40, cg_loss_offset=0.0)
+        assert baseline.total_withdrawn == explicit_zero.total_withdrawn
+        assert baseline.taxable_withdrawn == explicit_zero.taxable_withdrawn
+        assert baseline.net_delivered == explicit_zero.net_delivered
+        assert explicit_zero.cg_loss_offset_used == 0.0
 

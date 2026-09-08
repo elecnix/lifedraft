@@ -314,6 +314,22 @@ class YearWorkingState:
     opening_primary_tuition_carryforward: float = 0.0
     opening_spouse_tuition_carryforward: float = 0.0
     opening_child_tuition_carryforwards: list = field(default_factory=list)
+    # Issue #140: the capital-loss carry-forward pool entering the year (in
+    # TAXABLE-BASIS, i.e. includable dollars -- a $40k raw loss at 50%
+    # inclusion is $20k of pool). Lives in
+    # jurisdiction_state['canada']['capital_loss_carryforward']. 0.0 for a
+    # household that has never realized a net capital loss (the golden
+    # fixture) -- an absent key is an empty pool, the same
+    # absence-is-a-zero-pool contract the tuition carry-forwards use (DP#13:
+    # a default for absent input, never a coercion of a supplied value).
+    opening_capital_loss_carryforward: float = 0.0
+    # Issue #140: the includable dollars of this year's capital gains the
+    # pricing layer (the retirement drawdown's lead tax-free slice; later
+    # consumers as the fold grows them) ALREADY sheltered from the pool.
+    # Written unconditionally by every consumer (0.0 when none), read by the
+    # `capital_loss` rule to settle the pool against only the position not
+    # yet sheltered -- the sheltered slice is consumed exactly once.
+    cg_loss_offset_used: float = 0.0
 
     # ── This year's allocations (extracted from ctx.allocations) ──
     p_rrsp: float = 0.0
@@ -785,6 +801,21 @@ class YearWorkingState:
     new_spouse_tuition_carryforward: float = 0.0
     new_child_tuition_carryforwards: list = field(default_factory=list)
 
+    # ── capital_loss rule (issue #140, DP#26) ──
+    # The year's net capital position settled against the carry-forward pool
+    # by the registered `capital_loss` rule (after `solvency`, which realizes
+    # the forced-liquidation gains/losses the position reads; before `amt`,
+    # whose minimum-amount base must see the NET position). The rule calls
+    # capital_loss_carryforward.settle_year(opening pool net of the pricing
+    # consumption, the year's signed net capital position, inclusion) and
+    # writes: the pool leaving the year (persisted to jurisdiction_state by
+    # the epilogue) and the includable loss actually applied against this
+    # year's gains (surfaced on YearResult). All 0.0 for a household with an
+    # empty pool and no realized capital gains/losses (the golden fixture) --
+    # a strict no-op, so the golden invariant is unchanged by construction.
+    new_capital_loss_carryforward: float = 0.0
+    capital_loss_offset_applied: float = 0.0
+
     # ── property_disposition rule (issue #956 bite B, DP#26) ──
     # A declared mid-horizon SALE of a property settles in the sale year: the
     # net proceeds (gross value less the secured mortgage, selling costs, and
@@ -950,6 +981,10 @@ class YearWorkingState:
             'spouse_tuition_carryforward', 0.0)
         ws.opening_child_tuition_carryforwards = list(
             canada.get('child_tuition_carryforwards', []))
+        # Issue #140: the opening capital-loss carry-forward pool (includable
+        # dollars). See the field's docstring above.
+        ws.opening_capital_loss_carryforward = canada.get(
+            'capital_loss_carryforward', 0.0)
 
         ws.p_rrsp = allocations.get('primary_rrsp', 0)
         ws.s_rrsp = allocations.get('spousal_rrsp', 0)

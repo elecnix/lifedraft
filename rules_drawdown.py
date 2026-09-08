@@ -235,6 +235,16 @@ def apply_retirement_drawdown(ws: YearWorkingState, ctx: RuleContext) -> bool:
     if 'lif' in order:
         lif_discretionary_ceiling = max(
             0.0, ws.lif_maximum_withdrawal - ws.lif_withdrawal)
+    # Issue #140: the capital-loss carry-forward pool leads the non-reg
+    # draw's taxable slice tax-free -- the pool's cash value, realized where
+    # the engine can actually re-price a gain. The offset available is the
+    # pool carried in minus what pricing earlier in the year already
+    # consumed (0.0 in a no-pool year -- the golden path -- so the draw is
+    # priced byte-identically, DP#32). A capital loss shelters capital
+    # gains only: the RRSP/RRIF/LIF sources' ordinary-income slices are
+    # deliberately NOT offset.
+    cg_loss_offset = max(
+        0.0, ws.opening_capital_loss_carryforward - ws.cg_loss_offset_used)
     plan = plan_drawdown_net(
         ws.drawdown_net_target, order, draw_canada, ws.new_nonreg_bal,
         ws.new_nonreg_acb, ws.retiree_marginal_rate,
@@ -245,7 +255,8 @@ def apply_retirement_drawdown(ws: YearWorkingState, ctx: RuleContext) -> bool:
         oas_gross=ws.drawdown_oas_gross,
         oas_clawback_threshold=ws.drawdown_oas_threshold,
         per_member=per_member,
-        lif_max_withdrawal=lif_discretionary_ceiling)
+        lif_max_withdrawal=lif_discretionary_ceiling,
+        cg_loss_offset=cg_loss_offset)
 
     ws.drawdown_total = plan.total_withdrawn
     ws.drawdown_taxable = plan.taxable_withdrawn
@@ -255,6 +266,10 @@ def apply_retirement_drawdown(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # plan.taxable_withdrawn at the cg_inclusion rate; this is the pre-inclusion
     # figure the year-end AMT base reads.
     ws.drawdown_realized_capital_gain = plan.realized_capital_gain
+    # Issue #140: fold the draw's sheltered slice into the year's pricing
+    # consumption, so the `capital_loss` rule settles the pool against only
+    # the NOT-yet-sheltered position (the sheltered slice is consumed once).
+    ws.cg_loss_offset_used += plan.cg_loss_offset_used
 
     # Issue #825: the per-spouse taxable draw recognized this year, so the
     # forced RRIF minimum (apply_rrif_minimum, later in the fold) can re-bracket
