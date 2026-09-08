@@ -397,9 +397,8 @@ DEAD_ALLOWLIST = {
     "estate.life_insurance[].kind": ("#600", "term-vs-permanent is DERIVED from term_end_date being "
         "null, which is what the lapse check actually reads -- `kind` is a redundant second "
         "spelling of the same fact (#595) and is never branched on."),
-    "estate.life_insurance[].premium_annual": ("#600", "premiums are a lifetime cash outflow; the "
-        "engine does not deduct them from the projection (a real gap -- a $3,400/yr permanent "
-        "premium over 50 years is real money that never leaves the household's balance sheet)."),
+    # #138 moved premium_annual from this allowlist to CONSUMED below: the
+    # declared premium is now a dated cash-flow leg per in-force year.
     "estate.life_insurance[].as_of": ("#600", "the face amount's statement date; only the amount is "
         "read (same reasoning as accounts[].balance.as_of)."),
     "decisions.estate_elections[].id": ("#600", "no legacy consumer -- Phase 2c."),
@@ -613,7 +612,15 @@ CONSUMED = {
     "estate.rollover_overrides[].spousal_rollover": ("contract_estate.py", 'rolls = overrides[acc["id"]] if acc["id"] in overrides else default_rollover'),
     "estate.life_insurance[].insured": ("contract_estate.py", 'if pol["insured"] not in couple:'),
     "estate.life_insurance[].face_amount": ("contract_estate.py", 'death_benefit += pol["face_amount"]'),
-    "estate.life_insurance[].term_end_date": ("contract_estate.py", 'if term_end is not None and horizon_date is not None and term_end < horizon_date:'),
+    # Issue #138: the lapse gate reads the RENEWED coverage end -- a renewed
+    # policy stays in the estate past its original cliff; an un-renewed one
+    # lapses exactly as before. And the premium is now a real cash flow.
+    "estate.life_insurance[].renewal_end_date": ("contract_estate.py",
+        'if coverage_end is not None and horizon_date is not None and coverage_end < horizon_date:'),
+    "estate.life_insurance[].term_end_date": ("contract_estate.py",
+        'else pol.get("term_end_date")'),
+    "estate.life_insurance[].premium_annual": ("contract_estate.py",
+        '"amount": -float(premium)'),
     "assumptions.mortality[].person": ("contract_estate.py", 'mortality = {m["person"]: m for m in doc["assumptions"]["mortality"]}'),
     "assumptions.mortality[].assumed_death_age": ("contract_estate.py", 'age = m.get("assumed_death_age")'),
     "assumptions.mortality[].assumed_death_date": ("contract_estate.py", 'if m.get("assumed_death_date") is not None:'),
