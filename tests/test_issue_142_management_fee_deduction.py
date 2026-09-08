@@ -223,6 +223,68 @@ def _ctx(config, retired=False, taxable_income=0.0):
     )
 
 
+def test_nonreg_management_fee_is_deductible():
+    """The non-registered slice of the fee is a deductible carrying charge:
+    the `management_fee` rule charges rate x OPENING pot balance as real
+    cash, and the non-reg slice POOLS into the s.20(1)(c) deduction the
+    `sm_interest` rule values at bracket-fill (ws.sm_interest_deduction).
+    $100,000 pot x 0.5% = $500 fee + $500 traced mortgage interest = $1000."""
+    from rule_registry import YearWorkingState
+    from rules_leverage import apply_sm_interest
+    from rules_management_fee import apply_management_fee
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    config.account_management_fee_rate = {
+        "non_reg": {"management_fee_rate": 0.005}}
+    ws = YearWorkingState()
+    ws.opening_non_reg_balance = 100000.0
+    fired = apply_management_fee(ws, _ctx(config))
+    assert fired
+    assert ws.management_fee == 500.0
+    assert ws.management_fee_deductible == 500.0
+    # A pre-existing traced borrowing keeps the s.20(1)(c) rule off its
+    # no-deduction early return; the fee's slice must POOL into that
+    # deduction ($500 traced + $500 fee = $1000 on ws.sm_interest_deduction).
+    ws.mort = {'total_interest': 500.0}
+    ws.new_nonreg_bal = 100000.0
+    tracing = {'total_advances': 1000.0, 'investment_advances': 1000.0,
+               'rrsp_advances': 0.0, 'tfsa_advances': 0.0,
+               'personal_draws': 0.0}
+    ws.new_tracing = dict(tracing)
+    ws.new_advance_tracing = dict(tracing)
+    assert apply_sm_interest(ws, _ctx(config))
+    assert ws.sm_interest_deduction == 1000.0
+
+
+def test_registered_management_fee_cash_no_deduction():
+    """RRSP/TFSA/LIRA fees are real cash but add NOTHING to the deduction --
+    and a household with NO traced borrowing books no s.20(1)(c) deduction
+    at all (the rule's early return still fires; the fee never opens it)."""
+    from rule_registry import YearWorkingState
+    from rules_leverage import apply_sm_interest
+    from rules_management_fee import apply_management_fee
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    config.account_management_fee_rate = {
+        "rrsp": {"management_fee_rate": 0.005},
+        "tfsa": {"management_fee_rate": 0.005},
+        "lira": {"management_fee_rate": 0.01}}
+    ws = YearWorkingState()
+    ws.opening_rrsp_balance = 100000.0
+    ws.opening_tfsa_primary_balance = 50000.0
+    ws.opening_lira_balance = 10000.0
+    assert apply_management_fee(ws, _ctx(config))
+    # (100000 + 50000) * 0.5% + 10000 * 1% = 850, all cash, none deductible.
+    assert ws.management_fee == 850.0
+    assert ws.management_fee_deductible == 0.0
+    fired = apply_sm_interest(ws, _ctx(config))
+    assert not fired  # no traced borrowing, no fee slice -> early return
+    assert ws.sm_interest_deduction == 0.0
+    assert ws.management_fee == 850.0  # the cash fee stands regardless
+
+
 def test_no_declared_fee_is_a_fold_noop():
     """DP#32 golden no-op: no declared `management_fee` anywhere -> the rule
     refuses to fire and leaves BOTH working-state outputs at their exact
