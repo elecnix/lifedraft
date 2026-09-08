@@ -60,7 +60,8 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
 
     Returns ``{'return_overrides': {kind: {override_balance, weighted_rate_sum}},
     'locked': {kind: [{balance, unlock_age, owner_birth_year}]},
-    'mer_drag': {kind: {mer_rate}}}``.
+    'mer_drag': {kind: {mer_rate}},
+    'management_fee_rate': {kind: {management_fee_rate}}}``.
 
     - ``mer_drag[kind]`` (issue #691/#136): the balance-weighted average MER
       rate of accounts of ``kind`` that declared a `mer` fee. The growth rule
@@ -106,6 +107,12 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
     return_overrides: Dict[str, Dict[str, float]] = {}
     locked: Dict[str, List[Dict[str, Any]]] = {}
     mer_drag: Dict[str, Dict[str, float]] = {}
+    # Issue #142: per-kind s.20(1)(e) management-fee aggregation, mirroring the
+    # #691/#136 mer structure (intermediate collection, collapsed below).
+    mgmt_fee: Dict[str, Dict[str, float]] = {}
+    # Issue #142: kinds with at least one account that declares NO
+    # management_fee -- the mixed-pot signal for the $0-opening fallback.
+    has_non_mgmt: Dict[str, bool] = {}
     # Issue #136: total opening balance of ALL accounts of each growth-pot
     # kind (not just MER-flagged ones). Used to compute mer_rate as
     # weighted_mer_sum / kind_total so the fee is correct in year 1 (the rate
@@ -199,6 +206,17 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
             # (every account is flagged — the pot IS the flagged money).
             has_non_mer[kind] = True
             non_flagged_ids.setdefault(kind, []).append(acc["id"])
+        mfee = acc.get("management_fee")
+        if mfee is not None:
+            g = mgmt_fee.setdefault(kind, {"_balance": 0.0,
+                                           "_weighted_sum": 0.0,
+                                           "_max": 0.0})
+            g["_balance"] += amount
+            g["_weighted_sum"] += amount * mfee
+            if mfee > g["_max"]:
+                g["_max"] = mfee
+        else:
+            has_non_mgmt[kind] = True
         lu = acc.get("locked_until")
         if lu is None and product_rules is not None:
             lu = product_rules.locked_until
@@ -305,8 +323,31 @@ def _map_account_overrides(doc: Dict) -> Dict[str, Any]:
         del m["_mer_balance"]
         del m["_weighted_mer_sum"]
         del m["_max_mer"]
+    # Issue #142: collapse the management-fee collection into the final
+    # {management_fee_rate: float} structure the fold rule reads, mirroring
+    # the #136 mer collapse exactly: the fee is a RATE applied to the
+    # account-kind pot's OPENING balance each fold step (the same reference
+    # mer_drag's aggregation uses -- consistency with the existing fee path,
+    # stated as a modelling decision, not a silent convention). The same
+    # $0-opening split applies: a SINGLE-flagged pot (every account of the
+    # kind declares the fee -- the pot IS the fee'd money) falls back to the
+    # max declared rate so a funded pot is not silently fee-free; a MIXED pot
+    # falls back to 0.0 because charging non-declared money would invent a
+    # fee the household never agreed to. An explicit 0.0 is a declared
+    # fee-free fact (DP#32), recorded via the weighted-average path.
+    for kind, g in mgmt_fee.items():
+        if g["_balance"] > 0:
+            g["management_fee_rate"] = g["_weighted_sum"] / g["_balance"]
+        elif has_non_mgmt.get(kind):
+            g["management_fee_rate"] = 0.0
+        else:
+            g["management_fee_rate"] = g["_max"]
+        del g["_balance"]
+        del g["_weighted_sum"]
+        del g["_max"]
     return {"return_overrides": return_overrides, "locked": locked,
             "mer_drag": mer_drag,
+            "management_fee_rate": {k: v for k, v in mgmt_fee.items()},
             "mer_mixed_pot": mer_mixed_pot}
 
 
