@@ -635,11 +635,13 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
         LiquidationSource('non_reg', max(0.0, ws.new_nonreg_bal - locked_non_reg),
                            capital_gains_cost(non_reg_gain_frac,
                                                ctx.config.capital_gains_inclusion,
-                                               ctx.primary_marginal_rate)),
+                                               ctx.primary_marginal_rate,
+                                               friction=ctx.config.trading_friction)),
         LiquidationSource('tfsa', max(0.0, ws.new_tfsa_p_bal + ws.new_tfsa_sp_bal - locked_tfsa), identity_cost),
         LiquidationSource('registered',
                            max(0.0, ws.new_rrsp_bal + ws.new_spousal_rrsp_bal + ws.new_spouse_rrsp_bal - locked_registered),
-                           ordinary_income_cost(ctx.primary_marginal_rate)),
+                           ordinary_income_cost(ctx.primary_marginal_rate,
+                                                friction=ctx.config.trading_friction)),
     ]
 
     result = run_waterfall(shortfall, sources)
@@ -706,7 +708,11 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.solvency_liquidations = [
         {'source': step.source, 'gross_drawn': step.gross_drawn,
          'net_proceeds': step.net_proceeds, 'tax': step.tax,
-         'realized_gain': step.realized_gain}
+         'realized_gain': step.realized_gain,
+         # Issue #143: the trading friction this step paid (0.0 whenever no
+         # model is declared). Surfaced so the report can account for the
+         # full gross: net + tax + friction == gross_drawn, per step.
+         'friction': step.friction}
         for step in result.steps
     ]
     ws.solvency_ruined = result.ruined

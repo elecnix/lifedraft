@@ -686,6 +686,16 @@ class SimulationConfig:
     #   mer_drag[kind] = {'mer_rate': float}  # balance-weighted avg MER
     account_mer_drag: Dict = field(default_factory=dict)
 
+    # Issue #143: the DECLARED per-transaction trading-friction model (a
+    # bid/ask spread in bps + a flat commission per counted sale event),
+    # built once from ``assumptions.trading_friction`` at the loading
+    # boundary. None (no block declared) means frictionless: every consumer
+    # gates on the model being present and non-frictionless, so the golden
+    # household's run is byte-identical to the pre-feature behaviour (DP#32).
+    # Static declared fact -> rides the config (like account_mer_drag), not
+    # the per-year RuleContext.
+    trading_friction: Optional[object] = None
+
     @classmethod
     def from_json(cls, path: str) -> 'SimulationConfig':
         """Load configuration from an on-disk input contract document.

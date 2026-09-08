@@ -153,6 +153,14 @@ def map_assumptions(doc: Dict, start_year: int) -> tuple:
     return_beliefs = assumptions.get("return_beliefs")
     if return_beliefs is not None:
         assumptions_cfg["return_beliefs"] = dict(return_beliefs)
+    # Issue #143: the declared per-transaction trading-friction model passes
+    # through VERBATIM (the block's own loader, TradingFrictionModel
+    # .from_decl, does the loud per-key validation -- a typo'd key is refused
+    # there, not silently dropped here, DP#32). Absent block = absent key:
+    # the golden household stays byte-identical.
+    friction_decl = assumptions.get("trading_friction")
+    if friction_decl is not None:
+        assumptions_cfg["trading_friction"] = dict(friction_decl)
     return assumptions_cfg, resp_account_settings
 
 

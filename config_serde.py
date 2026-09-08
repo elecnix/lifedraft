@@ -69,6 +69,14 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
     tax = cfg.get('tax', {}) if isinstance(cfg.get('tax', {}), dict) else {}
 
     start_year = assumptions.get('start_year', 2026)
+    # Issue #143: the declared trading-friction block -> the ONE model
+    # spelling, built here at the loading boundary. Absent -> None (never a
+    # fabricated frictionless-looking model: None is the "not declared"
+    # marker the re-emit half keys off, so a household that declared nothing
+    # round-trips byte-identically, DP#32). A declared block -- even an
+    # all-zero one -- becomes a model (a declared 0 is a real value).
+    from trading_friction import TradingFrictionModel
+    friction_decl = assumptions.get('trading_friction')
     return dict(
         projection_years=projection_span(
             horizon_age=horizon_age,
@@ -249,6 +257,8 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         account_return_overrides=accounts.get('return_overrides', {}) if isinstance(accounts, dict) else {},
         account_locked=accounts.get('locked', {}) if isinstance(accounts, dict) else {},
         account_mer_drag=accounts.get('mer_drag', {}) if isinstance(accounts, dict) else {},
+        trading_friction=(TradingFrictionModel.from_decl(friction_decl)
+                          if friction_decl is not None else None),
     )
 
 
@@ -286,6 +296,12 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
                 'held_in': config.emergency_reserve_held_in,
                 'instrument': config.emergency_reserve_instrument,
             }} if config.emergency_reserve_target_months is not None else {}),
+            # Issue #143: re-emit the declared friction block (a declared
+            # all-zero block round-trips too -- it is a real declaration,
+            # DP#32). None (never declared) emits nothing.
+            **({'trading_friction': {'spread_bps': config.trading_friction.spread_bps,
+                                     'commission_per_trade': config.trading_friction.commission_per_trade}}
+               if config.trading_friction is not None else {}),
         },
         'cash_flows': config.cash_flows,
         'savings': {

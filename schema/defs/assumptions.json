@@ -233,7 +233,16 @@
         "products": { "type": "object", "additionalProperties": { "$ref": "#/$defs/product_definition" }, "description": "Synthetic product composition registry (issue #547). DP#15: synthetic names only, never real tickers." },
         "time_step": { "type": "string", "enum": ["yearly", "monthly"] },
         "return_beliefs": { "$ref": "#/$defs/return_beliefs", "description": "Issue #993 (DP#21): the household's long-run sleeve return beliefs used to price the risk-allocation recommendation's P10/P50/P90 metrics. Optional -- every key absent means the engine's documented default for that sleeve stands (a PARTIAL declaration merges over the defaults; it never zeroes the undeclared sleeves, DP#32). An explicit 0.0 is honoured as exactly zero." },
-        "emergency_reserve": { "$ref": "#/$defs/emergency_reserve", "description": "Issue #688: how much the household keeps OUT of the market, WHERE, and held as WHAT. Optional (DP#16 trigger data) and deliberately NOT in this object's `required` list -- but its absence is not a neutral default: it means the household holds a $0 reserve, and the ruin report (#679) says so explicitly rather than assuming one into existence (DP#32)." }
+        "emergency_reserve": { "$ref": "#/$defs/emergency_reserve", "description": "Issue #688: how much the household keeps OUT of the market, WHERE, and held as WHAT. Optional (DP#16 trigger data) and deliberately NOT in this object's `required` list -- but its absence is not a neutral default: it means the household holds a $0 reserve, and the ruin report (#679) says so explicitly rather than assuming one into existence (DP#32)." },
+        "trading_friction": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "spread_bps": { "type": "number", "minimum": 0, "description": "The proportional cost of turning one dollar over, in basis points -- the bid/ask spread crossed on a round trip plus any ad-valorem commission (5 bps on a $100,000 sale = $50). 0 = spread-free. Charged on the forced-liquidation waterfall's sales (the household's redemptions) and, as an annual NAV drag, on each pot's product-internal turnover." },
+            "commission_per_trade": { "$ref": "#/$defs/money", "description": "A flat commission per COUNTED trade event (a $9.95 ticket charge). Applies ONLY where the engine performed real, countable trade events -- today, each of the solvency waterfall's liquidation steps. The annual turnover path charges no commission (an aggregate pot's ticket count is not observable, DP#32)." }
+          },
+          "description": "Issue #143: the household's declared per-transaction trading friction. Optional -- absent means frictionless (every gate reads the model's presence, and the run is byte-identical to a frictionless declaration, DP#32)."
+        }
       }
     }
 
