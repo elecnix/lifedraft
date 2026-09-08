@@ -1111,7 +1111,8 @@ register(Approximation(
 # contributor's room, ``apply_contributions`` clips the excess -- and before
 # #170 the clipped slice simply VANISHED: booked $0, no warning, no redirect,
 # no disclosure. The per-year refusal amounts now ride every YearResult
-# (rrsp_contribution_refused_own / _spousal), and the optimize caller records
+# (rrsp_contribution_refused_own / _spousal / _spouse_own #176), and the
+# optimize caller records
 # the trajectory summary onto assumptions.rrsp_contribution_refused (the same
 # bridge #707's decumulation_shortfall uses), so this caveat can name the
 # first refused year and the refused totals on every surface. Direction is
@@ -1129,6 +1130,7 @@ def rrsp_refusal_summary(cfg: dict) -> Dict:
     return _run_recorded_summary(cfg, 'rrsp_contribution_refused', {
         'engaged': False, 'first_refused_year': None,
         'refused_own_total': 0.0, 'refused_spousal_total': 0.0,
+        'refused_spouse_own_total': 0.0,
     })
 
 
@@ -1143,6 +1145,7 @@ def _describe_rrsp_refusal(ctx: FidelityContext) -> List[str]:
     year = s.get('first_refused_year')
     own = s.get('refused_own_total', 0.0)
     spousal = s.get('refused_spousal_total', 0.0)
+    spouse_own = s.get('refused_spouse_own_total', 0.0)
     parts = []
     if year is not None:
         parts.append(f"first refused contribution in year {year}")
@@ -1152,6 +1155,10 @@ def _describe_rrsp_refusal(ctx: FidelityContext) -> List[str]:
     if spousal > 0:
         parts.append(f"${spousal:,.0f} of declared SPOUSAL RRSP contributions "
                      f"were refused (the contributor's pool was exhausted)")
+    if spouse_own > 0:
+        parts.append(f"${spouse_own:,.0f} of contributions declared to the "
+                     f"SPOUSE'S OWN RRSP were refused (above the spouse's "
+                     f"own room)")
     parts.append("the refused amounts were NOT redirected -- they entered no "
                  "account; a plan reading these contributions as made is wrong")
     return parts
@@ -1172,7 +1179,8 @@ register(Approximation(
             "room remaining (own first, spousal from the remainder of the "
             "contributor's pool). Before #170 the clipped slice was dropped "
             "by the bare min() with no record. Now the per-year refusals are "
-            "on YearResult.rrsp_contribution_refused_own/_spousal, and the "
+            "on YearResult.rrsp_contribution_refused_own/_spousal/_spouse_own "
+            "(#176), and the "
             "run-wide totals are recorded onto assumptions."
             "rrsp_contribution_refused so this caveat fires identically in "
             "TXT/JSON/HTML. The optimizer rarely trips this (it ranks splits "

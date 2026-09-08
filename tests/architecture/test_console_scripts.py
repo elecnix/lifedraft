@@ -23,7 +23,7 @@ PR), only that the wiring points somewhere real.
 from __future__ import annotations
 
 import importlib
-import tomllib
+import re
 from pathlib import Path
 
 import pytest
@@ -39,13 +39,22 @@ def _console_scripts() -> dict[str, str]:
     installed distribution metadata: the whole point of #749 was that the
     installed entry points lied about a module that no longer existed in the
     source tree, so the guard must verify against the tree, not the wheel.
+
+    Stdlib-only, no TOML parser: ``tomllib`` is 3.11+ and these tests must run
+    on 3.10 (the same rule ``test_numpy_runtime_dependency.py`` names). The
+    table is a handful of ``name = "module:attr"`` lines under the
+    ``[project.scripts]`` header -- parse that slice with a regex (house
+    pattern, see test_numpy_runtime_dependency.py).
     """
-    with _PYPROJECT.open("rb") as f:
-        data = tomllib.load(f)
-    scripts = data.get("project", {}).get("scripts", {})
+    text = _PYPROJECT.read_text()
+    block = re.search(r"(?m)^\[project\.scripts\]\s*$(.*?)(?=^\[|\Z)", text, re.S)
+    assert block, "no [project.scripts] table found in pyproject.toml"
+    scripts = dict(
+        re.findall(r'(?m)^\s*([A-Za-z0-9_-]+)\s*=\s*"([^"]+)"\s*$', block.group(1))
+    )
     if not scripts:
         pytest.fail("pyproject.toml has no [project.scripts]; the guard expects >=1 entry")
-    return dict(scripts)
+    return scripts
 
 
 @pytest.mark.parametrize("name, target", sorted(_console_scripts().items()))

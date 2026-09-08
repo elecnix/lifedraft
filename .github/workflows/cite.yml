@@ -45,4 +45,5 @@ jobs:
           # the old binary), and a release-time drift guard now enforces lockstep
           # upstream. Keep the explicit pin so a future regression cannot
           # silently re-deploy a stale binary.
-          version: v0.4.0
+          # Pin refreshed to v0.5.0 to match the action version above.
+          version: v0.5.0
