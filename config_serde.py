@@ -249,6 +249,11 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         account_return_overrides=accounts.get('return_overrides', {}) if isinstance(accounts, dict) else {},
         account_locked=accounts.get('locked', {}) if isinstance(accounts, dict) else {},
         account_mer_drag=accounts.get('mer_drag', {}) if isinstance(accounts, dict) else {},
+        # Issue #142: the s.20(1)(e) management-fee rates, pot-keyed. Absent
+        # key -> empty (no fee declared; DP#32).
+        account_management_fee_rate=(
+            accounts.get('management_fee_rate', {})
+            if isinstance(accounts, dict) else {}),
     )
 
 
@@ -448,6 +453,10 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
                if config.account_locked else {}),
             **({'mer_drag': config.account_mer_drag}
                if config.account_mer_drag else {}),
+            # Issue #142 (DP#24): round-trip the management-fee map. Empty
+            # dict round-trips to 'absent' (no fee declared).
+            **({'management_fee_rate': config.account_management_fee_rate}
+               if config.account_management_fee_rate else {}),
         },
         'tax': {
             'country': config.country,

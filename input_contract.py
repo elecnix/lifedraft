@@ -197,6 +197,11 @@ def to_internal_config(doc: Dict) -> Dict:
     # subtracts mer_rate from the pot's gross rate (net = gross - mer_rate).
     # Empty when no account declares a `mer` (golden: fee-free).
     accounts_cfg["mer_drag"] = account_overrides["mer_drag"]
+    # Issue #142: per-account s.20(1)(e) management fees, pot-keyed. The fold
+    # rule charges rate x opening pot balance as REAL CASH and pools the
+    # non-registered slice into the s.20(1)(c) deduction. Empty when no
+    # account declares a `management_fee` (golden: fee-free).
+    accounts_cfg["management_fee_rate"] = account_overrides["management_fee_rate"]
     # Issue #136: the mixed-pot-zero limitation -- when a kind has BOTH a
     # $0-opening MER-flagged account and a non-MER account, the flagged
     # accounts' fee is unmodeled for the whole run (mer_rate = 0.0). Recorded
