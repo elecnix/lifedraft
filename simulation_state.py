@@ -3416,6 +3416,10 @@ def simulate_year_pure(
         # Issue #956 bite B (sale-core): also folds in the realized gain from a
         # declared mid-horizon property SALE (ws.sale_realized_gain), so the AMT
         # base sees the property disposition's realized gain too.
+        # Issue #140: ws.solvency_realized_gain is now the SIGNED NET of the
+        # waterfall's realized gains/losses, so this base (and the `amt` rule's
+        # fast no-op) sees the NET capital position -- a below-ACB forced sale's
+        # loss reduces it, exactly as a carried or same-year capital loss does.
         realized_capital_gains=(ws.drawdown_realized_capital_gain
                                 + ws.solvency_realized_gain
                                 + ws.sale_realized_gain

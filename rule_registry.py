@@ -695,10 +695,15 @@ class YearWorkingState:
     solvency_covered: float = 0.0
     solvency_tax_paid: float = 0.0
     solvency_realized_loss: float = 0.0
-    # Issue #754: the positive realized capital gain (100% inclusion) crystallized
+    # Issue #754: the realized capital gain crystallized
     # by a FORCED non-reg liquidation in the solvency waterfall this year --
     # mirror of solvency_realized_loss (the negative part, #679). Folded into
     # YearResult.realized_capital_gains alongside the drawdown-side gain.
+    # Issue #140 UNFLOORED it: this is now the SIGNED NET of every step's
+    # realized gain/loss, so a below-ACB forced sale's loss reaches the tax
+    # path (the AMT base and the `capital_loss` ledger see the net position,
+    # not the gain with the loss floored away). The negative side is still
+    # reported separately in ``solvency_realized_loss``.
     solvency_realized_gain: float = 0.0
     solvency_liquidations: list = field(default_factory=list)
     solvency_credit_facility_unrepresentable: bool = False

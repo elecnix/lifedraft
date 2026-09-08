@@ -696,9 +696,13 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.solvency_covered = result.covered
     ws.solvency_tax_paid = sum(step.tax for step in result.steps)
     ws.solvency_realized_loss = sum(min(0.0, step.realized_gain) for step in result.steps)
-    # Issue #754: the positive counterpart -- a forced non-reg liquidation above
-    # cost base realizes a taxable capital gain, surfaced for the year-end AMT base.
-    ws.solvency_realized_gain = sum(max(0.0, step.realized_gain) for step in result.steps)
+    # Issue #754: the realized-gain figure the year-end AMT base folds in.
+    # Issue #140 UNFLOORED it: this is the SIGNED NET of every step's
+    # realized gain/loss (a below-ACB forced sale realizes a genuine loss,
+    # and both the AMT base and the `capital_loss` ledger must see the net
+    # position, not the gain with the loss floored away). The negative side
+    # is still reported separately in ``solvency_realized_loss`` above.
+    ws.solvency_realized_gain = sum(step.realized_gain for step in result.steps)
     ws.solvency_liquidations = [
         {'source': step.source, 'gross_drawn': step.gross_drawn,
          'net_proceeds': step.net_proceeds, 'tax': step.tax,

@@ -164,14 +164,22 @@ def capital_gains_cost(gain_frac: float, inclusion_rate: float, marginal_rate: f
     ``gain_frac`` is SIGNED and NOT clamped to [0, 1] here -- a forced sale
     while the account sits below its cost basis (a market-crash scenario,
     exactly the correlated case issue #679 is about) must report a genuine
-    realised loss, not a phantom zero. Only a positive gain is taxed; a
-    negative one costs nothing in tax (this engine does not yet carry
-    capital losses forward to shelter a later gain -- see module docstring).
+    realised loss, not a phantom zero.
+
+    Issue #140: the floor sits on the TAX, never on the GAIN. The realised
+    gain enters the taxable computation SIGNED (``realized_gain x
+    inclusion_rate``), so a net loss reaches the tax path -- the
+    ``capital_loss`` rule settles it into the carry-forward pool and the
+    year-end AMT base sees the net position -- instead of evaporating at
+    ``max(0.0, ...)``. But the tax itself is floored at 0: a loss never
+    produces a negative tax (no carryback -- this is a forward-only
+    projection -- and never a deduction against ordinary income); the loss
+    shelters later gains through the pool instead.
     """
     def _cost(gross: float) -> Tuple[float, float, float]:
         realized_gain = gross * gain_frac
-        taxable_gain = max(0.0, realized_gain) * inclusion_rate
-        tax = taxable_gain * max(0.0, min(0.95, marginal_rate))
+        taxable_gain = realized_gain * inclusion_rate  # signed (#140, unfloored)
+        tax = max(0.0, taxable_gain) * max(0.0, min(0.95, marginal_rate))
         return gross - tax, tax, realized_gain
     return _cost
 

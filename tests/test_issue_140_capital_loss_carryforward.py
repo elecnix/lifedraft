@@ -203,6 +203,52 @@ class TestCapitalLossRule(unittest.TestCase):
         assert fired is False
 
 
+class TestWaterfallUnfloored(unittest.TestCase):
+    """Issue #140: the two `max(0.0, ...)` floors are unfloored so the
+    signed loss reaches the tax path. The floor now sits on the TAX (a loss
+    never writes a check -- no carryback, never against ordinary income),
+    never on the GAIN (which flows signed to the ledger)."""
+
+    def test_capital_gains_cost_loss_flows_signed_tax_stays_zero(self):
+        from liquidation_waterfall import capital_gains_cost
+        cost = capital_gains_cost(-0.2, 0.5, 0.40)
+        net, tax, gain = cost(50_000)
+        # $50k gross from a pot 20% below ACB: a genuine $10k raw loss,
+        # signed all the way (unfloored); the tax is floored at 0, not the
+        # gain -- and never negative (no carryback, no ordinary-income
+        # deduction).
+        assert gain == pytest.approx(-10_000.0)
+        assert tax == 0.0
+        assert net == pytest.approx(50_000.0)
+
+    def test_capital_gains_cost_gain_unchanged(self):
+        from liquidation_waterfall import capital_gains_cost
+        cost = capital_gains_cost(0.2, 0.5, 0.40)
+        net, tax, gain = cost(50_000)
+        assert gain == pytest.approx(10_000.0)
+        assert tax == pytest.approx(10_000.0 * 0.5 * 0.40)
+        assert net == pytest.approx(50_000.0 - tax)
+
+    def test_solvency_realized_gain_nets_the_loss(self):
+        from liquidation_waterfall import (
+            LiquidationSource, capital_gains_cost, identity_cost,
+            run_waterfall)
+        # A $10k shortfall funded entirely from a below-ACB non-reg pot:
+        # every step's realized gain is a signed loss, so the signed net
+        # (solvency_realized_gain's new semantics) is negative while the
+        # loss-side report matches it.
+        sources = [
+            LiquidationSource('non_reg', 100_000.0,
+                              capital_gains_cost(-0.2, 0.5, 0.40)),
+        ]
+        result = run_waterfall(10_000, sources)
+        assert result.ruined is False
+        signed_net = sum(step.realized_gain for step in result.steps)
+        loss_side = sum(min(0.0, step.realized_gain) for step in result.steps)
+        assert signed_net < 0.0
+        assert signed_net == loss_side  # every step is a loss
+
+
 class TestDrawdownPricingSeam(unittest.TestCase):
     """The carry-forward pool's cash value: the non-reg draw's lead tax-free
     slice in plan_drawdown_net (cg_loss_offset)."""
