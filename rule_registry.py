@@ -330,6 +330,11 @@ class YearWorkingState:
     # every year (0.0 when everything booked), so no stale carryover.
     rrsp_refused_own: float = 0.0
     rrsp_refused_spousal: float = 0.0
+    # Issue #176: the same disclosure for the SPOUSE'S OWN RRSP declaration
+    # (``sp_rrsp``, clamped to ``opening_spouse_rrsp_room``) -- #170 stopped
+    # one line short of this one. Written unconditionally every year (0.0
+    # when everything booked), so no stale carryover.
+    spouse_rrsp_refused: float = 0.0
 
     # ── contributions rule ──
     p_rrsp_actual: float = 0.0
