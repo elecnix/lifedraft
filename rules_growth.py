@@ -12,6 +12,16 @@ rule (``rules_registered_plans``) and the FHSA rule (``rules_contributions``)
 import it from here rather than re-spelling it.
 
 Split out of ``simulation_rules.py``; the rule bodies are unchanged.
+
+Issue #143 (Part 4): each pot's rate also carries its product-internal
+TRADING-FRICTION drag -- the pot's blended ``Product.turnover`` (derived at
+the contract boundary from its declared holdings) times the DECLARED
+bid/ask spread, subtracted from the rate exactly like #691's MER. This
+prices the manager's own trading to maintain the composition: money that
+never leaves the household, charged as NAV drag on the pot balance. It is
+DISJOINT from the waterfall's sale friction (Part 2), which prices the
+household's redemptions on gross draws -- Part 4 never reads a waterfall
+draw, Part 2 never reads ``turnover``, so no trade is priced twice.
 """
 
 from __future__ import annotations
@@ -20,8 +30,31 @@ import logging
 from typing import Optional
 
 from rule_registry import RuleContext, YearWorkingState, rule
+from trading_friction import BPS
 
 logger = logging.getLogger(__name__)
+
+
+def _turnover_drag_rate(ctx: 'RuleContext', kind: str) -> float:
+    """Issue #143 (Part 4): the annual trading-friction drag RATE for one
+    pot (``kind``): its blended product-internal turnover times the declared
+    bid/ask spread. A NAV drag like #691's MER -- charged on the pot balance
+    via the growth rate, never as a cash outflow (the product's internal
+    trading moves no money out of the household). No declared friction
+    model, a frictionless model, or a turnover-free pot (no holdings, or a
+    0-turnover product such as a GIC ladder) all return 0.0 -- strict no-ops
+    (DP#32). The flat commission is deliberately NOT charged here: the
+    engine moves money at pot level and cannot observe the product's ticket
+    count (a fabricated count is the plausible-wrong-number defect DP#32
+    exists to prevent). Pure (DP#3).
+    """
+    model = ctx.config.trading_friction
+    if model is None or model.is_frictionless:
+        return 0.0
+    turnover = (ctx.config.turnover_drag or {}).get(kind, 0.0)
+    if turnover <= 0:
+        return 0.0
+    return turnover * model.spread_bps / BPS
 
 
 def _blended_pot_rate(ctx: 'RuleContext', kind: str, pot_total: float) -> float:
@@ -90,6 +123,13 @@ def _blended_pot_rate(ctx: 'RuleContext', kind: str, pot_total: float) -> float:
     wht_drag = ctx.registered_wht_drag
     if wht_drag:
         gross -= wht_drag.get(kind, 0.0)
+    # Issue #143 (Part 4): subtract the pot's product-internal turnover drag
+    # (blended turnover x declared spread) -- the trading cost of maintaining
+    # the composition, riding the same seam as the MER and WHT drags above.
+    # Disjoint from the waterfall's sale friction (Part 2): this prices the
+    # product's INTERNAL turnover on the pot balance; the waterfall prices
+    # the household's redemptions on gross draws. No trade is priced twice.
+    gross -= _turnover_drag_rate(ctx, kind)
     return gross
 
 @rule('registered_growth')
@@ -145,8 +185,19 @@ def apply_non_reg_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # portfolio after-tax adjustment is a future refinement. FTQ (the issue's
     # subject) lives in RRSP, not non_reg, so this is not the load-bearing
     # path for #823.
+    # Issue #143 (Part 4): the annual turnover drag applies on BOTH non-reg
+    # paths, EXACTLY ONCE. On the fallback path the rate comes from
+    # ``_blended_pot_rate``, which already subtracts the drag (the same seam
+    # every blended pot uses); on the DP#27 after-tax path the blend never
+    # ran, so the drag is subtracted here. The branch below preserves the
+    # existing equality quirk (a DP#27 rate that numerically equals the
+    # global rate re-blends) while guaranteeing one subtraction either way --
+    # a double subtraction would be the quiet double-charge this slice
+    # exists to prevent.
     if non_reg_growth_rate == ctx.investment_return:
         non_reg_growth_rate = _blended_pot_rate(ctx, 'non_reg', ws.new_nonreg_bal)
+    else:
+        non_reg_growth_rate -= _turnover_drag_rate(ctx, 'non_reg')
     ws.non_reg_growth_rate = non_reg_growth_rate
     pre = ws.new_nonreg_bal
     ws.new_nonreg_bal *= (1 + non_reg_growth_rate)

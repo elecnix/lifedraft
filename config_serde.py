@@ -257,6 +257,8 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         account_return_overrides=accounts.get('return_overrides', {}) if isinstance(accounts, dict) else {},
         account_locked=accounts.get('locked', {}) if isinstance(accounts, dict) else {},
         account_mer_drag=accounts.get('mer_drag', {}) if isinstance(accounts, dict) else {},
+        turnover_drag=accounts.get('turnover_drag', {})
+        if isinstance(accounts, dict) else {},
         trading_friction=(TradingFrictionModel.from_decl(friction_decl)
                           if friction_decl is not None else None),
     )
@@ -464,6 +466,10 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
                if config.account_locked else {}),
             **({'mer_drag': config.account_mer_drag}
                if config.account_mer_drag else {}),
+            # Issue #143: the blended per-pot turnover map round-trips like
+            # mer_drag (empty -> 'absent', DP#32).
+            **({'turnover_drag': config.turnover_drag}
+               if config.turnover_drag else {}),
         },
         'tax': {
             'country': config.country,

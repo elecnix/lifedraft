@@ -345,6 +345,87 @@ def _blend_registered_holdings(accs: List[Dict]) -> List[Dict]:
     return combined
 
 
+def _turnover_drag_by_kind(doc: Dict, products: Dict) -> Dict[str, float]:
+    """Issue #143 (Part 4): ``{kind: blended_turnover}`` for every pot whose
+    growth the engine prices through the blended-rate seam.
+
+    The manager's own trading to maintain a product's declared composition is
+    a property of the PRODUCT (the registry's ``Product.turnover`` -- already
+    declared, and until now consumed by nothing in the fold). Each pot's
+    blended turnover is the DOLLAR-WEIGHTED average of its accounts'
+    holding-weighted product turnovers: for each account,
+    ``sum(weight_h * turnover(product_h))`` over its holdings; across
+    accounts of one pot, balance-weighted (equal weights when every balance
+    is 0, so the rate stays well-defined -- the same convention
+    ``_blend_registered_holdings`` uses).
+
+    Pot kinds are the ones the growth rules actually price through
+    ``_blended_pot_rate``: rrsp, tfsa, fhsa, lira, lif, non_reg -- and a
+    declared ``spousal_rrsp`` account folds into the ``rrsp`` pot, because
+    that is exactly how its balance compounds (the fold sums the rrsp,
+    spousal-rrsp and spouse-rrsp balances into the one ``rrsp`` rate). A kind
+    whose growth does NOT run through that seam (today: resp and lsif) is
+    deliberately NOT mapped -- mapping it would be a dead write (DP#18), and
+    its turnover stays unpriced, disclosed here rather than silently
+    under-charged.
+
+    This is the SAME representation the engine already carries -- the
+    accounts' ``holdings`` resolved against ``assumptions.products`` -- not a
+    second turnover spelling (DP#9). A holding naming an unknown product is
+    refused loudly (DP#32): a typo'd product name must not silently price as
+    zero-turnover. Kinds with no holdings contribute no entry, so a
+    holdings-free contract yields ``{}`` -- a strict no-op (DP#32).
+
+    The growth rule (``rules_growth``) turns this into a NAV drag by
+    multiplying by the declared spread -- exactly like #691's MER, through
+    the same annual-charge seam. The engine moves money at pot level and
+    cannot observe the product's ticket COUNT, so the flat commission is
+    deliberately not charged here (a fabricated count is the
+    plausible-wrong-number defect DP#32 exists to prevent).
+    """
+    #: account kind -> the engine pot whose growth prices it. Absent kinds
+    #: (resp, lsif, ...) have no blended-rate consumer: not mapped (DP#18).
+    _GROWTH_POT = {
+        "rrsp": "rrsp",
+        "spousal_rrsp": "rrsp",  # the spousal pot compounds at the rrsp rate
+        "tfsa": "tfsa",
+        "fhsa": "fhsa",
+        "lira": "lira",
+        "lif": "lif",
+        "non_reg": "non_reg",
+    }
+    per_pot: Dict[str, List[Dict]] = {}
+    for a in doc.get("accounts", []):
+        pot = _GROWTH_POT.get(a.get("kind"))
+        if pot is not None and a.get("holdings"):
+            per_pot.setdefault(pot, []).append(a)
+    if not per_pot:
+        return {}
+    drag: Dict[str, float] = {}
+    for pot, accs in per_pot.items():
+        total = sum(a["balance"]["amount"] for a in accs)
+        n = len(accs)
+        weighted = 0.0
+        for acc in accs:
+            share = (acc["balance"]["amount"] / total) if total > 0 else (1.0 / n)
+            holdings = acc.get("holdings", [])
+            default_weight = 1.0 / len(holdings) if holdings else 0.0
+            account_turnover = 0.0
+            for h in holdings:
+                product = products.get(h["product"])
+                if product is None:
+                    raise ValueError(
+                        f"Account holding names unknown product "
+                        f"{h['product']!r} (kind={acc['kind']!r}); it is not a "
+                        f"key of assumptions.products, so its turnover cannot "
+                        f"be derived -- refuse rather than price it as "
+                        f"zero-turnover (DP#32)")
+                account_turnover += h.get("weight", default_weight) * product.get("turnover", 1.0)
+            weighted += share * account_turnover
+        drag[pot] = weighted
+    return drag
+
+
 def _registered_composition_accounts(doc: Dict, products: Dict) -> Dict[str, Dict]:
     """Issue #917: ``{kind: {composition, yield}}`` for every registered pot in
     ``doc`` that declares product holdings, derived from those holdings.
@@ -589,4 +670,12 @@ def map_account_pots(doc: Dict, as_of: str) -> tuple:
     registered_accounts = _registered_composition_accounts(doc, products)
     if registered_accounts:
         portfolio_cfg.setdefault("accounts", {}).update(registered_accounts)
+
+    # Issue #143 (Part 4): each pot's blended product-internal turnover, as a
+    # {kind: rate} map the growth rule turns into an annual NAV drag (the
+    # declared spread x turnover). Absent whenever no account declares
+    # holdings -- a strict no-op (DP#32).
+    turnover_by_kind = _turnover_drag_by_kind(doc, products)
+    if turnover_by_kind:
+        accounts_cfg["turnover_drag"] = turnover_by_kind
     return accounts_cfg, lira_cfg, lsif_cfg, portfolio_cfg

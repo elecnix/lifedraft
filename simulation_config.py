@@ -696,6 +696,18 @@ class SimulationConfig:
     # the per-year RuleContext.
     trading_friction: Optional[object] = None
 
+    # Issue #143 (Part 4): each pot's blended product-internal turnover (a
+    # {kind: rate} map derived at the contract boundary from the accounts'
+    # holdings resolved against assumptions.products). The growth rule turns
+    # it into an annual NAV drag by multiplying by the declared spread --
+    # exactly like account_mer_drag, which this rides beside. Absent kinds
+    # (or an empty map: a holdings-free household) charge nothing, so the
+    # golden run is byte-identical (DP#32). Deliberately NOT charged when no
+    # friction model is declared: turnover without a spread price is the
+    # pre-feature behaviour.
+    #   turnover_drag[kind] = float  # blended turnover fraction
+    turnover_drag: Dict = field(default_factory=dict)
+
     @classmethod
     def from_json(cls, path: str) -> 'SimulationConfig':
         """Load configuration from an on-disk input contract document.

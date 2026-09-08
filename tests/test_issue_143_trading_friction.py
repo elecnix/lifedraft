@@ -421,23 +421,23 @@ class TestAnnualTurnoverDrag:
     def test_no_friction_model_is_a_no_op_even_with_turnover(self):
         """A household with turnover-bearing products but no declared
         friction model keeps today's rate exactly (DP#32 golden no-op)."""
-        cfg = _drag_config(account_turnover_drag={'rrsp': 0.2})
+        cfg = _drag_config(turnover_drag={'rrsp': 0.2})
         assert _blended_pot_rate(_drag_ctx(cfg), 'rrsp', 100_000) == 0.07
 
     def test_drag_is_turnover_times_spread(self):
-        cfg = _drag_config(account_turnover_drag={'rrsp': 0.2},
+        cfg = _drag_config(turnover_drag={'rrsp': 0.2},
                            trading_friction=SPREAD_MODEL)
         # 20% of the pot turns over each year at 5 bps: 0.2 * 0.0005 = 1 bp.
         assert _blended_pot_rate(_drag_ctx(cfg), 'rrsp', 100_000) \
             == pytest.approx(0.07 - 0.2 * 5.0 / BPS)
 
     def test_drag_is_per_kind(self):
-        cfg = _drag_config(account_turnover_drag={'tfsa': 0.2},
+        cfg = _drag_config(turnover_drag={'tfsa': 0.2},
                            trading_friction=SPREAD_MODEL)
         assert _blended_pot_rate(_drag_ctx(cfg), 'rrsp', 100_000) == 0.07
 
     def test_drag_does_not_decay_with_pot_size(self):
-        cfg = _drag_config(account_turnover_drag={'rrsp': 0.2},
+        cfg = _drag_config(turnover_drag={'rrsp': 0.2},
                            trading_friction=SPREAD_MODEL)
         ctx = _drag_ctx(cfg)
         assert _blended_pot_rate(ctx, 'rrsp', 100_000) \
@@ -447,7 +447,7 @@ class TestAnnualTurnoverDrag:
         """The DP#27 after-tax path bypasses the blended-rate seam, so the
         drag is applied there too -- EXACTLY ONCE (a double subtraction is
         the quiet double-charge this slice exists to prevent)."""
-        cfg = _drag_config(account_turnover_drag={'non_reg': 0.2},
+        cfg = _drag_config(turnover_drag={'non_reg': 0.2},
                            trading_friction=SPREAD_MODEL)
         ws = YearWorkingState(new_nonreg_bal=100_000.0)
         apply_non_reg_growth(
@@ -459,7 +459,7 @@ class TestAnnualTurnoverDrag:
     def test_non_reg_fallback_path_drags_once(self):
         """The flat-rate fallback path goes through the blended-rate seam,
         which already carries the drag -- again exactly once."""
-        cfg = _drag_config(account_turnover_drag={'non_reg': 0.2},
+        cfg = _drag_config(turnover_drag={'non_reg': 0.2},
                            trading_friction=SPREAD_MODEL)
         ws = YearWorkingState(new_nonreg_bal=100_000.0)
         apply_non_reg_growth(ws, _drag_ctx(cfg))
@@ -518,10 +518,33 @@ class TestTurnoverDragFromTheRegistry:
         with pytest.raises(ValueError, match='typo_name'):
             _turnover_drag_by_kind(doc, doc['assumptions']['products'])
 
+    def test_spousal_rrsp_folds_into_the_rrsp_pot(self):
+        """The spousal pot compounds at the rrsp rate (the fold sums both
+        balances into one ``rrsp`` rate), so its holdings' turnover prices
+        into the rrsp pot -- balance-weighted with the rrsp accounts'."""
+        from contract_accounts import _turnover_drag_by_kind
+        doc = self._doc(
+            {'p_slow': {'category': 'global_equity_index', 'turnover': 0.05},
+             'p_fast': {'category': 'global_equity_index', 'turnover': 0.45}},
+            [self._acc('rrsp', 300_000, [{'product': 'p_slow', 'weight': 1.0}]),
+             self._acc('spousal_rrsp', 100_000, [{'product': 'p_fast', 'weight': 1.0}])])
+        drag = _turnover_drag_by_kind(doc, doc['assumptions']['products'])
+        assert drag == {'rrsp': pytest.approx(0.15)}
+
+    def test_pots_without_a_blended_rate_consumer_are_not_mapped(self):
+        """resp/lsif growth does not run through the blended-rate seam, so
+        mapping their turnover would be a dead write (DP#18): deliberately
+        absent, disclosed in the derivation's docstring."""
+        from contract_accounts import _turnover_drag_by_kind
+        doc = self._doc({'p_a': {'category': 'global_equity_index', 'turnover': 0.2}},
+                        [self._acc('resp', 100_000, [{'product': 'p_a', 'weight': 1.0}]),
+                         self._acc('lsif', 50_000, [{'product': 'p_a', 'weight': 1.0}])])
+        assert _turnover_drag_by_kind(doc, doc['assumptions']['products']) == {}
+
     def test_drag_round_trips_through_the_config(self):
         cfg = replace(_roundtrip_config(),
-                      account_turnover_drag={'rrsp': 0.2, 'non_reg': 0.15})
+                      turnover_drag={'rrsp': 0.2, 'non_reg': 0.15})
         d = cfg.to_dict()
         assert d['accounts']['turnover_drag'] == {'rrsp': 0.2, 'non_reg': 0.15}
         cfg2 = SimulationConfig.from_dict(d)
-        assert cfg2.account_turnover_drag == {'rrsp': 0.2, 'non_reg': 0.15}
+        assert cfg2.turnover_drag == {'rrsp': 0.2, 'non_reg': 0.15}
