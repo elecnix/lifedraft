@@ -39,6 +39,25 @@ class TestBelowACBDispositionReachesTaxPath:
         assert loss_offset == 0.0
 
 
+class TestLoudGuards:
+    """DP#32: absent or nonsense input fails loudly, never defaults."""
+
+    def test_negative_pool_is_refused(self):
+        # The pool only ever accumulates losses; a negative opening pool is
+        # corrupt state -- refuse it rather than silently pricing against it.
+        with pytest.raises(ValueError, match='negative'):
+            settle_year(opening_pool=-1.0, net_capital_position=10_000.0,
+                        inclusion=INCLUSION)
+
+    def test_inclusion_out_of_range_is_refused(self):
+        # An inclusion rate outside [0, 1] is not a rate -- refuse both
+        # directions rather than inventing a taxable basis from it.
+        for bad in (-0.1, 1.5):
+            with pytest.raises(ValueError, match='inclusion'):
+                settle_year(opening_pool=0.0, net_capital_position=10_000.0,
+                            inclusion=bad)
+
+
 class TestSameYearOffset:
     def test_loss_offsets_same_year_gain_before_pool_grows(self):
         # (b) A $50k loss and a $20k gain realized in the SAME year net to
@@ -375,6 +394,26 @@ class TestDrawdownPricingSeam(unittest.TestCase):
         assert plan.total_withdrawn == pytest.approx(4_000.0 + 20_000.0 / 3.0)
         assert plan.taxable_withdrawn == pytest.approx(20_000.0 / 3.0 * 0.25)
         assert plan.net_delivered == pytest.approx(10_000.0)
+
+    def test_offset_larger_than_the_pot_exhausts_it_tax_free(self):
+        # The offset covers the ENTIRE pot (gross_free = min(offset/inclusion,
+        # max_gross) == max_gross) while the net need exceeds what the pot can
+        # deliver: the taxed body is then called with max_gross - gross_free
+        # == 0 and must return its loud zero rather than price an empty draw.
+        # The pot empties through the lead tax-free slice alone.
+        from countries.canada.retirement_transition import plan_drawdown_net
+        canada = {'tfsa_primary_balance': 0}
+        plan = plan_drawdown_net(
+            20_000, ['non_reg'], canada, non_reg_balance=10_000,
+            non_reg_acb=5_000, marginal_rate=0.40,
+            cg_loss_offset=10_000.0)
+        assert plan.net_delivered == pytest.approx(10_000.0)
+        assert plan.total_withdrawn == pytest.approx(10_000.0)
+        assert plan.taxable_withdrawn == pytest.approx(0.0)
+        # The sheltered slice is the draw's whole taxable slice: 10k gross at
+        # gain_frac 0.5 x inclusion 0.5 = 2.5k includable.
+        assert plan.cg_loss_offset_used == pytest.approx(2_500.0)
+        assert plan.realized_capital_gain == pytest.approx(5_000.0)
 
     def test_no_offset_is_byte_identical_to_pre_140(self):
         from countries.canada.retirement_transition import plan_drawdown_net
