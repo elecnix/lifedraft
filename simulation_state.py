@@ -349,6 +349,17 @@ def _default_canada_state() -> dict:
         # parallel to SimulationConfig.children, initialized to all 0.0.
         'child_tuition_carryforwards': [],
 
+        # Issue #140: the capital-loss carry-forward pool, in TAXABLE-BASIS
+        # (includable) dollars -- a $40k raw net capital loss at 50% inclusion
+        # is $20k here. Settled once per year by the registered `capital_loss`
+        # rule (same-year offset, carry-forward; NEVER against ordinary
+        # income); its cash value is realized at pricing time, in the
+        # retirement drawdown's lead tax-free slice. 0.0 for a household that
+        # has never realized a net capital loss (inert, DP#32). Lives in
+        # jurisdiction_state['canada'] because it is a Canada-specific tax
+        # construct (DP#25: no Canada fields at SimState top level).
+        'capital_loss_carryforward': 0.0,
+
         # Epic #841 bite 2 / issue #812: each child's OWN registered accounts
         # (TFSA/FHSA/RRSP/non-reg) -- balances + available room -- as a list
         # parallel to SimulationConfig.children. A child is a first-class
@@ -3142,6 +3153,11 @@ def simulate_year_pure(
         'primary_tuition_carryforward': ws.new_primary_tuition_carryforward,
         'spouse_tuition_carryforward': ws.new_spouse_tuition_carryforward,
         'child_tuition_carryforwards': ws.new_child_tuition_carryforwards,
+        # Issue #140: write the capital_loss rule's settled pool to
+        # jurisdiction_state (the carry-forward that shelters a later year's
+        # net capital gain). 0.0 for a household with no losses (the golden
+        # path).
+        'capital_loss_carryforward': ws.new_capital_loss_carryforward,
         # Issue #700/#643/#704: write the single-slot WorkingState scalars back
         # into FRESH per-adult FHSA/LIRA/LIF stores carrying the prior ids/order.
         # A second adult's FHSA (slot 1) compounds at the same investment_return
@@ -3417,6 +3433,10 @@ def simulate_year_pure(
         # Issue #956 bite B (sale-core): also folds in the realized gain from a
         # declared mid-horizon property SALE (ws.sale_realized_gain), so the AMT
         # base sees the property disposition's realized gain too.
+        # Issue #140: ws.solvency_realized_gain is now the SIGNED NET of the
+        # waterfall's realized gains/losses, so this base (and the `amt` rule's
+        # fast no-op) sees the NET capital position -- a below-ACB forced sale's
+        # loss reduces it, exactly as a carried or same-year capital loss does.
         realized_capital_gains=(ws.drawdown_realized_capital_gain
                                 + ws.solvency_realized_gain
                                 + ws.sale_realized_gain
@@ -3624,6 +3644,13 @@ def simulate_year_pure(
         # household that declares no tuition (the golden path).
         primary_tuition_carryforward=ws.new_primary_tuition_carryforward,
         spouse_tuition_carryforward=ws.new_spouse_tuition_carryforward,
+        # Issue #140: the capital-loss carry-forward ledger surfaced for
+        # transparency (the settled pool, the offset the rule applied this
+        # year, and the slice pricing already sheltered). All 0.0 for a
+        # household with no losses (the golden path).
+        capital_loss_carryforward=ws.new_capital_loss_carryforward,
+        capital_loss_offset_applied=ws.capital_loss_offset_applied,
+        capital_loss_offset_priced=ws.cg_loss_offset_used,
         # Issue #137: surface the year-0 deployment-lag carry cost (computed
         # by FamilySimulation and passed through here) so output plugins can
         # render it. 0.0 in every year but year 0 (DP#32).

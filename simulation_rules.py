@@ -111,6 +111,7 @@ from rule_registry import RULES, RuleContext, YearWorkingState
 # ``RULE_ORDER`` is unregistered, so a module missing from this list is a loud
 # failure, never a silently skipped rule (DP#32).
 import rules_amt              # noqa: F401
+import rules_capital_loss     # noqa: F401
 import rules_contributions    # noqa: F401
 import rules_debt             # noqa: F401
 import rules_disposition      # noqa: F401
@@ -302,6 +303,22 @@ RULE_ORDER: tuple = (
     # 'solvency'; it is placed here to sit beside the rule that reads it.
     'tuition_credit',
     'solvency',
+    # Issue #140: the capital-loss carry-forward ledger. Settles the year's
+    # SIGNED net capital position (drawdown + forced-liquidation waterfall +
+    # property sales + HELOC-servicing + SM-unwind dispositions) against the
+    # carry-forward pool via capital_loss_carryforward.settle_year: same-year
+    # losses net against same-year gains first, the unused includable loss
+    # joins the pool, and the pool shelters a later year's net gain (its cash
+    # value is realized at pricing time, in the retirement drawdown's lead
+    # tax-free slice). Runs AFTER 'solvency' (the waterfall's forced
+    # liquidations are the last dispositions whose signed realized gains/
+    # losses the position reads) and BEFORE 'amt' (whose minimum-amount base
+    # must see the NET capital position, not the floored gain). A capital
+    # loss NEVER deducts against ordinary income (settle_year refuses to
+    # offset anything but a net capital gain). Strict no-op for a household
+    # with an empty pool and no realized capital gains/losses (the golden
+    # fixture) -- the golden invariant is unchanged by construction (DP#32).
+    'capital_loss',
     # issue #710/#747: the Alternative Minimum Tax is a YEAR-END assessment over
     # all of the year's realized income, so it runs DEAD LAST -- after solvency
     # has run every forced liquidation (each of which can realize a capital gain

@@ -26,8 +26,10 @@ quietly declares X, Y, and Z).
 
 The blocks stripped are the OPTIONAL illustrative ones (the example's
 ``transaction_costs`` (#139), the ``refi_50k`` refinance option's
-``advance_split`` (#792), and the ``refi_100k`` refinance option's
-``deployment_schedule_years`` / ``parking_rate`` (#74)).
+``advance_split`` (#792), the ``refi_100k`` refinance option's
+``deployment_schedule_years`` / ``parking_rate`` (#74), and the estate's
+``life_insurance`` policies, whose #138 premium legs are dated cash flows
+that would confound every byte-identical ``cash_flows`` assertion).
 A block a test is actively testing is added back BY THE TEST after the strip,
 never left to the example's illustration. The two-generation sub-family trim
 (``_two_generation_subset``) is applied first (the adapter only maps the
@@ -78,6 +80,12 @@ def minimal_example() -> Dict:
     doc = _two_generation_subset(_load_example())
     # Top-level illustrative block: the one-time transaction_costs (#139).
     doc.pop("transaction_costs", None)
+    # The estate's life_insurance policies: since #138 their premiums are
+    # dated cash-flow legs, so a test pinning a DIFFERENT feature's
+    # cash_flows byte-identity gets confounded by the example's illustration
+    # policies. A test pinning the insurance block adds policies back BY the
+    # test (see tests/test_issue_138_life_insurance_premiums.py).
+    doc["estate"]["life_insurance"] = []
     # The refinance options' illustrative deployment-timing / parking-rate /
     # advance-split blocks (#74/#137/#792). Stripped from EVERY refinance
     # option (the shipped example carries advance_split on refi_50k and a
