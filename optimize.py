@@ -4543,6 +4543,18 @@ def main():
     cfg.setdefault('assumptions', {})['rrsp_contribution_refused'] = \
         worst_rrsp_refusal([r.get('rrsp_refusal') for r in results
                             if isinstance(r, dict)])
+    # Issue #141: record whether any ranked scenario denied a superficial
+    # loss (the ITA s.53(1)(c) window) onto cfg BEFORE any surface renders,
+    # so the model_fidelity caveat (which reads assumptions.superficial_loss)
+    # fires identically in TXT/JSON/HTML. Same bridge, same spelling, as
+    # rrsp_contribution_refused above (#170/#707/DP#9); the
+    # worst-across-scenarios reduction is the pure ``worst_superficial_loss``
+    # beside the per-trajectory ``summarize_superficial_loss``.
+    from superficial_loss import summarize_superficial_loss, worst_superficial_loss
+    cfg.setdefault('assumptions', {})['superficial_loss'] = \
+        worst_superficial_loss([
+            summarize_superficial_loss(r.get('year_by_year', []))
+            for r in results if isinstance(r, dict)])
     # Issue #758: record the worst-case (shortest-runway) scenario's verdict
     # onto cfg BEFORE any surface renders, so the model_fidelity runway caveats
     # (which read assumptions.runway) fire identically in TXT/JSON/HTML and the

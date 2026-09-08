@@ -521,6 +521,13 @@ _CODE_ANCHORS = {
     # approximation (and the caveat) cannot arise.
     'deployment_lag_carry_is_linear': (
         'deployment_lag.py', 'lump * rate_spread * (months / 12.0)'),
+    # Issue #141: the annualized superficial-loss window. The statutory
+    # 61-day window is evaluated at the engine's annual step boundary;
+    # classify_window() in superficial_loss.py IS that abstraction -- the
+    # same-step/Y+1 limb pair and the pended-loss carry. Delete the window
+    # primitive and the caveat no longer describes anything real.
+    'superficial_loss_annual_window': (
+        'superficial_loss.py', 'def classify_window('),
     # unlabeled_dollar_basis is a config-shape gap, not a code path — it has
     # no anchor and is exempt below.
 }
