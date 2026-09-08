@@ -122,6 +122,14 @@ _INTERNAL_ROOT_ALLOWED_KEYS = {
     # simulator, DP#22). Not lifted onto a SimulationConfig field (a dead
     # surface -- D7); the raw key is the one spelling. Absence-safe (DP#32).
     'borrow_to_invest_options',
+    # Issue #141: the household's declared non-identical substitute pairs
+    # (decisions.superficial_loss.substitute_pairs), mapped by
+    # contract_decisions.map_superficial_loss onto SimulationConfig.
+    # superficial_loss_substitute_pairs (config_serde both halves); read by
+    # the registered `superficial_loss` rule to evaluate the ITA s.53(1)(c)
+    # window. Absent = the conservative identical-repurchase default
+    # (DP#32).
+    'superficial_loss_substitute_pairs',
     # Issue #692 (epic #690 bite 1): the couple's NON-principal real properties
     # (a cottage, a rental) as a first-class {id, kind, net_equity} list. Their
     # net equity reaches the annual balance sheet (SimulationConfig.properties

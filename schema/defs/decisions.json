@@ -277,8 +277,28 @@
         "resp_action": { "type": "array", "items": { "$ref": "#/$defs/resp_action" } },
         "estate_elections": { "type": "array", "items": { "$ref": "#/$defs/estate_election_candidate" } },
         "deposit_products": { "type": "array", "items": { "$ref": "#/$defs/deposit_product" }, "description": "OPTIONAL (issue #936): bank deposit products (a plain HISA, a term/GIC, a promotional teaser -- one generic mechanism) the optimizer ranks take-vs-leave as pure contract data. Absent/empty = no product swept -- a strict no-op, the golden trajectory is byte-identical (DP#32)." },
-        "borrow_to_invest": { "type": "array", "items": { "$ref": "#/$defs/borrow_to_invest_option" }, "description": "OPTIONAL (issue #1036): one-shot borrow-to-invest candidates (draw $X against a declared HELOC at year 0, invest the proceeds in non-reg, deduct the interest under ITA s.20(1)(c)). The optimizer sweeps the declared amount ladder plus the implicit no-draw baseline and ranks under the household's objective, mirroring decisions.mortgage.structure_options[]. Absent/empty = no borrow-to-invest sweep -- a strict no-op, the golden trajectory is byte-identical (DP#32). Independent of any mortgage / readvanceable facility: a mortgage-free household with a HELOC can express leverage this way. The unwind trigger is the #1017 decumulation lever, not modelled in this slice." }
+        "borrow_to_invest": { "type": "array", "items": { "$ref": "#/$defs/borrow_to_invest_option" }, "description": "OPTIONAL (issue #1036): one-shot borrow-to-invest candidates (draw $X against a declared HELOC at year 0, invest the proceeds in non-reg, deduct the interest under ITA s.20(1)(c)). The optimizer sweeps the declared amount ladder plus the implicit no-draw baseline and ranks under the household's objective, mirroring decisions.mortgage.structure_options[]. Absent/empty = no borrow-to-invest sweep -- a strict no-op, the golden trajectory is byte-identical (DP#32). Independent of any mortgage / readvanceable facility: a mortgage-free household with a HELOC can express leverage this way. The unwind trigger is the #1017 decumulation lever, not modelled in this slice." },
+        "superficial_loss": { "$ref": "#/$defs/superficial_loss" }
       }
+    },
+
+    "superficial_loss": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["substitute_pairs"],
+      "properties": {
+        "substitute_pairs": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "description": "Pairs of NON-identical substitute securities (issue #141, ITA s.53(1)(c)): e.g. [[\"XEQT\", \"VEQT\"]] declares that the household's repurchases inside the 61-day superficial-loss window are of the declared substitute, not the disposed security, so the loss is NOT denied. The engine tracks pot balances, not per-security holdings, so the declaration is an assertion of fact, not an optimization lever (DP#30)."
+        }
+      },
+      "description": "OPTIONAL (issue #141): the household's declaration of non-identical substitute securities for superficial-loss evaluation. ABSENT the whole block, the conservative default holds -- any repurchase in the window is treated as identical and the loss is denied/deferred into repurchase ACB (s.53(1)(f)). Present-but-partial (substitute_pairs missing) is refused loudly (DP#32)."
     },
 
     "sensitivity_preset": {
