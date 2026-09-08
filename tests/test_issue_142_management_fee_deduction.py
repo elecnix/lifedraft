@@ -8,7 +8,10 @@ s.336.0.1 QC cap, retirement gating). On REGISTERED kinds (RRSP/TFSA) it is
 a real cash fee with NO deduction -- the shelter means the expense is not a
 deductible charge against other income.
 
-Fixtures are synthetic round numbers (DP#15/#4).
+Fixtures are synthetic round numbers (DP#15/#4). Every engine-behaviour test
+drives the registered fold rules (`apply_management_fee`,
+`apply_sm_interest`, `apply_amt`) -- never a hand-built copy of their math
+(DP#11).
 """
 from __future__ import annotations
 
@@ -42,6 +45,18 @@ def test_no_declared_fee_records_nothing():
     assert out["management_fee_rate"] == {}
 
 
+def test_mer_only_account_gets_no_management_fee():
+    """An account declaring only `mer` populates mer_drag and records NO
+    management fee -- the two fees are distinct inputs (DP#8), and a MER
+    declaration must never silently grow into a s.20(1)(e) fee."""
+    doc = _doc_non_reg_with_fee()
+    del doc["accounts"][0]["management_fee"]
+    doc["accounts"][0]["mer"] = 0.01
+    out = _map_account_overrides(doc)
+    assert out["management_fee_rate"] == {}
+    assert out["mer_drag"] == {"non_reg": {"mer_rate": 0.01}}
+
+
 def _ctx(config, retired=False, taxable_income=0.0):
     """A minimal live-fold-shaped RuleContext: year_brackets supplied, so the
     deduction is valued at bracket-fill (the #1033 path), not flat-rate."""
@@ -67,48 +82,140 @@ def _ctx(config, retired=False, taxable_income=0.0):
 
 def test_nonreg_management_fee_is_deductible():
     """The non-registered slice of the fee is a deductible carrying charge:
-    it pools into the s.20(1)(c) deduction the sm_interest rule values at
-    bracket-fill (ws.sm_interest_deduction). $100,000 pot x 0.5% = $500."""
+    the `management_fee` rule charges rate x OPENING pot balance as real
+    cash, and the non-reg slice POOLS into the s.20(1)(c) deduction the
+    `sm_interest` rule values at bracket-fill (ws.sm_interest_deduction).
+    $100,000 pot x 0.5% = $500 fee + $500 traced mortgage interest = $1000."""
     from rule_registry import YearWorkingState
     from rules_leverage import apply_sm_interest
+    from rules_management_fee import apply_management_fee
     from simulation_config import SimulationConfig
 
     config = SimulationConfig()
     config.account_management_fee_rate = {
         "non_reg": {"management_fee_rate": 0.005}}
     ws = YearWorkingState()
-    ws.new_nonreg_bal = 100000.0
-    ws.management_fee = 500.0
-    # A pre-existing SM-interest pot keeps the rule off its no-traced-deduction
-    # early return; the fee's non-reg slice must POOL into that deduction
-    # ($500 traced + $500 fee = $1000 on ws.sm_interest_deduction).
-    ws.advance_deductible_interest = 500.0
-    ws.advance_deductible_balance = 0.0
-    ws.new_tracing = {'total_advances': 1000.0, 'investment_advances': 1000.0,
-                      'rrsp_advances': 0.0, 'tfsa_advances': 0.0,
-                      'personal_draws': 0.0}
-    ctx = _ctx(config)
-    fired = apply_sm_interest(ws, ctx)
+    ws.opening_non_reg_balance = 100000.0
+    fired = apply_management_fee(ws, _ctx(config))
     assert fired
+    assert ws.management_fee == 500.0
+    assert ws.management_fee_deductible == 500.0
+    # A pre-existing traced borrowing keeps the s.20(1)(c) rule off its
+    # no-deduction early return; the fee's slice must POOL into that
+    # deduction ($500 traced + $500 fee = $1000 on ws.sm_interest_deduction).
+    ws.mort = {'total_interest': 500.0}
+    ws.new_nonreg_bal = 100000.0
+    tracing = {'total_advances': 1000.0, 'investment_advances': 1000.0,
+               'rrsp_advances': 0.0, 'tfsa_advances': 0.0,
+               'personal_draws': 0.0}
+    ws.new_tracing = dict(tracing)
+    ws.new_advance_tracing = dict(tracing)
+    assert apply_sm_interest(ws, _ctx(config))
     assert ws.sm_interest_deduction == 1000.0
 
 
 def test_registered_management_fee_cash_no_deduction():
-    """RRSP/TFSA fees are real cash but add NOTHING to the deduction."""
+    """RRSP/TFSA/LIRA fees are real cash but add NOTHING to the deduction --
+    and a household with NO traced borrowing books no s.20(1)(c) deduction
+    at all (the rule's early return still fires; the fee never opens it)."""
     from rule_registry import YearWorkingState
     from rules_leverage import apply_sm_interest
+    from rules_management_fee import apply_management_fee
     from simulation_config import SimulationConfig
 
     config = SimulationConfig()
     config.account_management_fee_rate = {
         "rrsp": {"management_fee_rate": 0.005},
-        "tfsa": {"management_fee_rate": 0.005}}
+        "tfsa": {"management_fee_rate": 0.005},
+        "lira": {"management_fee_rate": 0.01}}
     ws = YearWorkingState()
     ws.opening_rrsp_balance = 100000.0
     ws.opening_tfsa_primary_balance = 50000.0
-    ws.management_fee = 750.0          # (100000 + 50000) * 0.005, real cash
-    ws.management_fee_deductible = 0.0  # registered: never deductible
-    ctx = _ctx(config)
-    apply_sm_interest(ws, ctx)
+    ws.opening_lira_balance = 10000.0
+    assert apply_management_fee(ws, _ctx(config))
+    # (100000 + 50000) * 0.5% + 10000 * 1% = 850, all cash, none deductible.
+    assert ws.management_fee == 850.0
+    assert ws.management_fee_deductible == 0.0
+    fired = apply_sm_interest(ws, _ctx(config))
+    assert not fired  # no traced borrowing, no fee slice -> early return
     assert ws.sm_interest_deduction == 0.0
-    assert ws.management_fee == 750.0
+    assert ws.management_fee == 850.0  # the cash fee stands regardless
+
+
+def test_no_declared_fee_is_a_fold_noop():
+    """DP#32 golden no-op: no declared `management_fee` anywhere -> the rule
+    refuses to fire and leaves BOTH working-state outputs at their exact
+    0.0 defaults, so the solvency identity's `+ ws.management_fee` and the
+    sm_interest pooling add a byte-identical zero. Absence is absence, never
+    a zeroed fee silently applied."""
+    from rule_registry import YearWorkingState
+    from rules_management_fee import apply_management_fee
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()  # account_management_fee_rate empty
+    ws = YearWorkingState()
+    ws.opening_non_reg_balance = 100000.0
+    ws.opening_rrsp_balance = 200000.0
+    assert not apply_management_fee(ws, _ctx(config))
+    assert ws.management_fee == 0.0
+    assert ws.management_fee_deductible == 0.0
+
+
+def test_management_fee_rate_does_not_touch_growth_drag():
+    """A declared management_fee must NOT change the growth net rate -- the
+    MER path (#136) is the only growth drag. A non_reg pot with ONLY a
+    management fee grows at the full gross rate; adding a `mer` is what
+    reduces it."""
+    from rule_registry import RuleContext, YearWorkingState
+    from rules_growth import _blended_pot_rate
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    config.account_management_fee_rate = {
+        "non_reg": {"management_fee_rate": 0.005}}
+    ctx = _ctx(config)
+    assert _blended_pot_rate(ctx, 'non_reg', 100000.0) == ctx.investment_return
+
+    config.account_mer_drag = {"non_reg": {"mer_rate": 0.01}}
+    ctx_mer = _ctx(config)
+    assert (_blended_pot_rate(ctx_mer, 'non_reg', 100000.0)
+            == ctx.investment_return - 0.01)
+
+
+def test_amt_noop_gate_includes_carrying_charges():
+    """Issue #142's AMT fix (a pre-existing bug): the no-op gate must NOT
+    fire in a no-gain year that booked a large s.20(1)(c) deduction -- the
+    s.127.52(1)(j)(ii) half-add-back can lift AMTI above regular taxable
+    income. Passing the gate is visible via ws.amt_taxable_income, which the
+    old gate returned before ever writing."""
+    from rule_registry import YearWorkingState
+    from rules_amt import apply_amt
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    ws = YearWorkingState()
+    ws.drawdown_taxable = 100000.0
+    ws.sm_interest_deduction = 10000.0
+    assert not apply_amt(ws, _ctx(config))  # no surcharge, but assessed
+    assert ws.amt_taxable_income == 100000.0
+
+
+def test_amt_half_add_back_raises_the_surcharge():
+    """The s.127.52(1)(j)(ii) half-add-back is live: identical gain years
+    differing only in the booked s.20(1)(c) deduction produce a STRICTLY
+    higher AMT surcharge for the carrying-charge household. Before the fix
+    both runs priced the same (the add-back was dormant)."""
+    from rule_registry import YearWorkingState
+    from rules_amt import apply_amt
+    from simulation_config import SimulationConfig
+
+    def _run(deduction):
+        config = SimulationConfig()
+        ws = YearWorkingState()
+        ws.drawdown_realized_capital_gain = 500000.0
+        ws.drawdown_taxable = 250000.0  # the 50%-included regular slice
+        ws.sm_interest_deduction = deduction
+        apply_amt(ws, _ctx(config))
+        return ws.amt_surcharge
+
+    assert _run(10000.0) > _run(0.0)
