@@ -303,10 +303,16 @@ class TestSubstitutePairDeclarationMapping:
         assert 'superficial_loss' not in doc['decisions']
         assert map_superficial_loss(doc) == []
 
-    def test_empty_block_returns_empty(self):
+    def test_empty_block_is_a_partial_declaration_and_raises(self):
+        # Cite thread (PR #196, logic-inversion): a PRESENT-but-empty block
+        # is a household that started a declaration and stopped -- it must
+        # be refused like substitute_pairs-absent, never silently defaulted
+        # to the conservative denial. Only true absence (None) returns [].
         doc = _two_generation_doc()
         doc['decisions']['superficial_loss'] = {}
-        assert map_superficial_loss(doc) == []
+        with pytest.raises(ValueError, match='substitute_pairs is'):
+            map_superficial_loss(doc)
+        assert map_superficial_loss(_two_generation_doc()) == []
 
     def test_declared_pairs_round_trip(self):
         doc = self._doc([['XEQT', 'VEQT'], ['XBB', 'VAB']])

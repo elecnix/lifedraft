@@ -935,12 +935,16 @@ def map_superficial_loss(doc: Dict) -> List[List[str]]:
       it a "substitute" of itself would assert a falsehood to dodge the
       window.
 
-    Returns ``[]`` when the household declares no block or an empty pair
-    list: the caller keeps the key out of the internal shape entirely so a
+    Returns ``[]`` when the household declares no block (true absence):
+    the caller keeps the key out of the internal shape entirely so a
     no-declaration household round-trips byte-identically (DP#24/DP#32).
+    A PRESENT-but-empty block (``{}``) is a partial declaration, not
+    absence -- it is refused like any other (DP#32): a household that
+    started a declaration and stopped must be told, never silently
+    defaulted to the conservative denial.
     """
     block = doc["decisions"].get("superficial_loss")
-    if not block:
+    if block is None:
         return []
     if not isinstance(block, dict):
         raise ValueError(
