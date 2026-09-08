@@ -45,6 +45,8 @@ import os
 import sys
 import unittest
 
+from liquidation_waterfall import summarize_solvency
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from countries.canada.adapter import CanadaAdapter
@@ -185,7 +187,18 @@ class TestCarryingCostsChargedWithoutLivingCosts(unittest.TestCase):
         """End-to-end conservation across the fold: a household paying
         $5k/yr it cannot absorb from income must end with strictly less
         than its cost-free twin. On main the two trajectories are
-        byte-identical (delta 0.0): the cost is stranded, the asset is free."""
+        byte-identical (delta 0.0): the cost is stranded, the asset is free.
+
+        Quantitative, not directional: the terminal delta must be at least
+        the ACCUMULATED declared outflows ($5k x 12 = $60k) -- every charged
+        dollar leaves before it can compound, so it can only cost the
+        household its face value or more by the fold's end (measured:
+        compounding plus liquidation drag put it well above). A gate that
+        charged $1 of the $60k stream would pass a sign test and still be
+        badly wrong; this bound fails it.
+        """
+        delta = (self.without_costs[-1].total_assets
+                 - self.with_costs[-1].total_assets)
         self.assertLess(
             self.with_costs[-1].total_assets,
             self.without_costs[-1].total_assets,
@@ -195,6 +208,11 @@ class TestCarryingCostsChargedWithoutLivingCosts(unittest.TestCase):
             f"{self.without_costs[-1].total_assets!r}): the household ended "
             f"richer for owning a costing asset -- money invented "
             f"from nothing (#195)")
+        self.assertGreaterEqual(
+            delta, CARRYING_ANNUAL * HORIZON_YEARS - 1e-6,
+            f"terminal delta {delta!r} is below the accumulated declared "
+            f"carrying costs {CARRYING_ANNUAL * HORIZON_YEARS!r} -- the "
+            "gate is under-charging the stream it claims to charge")
 
 
 class TestPurchaseOutflowChargedWithoutLivingCosts(unittest.TestCase):
@@ -221,7 +239,18 @@ class TestPurchaseOutflowChargedWithoutLivingCosts(unittest.TestCase):
         """A purchase converts portfolio dollars into property equity at a
         net LOSS of the closing costs (plus liquidation drag): the buyer must
         end strictly below the twin that never bought. On main the buyer ends
-        ABOVE by exactly the credited net_equity -- free property."""
+        ABOVE by exactly the credited net_equity -- free property.
+
+        Quantitative, not directional: the charged outflow is equity +
+        closing costs, but the equity does not LEAVE the household -- it
+        converts into property that stays on the balance sheet. The pure
+        leak is the closing costs, so the terminal delta must be at least
+        the declared closing costs. A gate that charged $1 of the $10k
+        would pass a sign test and still be badly wrong; this bound fails
+        it (the exact $70k charge is pinned separately above).
+        """
+        delta = (self.without_property[-1].total_assets
+                 - self.with_purchase[-1].total_assets)
         self.assertLess(
             self.with_purchase[-1].total_assets,
             self.without_property[-1].total_assets,
@@ -230,6 +259,11 @@ class TestPurchaseOutflowChargedWithoutLivingCosts(unittest.TestCase):
             f"({self.with_purchase[-1].total_assets!r} vs "
             f"{self.without_property[-1].total_assets!r}): the household "
             f"was credited equity it never paid for (#195)")
+        self.assertGreaterEqual(
+            delta, PURCHASE_CLOSING - 1e-6,
+            f"terminal delta {delta!r} is below the declared closing costs "
+            f"{PURCHASE_CLOSING!r} -- the purchase outflow is under-charged "
+            "even before the equity conversion is accounted for")
 
 
 class TestControlOutflowsChargedWhenLivingCostsDeclared(unittest.TestCase):
@@ -259,6 +293,65 @@ class TestControlOutflowsChargedWhenLivingCostsDeclared(unittest.TestCase):
             expected - 1e-6,
             f"year {PURCHASE_YEAR}: control household failed to charge the "
             f"purchase outflow -- the fixture itself is broken, not #195")
+
+
+class TestDp16NoOpSurvivesForThePureHousehold(unittest.TestCase):
+    """The GREEN control for the OTHER half of the narrowed gate.
+
+    The repair must not over-correct into "always run the solvency
+    machinery". A household that declares NEITHER a living-costs budget
+    NOR any real third-party obligation has nothing to charge and nothing
+    to fund: the DP#16 no-op must still fire in every year of the fold,
+    and the trajectory must be byte-identical to the same household
+    declaring an explicit ``living_costs`` of 0 (an explicitly-zero budget
+    and an absent budget leave nothing to charge in exactly the same way).
+    """
+
+    def test_pure_household_still_hits_the_no_op(self):
+        """No budget, no properties, no purchase: the solvency identity must
+        never run -- no outflow charged, no shortfall funded, no liquidation,
+        and the report must say UNCHECKED (engaged=False), not safe."""
+        results = _run(_household())
+        for r in results:
+            self.assertEqual(
+                r.solvency_spending_outflow, 0.0,
+                f"year {r.year}: the pure household charged an outflow "
+                f"{r.solvency_spending_outflow!r} -- the narrowed gate no "
+                "longer no-ops for a household with nothing declared (#195 "
+                "over-correction)")
+            self.assertEqual(
+                r.solvency_shortfall, 0.0,
+                f"year {r.year}: the pure household funded a shortfall "
+                f"{r.solvency_shortfall!r} nobody budgeted for -- the DP#16 "
+                "no-op is gone")
+            self.assertEqual(
+                r.forced_liquidation_events, [],
+                f"year {r.year}: the pure household liquidated accounts "
+                "through the waterfall -- the DP#16 no-op is gone")
+            self.assertFalse(
+                r.ruined,
+                f"year {r.year}: the pure household was marked ruined -- "
+                "the solvency machinery ran where the DP#16 no-op should "
+                "have fired")
+        summary = summarize_solvency(results)
+        self.assertFalse(
+            summary['engaged'],
+            "a household that never declared a budget or an obligation must "
+            "be reported as UNCHECKED, not as safely solvent (DP#32)")
+
+    def test_explicit_zero_budget_is_byte_identical_to_absent_budget(self):
+        """Declaring ``living_costs: 0`` and omitting the key are the same
+        fact (zero is a value, not a fallback -- DP#32): both must no-op and
+        produce byte-identical trajectories."""
+        absent = _run(_household())
+        zero_cfg = copy.deepcopy(_household())
+        zero_cfg["household_budget"] = {"living_costs": 0}
+        zero = _run(zero_cfg)
+        self.assertEqual(
+            repr(absent), repr(zero),
+            "an explicit living_costs of 0 produced a different trajectory "
+            "from an absent one -- zero was coerced or the gate treated the "
+            "two absences differently (DP#32/#195)")
 
 
 if __name__ == "__main__":
