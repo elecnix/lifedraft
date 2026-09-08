@@ -217,11 +217,14 @@ class TestEngineEndToEnd:
         first = results[0]
         # Year 1: spouse has $20k accumulated own room; $35k declared ->
         # $20k booked, $15k refused. (#170 semantics preserved: total nothing
-        # else of the refusals is on; primary/spousal are zero.)
+        # else of the refusals is on; primary/spousal are zero.) The
+        # spouse_rrsp field is the END-OF-YEAR balance: $20k booked grows at
+        # the 5% assumption inside year 1 (rules_growth.apply_rrsp_growth),
+        # so the balance reads $21k, not the booked $20k.
         assert first.rrsp_contribution_refused_own == 0.0
         assert first.rrsp_contribution_refused_spousal == 0.0
         assert first.rrsp_contribution_refused_spouse_own == 15_000.0
-        assert first.spouse_rrsp == 20_000.0
+        assert first.spouse_rrsp == 21_000.0
         s = summarize_rrsp_refusal(results)
         assert s['engaged'] is True
         assert s['refused_spouse_own_total'] >= 15_000.0
