@@ -203,6 +203,80 @@ class TestCapitalLossRule(unittest.TestCase):
         assert fired is False
 
 
+class TestPersistenceAndSurfacing(unittest.TestCase):
+    """The pool persists into jurisdiction_state['canada']
+    ['capital_loss_carryforward'] and surfaces on YearResult."""
+
+    def _sale_run(self, seeded_pool):
+        """Run one year of the #956-bite-B cottage-sale household (the same
+        shape the #584 registry sweep's Scenario M/P use) with an optional
+        seeded opening pool; return (YearResult, post-year state)."""
+        from simulation_config import SimulationConfig
+        from simulation_state import (
+            SimState, _default_canada_state, simulate_year_pure)
+        from test_issue_584_rules_registry import (
+            _default_tax_provider_combined_brackets)
+        from test_golden_trajectory_581 import golden_household_config
+        cfg_dict = golden_household_config()
+        cfg_dict.setdefault('properties', []).append({
+            'id': 'cottage',
+            'kind': 'recreational',
+            'net_equity': 200_000.0,
+            'value_share': 500_000.0,
+            'secured_share': 300_000.0,
+            'acb_share': 400_000.0,       # a $100k accrued gain
+            'sale': {
+                'year': 2026,
+                'selling_costs': 25_000.0,
+                'owner_roles': {'primary': 0.5, 'spouse': 0.5},
+                'designated_principal_residence_years': [],
+            },
+        })
+        cfg = SimulationConfig.from_dict(cfg_dict)
+        canada = dict(_default_canada_state())
+        if seeded_pool:
+            canada['capital_loss_carryforward'] = seeded_pool
+        state = SimState(jurisdiction_state={'canada': canada})
+        result, new_state = simulate_year_pure(
+            state=state, year=0, calendar_year=2026,
+            allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
+                         '_annual_savings': 0},
+            config=cfg, investment_return=0.0,
+            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            year_brackets=_default_tax_provider_combined_brackets())
+        return result, new_state
+
+    def test_sale_gain_with_seeded_pool_offsets_and_carries(self):
+        # A $100k raw sale gain ($50k includable) against a $30k seeded pool:
+        # the pool shelters $30k of it and is exhausted -- nothing carries
+        # out of the year, and the applied offset equals the whole pool.
+        result, new_state = self._sale_run(seeded_pool=30_000.0)
+        assert result.capital_loss_offset_applied == pytest.approx(30_000.0)
+        assert result.capital_loss_carryforward == pytest.approx(0.0)
+        assert (new_state.jurisdiction_state['canada']
+                ['capital_loss_carryforward']) == pytest.approx(0.0)
+
+    def test_excess_pool_carries_forward_in_state(self):
+        # A $60k pool against the same $50k-includable gain: $50k applied,
+        # and the unused $10k remainder carries forward in the persisted
+        # state (the pool that shelters a LATER year's gain).
+        result, new_state = self._sale_run(seeded_pool=60_000.0)
+        assert result.capital_loss_offset_applied == pytest.approx(50_000.0)
+        assert result.capital_loss_carryforward == pytest.approx(10_000.0)
+        assert (new_state.jurisdiction_state['canada']
+                ['capital_loss_carryforward']) == pytest.approx(10_000.0)
+
+    def test_no_pool_no_dispositions_surfaces_zeros(self):
+        # The golden path: nothing realized, nothing carried -- every new
+        # YearResult field reads 0.0 and the persisted pool stays 0.0.
+        result, new_state = self._sale_run(seeded_pool=0.0)
+        assert result.capital_loss_carryforward == 0.0
+        assert result.capital_loss_offset_applied == 0.0
+        assert result.capital_loss_offset_priced == 0.0
+        assert (new_state.jurisdiction_state['canada']
+                ['capital_loss_carryforward']) == 0.0
+
+
 class TestWaterfallUnfloored(unittest.TestCase):
     """Issue #140: the two `max(0.0, ...)` floors are unfloored so the
     signed loss reaches the tax path. The floor now sits on the TAX (a loss
