@@ -571,6 +571,21 @@ class YearResult:
     primary_tuition_carryforward: float = 0.0
     spouse_tuition_carryforward: float = 0.0
 
+    # Issue #140: the capital-loss carry-forward ledger. ``capital_loss_
+    # carryforward`` is the pool at the END of this year (in taxable-basis,
+    # i.e. includable dollars) -- the loss carried forward to shelter a later
+    # year's net capital gain. ``capital_loss_offset_applied`` is the
+    # includable loss the `capital_loss` rule actually applied against this
+    # year's net capital gain (same-year offset + pool sheltering).
+    # ``capital_loss_offset_priced`` is the includable slice the pricing
+    # layer (the retirement drawdown's lead tax-free slice) already sheltered
+    # this year -- the pool's cash value, realized where the engine can
+    # actually re-price a gain. All 0.0 for a household that never realizes
+    # a net capital loss (the golden fixture).
+    capital_loss_carryforward: float = 0.0
+    capital_loss_offset_applied: float = 0.0
+    capital_loss_offset_priced: float = 0.0
+
     # Epic #841 bite 4: end-of-year snapshot of each child's OWN accounts (the
     # bite-2 child_accounts list -- one dict per child with rrsp/tfsa/fhsa/
     # non_reg balances and their room/acb). Threaded here as REPORTING data so

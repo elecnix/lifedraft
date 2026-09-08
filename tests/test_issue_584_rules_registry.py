@@ -95,6 +95,7 @@ EXPECTED_RULE_NAMES = frozenset({
     'property_disposition',        # issue #956 bite B: a declared mid-horizon property SALE settles in its sale year (net proceeds invested post-growth, gain taxed + PRE-apportioned, conservation identity Δtotal_assets = -(selling_costs + T))
     'tuition_credit',              # epic #795 bite 3: federal (+ QC) tuition tax credit (own credit + #784 carry-forward + #785 transfers) -- was inline in the fold's prologue
     'solvency',                    # issue #679: cash-flow identity + forced-liquidation waterfall
+    'capital_loss',                # issue #140: settle the year's signed net capital position against the capital-loss carry-forward pool (same-year offset + carry-forward; never against ordinary income)
     'amt',                         # issue #710: year-end Alternative Minimum Tax assessment (max(regular, AMT)) over the year's realized capital gains
 })
 
@@ -205,6 +206,12 @@ EXPECTED_RULE_ORDER = (
     # after-tax income. Was inline in the fold's prologue (two spellings).
     'tuition_credit',
     'solvency',
+    # issue #140: the capital-loss carry-forward ledger settles the year's
+    # SIGNED net capital position against the pool. Runs AFTER 'solvency'
+    # (the waterfall's forced liquidations are the last dispositions whose
+    # signed realized gains/losses the position reads) and BEFORE 'amt'
+    # (whose minimum-amount base must see the NET capital position).
+    'capital_loss',
     # issue #710: the AMT assessment runs DEAD LAST -- it is a year-end
     # assessment over ALL of the year's realized income, so it must run after
     # solvency has crystallized every forced-liquidation gain (the AMT base).
@@ -882,6 +889,32 @@ def test_every_rule_fires_somewhere_in_representative_households():
                          '_annual_savings': 0},
             config=financed_config, investment_return=0.0,
             primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+        )
+    _merge(fired)
+
+    # ── Scenario P: the SAME cottage sale (issue #956 bite B) but with a
+    # capital-loss carry-forward pool seeded in jurisdiction_state (issue
+    # #140: the `capital_loss` rule). The pool -- carried in from a prior
+    # year's net capital loss -- shelters the sale year's net capital gain
+    # (carry-forward semantics), so the rule has an observable effect in
+    # this scenario and correctly stays a no-op in every OTHER one (no pool
+    # and no realized capital gains/losses). Round numbers, role-based
+    # names (DP#4/#15).
+    from copy import deepcopy
+    seeded_loss_state = SimState(
+        jurisdiction_state={
+            'canada': {**_default_canada_state(),
+                       'capital_loss_carryforward': 5_000.0}})
+    with trace_firing() as fired:
+        simulate_year_pure(
+            state=seeded_loss_state, year=0,
+            calendar_year=2026,
+            allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
+                         '_annual_savings': 0},
+            config=sale_config, investment_return=0.0,
+            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            year_brackets=_default_tax_provider_combined_brackets(),
+            primary_taxable_income=130_000.0, spouse_taxable_income=50_000.0,
         )
     _merge(fired)
 
