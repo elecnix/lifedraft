@@ -196,17 +196,25 @@ def summarize_superficial_loss(results) -> Dict:
     denied_total = 0.0
     acb_added_total = 0.0
     pending_years = 0
+
+    def _f(row, name):
+        # The optimize row's year_by_year carries asdict()-serialized dicts
+        # (issue #248); a caller holding YearResults passes objects. Both
+        # spellings, one summarizer (DP#9).
+        return row.get(name, 0.0) if isinstance(row, dict) \
+            else getattr(row, name, 0.0)
+
     for row in results:
-        denied = getattr(row, 'superficial_loss_denied', 0.0)
-        acb = getattr(row, 'superficial_loss_acb_added', 0.0)
-        held = getattr(row, 'superficial_loss_pended', 0.0)
+        denied = _f(row, 'superficial_loss_denied')
+        acb = _f(row, 'superficial_loss_acb_added')
+        held = _f(row, 'superficial_loss_pended')
         if denied > 0.0 or acb > 0.0 or held > 0.0:
             engaged = True
         denied_total += denied
         acb_added_total += acb
         pending_years += 1 if held > 0.0 else 0
         if denied > 0.0 and first_denied_year is None:
-            first_denied_year = getattr(row, 'year', None)
+            first_denied_year = _f(row, 'year')
     return {
         'engaged': engaged,
         'first_denied_year': first_denied_year,
