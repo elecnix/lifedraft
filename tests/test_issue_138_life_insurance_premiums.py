@@ -211,11 +211,16 @@ class TestAdapterFoldsPremiumLegs(unittest.TestCase):
                          [(y, -1200.0) for y in range(2026, 2037)])
 
     def test_no_policies_map_cash_flows_exactly_as_before(self):
-        """DP#32 at the adapter: emptying life_insurance restores the exact
-        pre-feature cash_flows list -- nothing added, nothing reshaped."""
+        """DP#32 at the adapter: removing the declared policies strips the
+        exact pre-feature cash_flows list -- nothing added, nothing
+        reshaped. (minimal_example() now starts policy-free -- the example's
+        illustration policies confound other features' byte-identity tests --
+        so this test declares its own baseline WITH a policy.)"""
         doc = minimal_example()
-        baseline = ic.to_internal_config(doc)["cash_flows"]
-        doc["estate"]["life_insurance"] = []
+        baseline_doc = copy.deepcopy(doc)
+        baseline_doc["estate"]["life_insurance"] = [
+            _policy(pol_id="term_only", term_end="2036-06-30")]
+        baseline = ic.to_internal_config(baseline_doc)["cash_flows"]
         stripped = ic.to_internal_config(doc)["cash_flows"]
         self.assertEqual(stripped, [cf for cf in baseline
                                     if cf.get("label")
