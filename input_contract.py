@@ -86,6 +86,7 @@ from contract_assumptions import (
 from contract_decisions import (
     map_borrow_to_invest, map_contribution_strategies, map_declared_objective,
     map_income_scenarios, map_mortgage_decisions, map_resp_action_scenarios,
+    map_superficial_loss,
 )
 from contract_estate import _family_pre_window, _map_estate, map_insurance_premiums
 from contract_liabilities import map_consumer_loans, resolve_liability_facilities
@@ -375,6 +376,18 @@ def to_internal_config(doc: Dict) -> Dict:
     btv_options = map_borrow_to_invest(doc, heloc)
     if btv_options:
         legacy["borrow_to_invest_options"] = btv_options
+
+    # Issue #141: decisions.superficial_loss.substitute_pairs -- the
+    # household's declaration that its superficial-loss-window repurchases
+    # are of non-identical substitutes (e.g. XEQT vs VEQT). Mapped (with its
+    # DP#32 boundary refusals raised) by
+    # contract_decisions.map_superficial_loss. Emitted only when the
+    # household declares some: an absent block keeps the conservative
+    # identical-repurchase default, so a no-declaration household
+    # round-trips byte-identically (DP#24/DP#32).
+    superficial_pairs = map_superficial_loss(doc)
+    if superficial_pairs:
+        legacy["superficial_loss_substitute_pairs"] = superficial_pairs
 
     # Issue #692 (epic #690 bite 1): the couple's NON-principal properties reach
     # the annual balance sheet as a first-class `properties` list
