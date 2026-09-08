@@ -3586,6 +3586,10 @@ def simulate_year_pure(
         # Issue #679: solvency identity + forced-liquidation waterfall.
         after_tax_income=ws.solvency_after_tax_income,
         living_costs=ws.solvency_living_costs,
+        # Issue #195: the engine's own per-year "the solvency identity ran"
+        # decision, stamped by apply_solvency's narrowed gate and read by
+        # the reporting fold -- never re-inferred from output scalars (DP#11).
+        solvency_engaged=ws.solvency_engaged,
         solvency_spending_outflow=ws.solvency_spending_outflow,
         solvency_discretionary_compressed=ws.solvency_discretionary_compressed,
         # Issue #760: this year's dated living-cost segment outflow charged in

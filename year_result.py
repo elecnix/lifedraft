@@ -382,6 +382,14 @@ class YearResult:
     # does not run without its trigger data).
     after_tax_income: float = 0.0       # Employment income net of tax this year
     living_costs: float = 0.0           # This year's declared working-phase budget
+    # Issue #195: True in exactly the years apply_solvency's narrowed gate
+    # ran the cash-flow identity (a declared living-costs budget OR any real
+    # third-party obligation: #696 purchase, #1010 carrying costs, #760
+    # segments). Stamped on YearWorkingState at the gate itself -- the
+    # engine's own "the identity ran" decision -- so the reporting fold reads
+    # one fact instead of re-inferring it (DP#11). False in every no-op year
+    # (no budget AND no obligation declared).
+    solvency_engaged: bool = False
     # Issue #761: the spending figure actually CHARGED in the cash-flow
     # identity's `required` term this year. Equals `living_costs` in every
     # year except a working-life income-shock year where the household

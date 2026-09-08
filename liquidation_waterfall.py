@@ -272,9 +272,15 @@ def summarize_solvency(results: Sequence) -> Dict:
     ``simulation_config`` (DP#25: dependencies point inward -- the waterfall
     is the inner layer here, and it must not reach back out to the config).
 
-    ``engaged`` is False when the household never supplied
-    ``household_budget.annual_living_costs``: the solvency module never ran,
-    and every zero below is an ABSENCE, not a measurement of safety. A caller
+    ``engaged`` is True when the solvency identity RAN in at least one year:
+    the household supplied ``household_budget.annual_living_costs`` OR
+    declared a real third-party obligation (#696 purchase, #1010 carrying
+    costs, #760 dated expense segments) that #195's narrowed gate charges
+    unconditionally. The fact is read from the engine's own per-year stamp
+    (``YearResult.solvency_engaged``, set by apply_solvency's gate itself) --
+    the fold never re-infers engagement from output scalars (DP#11). When it
+    is False the solvency module never ran, and every zero below is an
+    ABSENCE, not a measurement of safety. A caller
     that prints "0 shortfall years" for an un-engaged run would be reporting
     the most dangerous falsehood this codebase exists to prevent (DP#32), so
     the flag is returned first and the caller must branch on it.
@@ -290,7 +296,7 @@ def summarize_solvency(results: Sequence) -> Dict:
             'credit_facility_unrepresentable': False,
         }
 
-    engaged = any(getattr(r, 'living_costs', 0.0) > 0 for r in results)
+    engaged = any(getattr(r, 'solvency_engaged', False) for r in results)
     shortfall_rows = [r for r in results if getattr(r, 'solvency_shortfall', 0.0) > 0]
     ruined_rows = [r for r in results if getattr(r, 'ruined', False)]
 

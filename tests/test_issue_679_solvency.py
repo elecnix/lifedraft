@@ -335,7 +335,8 @@ RUIN_RRSP_CONTRIBUTION = 8_000     # the "committed savings" the pre-#679
 
 
 def _run_income_collapse_trajectory(collapse_year: int, n_years: int = 4,
-                                     reserve: float = 10_000):
+                                     reserve: float = 10_000,
+                                     living_costs: float = None):
     """Fold ``simulate_year_pure`` by hand across ``n_years``: comfortable
     income through ``collapse_year - 1``, EI-level income from
     ``collapse_year`` onward. A small starting cushion (fabricated, round
@@ -346,7 +347,16 @@ def _run_income_collapse_trajectory(collapse_year: int, n_years: int = 4,
     step is structurally empty until #689 (see apply_solvency's docstring);
     a HELOC is a *secured* product and is not a substitute for the unsecured
     line of credit that step is about.
+
+    ``living_costs`` defaults to ``RUIN_LIVING_COSTS`` (a declared budget).
+    Passing 0.0 runs the genuinely un-engaged case: no budget AND no
+    third-party obligation, so apply_solvency's narrowed gate (#195) never
+    fires the identity. Per the DP#16 no-op control
+    (test_issue_195_solvency_outflow_gate), an explicit zero budget is
+    byte-identical to an absent one.
     """
+    if living_costs is None:
+        living_costs = RUIN_LIVING_COSTS
     cfg = _reserve_config(emergency_reserve_rate=0.0)
     state = SimState(
         emergency_reserve_balance=reserve,
@@ -369,7 +379,7 @@ def _run_income_collapse_trajectory(collapse_year: int, n_years: int = 4,
             state=state, year=year,
             allocations=allocations, config=cfg, investment_return=0.05,
             primary_marginal_rate=0.30, mortgage_data=mort,
-            living_costs=RUIN_LIVING_COSTS, after_tax_income=after_tax_income,
+            living_costs=living_costs, after_tax_income=after_tax_income,
         )
         results.append(result)
     return results
@@ -909,15 +919,32 @@ class TestSolvencySummaryFold(unittest.TestCase):
 
     def test_an_unengaged_run_is_reported_as_UNCHECKED_not_as_safe(self):
         """DP#32, and the most dangerous falsehood this report could tell.
-        A household that never declared its living costs has not been found
-        solvent -- it has not been CHECKED. `engaged=False` is what forces
-        the caller to say so instead of printing a reassuring '0 shortfalls'.
+        A household that never declared its living costs -- and declared no
+        third-party obligation the #195 narrowed gate would charge -- has
+        not been found solvent: the gate never fired, the identity never
+        ran. `engaged=False` is what forces the caller to say so instead of
+        printing a reassuring '0 shortfalls'.
         """
-        results = _run_income_collapse_trajectory(collapse_year=99, n_years=3)
-        for r in results:
-            r.living_costs = 0.0     # the module never ran: no budget was supplied
+        results = _run_income_collapse_trajectory(
+            collapse_year=99, n_years=3, living_costs=0.0)
         summary = summarize_solvency(results)
         self.assertFalse(summary['engaged'])
+
+    def test_the_fold_reads_the_stamp_not_the_living_costs_scalar(self):
+        """#195 (DP#11): engagement is the engine's own per-year stamp
+        (``YearResult.solvency_engaged``, set by apply_solvency's gate) --
+        the fold must never re-infer it from output scalars. Rewriting
+        ``r.living_costs`` after the run cannot un-run the identity, so it
+        must not flip the verdict (the old predicate let it).
+        """
+        results = _run_income_collapse_trajectory(collapse_year=2, n_years=3)
+        self.assertTrue(summarize_solvency(results)['engaged'])
+        for r in results:
+            r.living_costs = 0.0     # post-hoc mutation of an OUTPUT scalar
+        self.assertTrue(
+            summarize_solvency(results)['engaged'],
+            "mutating YearResult.living_costs after the run must not flip "
+            "engaged -- the fold reads the engine's stamp (DP#11, #195)")
 
     def test_a_ruined_trajectory_reports_ruin_and_the_year_it_runs_out(self):
         results = _run_income_collapse_trajectory(collapse_year=2, n_years=5)

@@ -258,6 +258,17 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
     margin_available trigger-data pattern), not a value being silently
     coerced.
 
+    Issue #195 NARROWED that no-op's span (the DP#16 principle itself is
+    untouched): the old gate sat before the identity's outflow terms, so an
+    undeclared budget also silently deleted every DECLARED third-party
+    obligation -- #696 purchases, #1010 carrying costs, #760 dated expense
+    segments -- while the balance-sheet side of the same facts still landed
+    (money invented from nothing). The no-op now fires only when the
+    household declares neither a living-cost budget NOR any real obligation:
+    the engine still never funds a budget shortfall nobody budgeted for,
+    but a declared carrying cost or a signed purchase is charged (and, on a
+    shortfall, waterfall-funded) unconditionally.
+
     If even the full waterfall cannot cover the shortfall, the year is
     marked ``ws.solvency_ruined = True`` -- a hard ruin, reported on
     ``YearResult.ruined``, never silently absorbed (DP#32). This function
@@ -392,15 +403,6 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
         annual_debt_service=ws.mort.get('total_payment', 0.0) + consumer_debt_service,
     )
 
-    if ctx.living_costs <= 0:
-        return False
-
-    debt_service = ws.mort.get('total_payment', 0.0) + consumer_debt_service
-    contributions = (
-        ws.p_rrsp_actual + ws.s_rrsp_actual + ws.sp_rrsp_actual
-        + ws.p_tfsa_actual + ws.sp_tfsa_actual + ws.non_reg_alloc
-        + ws.resp_alloc + ws.fhsa_actual
-    )
     # Issue #696 (epic #690 bite 5): a dated mid-horizon PROPERTY PURCHASE is a
     # cash outflow in its purchase year, funded like every other spend the
     # household cannot cover from income -- through THIS identity's liquidation
@@ -438,6 +440,54 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # byte-for-byte today's behaviour (DP#32).
     carrying_cost_outflow = _total_carrying_cost_in_year(
         ctx.config, ctx.calendar_year, ctx.config.start_year)
+    # Issue #195: the DP#16 no-op is NARROWED, not deleted. Two questions were
+    # conflated under one gate and deserve opposite answers:
+    #
+    # 1. Should the engine FUND a shortfall the household never declared a
+    #    budget for? NO -- when ``living_costs`` is undeclared there is no
+    #    budget-driven shortfall to fund, and a household with no declared
+    #    budget AND no declared third-party obligation still no-ops here
+    #    entirely (the gate below keeps that no-op).
+    # 2. Should the engine CHARGE an outflow owed to a third party? YES,
+    #    ALWAYS. A cottage's carrying costs, a signed property purchase, and a
+    #    dated expense segment are declared, dated facts with obligations of
+    #    their own -- they do not stop existing because the household never
+    #    declared a working-budget scalar. The old gate sat BEFORE the
+    #    identity's outflow terms, so it deleted those obligations wholesale
+    #    while the balance-sheet side of the same facts still landed (the
+    #    property's net_equity entered total_assets): equity credited, cash
+    #    never leaving -- money invented from nothing.
+    #
+    # So the gate's SPAN is narrowed: it no longer guards the whole identity,
+    # only the budget-driven case. When a real obligation is declared, the
+    # identity runs with ``living_costs`` contributing exactly what was
+    # declared (0.0 when undeclared -- the budget term is simply absent, not
+    # coerced), and any shortfall the REAL obligations create is funded
+    # through the same waterfall as every other spend. The ``<= 0``
+    # comparisons are threshold checks on computed obligations, not the DP#32
+    # zero-as-fallback pattern: nothing is coerced, and an explicitly-zero
+    # obligation is indistinguishable from an absent one only because neither
+    # leaves anything to charge.
+    if (ctx.living_costs <= 0
+            and seg_charged <= 0.0
+            and purchase_outflow <= 0.0
+            and carrying_cost_outflow <= 0.0):
+        return False
+    # Issue #195: the gate just DECIDED the identity runs this year -- stamp
+    # that fact here, once, so the reporting fold
+    # (liquidation_waterfall.summarize_solvency) reports ``engaged`` from the
+    # engine's own decision instead of re-inferring it from output scalars
+    # (DP#11: one fact, defined once, where it is computed). The stamp sits
+    # BEFORE the solvent early return below: a year the identity ran and
+    # found no shortfall is still an engaged year.
+    ws.solvency_engaged = True
+
+    debt_service = ws.mort.get('total_payment', 0.0) + consumer_debt_service
+    contributions = (
+        ws.p_rrsp_actual + ws.s_rrsp_actual + ws.sp_rrsp_actual
+        + ws.p_tfsa_actual + ws.sp_tfsa_actual + ws.non_reg_alloc
+        + ws.resp_alloc + ws.fhsa_actual
+    )
     # Borrowed money that was invested this year is an INFLOW as well as an
     # outflow: it arrives from the lender and leaves for the brokerage in the
     # same breath. `contributions` below already counts the outflow, so the
