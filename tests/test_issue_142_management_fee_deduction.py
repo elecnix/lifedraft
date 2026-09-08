@@ -107,6 +107,65 @@ def test_opening_pot_balance_lif_and_fhsa_pots():
     assert _opening_pot_balance(ws, 'fhsa') == 8000.0
 
 
+def _state_with_tfsa_and_lira(primary_tfsa=120000.0, spouse_tfsa=30000.0,
+                              lira=54000.0):
+    """A real SimState carrying per-adult TFSA (primary + spouse) and a LIRA,
+    the stores the engine's own ``YearWorkingState.from_state`` stamps the
+    ``opening_*`` scalars from (issue #700/#643)."""
+    from simulation_state import SimState, _default_canada_state
+    canada = _default_canada_state()
+    canada['adult_tfsa'] = {
+        'primary': {'balance': primary_tfsa, 'room': 0.0},
+        'spouse': {'balance': spouse_tfsa, 'room': 0.0},
+    }
+    canada['adult_lira'] = {'primary': {
+        'balance': lira, 'birth_year': 1979, 'jurisdiction': 'quebec',
+        'reference_rate': 0.06, 'conversion_year': 0,
+    }}
+    return SimState(
+        non_reg_balance=0.0, non_reg_acb=0.0, mortgage_balance=0.0,
+        heloc_balance=0.0, jurisdiction_state={'canada': canada})
+
+
+def test_tfsa_pot_fee_charged_on_summed_opening_balances():
+    """A declared ``tfsa`` management fee is charged on the SUM of the
+    primary's and the spouse's opening TFSA balances (rule line 67) -- the
+    registered rule over an engine-stamped working state (no hand-built
+    openings), and no slice is deductible: the shelter means the fee is
+    real cash with NO s.20(1)(e) charge against other income."""
+    from rule_registry import YearWorkingState
+    from rules_management_fee import apply_management_fee
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    config.account_management_fee_rate = {
+        "tfsa": {"management_fee_rate": 0.001}}
+    ws = YearWorkingState.from_state(_state_with_tfsa_and_lira(), {}, 0)
+    assert (ws.opening_tfsa_primary_balance,
+            ws.opening_tfsa_spouse_balance) == (120000.0, 30000.0)
+    assert apply_management_fee(ws, _ctx(config))
+    assert ws.management_fee == 150.0  # 0.001 x (120000 + 30000)
+    assert ws.management_fee_deductible == 0.0
+
+
+def test_lira_pot_fee_charged_on_opening_balance():
+    """A declared ``lira`` management fee is charged on the LIRA pot's opening
+    balance (rule line 70), read from the per-adult store the engine stamps
+    -- again real cash, no deduction (a LIRA is registered money)."""
+    from rule_registry import YearWorkingState
+    from rules_management_fee import apply_management_fee
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    config.account_management_fee_rate = {
+        "lira": {"management_fee_rate": 0.002}}
+    ws = YearWorkingState.from_state(_state_with_tfsa_and_lira(), {}, 0)
+    assert ws.opening_lira_balance == 54000.0
+    assert apply_management_fee(ws, _ctx(config))
+    assert ws.management_fee == 108.0  # 0.002 x 54000
+    assert ws.management_fee_deductible == 0.0
+
+
 def test_opening_pot_balance_unknown_kind_is_a_loud_failure():
     """An adapter-emitted kind with no opening field raises ValueError
     (rule line 75) -- a loud failure, never a silently unfunded pot (DP#32)."""
