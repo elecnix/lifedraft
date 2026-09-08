@@ -44,6 +44,11 @@ def apply_contributions(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # the working state, every YearResult, and the model_fidelity caveat.
     ws.rrsp_refused_own = ws.p_rrsp - p_rrsp_actual
     ws.rrsp_refused_spousal = ws.s_rrsp - s_rrsp_actual
+    # Issue #176: the spouse's OWN declaration is a third, separate declared
+    # line -- an over-room slice here gets its own refused field, mirroring
+    # #170 exactly. Booked amounts unchanged (the clamp still bounds what
+    # enters the plan); this only makes the refusal VISIBLE.
+    ws.spouse_rrsp_refused = ws.sp_rrsp - sp_rrsp_actual
 
     ws.p_rrsp_actual = p_rrsp_actual
     ws.s_rrsp_actual = s_rrsp_actual
@@ -251,11 +256,13 @@ def worst_rrsp_refusal(rows) -> Dict:
                if isinstance(r, dict) and r.get('engaged')]
     if not engaged:
         return {'engaged': False, 'first_refused_year': None,
-                'refused_own_total': 0.0, 'refused_spousal_total': 0.0}
+                'refused_own_total': 0.0, 'refused_spousal_total': 0.0,
+                'refused_spouse_own_total': 0.0}
     return max(
         engaged,
         key=lambda row: (row.get('refused_own_total', 0.0)
-                         + row.get('refused_spousal_total', 0.0),
+                         + row.get('refused_spousal_total', 0.0)
+                         + row.get('refused_spouse_own_total', 0.0),
                          -(row.get('first_refused_year')
                            if row.get('first_refused_year') is not None
                            else float('inf'))))
@@ -272,6 +279,7 @@ def summarize_rrsp_refusal(results) -> Dict:
           'first_refused_year':   int | None,
           'refused_own_total':    float, # sum of own-RRSP refusals across the run
           'refused_spousal_total': float, # sum of spousal-RRSP refusals
+          'refused_spouse_own_total': float, # sum of spouse's OWN-RRSP refusals (#176)
         }
 
     Mirrors ``decumulation.summarize_drawdown_shortfall`` (#707): the facts are
@@ -283,18 +291,22 @@ def summarize_rrsp_refusal(results) -> Dict:
     first_year = None
     own_total = 0.0
     spousal_total = 0.0
+    spouse_own_total = 0.0
     for r in results:
         own = getattr(r, 'rrsp_contribution_refused_own', 0.0)
         spousal = getattr(r, 'rrsp_contribution_refused_spousal', 0.0)
-        if own > 0 or spousal > 0:
+        spouse_own = getattr(r, 'rrsp_contribution_refused_spouse_own', 0.0)
+        if own > 0 or spousal > 0 or spouse_own > 0:
             engaged = True
             if first_year is None:
                 first_year = getattr(r, 'year', None)
         own_total += own
         spousal_total += spousal
+        spouse_own_total += spouse_own
     return {
         'engaged': engaged,
         'first_refused_year': first_year,
         'refused_own_total': own_total,
         'refused_spousal_total': spousal_total,
+        'refused_spouse_own_total': spouse_own_total,
     }
