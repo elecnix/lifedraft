@@ -419,9 +419,15 @@ def apply_sm_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.margin_deductible_balance = ws.new_heloc_balance * margin_proportion
 
     traced_deductible = ws.advance_deductible_interest + ws.margin_deductible_interest
-    total_deductible = sm_deductible + traced_deductible
+    # Issue #142: the non-registered management fee (s.20(1)(e)) is the same
+    # taxpayer's same kind of carrying charge -- it pools into ONE deduction
+    # here rather than becoming a second engine: bracket-fill valuation, the
+    # shared QC cap, and the retirement gating all reuse the s.20(1)(c)
+    # machinery wholesale. 0.0 for a household that declares no fee (DP#32).
+    total_deductible = (sm_deductible + traced_deductible
+                        + ws.management_fee_deductible)
 
-    if not sm_active and traced_deductible <= 0:
+    if not sm_active and traced_deductible <= 0 and ws.management_fee_deductible <= 0:
         # Nothing traced anywhere: no deduction, and the carry-forward simply
         # carries. Byte-for-byte the pre-#850 `else` branch -- the golden
         # household lands here every year of its 46-year horizon.
@@ -459,7 +465,7 @@ def apply_sm_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # statute, so it deducts the full traced interest provincially too, and
     # any carry-forward it somehow carries simply carries (#1035).
     qc_income_pots = [ws.new_sm_investment]
-    if traced_deductible > 0:
+    if traced_deductible > 0 or ws.management_fee_deductible > 0:
         qc_income_pots.append(ws.new_nonreg_bal)
     from countries.canada.provinces.quebec.quebec_deduction import (
         cap_qc_investment_interest)

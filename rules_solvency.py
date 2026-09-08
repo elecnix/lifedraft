@@ -474,7 +474,14 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
         # False in retirement, so nothing compresses). A segment that already
         # ended (`to` in an earlier year) contributes 0 here by construction.
         spending_outflow = (ws.retirement_spending_target + seg_charged
-                            + purchase_outflow + carrying_cost_outflow)
+                            + purchase_outflow + carrying_cost_outflow
+                            # Issue #142: the s.20(1)(e) management fees are
+                            # a real annual cash outflow on the declared
+                            # pots -- non-compressible (a must-pay contract
+                            # fee, not a lifestyle choice), waterfall-funded,
+                            # money conserved (DP#18). 0.0 for a household
+                            # that declares no fee (the golden path, DP#32).
+                            + ws.management_fee)
         available = (ctx.after_tax_income + ws.drawdown_net_delivered
                      + ws.cpp_income + ws.oas_income + ws.pension_income
                      + ctx.borrowed_investment + ctx.free_cash_invested
@@ -542,7 +549,10 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
         # stress relief transparently (DP#32).
         spending_outflow = (
             (ctx.living_costs - discretionary_compressed) + seg_charged
-            + purchase_outflow + carrying_cost_outflow)
+            + purchase_outflow + carrying_cost_outflow
+            # Issue #142: the management fees' cash outflow (see the retired
+            # branch) -- 0.0 when no fee is declared (DP#32).
+            + ws.management_fee)
         discretionary_compressed += seg_discretionary_compressed
         available = (ctx.after_tax_income + ws.drawdown_net_delivered
                      + ctx.borrowed_investment + ctx.free_cash_invested
