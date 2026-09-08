@@ -37,6 +37,42 @@ def test_adapter_collects_management_fee_rate():
     assert out["management_fee_rate"] == {"non_reg": {"management_fee_rate": 0.005}}
 
 
+def test_mixed_pot_zero_opening_records_zero_rate():
+    """The #136 mixed-pot split, management-fee edition (adapter lines 341-342):
+    a MIXED non_reg pot (one flagged account, one non-flagged) where every
+    account opens at $0 falls back to rate 0.0 -- charging the non-flagged
+    money would invent a fee the household never agreed to. Mirror of
+    #136's ``mer_mixed_pot_zero_fee_unmodeled`` fixture shape (DP#13/DP#15)."""
+    doc = {
+        "people": [],
+        "accounts": [
+            {"id": "acct_flagged", "kind": "non_reg",
+             "balance": {"amount": 0.0, "as_of": "2026-01-01"},
+             "acb": 0.0, "holdings": [], "beneficiary": None,
+             "successor_holder": None, "owner": {"person": "primary"},
+             "management_fee": 0.005},
+            {"id": "acct_plain", "kind": "non_reg",
+             "balance": {"amount": 0.0, "as_of": "2026-01-01"},
+             "acb": 0.0, "holdings": [], "beneficiary": None,
+             "successor_holder": None, "owner": {"person": "spouse"}},
+        ],
+    }
+    out = _map_account_overrides(doc)
+    assert out["management_fee_rate"] == {
+        "non_reg": {"management_fee_rate": 0.0}}
+
+
+def test_single_flagged_zero_opening_falls_back_to_max():
+    """The #136 single-flagged split, management-fee edition (adapter lines
+    343-344): a non_reg pot where EVERY account declares the fee and opens at
+    $0 -- the pot IS the fee'd money -- falls back to the max declared rate so
+    a future funded state is not silently fee-free."""
+    doc = _doc_non_reg_with_fee(fee=0.005, balance=0.0)
+    out = _map_account_overrides(doc)
+    assert out["management_fee_rate"] == {
+        "non_reg": {"management_fee_rate": 0.005}}
+
+
 def test_no_declared_fee_records_nothing():
     """No declared fee -> empty map (DP#32: absence is absence, golden no-op)."""
     doc = _doc_non_reg_with_fee()
@@ -55,6 +91,54 @@ def test_mer_only_account_gets_no_management_fee():
     out = _map_account_overrides(doc)
     assert out["management_fee_rate"] == {}
     assert out["mer_drag"] == {"non_reg": {"mer_rate": 0.01}}
+
+
+def test_opening_pot_balance_lif_and_fhsa_pots():
+    """``_opening_pot_balance`` maps the ``lif`` and ``fhsa`` pot kinds to their
+    opening fields (rule lines 71-74) -- every adapter-emittable kind has a
+    real opening balance, never a silently unfunded pot (DP#32)."""
+    from rule_registry import YearWorkingState
+    from rules_management_fee import _opening_pot_balance
+
+    ws = YearWorkingState()
+    ws.opening_lif_balance = 40000.0
+    ws.opening_fhsa_balance = 8000.0
+    assert _opening_pot_balance(ws, 'lif') == 40000.0
+    assert _opening_pot_balance(ws, 'fhsa') == 8000.0
+
+
+def test_opening_pot_balance_unknown_kind_is_a_loud_failure():
+    """An adapter-emitted kind with no opening field raises ValueError
+    (rule line 75) -- a loud failure, never a silently unfunded pot (DP#32)."""
+    import pytest
+    from rule_registry import YearWorkingState
+    from rules_management_fee import _opening_pot_balance
+
+    with pytest.raises(ValueError, match="unknown account kind"):
+        _opening_pot_balance(YearWorkingState(), 'mystery_kind')
+
+
+def test_declared_zero_fee_rate_is_a_value_not_absence():
+    """DP#32: an explicitly declared 0.0 fee rate is a DECLARED fee-free fact
+    (rule line 101's continue), not an absent declaration -- the household
+    said zero. Behaviourally both book no fee; the distinction the rule
+    protects is that the zero declaration is consumed as a fact, not skipped
+    as missing input, so a kind explicitly set to 0.0 coexisting with a
+    charged kind still books only the charged fee."""
+    from rule_registry import YearWorkingState
+    from rules_management_fee import apply_management_fee
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    config.account_management_fee_rate = {
+        "non_reg": {"management_fee_rate": 0.0},
+        "rrsp": {"management_fee_rate": 0.005}}
+    ws = YearWorkingState()
+    ws.opening_non_reg_balance = 100000.0
+    ws.opening_rrsp_balance = 200000.0
+    assert apply_management_fee(ws, _ctx(config))
+    assert ws.management_fee == 1000.0  # rrsp only; the declared 0.0 adds nothing
+    assert ws.management_fee_deductible == 0.0
 
 
 def _ctx(config, retired=False, taxable_income=0.0):
