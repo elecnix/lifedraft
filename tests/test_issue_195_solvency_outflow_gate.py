@@ -266,6 +266,48 @@ class TestPurchaseOutflowChargedWithoutLivingCosts(unittest.TestCase):
             "even before the equity conversion is accounted for")
 
 
+class TestEngagedStampFollowsTheNarrowedGate(unittest.TestCase):
+    """#195 (reporting side): ``summarize_solvency()['engaged']`` must say
+    True for an obligation-only household.
+
+    The narrowed gate charges a declared carrying cost / signed purchase
+    even when no living-costs budget is declared, so the solvency identity
+    demonstrably ran -- liquidations may have fired, the year may even have
+    ruined. The reporting fold used to re-infer engagement from the OLD
+    predicate (``living_costs > 0``) and printed UNCHECKED for exactly that
+    run. Engagement is now the engine's own per-year stamp
+    (``YearResult.solvency_engaged``, set by apply_solvency's gate) and the
+    fold reads it -- never re-inferred (DP#11).
+
+    Purchase-bound pin caveat: the bought-property run's terminal balance
+    sheet is not asserted here -- the pin only asserts the engagement flag,
+    so it carries no dependence on modelled property appreciation never
+    outpacing portfolio return plus liquidation drag.
+    """
+
+    def test_carrying_cost_household_is_engaged(self):
+        results = _run(_household([_cottage(CARRYING_ANNUAL)]))
+        self.assertTrue(
+            summarize_solvency(results)['engaged'],
+            "an obligation-only household (carrying cost declared, no "
+            "budget) ran the solvency identity every year -- the summary "
+            "must not report UNCHECKED (#195)")
+
+    def test_purchase_household_is_engaged(self):
+        results = _run(_household([_bought_property()]))
+        self.assertTrue(
+            summarize_solvency(results)['engaged'],
+            "a signed mid-horizon purchase ran the solvency identity in its "
+            "purchase year -- the summary must not report UNCHECKED (#195)")
+
+    def test_pure_household_still_reports_unengaged(self):
+        results = _run(_household())
+        self.assertFalse(
+            summarize_solvency(results)['engaged'],
+            "the pure household (no budget, no obligation) must stay "
+            "UNCHECKED -- the stamp must not over-engage (#195)")
+
+
 class TestControlOutflowsChargedWhenLivingCostsDeclared(unittest.TestCase):
     """The GREEN control, passing on main today: the identical outflows ARE
     charged once the household declares a living-costs budget. This proves

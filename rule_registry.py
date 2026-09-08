@@ -683,6 +683,14 @@ class YearWorkingState:
     # ── solvency rule (issue #679) ──
     solvency_after_tax_income: float = 0.0
     solvency_living_costs: float = 0.0
+    # Issue #195: True in exactly the years apply_solvency's narrowed gate
+    # DECIDED to run the cash-flow identity (declared budget OR a real
+    # third-party obligation) -- the engine's own "the identity ran" fact,
+    # stamped once where that decision is made, so the reporting fold
+    # (liquidation_waterfall.summarize_solvency) reads it instead of
+    # re-inferring engagement from output scalars (DP#11). False in every
+    # no-op year: a fresh from_state() resets it each year.
+    solvency_engaged: bool = False
     solvency_debt_service: float = 0.0
     solvency_contributions: float = 0.0
     # Issue #761: the spending figure actually charged in the identity's

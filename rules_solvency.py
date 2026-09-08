@@ -473,6 +473,14 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
             and purchase_outflow <= 0.0
             and carrying_cost_outflow <= 0.0):
         return False
+    # Issue #195: the gate just DECIDED the identity runs this year -- stamp
+    # that fact here, once, so the reporting fold
+    # (liquidation_waterfall.summarize_solvency) reports ``engaged`` from the
+    # engine's own decision instead of re-inferring it from output scalars
+    # (DP#11: one fact, defined once, where it is computed). The stamp sits
+    # BEFORE the solvent early return below: a year the identity ran and
+    # found no shortfall is still an engaged year.
+    ws.solvency_engaged = True
 
     debt_service = ws.mort.get('total_payment', 0.0) + consumer_debt_service
     contributions = (
