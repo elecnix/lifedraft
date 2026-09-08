@@ -461,6 +461,16 @@ class YearWorkingState:
     # the golden household (no borrowing) -> byte-exact.
     sm_interest_nondrawdown_tax_saving: float = 0.0
 
+    # ── management_fee rule (issue #142, ITA s.20(1)(e)) ──
+    # The year's total management-fee cash outflow (rate x opening pot
+    # balance, every declared kind) and its NON-REGISTERED slice -- the only
+    # part that is a deductible carrying charge. The registered slice is a
+    # real cash fee with NO deduction (the shelter means the expense is not a
+    # charge against other income). Both 0.0 for a household that declares no
+    # `management_fee` (the golden path) -> byte-exact (DP#32).
+    management_fee: float = 0.0
+    management_fee_deductible: float = 0.0
+
     # ── borrowing_purpose / sm_interest rules (issue #850) ──
     # The purpose tracing of the mortgage ADVANCE and the DRAWN revolving
     # margin -- the two legs of #849's trade-off. Set once at year 0, carried
