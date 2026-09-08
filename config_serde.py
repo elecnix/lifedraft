@@ -231,6 +231,17 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         # with no such product, the golden path), never a fabricated entry
         # (DP#24/DP#32).
         deposit_products=list(cfg.get('deposit_products', [])),
+        # Issue #141: the household's declared non-identical substitute pairs
+        # (decisions.superficial_loss.substitute_pairs, e.g.
+        # [["XEQT", "VEQT"]]). The engine cannot match securities at pot
+        # granularity, so the declaration is the assertion that window
+        # repurchases are non-identical -- a non-empty list allows losses a
+        # same-step repurchase would otherwise deny (see
+        # superficial_loss.py). Absence-safe -- .get with no default returns
+        # [] (no declaration -> the conservative identical-repurchase
+        # default), never a fabricated pair (DP#24/DP#32).
+        superficial_loss_substitute_pairs=list(
+            cfg.get('superficial_loss_substitute_pairs', [])),
         deposit_product=cfg.get('deposit_product'),
         # Issue #1036: capitalize_interest defaults True when absent
         # (property.capitalize_interest key absent) so every internal-
@@ -490,6 +501,13 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
         # payment plan), never to a fabricated block (DP#24/DP#32).
         **({'installments': config.installments}
            if config.installments else {}),
+        # Issue #141: only re-emitted when the household actually declared
+        # substitute pairs -- an empty list round-trips to 'absent' (no
+        # declaration -> the conservative default), never to a fabricated
+        # block (DP#24/DP#32).
+        **({'superficial_loss_substitute_pairs':
+            config.superficial_loss_substitute_pairs}
+           if config.superficial_loss_substitute_pairs else {}),
         # Issue #768: only re-emitted when the household actually declared
         # equity grants -- an empty list round-trips to 'absent' (no
         # grants), never to a fabricated block (DP#24/DP#32).

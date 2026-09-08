@@ -598,6 +598,22 @@ class SimulationConfig:
     # shares, fully_diluted_pct, notes}.
     equity_grants: List[Dict] = field(default_factory=list)
 
+    # Issue #141: the household's declared non-identical substitute pairs
+    # (decisions.superficial_loss.substitute_pairs, e.g. [["XEQT", "VEQT"]])
+    # for ITA s.53(1)(c) superficial-loss evaluation. The engine tracks pot
+    # balances, not per-security holdings, so identity of property is
+    # evaluated by DECLARATION: a non-empty list asserts the household's
+    # window repurchases are of the declared non-identical substitutes, so a
+    # same-step repurchase does NOT deny the loss; an empty list (absent
+    # declaration) keeps the conservative default -- any repurchase in the
+    # window is treated as identical and the loss is denied/deferred into
+    # repurchase ACB (see superficial_loss.py + the registered
+    # `superficial_loss` rule). Absence-safe: an empty list is a household
+    # with no declaration, and the run is unchanged (the golden invariant
+    # must not move, DP#32).
+    superficial_loss_substitute_pairs: List[List[str]] = field(
+        default_factory=list)
+
     # Issue #936: deposit products -- a plain HISA, a term/GIC, a promotional
     # teaser, expressed by ONE generic mechanism (different rate_schedule/cap
     # field values, not different concepts).

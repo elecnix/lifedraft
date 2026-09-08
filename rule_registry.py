@@ -323,6 +323,16 @@ class YearWorkingState:
     # absence-is-a-zero-pool contract the tuition carry-forwards use (DP#13:
     # a default for absent input, never a coercion of a supplied value).
     opening_capital_loss_carryforward: float = 0.0
+    # Issue #141: superficial-loss pending list entering the year -- losses
+    # realized in the PRIOR step whose 61-day window is still open (the
+    # engine's annualized abstraction of ITA s.53(1)(c); see
+    # superficial_loss.py). Each entry is {'year': <calendar step the loss
+    # was realized in>, 'amount': <RAW dollars>}. Lives in
+    # jurisdiction_state['canada']['superficial_loss_pending']. [] for a
+    # household that has never pended a loss (the golden fixture) -- an
+    # absent key is an empty ledger, the same absence-safe contract the
+    # capital-loss pool uses (DP#13).
+    opening_superficial_loss_pending: list = field(default_factory=list)
     # Issue #140: the includable dollars of this year's capital gains the
     # pricing layer (the retirement drawdown's lead tax-free slice; later
     # consumers as the fold grows them) ALREADY sheltered from the pool.
@@ -826,6 +836,39 @@ class YearWorkingState:
     new_capital_loss_carryforward: float = 0.0
     capital_loss_offset_applied: float = 0.0
 
+    # ── superficial_loss rule (issue #141, DP#26) ──
+    # ITA s.53(1)(c)/(f): the annualized-window classification the registered
+    # `superficial_loss` rule computes (after `solvency`, whose waterfall is
+    # one of the two loss-carrying disposition paths; before `capital_loss`,
+    # whose settlement reads `superficial_loss_position_adjustment` to see
+    # the position NET of what this rule intercepted). Runs in RAW dollars
+    # (100%-inclusion), matching the capital-loss ledger's convention (#140).
+    # All 0.0 / [] for a household with no realized security loss (the golden
+    # fixture) -- a strict no-op, so the golden invariant is unchanged by
+    # construction.
+    new_superficial_loss_pending: list = field(default_factory=list)
+    # Raw dollars denied THIS step (same-step loss + pended entries caught
+    # by this step's repurchase). Added to `new_nonreg_acb` (s.53(1)(f)) and
+    # surfaced on YearResult.
+    superficial_loss_denied: float = 0.0
+    # == `superficial_loss_denied`: the s.53(1)(f) ACB addition, surfaced
+    # separately so the disclosure can show "denied X, deferred into ACB X"
+    # explicitly rather than implying the loss was destroyed.
+    superficial_loss_acb_added: float = 0.0
+    # Raw dollars of THIS step's loss held over to the next step (the Y+1
+    # limb of the annualized window).
+    superficial_loss_pended: float = 0.0
+    # Raw dollars of PRIOR-step pended entries resolved as NON-superficial
+    # this step -- they enter THIS step's capital-loss settlement (one step
+    # late; the disclosed cost of the step boundary).
+    superficial_loss_released: float = 0.0
+    # The net correction the `capital_loss` rule folds into the year's
+    # signed position: +(denied + pended) removes losses the raw ws fields
+    # (solvency_realized_gain / sm_unwind_realized_gain) still embed,
+    # -(released) adds a prior step's released loss back in. 0.0 keeps the
+    # pre-#141 position byte-identical.
+    superficial_loss_position_adjustment: float = 0.0
+
     # ── property_disposition rule (issue #956 bite B, DP#26) ──
     # A declared mid-horizon SALE of a property settles in the sale year: the
     # net proceeds (gross value less the secured mortgage, selling costs, and
@@ -995,6 +1038,11 @@ class YearWorkingState:
         # dollars). See the field's docstring above.
         ws.opening_capital_loss_carryforward = canada.get(
             'capital_loss_carryforward', 0.0)
+        # Issue #141: the pending superficial-loss ledger (losses realized in
+        # the PRIOR step whose window is still open). [] when absent (a
+        # household that never pended one) -- DP#13.
+        ws.opening_superficial_loss_pending = list(
+            canada.get('superficial_loss_pending', []))
 
         ws.p_rrsp = allocations.get('primary_rrsp', 0)
         ws.s_rrsp = allocations.get('spousal_rrsp', 0)
