@@ -59,11 +59,34 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from trading_friction import TradingFrictionModel, transition_cost
+
 # A cost function prices a GROSS draw from one source: given the gross
 # dollar amount drawn, it returns (net_proceeds, tax, realized_gain).
 # realized_gain is signed -- negative means a realised loss (DP#679:
 # reported honestly, never clamped to zero).
 CostFn = Callable[[float], Tuple[float, float, float]]
+
+# Attribute set on a cost-function closure whose net proceeds are AFFINE in
+# the gross draw -- net = k*gross + fixed -- rather than linear (fixed = 0).
+# The only affine cost functions in this engine are the friction-carrying
+# sale functions below (issue #143): a flat per-trade commission is a FIXED
+# cost, not a proportional one. run_waterfall reads this flag to pick the
+# exact affine gross-up (two-probe slope/intercept solve) instead of the
+# single-probe linear one; a closure without the flag keeps today's exact
+# single-probe arithmetic bit-for-bit (DP#32: behaviour-preserving for every
+# pre-existing cost function).
+AFFINE_COST_ATTR = '_affine_cost'
+
+
+def _friction_on(friction: Optional[TradingFrictionModel], gross: float) -> float:
+    """The friction charged on one SALE of ``gross`` dollars under
+    ``friction`` (0.0 when no model is declared). Each waterfall draw is one
+    real, countable sale event, so the flat commission applies here (one
+    event). Pure (DP#3)."""
+    if friction is None or friction.is_frictionless or gross <= 0:
+        return 0.0
+    return transition_cost(gross, friction, count_events=1)
 
 
 @dataclass(frozen=True)
@@ -74,6 +97,13 @@ class LiquidationStep:
     net_proceeds: float
     tax: float = 0.0
     realized_gain: float = 0.0
+    # Issue #143: the trading friction this sale paid (bid/ask spread plus
+    # the flat commission for this one sale event). Money conservation at
+    # the step: gross_drawn == net_proceeds + tax + friction -- the gross
+    # drawn from the source balance is fully accounted (delivered, remitted,
+    # paid to the market); nothing vanishes and nothing is double-booked.
+    # 0.0 for every friction-free source (the golden path, byte-identical).
+    friction: float = 0.0
 
     @property
     def cost(self) -> float:
@@ -146,15 +176,25 @@ def months_covered(reserve_balance: float, annual_living_costs: float,
     return max(0.0, reserve_balance) / (annual / 12.0)
 
 
-def identity_cost(gross: float) -> Tuple[float, float, float]:
+def identity_cost(gross: float, friction: Optional[TradingFrictionModel] = None) -> Tuple[float, float, float]:
     """A dollar-for-dollar source: no tax, no realized gain/loss. Used for
     the emergency reserve (already after-tax cash), the revolving credit
     facility (borrowed cash is not a taxable event), and TFSA withdrawals
-    (tax-free by statute)."""
+    (tax-free by statute).
+
+    Issue #143: ``friction`` is accepted for signature parity but is
+    deliberately NOT charged here. The reserve is CASH and the credit
+    facility is DEBT -- neither is an asset sale, so neither crosses a
+    bid/ask spread; charging one would price a trade that never happened.
+    (A TFSA withdrawal sells units inside the TFSA, but the TFSA is drawn
+    through this identity source by the engine's pot-level fold -- the
+    disclosure is honest: slice A prices the spread only on the sources
+    whose cost functions actually price a sale's tax.)"""
     return gross, 0.0, 0.0
 
 
-def capital_gains_cost(gain_frac: float, inclusion_rate: float, marginal_rate: float) -> CostFn:
+def capital_gains_cost(gain_frac: float, inclusion_rate: float, marginal_rate: float,
+                       friction: Optional[TradingFrictionModel] = None) -> CostFn:
     """Cost function for a non-registered/taxable account: only the
     accrued-gain fraction of a withdrawal is taxable, at
     ``inclusion_rate x marginal_rate`` (matches the rest of this engine's
@@ -175,23 +215,45 @@ def capital_gains_cost(gain_frac: float, inclusion_rate: float, marginal_rate: f
     produces a negative tax (no carryback -- this is a forward-only
     projection -- and never a deduction against ordinary income); the loss
     shelters later gains through the pool instead.
+
+    Issue #143: an optional declared ``friction`` model charges the sale's
+    trading cost -- the bid/ask spread plus the flat commission for this one
+    sale event -- netted out of the proceeds BESIDE the tax (the seam where
+    "sells at par" was true). The friction is an additional leakage, never a
+    second tax: ``tax`` and ``realized_gain`` are unchanged, and step-level
+    conservation holds exactly (gross = net + tax + friction). ``None`` (the
+    default) is today's byte-identical behaviour (DP#32).
     """
     def _cost(gross: float) -> Tuple[float, float, float]:
         realized_gain = gross * gain_frac
         taxable_gain = realized_gain * inclusion_rate  # signed (#140, unfloored)
         tax = max(0.0, taxable_gain) * max(0.0, min(0.95, marginal_rate))
-        return gross - tax, tax, realized_gain
+        friction_paid = _friction_on(friction, gross)
+        if friction_paid:
+            # A flat commission makes net AFFINE in gross, not linear; the
+            # flag tells run_waterfall to use the exact affine gross-up.
+            setattr(_cost, AFFINE_COST_ATTR, True)
+        return gross - tax - friction_paid, tax, realized_gain
     return _cost
 
 
-def ordinary_income_cost(marginal_rate: float) -> CostFn:
+def ordinary_income_cost(marginal_rate: float,
+                         friction: Optional[TradingFrictionModel] = None) -> CostFn:
     """Cost function for a fully-taxable registered withdrawal (RRSP/RRIF):
     every gross dollar drawn is ordinary income at ``marginal_rate`` --
     forced out at whatever this year's rate is, not a rate the household
-    would have chosen for a planned drawdown."""
+    would have chosen for a planned drawdown.
+
+    Issue #143: an optional declared ``friction`` model charges the sale's
+    trading cost beside the tax, exactly as ``capital_gains_cost`` does
+    (same seam, same conservation, same ``None`` = byte-identical default).
+    """
     def _cost(gross: float) -> Tuple[float, float, float]:
         tax = gross * max(0.0, min(0.95, marginal_rate))
-        return gross - tax, tax, 0.0
+        friction_paid = _friction_on(friction, gross)
+        if friction_paid:
+            setattr(_cost, AFFINE_COST_ATTR, True)
+        return gross - tax - friction_paid, tax, 0.0
     return _cost
 
 
@@ -206,8 +268,17 @@ def run_waterfall(shortfall: float, sources: Sequence[LiquidationSource]) -> Wat
     fixed gain fraction, not a function of the amount itself), the gross
     needed to net a given amount is computed from one probe call --
     ``cost_fn(probe)`` -- rather than requiring callers to supply an
-    inverse function. A ``cost_fn`` that is genuinely non-linear in gross
-    would need a different solver; none used by this engine is.
+    inverse function. EXCEPT the friction-carrying sale functions (issue
+    #143): a flat commission makes net AFFINE (net = k*gross - fee), which
+    the single-probe linear estimate would misprice (a $9.95 fee divided
+    into a $1 probe drives net_per_dollar negative and skips the source
+    entirely). A closure flagged ``AFFINE_COST_ATTR`` is grossed up with the
+    exact affine solve instead -- two probe calls fix the slope and
+    intercept, and ``gross = (remaining - intercept) / slope`` delivers the
+    household its target net AFTER friction, with the fee leaving inside
+    the gross drawn (never invented on top). Every pre-existing closure is
+    unflagged and keeps today's exact single-probe arithmetic bit-for-bit
+    (DP#32).
 
     ``ruined`` is True only if every source is exhausted and the household
     is still short (DP#32: a shortfall that survives every real source must
@@ -228,17 +299,41 @@ def run_waterfall(shortfall: float, sources: Sequence[LiquidationSource]) -> Wat
 
         probe = min(1.0, available)
         probe_net, _, _ = source.cost_fn(probe)
-        net_per_dollar = probe_net / probe if probe > 0 else 0.0
-        if net_per_dollar <= 0:
-            continue
+        if getattr(source.cost_fn, AFFINE_COST_ATTR, False) and available > probe + 1e-12:
+            # Affine gross-up (issue #143): two probes fix slope + intercept,
+            # then solve net = remaining exactly. A slope <= 0 or a draw
+            # whose whole-lot net is non-positive is skipped honestly --
+            # selling a lot whose proceeds cannot cover its own commission
+            # delivers nothing (the household would never make that trade).
+            probe2 = min(available, 2.0 * probe)
+            net2, _, _ = source.cost_fn(probe2)
+            slope = (net2 - probe_net) / (probe2 - probe)
+            if slope <= 0:
+                continue
+            intercept = probe_net - slope * probe  # <= 0: the flat fee
+            gross_needed = (remaining - intercept) / slope
+            gross_draw = min(gross_needed, available)
+            net, tax, gain = source.cost_fn(gross_draw)
+            if net <= 1e-9:
+                continue
+        else:
+            net_per_dollar = probe_net / probe if probe > 0 else 0.0
+            if net_per_dollar <= 0:
+                continue
 
-        gross_needed = remaining / net_per_dollar
-        gross_draw = min(gross_needed, available)
-        net, tax, gain = source.cost_fn(gross_draw)
-        if gross_draw <= 1e-9:
-            continue
+            gross_needed = remaining / net_per_dollar
+            gross_draw = min(gross_needed, available)
+            net, tax, gain = source.cost_fn(gross_draw)
+            if net <= 1e-9:
+                continue
 
-        steps.append(LiquidationStep(source.name, gross_draw, net, tax, gain))
+        # Step-level money conservation: whatever the gross draw carried
+        # beyond net + tax is the sale's trading friction (issue #143). For
+        # every pre-existing linear cost function this expression is EXACTLY
+        # 0.0 (net is literally computed as gross - tax), so the golden path
+        # is byte-identical (DP#32).
+        steps.append(LiquidationStep(source.name, gross_draw, net, tax, gain,
+                                     friction=(gross_draw - tax) - net))
         remaining -= net
 
     remaining = max(0.0, remaining)

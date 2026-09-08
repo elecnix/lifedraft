@@ -211,9 +211,10 @@ class TestWaterfallSaleFriction:
         plain = capital_gains_cost(0.4, 0.5, 0.35)
         assert plain(7_777.0) == capital_gains_cost(0.4, 0.5, 0.35)(7_777.0)
         net, tax, gain = capital_gains_cost(0.4, 0.5, 0.35)(10_000.0)
-        assert (net, tax, gain) == (10_000.0 - 0.4 * 0.5 * 0.35 * 10_000.0,
-                                    0.4 * 0.5 * 0.35 * 10_000.0,
-                                    4_000.0)
+        expected_tax = 0.4 * 0.5 * 0.35 * 10_000.0
+        assert (net, tax, gain) == pytest.approx((10_000.0 - expected_tax,
+                                                  expected_tax,
+                                                  4_000.0))
 
     def test_step_conservation_gross_equals_net_plus_tax_plus_friction(self):
         """Money conservation at the step: the gross drawn from the source
@@ -243,10 +244,13 @@ class TestWaterfallCommissionGrossUp:
         k = 1.0 - 0.30 - 5.0 / BPS
         expected_gross = (shortfall + 9.95) / k
         assert step.gross_drawn == pytest.approx(expected_gross, rel=1e-9)
-        # Step-level conservation: gross = net + tax + spread + commission.
-        spread_cost = expected_gross * 5.0 / BPS
-        assert (step.gross_drawn == pytest.approx(
-            step.net_proceeds + step.tax + step.friction + (expected_gross - k * expected_gross + 9.95), abs=1e-6))
+        # Step-level conservation: the gross drawn is fully accounted --
+        # net delivered + tax remitted + friction paid to the market.
+        assert step.gross_drawn == pytest.approx(
+            step.net_proceeds + step.tax + step.friction, abs=1e-6)
+        # And the friction is exactly the spread plus the one commission.
+        assert step.friction == pytest.approx(
+            expected_gross * 5.0 / BPS + 9.95, abs=1e-6)
 
     def test_linear_cost_fn_unchanged_by_affine_solver(self):
         """Without a commission the affine solve reduces EXACTLY to today's
