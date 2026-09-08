@@ -93,6 +93,54 @@ def test_mer_only_account_gets_no_management_fee():
     assert out["mer_drag"] == {"non_reg": {"mer_rate": 0.01}}
 
 
+def test_opening_pot_balance_lif_and_fhsa_pots():
+    """``_opening_pot_balance`` maps the ``lif`` and ``fhsa`` pot kinds to their
+    opening fields (rule lines 71-74) -- every adapter-emittable kind has a
+    real opening balance, never a silently unfunded pot (DP#32)."""
+    from rule_registry import YearWorkingState
+    from rules_management_fee import _opening_pot_balance
+
+    ws = YearWorkingState()
+    ws.opening_lif_balance = 40000.0
+    ws.opening_fhsa_balance = 8000.0
+    assert _opening_pot_balance(ws, 'lif') == 40000.0
+    assert _opening_pot_balance(ws, 'fhsa') == 8000.0
+
+
+def test_opening_pot_balance_unknown_kind_is_a_loud_failure():
+    """An adapter-emitted kind with no opening field raises ValueError
+    (rule line 75) -- a loud failure, never a silently unfunded pot (DP#32)."""
+    import pytest
+    from rule_registry import YearWorkingState
+    from rules_management_fee import _opening_pot_balance
+
+    with pytest.raises(ValueError, match="unknown account kind"):
+        _opening_pot_balance(YearWorkingState(), 'mystery_kind')
+
+
+def test_declared_zero_fee_rate_is_a_value_not_absence():
+    """DP#32: an explicitly declared 0.0 fee rate is a DECLARED fee-free fact
+    (rule line 101's continue), not an absent declaration -- the household
+    said zero. Behaviourally both book no fee; the distinction the rule
+    protects is that the zero declaration is consumed as a fact, not skipped
+    as missing input, so a kind explicitly set to 0.0 coexisting with a
+    charged kind still books only the charged fee."""
+    from rule_registry import YearWorkingState
+    from rules_management_fee import apply_management_fee
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    config.account_management_fee_rate = {
+        "non_reg": {"management_fee_rate": 0.0},
+        "rrsp": {"management_fee_rate": 0.005}}
+    ws = YearWorkingState()
+    ws.opening_non_reg_balance = 100000.0
+    ws.opening_rrsp_balance = 200000.0
+    assert apply_management_fee(ws, _ctx(config))
+    assert ws.management_fee == 1000.0  # rrsp only; the declared 0.0 adds nothing
+    assert ws.management_fee_deductible == 0.0
+
+
 def _ctx(config, retired=False, taxable_income=0.0):
     """A minimal live-fold-shaped RuleContext: year_brackets supplied, so the
     deduction is valued at bracket-fill (the #1033 path), not flat-rate."""
@@ -114,6 +162,46 @@ def _ctx(config, retired=False, taxable_income=0.0):
         year_brackets=empty_brackets,
         primary_taxable_income=taxable_income,
     )
+
+
+def test_no_declared_fee_is_a_fold_noop():
+    """DP#32 golden no-op: no declared `management_fee` anywhere -> the rule
+    refuses to fire and leaves BOTH working-state outputs at their exact
+    0.0 defaults, so the solvency identity's `+ ws.management_fee` and the
+    sm_interest pooling add a byte-identical zero. Absence is absence, never
+    a zeroed fee silently applied."""
+    from rule_registry import YearWorkingState
+    from rules_management_fee import apply_management_fee
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()  # account_management_fee_rate empty
+    ws = YearWorkingState()
+    ws.opening_non_reg_balance = 100000.0
+    ws.opening_rrsp_balance = 200000.0
+    assert not apply_management_fee(ws, _ctx(config))
+    assert ws.management_fee == 0.0
+    assert ws.management_fee_deductible == 0.0
+
+
+def test_management_fee_rate_does_not_touch_growth_drag():
+    """A declared management_fee must NOT change the growth net rate -- the
+    MER path (#136) is the only growth drag. A non_reg pot with ONLY a
+    management fee grows at the full gross rate; adding a `mer` is what
+    reduces it."""
+    from rule_registry import RuleContext, YearWorkingState
+    from rules_growth import _blended_pot_rate
+    from simulation_config import SimulationConfig
+
+    config = SimulationConfig()
+    config.account_management_fee_rate = {
+        "non_reg": {"management_fee_rate": 0.005}}
+    ctx = _ctx(config)
+    assert _blended_pot_rate(ctx, 'non_reg', 100000.0) == ctx.investment_return
+
+    config.account_mer_drag = {"non_reg": {"mer_rate": 0.01}}
+    ctx_mer = _ctx(config)
+    assert (_blended_pot_rate(ctx_mer, 'non_reg', 100000.0)
+            == ctx.investment_return - 0.01)
 
 
 def test_amt_noop_gate_includes_carrying_charges():
