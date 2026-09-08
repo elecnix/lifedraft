@@ -31,6 +31,8 @@ from superficial_loss import (
 from simulation_config import SimulationConfig
 from simulation_state import SimState, _default_canada_state, simulate_year_pure
 
+from contract_decisions import map_superficial_loss
+
 
 # ── Unit: classify_window ──────────────────────────────────────────────────
 
@@ -269,3 +271,146 @@ class TestEngineDrivenDenial:
         assert yr.superficial_loss_pended == 0.0
         assert yr.superficial_loss_released == 0.0
         assert yr.superficial_loss_acb_added == 0.0
+
+
+# ── Contract mapping: decisions.superficial_loss.substitute_pairs ─────────
+
+
+def _two_generation_doc():
+    """A validated two-generation contract document (the adapter's Phase 1
+    sub-family), via test_input_contract's fixture builders."""
+    import contract_schema
+    from test_input_contract import _load_example, _two_generation_subset
+    doc = _two_generation_subset(_load_example())
+    contract_schema.validate_contract(doc)
+    return doc
+
+
+class TestSubstitutePairDeclarationMapping:
+    """DP#32 on the INPUT side: a malformed `decisions.superficial_loss`
+    declaration must FAIL LOUDLY at load time, never coerce to the
+    conservative default -- a household that declares substitutes and is
+    silently ignored loses money it was told it could keep."""
+
+    @staticmethod
+    def _doc(pairs):
+        doc = _two_generation_doc()
+        doc['decisions']['superficial_loss'] = {'substitute_pairs': pairs}
+        return doc
+
+    def test_absent_block_returns_empty(self):
+        doc = _two_generation_doc()
+        assert 'superficial_loss' not in doc['decisions']
+        assert map_superficial_loss(doc) == []
+
+    def test_empty_block_returns_empty(self):
+        doc = _two_generation_doc()
+        doc['decisions']['superficial_loss'] = {}
+        assert map_superficial_loss(doc) == []
+
+    def test_declared_pairs_round_trip(self):
+        doc = self._doc([['XEQT', 'VEQT'], ['XBB', 'VAB']])
+        assert map_superficial_loss(doc) == [['XEQT', 'VEQT'], ['XBB', 'VAB']]
+
+    def test_adapter_emits_pairs_only_when_declared(self):
+        import input_contract as ic
+        # Absent block: the key stays OUT of the internal shape entirely,
+        # so a no-declaration household round-trips byte-identically.
+        legacy_without = ic.to_internal_config(_two_generation_doc())
+        assert 'superficial_loss_substitute_pairs' not in legacy_without
+        # Declared block: the pairs reach the legacy config the engine reads.
+        legacy = ic.to_internal_config(self._doc([['XEQT', 'VEQT']]))
+        assert legacy['superficial_loss_substitute_pairs'] == [['XEQT', 'VEQT']]
+
+    def test_non_object_block_raises(self):
+        doc = _two_generation_doc()
+        doc['decisions']['superficial_loss'] = ['XEQT', 'VEQT']
+        with pytest.raises(ValueError, match='must be an object'):
+            map_superficial_loss(doc)
+
+    def test_block_without_substitute_pairs_raises(self):
+        # A partial declaration is refused: `substitute_pairs` absent means
+        # the household STARTED a declaration and stopped -- silence here
+        # would apply the conservative default to a household that meant
+        # to declare (DP#32).
+        doc = _two_generation_doc()
+        doc['decisions']['superficial_loss'] = {'declared_elsewhere': True}
+        with pytest.raises(ValueError, match='substitute_pairs is'):
+            map_superficial_loss(doc)
+
+    def test_non_list_substitute_pairs_raises(self):
+        doc = self._doc('XEQT')
+        with pytest.raises(ValueError, match='must be a list'):
+            map_superficial_loss(doc)
+
+    @pytest.mark.parametrize('bad_pair', [
+        'XEQT',            # not a list
+        ['XEQT'],          # one element
+        ['XEQT', 'VEQT', 'XBB'],  # three elements
+        ['XEQT', ''],      # empty string
+        ['XEQT', 42],      # non-string
+    ])
+    def test_malformed_pair_raises(self, bad_pair):
+        doc = self._doc([bad_pair])
+        with pytest.raises(ValueError, match='exactly two non-empty strings'):
+            map_superficial_loss(doc)
+
+    def test_self_pair_raises(self):
+        # A security is trivially identical to itself: declaring it a
+        # substitute of itself asserts a falsehood to dodge the window.
+        doc = self._doc([['XEQT', 'XEQT']])
+        with pytest.raises(ValueError, match='same security twice'):
+            map_superficial_loss(doc)
+
+
+class TestFidelityDisclosure:
+    """The run-recorded bridge (#685/#707): the optimize caller writes the
+    worst-across-scenarios summary onto assumptions.superficial_loss and the
+    registered approximation reads it. Drive the REGISTRY entry, never the
+    private describe function, so the registration itself is what the test
+    proves."""
+
+    @staticmethod
+    def _summary(**overrides):
+        s = {'engaged': True, 'first_denied_year': 3,
+             'denied_total': 12_000.0, 'acb_added_total': 12_000.0,
+             'pending_years': 1}
+        s.update(overrides)
+        return s
+
+    def _approximation(self):
+        import model_fidelity
+        active = [a for a in model_fidelity.all_approximations()
+                  if a.id == 'superficial_loss_annual_window']
+        assert active, 'superficial_loss_annual_window must be registered'
+        return active[0]
+
+    def test_engaged_summary_fires_every_finding_branch(self):
+        import model_fidelity
+        approx = self._approximation()
+        cfg = {'assumptions': {'superficial_loss': self._summary()}}
+        ctx = model_fidelity.FidelityContext(cfg=cfg)
+        assert approx.is_active(ctx)
+        findings = approx.findings_for(ctx)
+        text = '\n'.join(findings)
+        assert 'year 3' in text                        # first_denied_year named
+        assert '12,000' in text                        # denied dollars named
+        assert '53(1)(f)' in text                      # ACB deferral named
+        assert 'held' in text                          # pending carry named
+        assert 'ANNUAL' in text                        # the abstraction itself
+
+    def test_not_engaged_is_inactive_and_silent(self):
+        import model_fidelity
+        approx = self._approximation()
+        ctx = model_fidelity.FidelityContext(cfg={'assumptions': {}})
+        assert not approx.is_active(ctx)
+        assert approx.findings_for(ctx) == []
+
+    def test_zero_denial_engaged_summary_is_not_a_finding_source(self):
+        # Engaged=False even with figures present: the caveat must not
+        # fire on an all-clear recorded summary.
+        import model_fidelity
+        approx = self._approximation()
+        cfg = {'assumptions': {'superficial_loss': self._summary(engaged=False)}}
+        ctx = model_fidelity.FidelityContext(cfg=cfg)
+        assert not approx.is_active(ctx)
