@@ -15,6 +15,84 @@ drives the registered fold rules (`apply_management_fee`,
 """
 from __future__ import annotations
 
+from contract_accounts import _map_account_overrides
+
+
+def _doc_non_reg_with_fee(fee=0.005, balance=100000.0):
+    return {
+        "people": [],
+        "accounts": [
+            {"id": "acct_nonreg", "kind": "non_reg",
+             "balance": {"amount": balance, "as_of": "2026-01-01"},
+             "acb": balance, "holdings": [], "beneficiary": None,
+             "successor_holder": None, "owner": {"person": "primary"},
+             "management_fee": fee},
+        ],
+    }
+
+
+def test_adapter_collects_management_fee_rate():
+    """A declared management_fee lands in a pot-keyed management_fee_rate."""
+    out = _map_account_overrides(_doc_non_reg_with_fee())
+    assert out["management_fee_rate"] == {"non_reg": {"management_fee_rate": 0.005}}
+
+
+def test_mixed_pot_zero_opening_records_zero_rate():
+    """The #136 mixed-pot split, management-fee edition (adapter lines 341-342):
+    a MIXED non_reg pot (one flagged account, one non-flagged) where every
+    account opens at $0 falls back to rate 0.0 -- charging the non-flagged
+    money would invent a fee the household never agreed to. Mirror of
+    #136's ``mer_mixed_pot_zero_fee_unmodeled`` fixture shape (DP#13/DP#15)."""
+    doc = {
+        "people": [],
+        "accounts": [
+            {"id": "acct_flagged", "kind": "non_reg",
+             "balance": {"amount": 0.0, "as_of": "2026-01-01"},
+             "acb": 0.0, "holdings": [], "beneficiary": None,
+             "successor_holder": None, "owner": {"person": "primary"},
+             "management_fee": 0.005},
+            {"id": "acct_plain", "kind": "non_reg",
+             "balance": {"amount": 0.0, "as_of": "2026-01-01"},
+             "acb": 0.0, "holdings": [], "beneficiary": None,
+             "successor_holder": None, "owner": {"person": "spouse"}},
+        ],
+    }
+    out = _map_account_overrides(doc)
+    assert out["management_fee_rate"] == {
+        "non_reg": {"management_fee_rate": 0.0}}
+
+
+def test_single_flagged_zero_opening_falls_back_to_max():
+    """The #136 single-flagged split, management-fee edition (adapter lines
+    343-344): a non_reg pot where EVERY account declares the fee and opens at
+    $0 -- the pot IS the fee'd money -- falls back to the max declared rate so
+    a future funded state is not silently fee-free."""
+    doc = _doc_non_reg_with_fee(fee=0.005, balance=0.0)
+    out = _map_account_overrides(doc)
+    assert out["management_fee_rate"] == {
+        "non_reg": {"management_fee_rate": 0.005}}
+
+
+def test_no_declared_fee_records_nothing():
+    """No declared fee -> empty map (DP#32: absence is absence, golden no-op)."""
+    doc = _doc_non_reg_with_fee()
+    del doc["accounts"][0]["management_fee"]
+    out = _map_account_overrides(doc)
+    assert out["management_fee_rate"] == {}
+
+
+def test_mer_only_account_gets_no_management_fee():
+    """An account declaring only `mer` populates mer_drag and records NO
+    management fee -- the two fees are distinct inputs (DP#8), and a MER
+    declaration must never silently grow into a s.20(1)(e) fee."""
+    doc = _doc_non_reg_with_fee()
+    del doc["accounts"][0]["management_fee"]
+    doc["accounts"][0]["mer"] = 0.01
+    out = _map_account_overrides(doc)
+    assert out["management_fee_rate"] == {}
+    assert out["mer_drag"] == {"non_reg": {"mer_rate": 0.01}}
+
+
 def _ctx(config, retired=False, taxable_income=0.0):
     """A minimal live-fold-shaped RuleContext: year_brackets supplied, so the
     deduction is valued at bracket-fill (the #1033 path), not flat-rate."""

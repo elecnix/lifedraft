@@ -686,6 +686,17 @@ class SimulationConfig:
     #   mer_drag[kind] = {'mer_rate': float}  # balance-weighted avg MER
     account_mer_drag: Dict = field(default_factory=dict)
 
+    # Issue #142: per-account s.20(1)(e) management fees, pot-keyed. Defaults
+    # to empty -- a household that declares no `management_fee` pays no fee
+    # and books no deduction (today's behaviour; keeps the golden invariant
+    # unchanged, DP#32: an absent fee is not a zero fee). Distinct from
+    # `account_mer_drag` (DP#8): the MER is a growth drag netted out of the
+    # pot's return; the management fee is a REAL annual cash outflow, and its
+    # non-registered slice is a deductible carrying charge (ITA s.20(1)(e))
+    # that pools into the s.20(1)(c) machinery (the `sm_interest` rule).
+    #   management_fee_rate[kind] = {'management_fee_rate': float}
+    account_management_fee_rate: Dict = field(default_factory=dict)
+
     @classmethod
     def from_json(cls, path: str) -> 'SimulationConfig':
         """Load configuration from an on-disk input contract document.
