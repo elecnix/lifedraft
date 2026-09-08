@@ -118,6 +118,7 @@ import rules_disposition      # noqa: F401
 import rules_drawdown         # noqa: F401
 import rules_growth           # noqa: F401
 import rules_leverage         # noqa: F401
+import rules_management_fee   # noqa: F401
 import rules_registered_plans  # noqa: F401
 import rules_retirement_income  # noqa: F401
 import rules_solvency         # noqa: F401
@@ -230,6 +231,13 @@ RULE_ORDER: tuple = (
     # investment income the grown pot earns). The golden household hits the
     # `if not sm_active and traced_deductible <= 0` early return (no draw,
     # personal mortgage), so it is byte-identical (DP#32).
+    # Issue #142: the s.20(1)(e) management-fee charge. Fees are rate x
+    # OPENING pot balance (the Jan-1 reference -- stated modelling decision,
+    # see the module docstring), so it depends only on the prologue's
+    # opening_* stamps and must precede 'sm_interest', the rule that pools
+    # the non-registered slice into the s.20(1)(c) deduction. apply_solvency
+    # (last) charges the total cash fee through spending_outflow.
+    'management_fee',
     'sm_interest',
     # Issue #956 bite E (principal-residence disposition): a declared
     # mid-horizon SALE of the PRINCIPAL residence settles in its sale year.

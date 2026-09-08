@@ -84,6 +84,7 @@ EXPECTED_RULE_NAMES = frozenset({
     'sm_investment_growth',        # SM investment grows at after-tax rate (issue #576)
     'margin_heloc_interest',       # interest on the drawn HELOC, capitalized only as far as the charge allows (#577/#681)
     'heloc_interest_servicing',    # issue #681: interest the charge can't absorb is PAID IN CASH from non-reg/SM
+    'management_fee',              # issue #142: s.20(1)(e) management-fee charge on declared pots -- non-reg slice pools into sm_interest's s.20(1)(c) deduction, so it runs BEFORE sm_interest; total cash fee charged via solvency's spending_outflow
     'sm_interest',                 # issue #1036 D4/N2: SM HELOC interest + QC-carry-forward-limited deduction -- runs AFTER heloc_interest_servicing so the drawn-margin (Leg 3) deduction EXCLUDES heloc_interest_unfunded (interest neither paid nor payable; a deduction requires paid-or-payable)
     'principal_disposition',        # issue #956 bite E: a declared mid-horizon SALE of the PRINCIPAL residence settles in its sale year (net proceeds invested post-growth, gain taxed + PRE-apportioned ≈ 0 for a fully-designated home, secured debt discharged, conservation identity on net_assets Δnet_assets = V - selling_costs - T)
     'rrsp_refund_heloc_paydown',   # apply RRSP refund to HELOC paydown
@@ -169,6 +170,13 @@ EXPECTED_RULE_ORDER = (
     'sm_readvance',
     'sm_investment_growth',
     'heloc_interest_servicing',
+    # issue #142: the s.20(1)(e) management-fee charge. Runs BEFORE
+    # 'sm_interest' because the non-registered slice POOLS into that rule's
+    # s.20(1)(c) total_deductible (bracket-fill valuation, QC cap, retirement
+    # gating); the total cash fee is charged later via apply_solvency's
+    # spending_outflow. Depends only on the prologue's opening_* stamps --
+    # it reads nothing any growth rule writes.
+    'management_fee',
     'sm_interest',
     # issue #956 bite E: a declared mid-horizon SALE of the PRINCIPAL residence
     # settles in its sale year -- the home + its mortgage + any HELOC/SM
@@ -376,8 +384,21 @@ def test_every_rule_fires_somewhere_in_representative_households():
     # RESP wind-down, retirement, RRIF conversion at 71, long decumulation.
     # By design (see test_golden_trajectory_581.py's docstring) it never
     # draws its HELOC margin and never turns on the Smith Manoeuvre.
+    # Issue #142: the golden fixture itself declares NO management_fee and
+    # funds no non-reg pot, so the raw config leaves the management_fee rule
+    # a sweep-wide no-op. This variant funds the non-reg pot ($250k) and
+    # declares a 0.5% fee on it: the fee fires on the OPENING pot every year
+    # and its non-reg slice pools into sm_interest's s.20(1)(c) deduction
+    # (observable as sm_qc_deductible/traced_borrowing_tax_savings from
+    # year 0). Fabricated round numbers, DP#15.
+    golden_with_fee = golden_household_config()
+    golden_with_fee['portfolio']['accounts']['non_reg']['balance'] = 250_000
+    golden_with_fee['portfolio']['accounts']['non_reg']['cost_basis'] = 250_000
+    golden_with_fee['accounts'] = dict(
+        golden_with_fee.get('accounts', {}),
+        management_fee_rate={'non_reg': {'management_fee_rate': 0.005}})
     with trace_firing() as fired:
-        _run_golden(golden_household_config())
+        _run_golden(golden_with_fee)
     _merge(fired)
 
     # ── Scenario B: Smith Manoeuvre active (readvanceable mortgage).
