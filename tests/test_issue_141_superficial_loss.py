@@ -369,3 +369,54 @@ class TestSubstitutePairDeclarationMapping:
             map_superficial_loss(doc)
 
 
+class TestFidelityDisclosure:
+    """The run-recorded bridge (#685/#707): the optimize caller writes the
+    worst-across-scenarios summary onto assumptions.superficial_loss and the
+    registered approximation reads it. Drive the REGISTRY entry, never the
+    private describe function, so the registration itself is what the test
+    proves."""
+
+    @staticmethod
+    def _summary(**overrides):
+        s = {'engaged': True, 'first_denied_year': 3,
+             'denied_total': 12_000.0, 'acb_added_total': 12_000.0,
+             'pending_years': 1}
+        s.update(overrides)
+        return s
+
+    def _approximation(self):
+        import model_fidelity
+        active = [a for a in model_fidelity.all_approximations()
+                  if a.id == 'superficial_loss_annual_window']
+        assert active, 'superficial_loss_annual_window must be registered'
+        return active[0]
+
+    def test_engaged_summary_fires_every_finding_branch(self):
+        import model_fidelity
+        approx = self._approximation()
+        cfg = {'assumptions': {'superficial_loss': self._summary()}}
+        ctx = model_fidelity.FidelityContext(cfg=cfg)
+        assert approx.is_active(ctx)
+        findings = approx.findings_for(ctx)
+        text = '\n'.join(findings)
+        assert 'year 3' in text                        # first_denied_year named
+        assert '12,000' in text                        # denied dollars named
+        assert '53(1)(f)' in text                      # ACB deferral named
+        assert 'held' in text                          # pending carry named
+        assert 'ANNUAL' in text                        # the abstraction itself
+
+    def test_not_engaged_is_inactive_and_silent(self):
+        import model_fidelity
+        approx = self._approximation()
+        ctx = model_fidelity.FidelityContext(cfg={'assumptions': {}})
+        assert not approx.is_active(ctx)
+        assert approx.findings_for(ctx) == []
+
+    def test_zero_denial_engaged_summary_is_not_a_finding_source(self):
+        # Engaged=False even with figures present: the caveat must not
+        # fire on an all-clear recorded summary.
+        import model_fidelity
+        approx = self._approximation()
+        cfg = {'assumptions': {'superficial_loss': self._summary(engaged=False)}}
+        ctx = model_fidelity.FidelityContext(cfg=cfg)
+        assert not approx.is_active(ctx)

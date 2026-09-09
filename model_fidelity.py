@@ -1192,6 +1192,99 @@ register(Approximation(
 ))
 
 
+# ── Issue #141: the annualized superficial-loss window ─────────────────────
+#
+# ITA s.53(1)(c)'s superficial-loss window is 61 days wide (30 days ending on
+# the disposition + 30 days after). The engine's step is a YEAR and it cannot
+# see intra-year timing, so the registered `superficial_loss` rule evaluates
+# the window at two annual steps: a loss realized in step Y is denied when the
+# household re-acquires in Y or Y+1 (unless the household declared non-identical
+# substitute pairs), denied dollars are deferred into repurchase ACB under
+# s.53(1)(f), and a loss with no Y+1 repurchase is released into Y+1's
+# settlement -- one step late. Both directions err toward denial (conservative),
+# but the abstraction is real: a January disposition and a December repurchase
+# are >61 days apart in reality yet in-window here, and the released loss's
+# benefit lands a year late. Surfaced through this registry for the same reason
+# as every other disclosure: an output surface that prints a capital-loss
+# benefit without saying the window was evaluated at year granularity is a lie
+# of omission. The content depends on the TRAJECTORY (whether any loss was
+# denied/held), so it rides the run-recorded bridge (#685/#707): the optimize
+# caller writes the worst-across-scenarios summary onto
+# assumptions.superficial_loss before any surface renders.
+
+def superficial_loss_summary(cfg: dict) -> Dict:
+    """The run-recorded superficial-loss summary (written by the optimize
+    caller onto ``assumptions.superficial_loss``), or an all-clear summary
+    when no loss was denied or held. Recorded as data, not recomputed here
+    -- see ``_run_recorded_summary`` for the bridge (#685/#707)."""
+    return _run_recorded_summary(cfg, 'superficial_loss', {
+        'engaged': False, 'first_denied_year': None,
+        'denied_total': 0.0, 'acb_added_total': 0.0,
+        'pending_years': 0,
+    })
+
+
+def _has_superficial_loss(ctx: FidelityContext) -> bool:
+    return bool(superficial_loss_summary(ctx.cfg).get('engaged'))
+
+
+def _describe_superficial_loss(ctx: FidelityContext) -> List[str]:
+    s = superficial_loss_summary(ctx.cfg)
+    if not s.get('engaged'):
+        return []
+    parts = []
+    year = s.get('first_denied_year')
+    denied = s.get('denied_total', 0.0)
+    acb = s.get('acb_added_total', 0.0)
+    held = s.get('pending_years', 0)
+    if year is not None:
+        parts.append(f"first denial in projection year {year}")
+    if denied > 0:
+        parts.append(f"${denied:,.0f} of realized capital losses were denied "
+                     f"as superficial (ITA s.53(1)(c))")
+    if acb > 0:
+        parts.append(f"the full ${acb:,.0f} was DEFERRED into the repurchased "
+                     f"property's ACB under s.53(1)(f) -- it resurfaces on a "
+                     f"genuine later disposition, it is not destroyed")
+    if held > 0:
+        parts.append(f"{held} year(s) held a loss over to the next year's "
+                     f"window check")
+    parts.append("the 61-day statutory window was evaluated at ANNUAL step "
+                 "granularity: the engine cannot see intra-year timing, so "
+                 "both directions err toward denial")
+    return parts
+
+
+register(Approximation(
+    id='superficial_loss_annual_window',
+    summary=("ITA s.53(1)(c)'s 61-day superficial-loss window was evaluated "
+             "at annual-step granularity: losses whose household repurchase "
+             "lands in the same or the immediately following annual step were "
+             "denied and deferred into repurchase ACB, and both directions of "
+             "the abstraction err toward denial"),
+    biased_figure=("the realized capital-loss benefit -- the carry-forward "
+                   "pool and the year of its availability; a non-superficial "
+                   "loss whose window straddles the step boundary reaches the "
+                   "pool one year late"),
+    direction=Direction.UNDERSTATES,
+    detail=("The engine's step is a year; the statutory window is 61 days. "
+            "The registered `superficial_loss` rule denies a loss when the "
+            "household re-acquires in the same or next annual step (absent a "
+            "declared non-identical substitute pair), defers the denial into "
+            "repurchase ACB (s.53(1)(f)), and releases an unpurchased loss "
+            "into the next step's settlement. A January disposition followed "
+            "by a December repurchase is >61 days apart in reality but "
+            "in-window here; identity of property is evaluated by DECLARATION "
+            "(decisions.superficial_loss.substitute_pairs), not per-security "
+            "matching. The run-wide facts are recorded onto "
+            "assumptions.superficial_loss so this caveat fires identically in "
+            "TXT/JSON/HTML (DP#9)."),
+    issue='#141',
+    applies=_has_superficial_loss,
+    findings=_describe_superficial_loss,
+))
+
+
 # ── Issue #136: mixed-pot MER limitation ───────────────────────────────────
 #
 # When a household declares `mer` on accounts of a growth-pot kind where OTHER
