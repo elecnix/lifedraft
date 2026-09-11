@@ -23,16 +23,10 @@ name: Clone detection
 # comment (found by hidden marker) carrying the finding count. A later push
 # that scans clean deletes the stale comment.
 #
-# NOTE on cost: this job runs on the same ephemeral autoscaling cloud pods
-# (Actions Runner Controller on Hetzner) as every other workflow here —
-# `runs-on: arc-runners` below; the pods register as runners named
-# `arc-runners-*` (`gh api repos/:owner/:repo/actions/runners`). The single
-# persistent registered runner (`vandenberg-lifedraft`, labels
-# self-hosted/Linux/X64) lacks the `arc-runners` label and never serves these
-# jobs. Because pods scale from zero on demand, this job CAN fan out in
-# parallel with the `Tests` leg rather than queueing behind it — but a cold
-# cluster pays a pod-startup delay before either leg begins, so a second
-# concurrent job does lengthen wall-clock time somewhat.
+# NOTE on cost: this job runs on a GitHub-hosted runner (`runs-on:
+# ubuntu-latest` below) — the repo is public, so hosted minutes are free, and
+# the hosted runner (4 vCPU / 16 GB) exceeds the ARC pod it replaced. It can
+# fan out in parallel with the `Tests` leg with no pod-startup delay.
 #
 # Keep it fast anyway: dupdelta is a single compiled binary (downloaded from
 # its GitHub release, no pip/npm install step) and a full-tree scan of this
@@ -74,9 +68,8 @@ concurrency:
 
 jobs:
   clone-detection:
-    # Self-hosted ARC (ephemeral autoscaling pods on Hetzner cloud), like every
-    # other workflow in this repo.
-    runs-on: arc-runners
+    # GitHub-hosted runner, like every other workflow in this repo.
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       # Posting/updating/deleting the findings comment on the PR conversation.

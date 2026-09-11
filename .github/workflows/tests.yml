@@ -43,13 +43,10 @@ concurrency:
 
 jobs:
   test:
-    # Self-hosted: GitHub-hosted minutes are exhausted, so a GitHub-hosted job
-    # fails immediately with zero steps executed.
-    # The coverage-instrumented full suite is the memory peak in this repo, so it
-    # runs on the DEDICATED 8 GB scale set (7Gi request/limit, cap 2) rather than
-    # sharing the general `arc-runners` pool (3-4Gi, cap 4). `quick-tests` below
-    # stays on the shared pool: it is not the job that was being evicted.
-    runs-on: arc-8gb
+    # GitHub-hosted: the repo is public, so hosted minutes are free, and the
+    # hosted runner (4 vCPU / 16 GB) has more RAM than the arc-8gb scale set
+    # (7Gi request/limit) this job used to need after nightly OOMs at 3Gi.
+    runs-on: ubuntu-latest
     strategy:
       # Don't cancel 3.10 because 3.12 failed -- we want the full picture on main.
       fail-fast: false
@@ -216,12 +213,14 @@ jobs:
           # second runner pod alongside the one that died, and two pods at 4.7 GB
           # on an 8 GB node is ~9.4 GB. No per-worker measurement predicts that.
           #
-          # That is now fixed where it belongs, in ARC rather than here: this job
-          # runs on a dedicated `arc-8gb` scale set (7Gi request AND limit, so
-          # the pod owns its node). With co-tenancy gone the budget no longer has
+          # That is now fixed by runner sizing rather than a budget for a
+          # neighbour: this job runs on a GitHub-hosted runner (16 GB, no
+          # co-tenant). With co-tenancy gone the budget no longer has
           # to buy headroom for a neighbour, so 1024 MB -- still ~1.7x the
           # measured footprint -- replaces the 2048 MB that only ever made sense
-          # against a co-tenant. On the 7Gi pod that yields 7 workers.
+          # against a co-tenant. On the 16 GB hosted runner the memory term
+          # no longer binds (16 GB / 1024 MB = 16), so the CPU term does:
+          # nproc() = 4 workers.
           #
           # PYTEST_MEM_BUDGET_MB caps the RAM the computation may assume, for a
           # machine where the limit you care about is not the machine's total
@@ -343,7 +342,7 @@ jobs:
   # is the only leg that matters for a fast signal. The nightly full matrix still
   # comes from `test`.
   quick-tests:
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
@@ -366,10 +365,9 @@ jobs:
         # the runner-eviction signature, while `test (3.12)` passed on the
         # dedicated pool.
         #
-        # It stays on the shared `arc-runners` pool deliberately: the cgroup
-        # limit there is smaller (~3-4Gi vs the 8gb set's 7Gi), so the same
-        # arithmetic simply yields fewer workers, and this job does not need
-        # to consume one of the two dedicated 8 GB slots to be safe.
+        # It runs on the same GitHub-hosted runner as the `test` job (16 GB,
+        # no smaller cgroup limit), so the same arithmetic simply yields more
+        # workers than the pod it used to share.
         #
         # Read the CGROUP limit, not /proc/meminfo: inside a container the
         # latter reports the NODE's RAM, which is the exact mistake `-n auto`
