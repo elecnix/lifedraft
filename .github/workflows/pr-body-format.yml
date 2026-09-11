@@ -44,8 +44,8 @@ concurrency:
 
 jobs:
   pr-body-format:
-    # Self-hosted: GitHub-hosted minutes are exhausted. See docs/self-hosted-runner.md.
-    runs-on: arc-runners
+    # GitHub-hosted: the repo is public, so hosted minutes are free.
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       # The action reads the PR body via the API; without this scope it
