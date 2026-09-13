@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 
 from simulation_config import SimulationConfig
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports
 from simulation import FamilySimulation
 from countries.canada.adapter import CanadaAdapter
 

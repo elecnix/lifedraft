@@ -15,6 +15,7 @@ Fabricated round numbers and role-based names only (DP#4, DP#15).
 from countries.canada.adapter import CanadaAdapter
 from countries.canada.retirement_transition import price_forced_rrif_tax
 from simulation import FamilySimulation
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports
 from simulation_config import SimulationConfig
 
 # A two-bracket table: 20% up to 50k, 40% above. A slice climbing across the

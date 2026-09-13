@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from capital_loss_carryforward import settle_year
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports
 import rules_capital_loss  # noqa: F401  (registers the `capital_loss` rule)
 from rule_registry import RULES, RuleContext, YearWorkingState
 

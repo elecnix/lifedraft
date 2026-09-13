@@ -25,6 +25,7 @@ import pytest
 
 from simulation_state import SimState, simulate_year_pure, _default_canada_state
 from simulation_config import SimulationConfig
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports
 from rule_registry import RULES, RuleContext, YearWorkingState
 from countries.canada.amt import (
     AMTParameters, total_tax_with_amt,

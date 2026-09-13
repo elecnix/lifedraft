@@ -67,6 +67,7 @@ import pytest
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports
 import rule_registry
 
 # ── The fabricated 70-year-old household (DP#15) ───────────────────────────

@@ -50,6 +50,7 @@ from countries.canada.pension_split_optimizer import (
     split_pension_amounts, MAX_PENSION_SPLIT_PCT,
 )
 from simulation import FamilySimulation, SimulationConfig
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports
 from rule_registry import RuleContext, YearWorkingState, RULES
 
 START_YEAR = 2026
