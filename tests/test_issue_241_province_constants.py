@@ -14,9 +14,9 @@ import re
 import sys
 import unittest
 
-import canada_state_accessors
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import canada_state_accessors  # noqa: E402 -- repo root must be on sys.path first
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
