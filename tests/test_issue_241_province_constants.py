@@ -16,6 +16,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import canada_state_accessors  # noqa: E402 -- repo root must be on sys.path first
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -106,7 +108,7 @@ class TestLimitsSourcedFromCanadaPackage(unittest.TestCase):
             FHSA_ANNUAL_LIMIT, FHSA_CARRY_FORWARD_MAX, FHSA_LIFETIME_LIMIT,
         )
         self.assertEqual(
-            simulation_state._canada_fhsa_limits(),
+            canada_state_accessors._canada_fhsa_limits(),
             (FHSA_ANNUAL_LIMIT, FHSA_CARRY_FORWARD_MAX, FHSA_LIFETIME_LIMIT),
         )
 

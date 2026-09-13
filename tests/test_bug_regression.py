@@ -15,7 +15,7 @@ import unittest
 from copy import deepcopy
 
 from simulation import FamilySimulation, SimulationConfig
-from simulation_state import adult_rrsp_slot  # #700: per-adult RRSP store
+from canada_state_accessors import adult_rrsp_slot
 from strategy import (
     AllocationStrategy, StrategyEngine, FamilyState,
 )

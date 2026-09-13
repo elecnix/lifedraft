@@ -3150,7 +3150,7 @@ def run_optimization(cfg: Dict, input_path: str = "input.json",
             fhsa_lifetime_declared = 0
         if fhsa_lifetime_declared is None:
             # engine default when the contract omits the lifetime cap
-            from simulation_state import _canada_fhsa_limits
+            from canada_state_accessors import _canada_fhsa_limits
             fhsa_lifetime_declared = _canada_fhsa_limits()[2] if fhsa_room_declared > 0 else 0
         state = FamilyState(
             primary_income=income,

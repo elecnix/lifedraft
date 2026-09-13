@@ -233,7 +233,10 @@ class TestPersistenceAndSurfacing(unittest.TestCase):
         seeded opening pool; return (YearResult, post-year state)."""
         from simulation_config import SimulationConfig
         from simulation_state import (
-            SimState, _default_canada_state, simulate_year_pure)
+            SimState,
+            simulate_year_pure,
+        )
+        from canada_state_accessors import _default_canada_state
         from test_issue_584_rules_registry import (
             _default_tax_provider_combined_brackets)
         from test_golden_trajectory_581 import golden_household_config

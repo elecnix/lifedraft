@@ -28,7 +28,10 @@ from runway import (
     RunwayResult, compute_runway, runway_curve, shift_income_scenario_dates,
 )
 from simulation_state import (
-    SimState, simulate_year_pure, adult_lira_slot, adult_fhsa_slot,
+    SimState, simulate_year_pure,
+)
+from canada_state_accessors import (
+    adult_lira_slot, adult_fhsa_slot,
 )  # #700/#643/#704: per-adult LIRA/FHSA stores
 # Import the #679 fixture helpers WITHOUT the `tests.` prefix (the repo's
 # convention for sibling test imports under pytest's rootdir insertion). A
@@ -1071,7 +1074,7 @@ class TestRetirementDrawdownFromLiraAndFhsa(unittest.TestCase):
     """
 
     def _draw(self, net_target):
-        from simulation_state import _default_canada_state
+        from canada_state_accessors import _default_canada_state
         from simulation_config import SimulationConfig
         # #700/#643/#704: LIRA/FHSA are per-adult stores (single primary slot).
         canada = _default_canada_state()

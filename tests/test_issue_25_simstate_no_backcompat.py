@@ -20,7 +20,16 @@ from dataclasses import fields
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from simulation_state import SimState, simulate_year_pure, adult_rrsp_slot, adult_rrsp_total, adult_tfsa_slot, adult_tfsa_total  # #700
+from simulation_state import (
+    SimState,
+    simulate_year_pure,
+)
+from canada_state_accessors import (
+    adult_rrsp_slot,
+    adult_rrsp_total,
+    adult_tfsa_slot,
+    adult_tfsa_total,
+)
 from simulation_config import SimulationConfig
 
 

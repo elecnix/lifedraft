@@ -29,7 +29,11 @@ from superficial_loss import (
 )
 
 from simulation_config import SimulationConfig
-from simulation_state import SimState, _default_canada_state, simulate_year_pure
+from simulation_state import (
+    SimState,
+    simulate_year_pure,
+)
+from canada_state_accessors import _default_canada_state
 
 from contract_decisions import map_superficial_loss
 

@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
 
+import canada_state_accessors
 import simulation_state
 
 
@@ -53,7 +54,7 @@ class TestCanadaRegistersLIFProvider(unittest.TestCase):
 
     def test_canada_registers_provider(self):
         import countries.canada  # noqa: F401  (import-time registration)
-        provider = simulation_state._get_lif_conversion_provider()
+        provider = canada_state_accessors._get_lif_conversion_provider()
         self.assertIsNotNone(provider)
         # The provider must satisfy the core's LIF-conversion contract.
         for attr in ("must_convert_by_year", "make_locked_in_account",
@@ -99,13 +100,13 @@ class TestConversionResolvesThroughAdapter(unittest.TestCase):
     def test_missing_provider_raises_clear_error(self):
         # If no provider is registered but a locked-in account is present, the
         # pure step must fail loudly rather than silently dropping the LIRA.
-        saved = simulation_state._LIF_CONVERSION_PROVIDER
+        saved = canada_state_accessors._LIF_CONVERSION_PROVIDER
         try:
-            simulation_state._LIF_CONVERSION_PROVIDER = None
+            canada_state_accessors._LIF_CONVERSION_PROVIDER = None
             with self.assertRaises(RuntimeError):
-                simulation_state._get_lif_conversion_provider()
+                canada_state_accessors._get_lif_conversion_provider()
         finally:
-            simulation_state._LIF_CONVERSION_PROVIDER = saved
+            canada_state_accessors._LIF_CONVERSION_PROVIDER = saved
 
 
 if __name__ == "__main__":

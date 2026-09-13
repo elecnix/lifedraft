@@ -346,7 +346,11 @@ class TestRoundTripAndGuards(unittest.TestCase):
         consumer_loan_balances length disagrees with config.consumer_loans --
         a programming error in the simulation wiring, not a silent
         truncation (DP#32)."""
-        from simulation_state import SimState, _default_canada_state, simulate_year_pure
+        from simulation_state import (
+            SimState,
+            simulate_year_pure,
+        )
+        from canada_state_accessors import _default_canada_state
         cfg = _config_from(_doc_with_liabilities(_closed_end_liability(
             "car_loan", balance=40_000, rate=0.03, payment_monthly=700, years=5)))
         # Two consumer loans on the config, but the state carries one balance

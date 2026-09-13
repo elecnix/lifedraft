@@ -1227,8 +1227,11 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         simulate_year_pure, child_savings_for_year, child_gift_funding_for_year,
         child_loan_funded_for_year,
         child_after_tax_savings_for_year,
+    )
+    from canada_state_accessors import (
         adult_rrsp_slot, adult_tfsa_slot,
-        adult_fhsa_total_room, adult_fhsa_total_lifetime_remaining)
+        adult_fhsa_total_room, adult_fhsa_total_lifetime_remaining,
+    )
 
     cfg = ctx.config
     salary_growth = cfg.salary_growth
@@ -2124,7 +2127,7 @@ class FamilySimulation:
         # does not second-guess the zero -- and warnings.warn is a hard test
         # failure under this repo's filterwarnings=["error"] pytest config,
         # which would make it identical to a raise for every caller.
-        from simulation_state import (
+        from canada_state_accessors import (
             adult_fhsa_total_room,
             adult_fhsa_total_lifetime_remaining,
         )
@@ -2231,7 +2234,7 @@ class FamilySimulation:
     @property
     def has_fhsa(self):
         """Whether FHSA is active — derived from jurisdiction_state, not a mutable object."""
-        from simulation_state import adult_fhsa_active  # #700/#643: per-adult FHSA store
+        from canada_state_accessors import adult_fhsa_active
         canada = self._state.jurisdiction_state.get('canada', {})
         return adult_fhsa_active(canada)
 
@@ -2382,11 +2385,18 @@ class FamilySimulation:
         and RRSP per-contribution deduction tracking all work correctly in monthly mode.
         """
         from simulation_state import (
-            simulate_year_pure, child_savings_for_year, child_gift_funding_for_year,
+            simulate_year_pure,
+            child_savings_for_year,
+            child_gift_funding_for_year,
             child_loan_funded_for_year,
             child_after_tax_savings_for_year,
-            adult_rrsp_slot, adult_tfsa_slot,
-            adult_fhsa_total_room, adult_fhsa_total_lifetime_remaining)
+        )
+        from canada_state_accessors import (
+            adult_rrsp_slot,
+            adult_tfsa_slot,
+            adult_fhsa_total_room,
+            adult_fhsa_total_lifetime_remaining,
+        )
         from strategy import StrategyEngine
         
         cfg = self.config
@@ -3032,7 +3042,10 @@ class FamilySimulation:
 
     def summary(self) -> Dict:
         """Return a summary of the current simulation state."""
-        from simulation_state import adult_rrsp_total, adult_tfsa_total
+        from canada_state_accessors import (
+            adult_rrsp_total,
+            adult_tfsa_total,
+        )
         state = self._state
         canada = state.jurisdiction_state.get('canada', {})
         return {

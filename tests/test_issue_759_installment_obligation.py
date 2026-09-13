@@ -34,7 +34,8 @@ import countries.canada  # noqa: F401 -- registers the Canada jurisdiction provi
 import input_contract as ic
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-from simulation_state import SimState, _default_canada_state
+from simulation_state import SimState
+from canada_state_accessors import _default_canada_state
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from test_dp_income_scenario_reaches_engine import _two_generation_subset
@@ -455,7 +456,11 @@ class TestRoundTripAndGuards(unittest.TestCase):
         installment_balances length disagrees with config.installments -- a
         programming error in the simulation wiring, not a silent truncation
         (DP#32, mirroring apply_consumer_loans' guard)."""
-        from simulation_state import SimState, _default_canada_state, simulate_year_pure
+        from simulation_state import (
+            SimState,
+            simulate_year_pure,
+        )
+        from canada_state_accessors import _default_canada_state
         cfg = _config_from(_doc_with_installments(_installment_plan()))
         # Two plans on the config, but the state carries one balance -- a
         # length mismatch no legitimate flow produces (SimState.initial seeds

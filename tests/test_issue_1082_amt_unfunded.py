@@ -33,7 +33,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-from simulation_state import SimState, simulate_year_pure, _default_canada_state
+from simulation_state import (
+    SimState,
+    simulate_year_pure,
+)
+from canada_state_accessors import _default_canada_state
 from simulation_config import SimulationConfig
 from trajectory_invariants import run_invariant
 from countries.canada.amt import AMTParameters, total_tax_with_amt

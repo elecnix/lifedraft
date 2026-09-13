@@ -26,12 +26,8 @@ from countries.canada.adapter import CanadaAdapter  # registers the LIF provider
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
 from strategy import AllocationStrategy
-from simulation_state import (
-    rebuild_adult_fhsa,
-    convert_further_adult_locked_in,
-    adult_fhsa_total_room,
-    adult_fhsa_total_lifetime_remaining,
-    _canada_fhsa_limits,
+from canada_state_accessors import (
+    rebuild_adult_fhsa, convert_further_adult_locked_in, adult_fhsa_total_room, adult_fhsa_total_lifetime_remaining, _canada_fhsa_limits,
 )
 
 _LIFETIME = _canada_fhsa_limits()[2]

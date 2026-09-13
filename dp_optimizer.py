@@ -46,7 +46,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 from copy import deepcopy
 
 from simulation import SimulationConfig, YearResult, simulate_year
-from simulation_state import SimState, initial_state_for_run
+from simulation_state import (
+    SimState, initial_state_for_run,
+)
 from return_model import ReturnModel, FixedReturn
 from objective import ObjectiveFunction, MAX_NET_BENEFIT
 from strategy import AllocationStrategy

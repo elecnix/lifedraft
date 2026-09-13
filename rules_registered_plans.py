@@ -36,7 +36,7 @@ def apply_lira_lif(ws: YearWorkingState, ctx: RuleContext) -> bool:
     does not grow the balance (``convert_to_lif`` is a transfer, not a return),
     so no drag applies there.
     """
-    from simulation_state import _get_lif_conversion_provider
+    from canada_state_accessors import _get_lif_conversion_provider
 
     lif_withdrawal = 0.0
     new_lira_balance = ws.opening_lira_balance

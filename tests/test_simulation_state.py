@@ -26,12 +26,12 @@ from dataclasses import replace
 from copy import deepcopy
 
 from simulation_state import (
-    SimState, simulate_year_pure,
-    compute_heloc_deductible_proportion,
-    adult_rrsp_slot, adult_rrsp_total,  # #700: per-adult RRSP store
-    adult_tfsa_slot, adult_tfsa_total,  # #700: per-adult TFSA store
-    adult_fhsa_slot,  # #700/#643/#704: per-adult FHSA store
+    SimState, simulate_year_pure, compute_heloc_deductible_proportion, # #700: per-adult RRSP store, # #700: per-adult TFSA store, # #700/#643/#704: per-adult FHSA store,
 )
+from canada_state_accessors import (
+    adult_rrsp_slot, adult_rrsp_total, adult_tfsa_slot, adult_tfsa_total, adult_fhsa_slot,
+)
+
 from simulation import SimulationConfig, YearResult
 
 

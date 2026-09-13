@@ -44,7 +44,11 @@ from liquidation_waterfall import (
     summarize_solvency,
 )
 from simulation_config import SimulationConfig
-from simulation_state import SimState, simulate_year_pure, adult_tfsa_slot  # #700
+from simulation_state import (
+    SimState,
+    simulate_year_pure,
+)
+from canada_state_accessors import adult_tfsa_slot
 from trajectory_invariants import assert_invariant, run_invariant
 
 
