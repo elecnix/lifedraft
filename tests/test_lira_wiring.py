@@ -116,7 +116,7 @@ class TestLIRAInTotalAssets:
     def test_zero_lira_balance_not_counted(self):
         """Zero-balance LIRA should not affect total_assets."""
         state = _make_state_with_lira(lira_balance=0)
-        from canada_state_accessors import _default_canada_state
+        from canada_state_accessors import _default_canada_state as _dcs
         no_lira_state = SimState(
             non_reg_balance=0, non_reg_acb=0,
             mortgage_balance=300000, heloc_balance=0,
