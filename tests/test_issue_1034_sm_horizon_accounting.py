@@ -31,10 +31,11 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from optimize import compute_net_benefit
+from objective import compute_net_benefit
 from objective import compute_after_tax_estate
 from simulation_config import SimulationConfig
 from year_result import YearResult
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports (issue #232 PR: make the file self-sufficient)
 from rule_registry import RULES, RuleContext, YearWorkingState
 from tax_data import default_tax_provider
 
@@ -238,11 +239,14 @@ class TestComputeNetBenefitPricesSmSleeve:
           * RIGHT-list stash: stash an estate keyed to the SAME ``results_big``
             list object; compute_net_benefit must HIT (is match) and reuse it
             (0 compute_estate calls)."""
-        import optimize as _optimize
         from countries.canada.estate import EstateResult
         # ``results_*`` are the LISTS passed to compute_net_benefit (the stash
         # is keyed to the list, so the test stashes the actual list object --
         # stashing the YearResult instead would be a vacuous always-miss).
+        # Since #232 the SM-sleeve estate call lives in objective.py's
+        # compute_net_benefit and goes through the seam binding
+        # objective._compute_estate, so the patched call site is that binding
+        # (same function object as optimize.compute_estate).
         big = _yr(sm_investment_balance=700_000.0, sm_investment_cost_basis=500_000.0,
                  non_reg_acb=0.0, total_assets=1_500_000.0, total_debt=0.0)
         small = _yr(sm_investment_balance=100_000.0, sm_investment_cost_basis=100_000.0,
@@ -252,16 +256,17 @@ class TestComputeNetBenefitPricesSmSleeve:
         cfg = _cfg()
 
         def _count_estate_calls(fn):
-            _orig = _optimize.compute_estate
+            import objective as _objective
+            _orig = _objective._compute_estate
             _calls = {'n': 0}
             def _wrap(*a, **k):
                 _calls['n'] += 1
                 return _orig(*a, **k)
-            _optimize.compute_estate = _wrap
+            _objective._compute_estate = _wrap
             try:
                 out = fn()
             finally:
-                _optimize.compute_estate = _orig
+                _objective._compute_estate = _orig
             return out, _calls['n']
 
         # The correct net_benefit for results_big (no cache, computes its own

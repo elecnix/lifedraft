@@ -548,7 +548,7 @@ register(Approximation(
              "birth_year — neither is the deemed disposition that actually occurs"),
     biased_figure='net_benefit ranking figure (the default objective, and the console headline)',
     direction=Direction.UNKNOWN,
-    detail=("optimize.py:compute_net_benefit() — the RRSP withdrawal tax is computed from "
+    detail=("objective.py:compute_net_benefit() — the RRSP withdrawal tax is computed from "
              "a projected retirement state when birth_year is present, and from a flat "
              "30% assumption when it is not (a round-number placeholder, not this "
              "household's rate). Distinct from 'terminal_wealth_is_pretax': net_benefit "
@@ -583,11 +583,10 @@ register(Approximation(
     detail=("#661's VOI sweep (voi.py) measured /estate/default_spousal_rollover at $0 "
              "VOI under max_net_benefit and $84,998 under max_after_tax_estate on a "
              "reference household -- proof, not inference, that compute_net_benefit() "
-             "(optimize.py) never routed through objective.compute_after_tax_estate() / "
+             "(objective.py) never routed through objective.compute_after_tax_estate() / "
              "countries/canada/estate.py. Issue #1034 closed the largest piece: "
              "compute_net_benefit() now prices the SM sleeve's terminal deemed "
-             "disposition by calling compute_estate(**_estate_call_args(...)) -- the "
-             "SAME estate code path max_after_tax_estate uses (DP#9, one spelling) -- "
+             "disposition by calling the same estate code path (DP#9, one spelling) -- "
              "so the spousal-rollover election (which the SM sleeve mirrors, via the "
              "non-reg pot's rollover) now moves net_benefit for a leveraged household. "
              "The blindness that remains is the NON-REG pot: net_benefit still prices "
@@ -619,9 +618,10 @@ register(Approximation(
                     'cross-pot basis inconsistency that still tilts it toward leverage'),
     direction=Direction.UNKNOWN,
     detail=("compute_net_benefit charges the non-reg pot gain x inclusion x "
-             "marginal_rate(retirement_income + ..., brackets_2026) (optimize.py:410), but "
-             "the SM sleeve via compute_estate(**_estate_call_args(...)).sm_investment_tax "
-             "(optimize.py:455-457) -- two terminal returns running progressive brackets "
+             "marginal_rate(retirement_income + ..., brackets_2026), but "
+             "the SM sleeve via the estate path "
+             "compute_estate(**_estate_call_args(...)).sm_investment_tax "
+             "-- two terminal returns running progressive brackets "
              "from $0 on terminal-YEAR indexed brackets, with the rollover election. The "
              "estate path is the SAME spelling max_after_tax_estate uses (DP#9 for the SM "
              "sleeve), but the non-reg pot kept net_benefit's pre-#1034 formula, so the two "

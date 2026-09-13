@@ -181,7 +181,7 @@ def test_incentive_changes_the_objective():
     """A declared acquisition must MOVE the number, by exactly the two programs'
     amounts. Asserting the key exists on the config would not have caught
     ``decisions.income[]``, which reached the config and stopped there."""
-    from optimize import compute_net_benefit
+    from objective import compute_net_benefit
 
     results = _minimal_results()
     without = compute_net_benefit(results, _base_cfg())
@@ -195,7 +195,7 @@ def test_incentive_changes_the_objective():
 def test_non_quebec_household_gets_only_the_federal_incentive():
     """The two programs are independent and the provincial one is gated on
     jurisdiction, not assumed."""
-    from optimize import compute_net_benefit
+    from objective import compute_net_benefit
 
     results = _minimal_results()
     cfg = _base_cfg(zev_purchases=[OPEN_WINDOW_BEV])
@@ -208,7 +208,7 @@ def test_non_quebec_household_gets_only_the_federal_incentive():
 def test_closed_program_year_moves_nothing():
     """DP#28/DP#32: an acquisition after both programs' priced windows adds
     exactly zero -- and the household is told why by the modules' reasons."""
-    from optimize import compute_net_benefit
+    from objective import compute_net_benefit
 
     results = _minimal_results()
     late = dict(OPEN_WINDOW_BEV, acquisition_date="2027-06-01")
@@ -219,7 +219,7 @@ def test_closed_program_year_moves_nothing():
 
 def test_absent_block_is_byte_identical():
     """The golden household declares no vehicle: its number must not move."""
-    from optimize import compute_net_benefit
+    from objective import compute_net_benefit
 
     results = _minimal_results()
     assert compute_net_benefit(results, _base_cfg()) == compute_net_benefit(
@@ -229,7 +229,7 @@ def test_absent_block_is_byte_identical():
 def test_two_acquisitions_both_count():
     """Two vehicles are two acquisitions, each priced on its own date. The
     'returning the first match' trap would silently drop the second."""
-    from optimize import compute_net_benefit
+    from objective import compute_net_benefit
 
     results = _minimal_results()
     second = dict(OPEN_WINDOW_BEV, id="ev_b")

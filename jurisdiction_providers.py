@@ -191,4 +191,5 @@ def _auto_register():
     except ImportError:
         pass
 
+
 _auto_register()

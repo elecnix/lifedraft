@@ -453,17 +453,17 @@ _CODE_ANCHORS = {
     'rrsp_contribution_refused': (
         'rules_contributions.py', 'ws.rrsp_refused_own'),
     'net_benefit_withdrawal_tax_is_estimated': (
-        'optimize.py', 'def compute_net_benefit('),
+        'objective.py', 'def compute_net_benefit('),
     # Issue #672: sibling caveat, same anchor -- both describe
     # compute_net_benefit(), which never models a death event.
     'net_benefit_omits_estate_elections': (
-        'optimize.py', 'def compute_net_benefit('),
+        'objective.py', 'def compute_net_benefit('),
     # Issue #1034: the residual cross-pot basis inconsistency -- the SM sleeve
     # is priced via compute_estate (estate path) while the non-reg pot keeps
     # compute_net_benefit's own marginal_rate formula. Anchored to the SM
     # sleeve's estate-path call site.
     'net_benefit_sm_sleeve_cheaper_than_non_reg': (
-        'optimize.py', 'compute_estate(**_sm_estate_args).sm_investment_tax'),
+        'objective.py', '_compute_estate(**_sm_estate_args).sm_investment_tax'),
     # epic #603 Track C Phase 2c (#600): after_tax_estate_defaulted_assumptions
     # is GONE (the schema CAN now express all five elections -- the caveat's own
     # claim became false). Two narrower, still-true caveats replace it.
