@@ -92,6 +92,7 @@
     "module_registry.py": 24,
     "money.py": 0,
     "monte_carlo_optimizer.py": 5,
+    "net_benefit_legs.py": 0,
     "next_action.py": 53,
     "objective.py": 0,
     "optimize.py": 127,
