@@ -9,6 +9,7 @@
   "files": {
     "__init__.py": 0,
     "asset_location_optimize.py": 0,
+    "canada_state_accessors.py": 0,
     "capital_loss_carryforward.py": 0,
     "charge_limits.py": 0,
     "config_access.py": 10,
