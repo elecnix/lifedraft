@@ -211,10 +211,12 @@ class TestSerdeParity(unittest.TestCase):
     The read half is measured by EXECUTING the real ``config_fields_from_dict``
     against the canonical example document (its return keys are the
     constructor kwargs). The write half is measured STATICALLY -- every
-    ``config.<name>`` attribute access inside ``config_to_dict``, so a field
-    whose write lives inside a conditional block is still seen. Both lists are
-    then compared to the dataclass declaration itself; a one-sided field fails
-    with its exact name, not a count.
+    ``config.<name>`` access in an emission position inside ``config_to_dict``
+    (a dict value, never a gate), so a field whose write lives inside a
+    conditional block is still seen while a name that only guards an emission
+    is not mistaken for one. Both lists are then compared to the dataclass
+    declaration itself; a one-sided field fails with its exact name, not a
+    count.
     """
 
     # Fields whose from_dict() value is DERIVED from other round-tripped
@@ -247,20 +249,45 @@ class TestSerdeParity(unittest.TestCase):
     @classmethod
     def _write_half_fields(cls):
         """The fields to_dict() re-emits: every ``config.<name>`` access in
-        the source of ``config_to_dict``. Static (AST over config_serde.py),
+        an *emission position* -- the value of one of the dicts being built --
+        in the source of ``config_to_dict``. Static (AST over config_serde.py),
         so a field whose emission is gated behind ``if config.X is not None``
         or a ``**({...} if ... else {})`` spread is still counted -- exactly
         the conditional shape every absence-idiom field uses here.
+
+        A *reference* is not an *emission*: ``config.X`` appearing only in a
+        gate -- ``**({} if config.X is None else {})`` -- writes nothing, so
+        it must not count. Counting it would let a field whose write entry
+        was deleted (leaving only the guard behind) pass as written and be
+        silently lost on round-trip (#235).
         """
         tree = ast.parse(Path(config_serde.__file__).read_text())
+
+        def _emitted(out: Set[str], n: ast.AST) -> None:
+            """Collect ``config.<attr>`` from emission positions under *n*:
+            dict values (a ``**{...}`` spread is a None-keyed entry whose
+            value is walked the same), never dict keys, and never the
+            ``test`` of an ``ast.IfExp`` / ``ast.If`` met on the way -- a
+            gate is not an emission.
+            """
+            if isinstance(n, (ast.IfExp, ast.If)):
+                for branch in (n.body, n.orelse):  # type: ignore[attr-defined]
+                    _emitted(out, branch)
+            elif isinstance(n, ast.Dict):
+                for value in n.values:
+                    _emitted(out, value)
+            elif isinstance(n, ast.Attribute):
+                if isinstance(n.value, ast.Name) and n.value.id == 'config':
+                    out.add(n.attr)
+                _emitted(out, n.value)
+            else:
+                for child in ast.iter_child_nodes(n):
+                    _emitted(out, child)
+
         fields: Set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == 'config_to_dict':
-                for n in ast.walk(node):
-                    if (isinstance(n, ast.Attribute)
-                            and isinstance(n.value, ast.Name)
-                            and n.value.id == 'config'):
-                        fields.add(n.attr)
+                _emitted(fields, node)
         return fields
 
     @classmethod
