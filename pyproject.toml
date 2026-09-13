@@ -83,7 +83,7 @@ py-modules = [
     "monte_carlo_optimizer", "next_action", "objective", "optimize",
     "optimizer", "output_paths", "output_plugins", "property_structure",
     "provenance",
-    "retirement_analysis", "return_model", "runway", "scenario_discovery",
+    "retirement_analysis", "return_model", "rrsp_ledger", "runway", "scenario_discovery",
     "scenario_overlay",
     "scipy_optimizer", "sensitivity", "session_log", "simulate",
     "rule_registry", "rules_amt", "rules_contributions", "rules_debt",
