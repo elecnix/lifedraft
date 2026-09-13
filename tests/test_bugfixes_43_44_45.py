@@ -191,7 +191,7 @@ class TestBug45DeductLaterBracketAware(unittest.TestCase):
         
         # With deduct_later=True, the ledger should have undeducted contributions
         ledger = new_state.jurisdiction_state['canada']['rrsp_ledger']
-        from simulation_state import ledger_undeducted_total, ledger_total_claimed
+        from rrsp_ledger import ledger_undeducted_total, ledger_total_claimed
         total_undeducted = ledger_undeducted_total(ledger)
         total_deducted = ledger_total_claimed(ledger)
         
@@ -234,7 +234,7 @@ class TestBug45DeductLaterBracketAware(unittest.TestCase):
         
         # All RRSP contributions should be deducted
         ledger = new_state.jurisdiction_state['canada']['rrsp_ledger']
-        from simulation_state import ledger_undeducted_total, ledger_total_claimed
+        from rrsp_ledger import ledger_undeducted_total, ledger_total_claimed
         total_undeducted = ledger_undeducted_total(ledger)
         total_deducted = ledger_total_claimed(ledger)
         

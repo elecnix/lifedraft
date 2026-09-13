@@ -16,7 +16,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from simulation_config import SimulationConfig
-from simulation_state import RRSPListLedger, SimState, simulate_year_pure
+from rrsp_ledger import RRSPListLedger
+from simulation_state import SimState, simulate_year_pure
 from tax_calculator import (
     deduction_value,
     marginal_rate,

@@ -93,9 +93,10 @@ _CONFIRMED_VIOLATIONS = {
 # (b) the expression is developer-tooling metadata (CLI args, git commit,
 # session bookkeeping), not financial data DP#32 is about.
 _REVIEWED_HARMLESS = {
-    # simulation_state.py: deduction_marginal_rate -- 0% deduction is
+    # rrsp_ledger.py: deduction_marginal_rate -- 0% deduction is
     # legitimately both "not specified" and "specified as 0%"; #606 confirms.
-    ("simulation_state.py", "e.get('deduction_marginal_rate') or 0"): {
+    # Moved from simulation_state.py (#236).
+    ("rrsp_ledger.py", "e.get('deduction_marginal_rate') or 0"): {
         "reason": "#606 verified-not-a-bug: default already equals fallback (0 or 0); a 0% rate reads the same whether absent or explicit.",
     },
     # simulation_state.py:434 -- part of the SAME _opening() function as the

@@ -99,7 +99,7 @@ from countries.canada.hbp_rules import (  # noqa: F401
 )
 
 # RRSP contribution ledger: the canonical per-contribution ledger lives in
-# simulation_state.RRSPListLedger (jurisdiction-agnostic, DP#25). The dead
+# rrsp_ledger.RRSPListLedger (jurisdiction-agnostic, DP#25). The dead
 # countries.canada.rrsp_ledger clone was removed (#744, DP#9).
 
 # Canada-specific simulation state (DP#9)
