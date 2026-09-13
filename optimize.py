@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from tax_calculator import (
-    marginal_rate, tax_on_income,
+    marginal_rate,
 )
 from countries.canada.tax_calc import (
     federal_tax, quebec_tax,
@@ -54,13 +54,6 @@ from countries.canada.rate_model import (
     amortization_schedule, annual_summary, monthly_payment,
 )
 from countries.canada.cashout_optimizer import compute_min_extraction, print_cashout_report
-from countries.canada.retirement import (
-    DrawdownOptimizer, RetirementState, project_retirement,
-    get_oas_annual_max,  # DP#20 year-versioned (#1029)
-)
-from countries.canada.lsif_credit import compute_lsif_credit, lsif_from_config, LSIFPurchase
-from countries.canada.zev_incentive import compute_izev_incentive, zev_purchase_from_dict
-from countries.canada.provinces.quebec.roulez_vert import compute_roulez_vert_rebate
 # Issue #732 (DP#25): objective.py resolves the estate math through the
 # jurisdiction provider seam and cannot import countries.canada.estate. The
 # static reach-detector (tests/architecture/test_unreached_rule_modules.py)
@@ -75,6 +68,7 @@ from countries.canada.provinces.quebec.roulez_vert import compute_roulez_vert_re
 from countries.canada.estate import compute_estate
 from objective import (
     ObjectiveFunction, MAX_NET_BENEFIT,
+    compute_net_benefit,
     estate_is_declared, _estate_call_args,
     OBJECTIVES, get_objective,
 )
@@ -92,40 +86,6 @@ import atexit
 import collections
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
-
-
-# DP#13/DP#20: fallback OAS annual amount used by compute_net_benefit() when
-# the household's config supplies no ``assumptions.oas_annual``. This is a
-# named fallback for ABSENT input only -- an explicit ``0`` is honoured (the
-# ``dict.get`` calls below use it as the dict.get default, NOT
-# ``x or DEFAULT``, so DP#32 is respected: a configured zero stays zero).
-#
-# Issue #1029 (the deliberate decision #986 deferred): the fallback AMOUNT is
-# read live from the year-versioned government table
-# ``countries.canada.retirement.get_oas_annual_max(year)`` -- the same source
-# every other consumer uses (pension_split_optimizer via #331,
-# simulation_rules, retirement) -- instead of a frozen literal. The relevant
-# year is the household's simulation start year (``cfg['tax']['start_year']``,
-# which run_optimization always writes into the objective cfg); a hand-built
-# config without that block falls back to ``_CURRENT_YEAR``, the same
-# current-year convention compute_net_benefit already uses for its age and
-# LSIF math. For 2026 this reads 8908 (pre-#1029 it was the stale frozen
-# 8500), so optimizer net-benefit numbers MOVE for households omitting
-# ``assumptions.oas_annual`` -- that delta is the intended correctness fix.
-_CURRENT_YEAR = 2026
-
-
-def _default_oas_annual(cfg: Dict) -> float:
-    """Year-versioned OAS maximum for ABSENT ``assumptions.oas_annual`` (#1029).
-
-    Reads the live government table for the household's simulation start year;
-    an unknown year raises ValueError from ``get_oas_annual_max`` rather than
-    silently coercing (DP#32).
-    """
-    start_year = cfg.get('tax', {}).get('start_year')
-    if start_year is None:
-        start_year = _CURRENT_YEAR
-    return get_oas_annual_max(start_year)
 
 
 # ── Scenario-sweep parallelism (perf) ────────────────────────────────────────
@@ -328,221 +288,6 @@ def resolve_objective(cli_name: Optional[str], cfg: Dict) -> ObjectiveFunction:
             f"Valid objectives: {sorted(OBJECTIVES)}."
         )
 
-
-def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
-    """Compute net benefit from simulation YearResult list.
-
-    Net benefit = total_assets - total_debt + cumulative tax savings
-    - estimated withdrawal taxes on RRSP and capital gains.
-
-    Auto-includes retirement drawdown analysis when birth_year data
-    is available in cfg, otherwise uses simplified 30% withdrawal tax.
-
-    This is a pure function: same inputs → same output (DP#3).
-    """
-    if not results:
-        return 0.0
-
-    final = results[-1]
-    brackets = default_tax_provider().get_combined_brackets()
-
-    # Cumulative tax savings over the projection
-    total_rrsp_savings = sum(yr.rrsp_tax_savings for yr in results)
-    total_sm_savings = sum(yr.readvance_tax_savings for yr in results)
-    # Issue #850: the s.20(1)(c) deduction on the mortgage ADVANCE and on the
-    # DRAWN revolving line. Without this term, ranking advance-vs-line prices
-    # the rate gap and interest capitalization ONLY -- i.e. it ranks a
-    # different question than the one #849 asks. 0.0 for a household that
-    # borrowed no lump sum, so a household that never asked this question sees
-    # exactly the number it saw before (DP#32).
-    total_traced_savings = sum(yr.traced_borrowing_tax_savings for yr in results)
-
-    # ── RRSP withdrawal tax: use retirement module if age data available ──
-    members = cfg.get('family', {}).get('members', [])
-    primary = find_member_by_role(members, 'primary', {})  # #699 seam
-    birth_year = primary.get('birth_year')
-    
-    rrsp_withdrawal_tax = 0
-    if final.total_rrsp > 0:
-        if birth_year and birth_year > 1900:
-            # Auto-include retirement drawdown analysis (DP#16)
-            current_age = 2026 - birth_year
-            # Standard retirement age: 65, or current+10 if already past 55
-            retirement_age = max(current_age + 10, 65)
-            # DP#19: use actual ACB tracked by simulation, not a rough estimate
-            non_reg_acb = getattr(final, 'non_reg_acb',
-                                   final.non_reg_balance * 0.5)  # Fallback for old results
-            # DP#16/issue #232: Read CPP/OAS from config instead of hardcoding.
-            # Per issue #232: retirement_income=0 was a placeholder. Now compute actual
-            # retirement income from CPP monthly estimate, OAS, pension, and LIF withdrawal.
-            cpp_monthly_estimated = primary.get('cpp_monthly_estimated', 0)
-            cpp_start_age = primary.get('cpp_start_age', 65)
-            oas_start_age = primary.get('oas_start_age', 65)
-            oas_defer_months = primary.get('oas_defer_months', 0)
-            pension_income_annual = primary.get('pension_income_annual', 0)
-            # Compute CPP annual from monthly estimate
-            cpp_annual = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
-            # Compute OAS annual from config or defaults
-            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
-            # LIF withdrawal from simulation results (issue #230)
-            lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
-            ret_state = RetirementState(
-                rrif_balance=final.total_rrsp,  # RRSP becomes RRIF at retirement
-                tfsa_balance=final.total_tfsa,
-                non_reg_balance=final.non_reg_balance,
-                non_reg_acb=non_reg_acb,
-                age=retirement_age,
-                annual_expenses=cfg.get('assumptions', {}).get('retirement_expenses', 60000),
-                cpp_start_age=cpp_start_age,
-                cpp_annual=cpp_annual,
-                oas_annual=oas_annual,
-                lif_balance=getattr(final, 'lif_balance', 0),
-                lif_jurisdiction=primary.get('lira', {}).get('jurisdiction', 'federal'),
-                lif_birth_year=birth_year,
-            )
-            ret_results = project_retirement(ret_state, investment_return=resolve_return_rate(cfg))
-            rrsp_withdrawal_tax = sum(r.get('tax_owed', 0) for r in ret_results)
-        else:
-            # DP#13/issue #232: retirement_income should come from config.
-            # Compute actual retirement income from CPP + OAS + pension + LIF.
-            cpp_monthly_estimated = primary.get('cpp_monthly_estimated', 0)
-            cpp_annual_income = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
-            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
-            pension_income_annual = primary.get('pension_income_annual', 0)
-            lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
-            retirement_income = cpp_annual_income + oas_annual + pension_income_annual + lif_withdrawal
-            rrsp_withdrawal_tax = (tax_on_income(retirement_income + final.total_rrsp, brackets)
-                                   - tax_on_income(retirement_income, brackets))
-
-    # Capital gains tax on non-reg (DP#19: use tracked ACB)
-    cg_inclusion = cfg.get('assumptions', {}).get('capital_gains_inclusion', 0.50)
-    # Use tracked ACB if available (from YearResult.non_reg_acb),
-    # otherwise estimate from cumulative contributions
-    non_reg_acb = getattr(final, 'non_reg_acb', None)
-    if non_reg_acb is not None:
-        nonreg_gains = max(0, final.non_reg_balance - non_reg_acb)
-    else:
-        nonreg_gains = max(0, final.non_reg_balance - sum(yr.contributions.get('non_reg', 0) for yr in results))
-    # DP#16/issue #232: Compute retirement income from CPP + OAS + pension + LIF
-    # Per issue #232: the placeholder retirement_income=0 understates the marginal
-    # rate applied to capital gains. Use actual CPP/OAS/pension data from config.
-    cpp_monthly_for_cg = primary.get('cpp_monthly_estimated', 0)
-    cpp_annual_for_cg = cpp_monthly_for_cg * 12 if cpp_monthly_for_cg > 0 else 0
-    oas_annual_for_cg = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
-    pension_income_for_cg = primary.get('pension_income_annual', 0)
-    lif_withdrawal_for_cg = getattr(final, 'lif_withdrawal', 0)
-    retirement_income = cpp_annual_for_cg + oas_annual_for_cg + pension_income_for_cg + lif_withdrawal_for_cg
-    cg_tax = nonreg_gains * cg_inclusion * marginal_rate(retirement_income + nonreg_gains * cg_inclusion, brackets)
-
-    # RESP withdrawal tax
-    resp_eap_portion = cfg.get('assumptions', {}).get('resp_eap_taxable_portion', 0.60)
-    resp_eap_rate = cfg.get('assumptions', {}).get('resp_eap_tax_rate', 0.15)
-    resp_tax = final.resp_balance * resp_eap_portion * resp_eap_rate
-
-    # DP#16/issue #231: LSIF tax credit computation.
-    # A spouse below the LSIF income threshold is eligible for credits on FTQ
-    # purchases up to $5k/yr; a primary above the threshold is ineligible for the
-    # provincial credit. Eligibility is decided by the lsif_credit module from the
-    # income data in the config — names and incomes are never hardcoded here.
-    # DP#13: birth_year is sourced from config; the placeholder (LSIFPurchase's
-    # default of 2000) is a clearly-dated stand-in, not a real person's year.
-    lsif_credit_total = 0.0
-    lsif_purchase = lsif_from_config(cfg, birth_year=primary.get('birth_year', LSIFPurchase.birth_year), year=2026)
-    if lsif_purchase is not None and lsif_purchase.amount > 0:
-        lsif_result = compute_lsif_credit(lsif_purchase, year=2026)
-        lsif_credit_total = lsif_result.federal_credit + lsif_result.quebec_credit
-
-    # Also check spouse LSIF eligibility (the below-threshold spouse is the typically eligible one)
-    spouse_mem = find_member_by_role(members, 'spouse', {})  # #699 seam
-    spouse_lsif_purchase = lsif_from_config(cfg, birth_year=spouse_mem.get('birth_year', LSIFPurchase.birth_year), year=2026)
-    if spouse_lsif_purchase is not None and spouse_lsif_purchase.amount > 0:
-        spouse_lsif_result = compute_lsif_credit(spouse_lsif_purchase, year=2026)
-        lsif_credit_total += spouse_lsif_result.federal_credit + spouse_lsif_result.quebec_credit
-
-    # DP#16: zero-emission vehicle incentives. Fires only when the household
-    # declares a zev_purchases[] acquisition; absent the block this is 0.0 and
-    # every existing household's number is byte-identical (DP#32).
-    #
-    # Two INDEPENDENT programs are priced per acquisition and summed: the
-    # federal iZEV incentive (closed 2025-03-31) and, for a Quebec household,
-    # the provincial Roulez vert rebate. Each decides its own dated eligibility
-    # from the acquisition date -- neither reads the other, and a household may
-    # receive both, one, or neither.
-    #
-    # KNOWN SIMPLIFICATION, shared verbatim with lsif_credit_total above: the
-    # incentive is added to the terminal objective undiscounted, as though
-    # received at the horizon rather than in the acquisition year. It is
-    # therefore not compounded over the years between. This understates an
-    # early acquisition relative to a late one. Correcting it means routing the
-    # incentive through the yearly fold as a real inflow, which is the decision
-    # dimension's job, not this module's.
-    zev_incentive_total = 0.0
-    _province = cfg.get('tax', {}).get('province')
-    for _entry in cfg.get('zev_purchases', []):
-        _purchase = zev_purchase_from_dict(_entry)
-        zev_incentive_total += compute_izev_incentive(_purchase).amount
-        if _province == 'quebec':
-            zev_incentive_total += compute_roulez_vert_rebate(
-                acquisition_date=_purchase.acquisition_date,
-                msrp=_purchase.trim_msrp,
-                propulsion=_purchase.propulsion,
-                is_quebec_resident=True,
-            ).amount
-
-    # Issue #1034: price the SM sleeve's terminal deemed disposition with the
-    # SAME estate code path compute_after_tax_estate uses (DP#9 -- one
-    # spelling, not a parallel marginal_rate computation). final.total_assets
-    # carries the SM sleeve (optimize.py:437), so pre-#1034 this objective
-    # taxed non_reg_balance's accrued gain but left the SM sleeve's entire
-    # embedded gain untaxed -- an unpriced thumb on the scale in favour of
-    # leverage that let flipping --objective between max_net_benefit and
-    # max_after_tax_estate reverse the sign of the leverage recommendation.
-    # sm_investment_cost_basis is on YearResult since #1032 (344106b). The
-    # estate path is invoked ONLY when an SM sleeve is present (the golden
-    # household and every sleeve-less YearResult get sm_deemed_tax = 0.0 ->
-    # byte-identical, DP#32). D3: ``non_reg_acb`` MUST be a float -- compute_estate
-    # prices the non-reg pot too and requires a float ACB; a None ACB cannot be
-    # priced, and silently substituting $0 tax would let the sleeve's entire
-    # embedded gain escape (AGENTS.md: a plausible answer from absent data is
-    # worse than crashing). The production fold always tracks a float ACB, so
-    # this only fires for a hand-crafted YearResult -- raise loudly.
-    sm_deemed_tax = 0.0
-    if getattr(final, 'sm_investment_balance', 0.0) > 0.0:
-        if getattr(final, 'non_reg_acb', None) is None:
-            raise ValueError(
-                "compute_net_benefit cannot price the SM sleeve's terminal "
-                "deemed disposition when final.non_reg_acb is None: the estate "
-                "path (compute_estate) prices the non-reg pot too and requires a "
-                "float ACB. The fold always tracks a float ACB; a hand-crafted "
-                "YearResult must supply one (or set sm_investment_balance=0 to "
-                "skip the sleeve). Silently substituting $0 tax would let the "
-                "sleeve's entire embedded gain escape (DP#32).")
-        # D11 (#1072): the ranking path precomputes the EstateResult once per
-        # strategy and stashes it on cfg (keyed to id(results)) so this
-        # objective, the net_benefit report column, and the after_tax_estate
-        # report column all reuse ONE compute_estate call. N1: keyed to
-        # id(results) so it cannot leak across different results --
-        # _risk_ensemble_scores calls objective.evaluate for N ensemble paths
-        # with the SAME cfg dict, so an un-keyed stash would price every
-        # ensemble path with the representative path's estate.
-        # N1: identity on the list itself (``is``), with the list held by
-        # the stash so CPython's list free-list cannot recycle a freed
-        # address into a stale match. id() would be silently fallible; the
-        # strong reference makes the match correct BY CONSTRUCTION.
-        _precomputed = (cfg.get('_precomputed_estate_result')
-                        if cfg.get('_precomputed_estate_for') is results
-                        else None)
-        if _precomputed is not None:
-            sm_deemed_tax = _precomputed.sm_investment_tax
-        else:
-            _sm_estate_args = _estate_call_args(results, cfg)
-            if _sm_estate_args is not None:
-                sm_deemed_tax = compute_estate(**_sm_estate_args).sm_investment_tax
-
-    return (final.total_assets - final.total_debt
-            + total_rrsp_savings + total_sm_savings + total_traced_savings
-            - rrsp_withdrawal_tax - cg_tax - resp_tax - sm_deemed_tax
-            + lsif_credit_total + zev_incentive_total)
 
 
 def _risk_ensemble_scores(

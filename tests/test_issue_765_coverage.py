@@ -28,6 +28,7 @@ import math
 import pytest
 
 import decumulation
+import objective
 import optimize
 import trajectory_invariants as ti
 from year_result import YearResult
@@ -145,7 +146,7 @@ class TestComputeNetBenefitRetirementBranches:
     empty-results guard were uncovered."""
 
     def test_empty_results_returns_zero(self):
-        assert optimize.compute_net_benefit([], {}) == 0.0
+        assert objective.compute_net_benefit([], {}) == 0.0
 
     def test_rrsp_balance_without_birth_year_uses_config_retirement_income(self):
         """When total_rrsp > 0 but no birth_year is declared, the retirement
@@ -165,7 +166,7 @@ class TestComputeNetBenefitRetirementBranches:
                  'pension_income_annual': 20_000}]},
             'assumptions': {'oas_annual': 8_500},
         }
-        net = optimize.compute_net_benefit([final], cfg)
+        net = objective.compute_net_benefit([final], cfg)
         assert isinstance(net, float)
         # Sanity: with positive assets and tax savings, net benefit is finite
         # and not NaN/inf (the block must have run, not raised).

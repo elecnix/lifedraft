@@ -19,7 +19,7 @@ Tests cover:
 
 import pytest
 from copy import deepcopy
-from optimize import compute_net_benefit
+from objective import compute_net_benefit
 from year_result import YearResult
 from countries.canada.lsif_credit import (
     compute_lsif_credit, lsif_from_config, LSIFPurchase,
@@ -207,7 +207,7 @@ class TestNoPersonalDataInCode:
 
     def test_lsif_birth_year_sourced_from_config(self):
         """The birth_year passed to LSIF is taken from the config member, not a literal."""
-        from optimize import compute_net_benefit
+        from objective import compute_net_benefit
         from countries.canada.lsif_credit import LSIFPurchase, lsif_from_config
 
         results = [YearResult(

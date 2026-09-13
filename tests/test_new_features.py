@@ -32,7 +32,7 @@ from countries.canada.strategies import (
 from simulation import FamilySimulation, SimulationConfig, YearResult
 from simulation_state import adult_fhsa_slot  # #700/#643/#704: per-adult FHSA store
 
-from optimize import compute_net_benefit
+from objective import compute_net_benefit
 
 from countries.canada.rate_model import build_rate_path
 
@@ -628,7 +628,7 @@ class TestAutoDetection(unittest.TestCase):
 
     def test_retirement_module_used_in_net_benefit_with_age(self):
         """compute_net_benefit uses retirement.py when birth_year is available."""
-        from optimize import compute_net_benefit
+        from objective import compute_net_benefit
         config = _make_config()
         sim = FamilySimulation(config, STRATEGY_BALANCED, build_rate_path("test", 0.05, 10, 'variable', [0.05]), use_readvanceable=False)
         results = sim.run()
@@ -644,7 +644,7 @@ class TestAutoDetection(unittest.TestCase):
 
     def test_retirement_module_not_used_without_age(self):
         """compute_net_benefit falls back to simplified when no birth_year."""
-        from optimize import compute_net_benefit
+        from objective import compute_net_benefit
         config = _make_config()
         sim = FamilySimulation(config, STRATEGY_BALANCED, build_rate_path("test", 0.05, 10, 'variable', [0.05]), use_readvanceable=False)
         results = sim.run()

@@ -44,7 +44,7 @@ from config_access import has_readvanceable_facility
 from scenario_overlay import ScenarioOverlay, build_overlay_config, refinance_amortization_fallback
 from simulation_config import SimulationConfig
 from year_result import YearResult
-from optimize import compute_net_benefit, evaluate_strategy_with_simulation
+from optimize import evaluate_strategy_with_simulation
 from countries.canada.resp_rules import RESPCalculator
 from tax_calculator import marginal_rate
 

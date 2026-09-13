@@ -296,7 +296,7 @@ class TestBothLegsAreNowDeducted:
         trade-off the engine did not compute. ``compute_net_benefit`` must
         carry the traced savings, or advance-vs-line is still ranked on the
         rate gap alone."""
-        from optimize import compute_net_benefit
+        from objective import compute_net_benefit
         cfg = _household(revolving_share=0.0)
         rs = _run(cfg)
         saved = sum(r.traced_borrowing_tax_savings for r in rs)
