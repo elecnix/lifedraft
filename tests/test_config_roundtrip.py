@@ -11,9 +11,15 @@ import json
 import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import ast
 import unittest
-from dataclasses import replace
+from dataclasses import fields as dataclass_fields, replace
+from pathlib import Path
+from typing import Set
 
+import _example_doc
+import config_serde
+import input_contract as ic
 from simulation import SimulationConfig
 
 
@@ -191,6 +197,186 @@ class TestOverlayDiff(unittest.TestCase):
         for key, change in diff['overlays'].items():
             self.assertIn('from', change)
             self.assertIn('to', change)
+
+
+class TestSerdeParity(unittest.TestCase):
+    """Issue #235: every SimulationConfig field is BOTH read by
+    ``config_fields_from_dict()`` and re-emitted by ``config_to_dict()``.
+
+    The two halves are hand-listed and each field has its own absence idiom;
+    before this guard, a field with a read entry but no write entry (or vice
+    versa) failed silently -- #729's ``lira`` and #730's ``cash_out`` were
+    exactly that defect, and the old round-trip test named only ~6 fields.
+
+    The read half is measured by EXECUTING the real ``config_fields_from_dict``
+    against the canonical example document (its return keys are the
+    constructor kwargs). The write half is measured STATICALLY -- every
+    ``config.<name>`` access in an emission position inside ``config_to_dict``
+    (a dict value, never a gate), so a field whose write lives inside a
+    conditional block is still seen while a name that only guards an emission
+    is not mistaken for one. Both lists are then compared to the dataclass
+    declaration itself; a one-sided field fails with its exact name, not a
+    count.
+    """
+
+    # Fields whose from_dict() value is DERIVED from other round-tripped
+    # keys, not read as declared data -- a derived value has nothing to
+    # preserve, so the write half correctly does not re-emit it (re-emitting
+    # would be a DP#18 dead write: nothing reads it back). Each entry is
+    # mechanically re-verified in test_derived_exceptions_are_not_readable,
+    # so a stale entry fails the build instead of rotting.
+    DERIVED_NO_WRITE: Set[str] = {
+        # #663: from_dict computes has_heloc as
+        # 'margin_available' in cfg['property'] (has_readvanceable_facility)
+        # -- the PRESENCE of the key, never a value read off it. to_dict
+        # always writes property.margin_available, so the derivation restores
+        # itself on reload. A write entry here could never be read back.
+        'has_heloc',
+    }
+
+    @classmethod
+    def _read_half_fields(cls):
+        """The fields from_dict() constructs: config_fields_from_dict's keys.
+
+        Run against the canonical two-generation example document mapped to
+        the internal shape -- the maximally populated config the issue's
+        spec calls for -- so the guard exercises the real halves on a real
+        document, not a hand-built stub.
+        """
+        cfg = ic.to_internal_config(_example_doc.minimal_example())
+        return set(config_serde.config_fields_from_dict(cfg).keys())
+
+    @classmethod
+    def _write_half_fields(cls):
+        """The fields to_dict() re-emits: every ``config.<name>`` access in
+        an *emission position* -- the value of one of the dicts being built --
+        in the source of ``config_to_dict``. Static (AST over config_serde.py),
+        so a field whose emission is gated behind ``if config.X is not None``
+        or a ``**({...} if ... else {})`` spread is still counted -- exactly
+        the conditional shape every absence-idiom field uses here.
+
+        A *reference* is not an *emission*: ``config.X`` appearing only in a
+        gate -- ``**({} if config.X is None else {})`` -- writes nothing, so
+        it must not count. Counting it would let a field whose write entry
+        was deleted (leaving only the guard behind) pass as written and be
+        silently lost on round-trip (#235).
+        """
+        tree = ast.parse(Path(config_serde.__file__).read_text())
+
+        def _emitted(out: Set[str], n: ast.AST) -> None:
+            """Collect ``config.<attr>`` from emission positions under *n*:
+            dict values (a ``**{...}`` spread is a None-keyed entry whose
+            value is walked the same), never dict keys, and never the
+            ``test`` of an ``ast.IfExp`` / ``ast.If`` met on the way -- a
+            gate is not an emission.
+            """
+            if isinstance(n, (ast.IfExp, ast.If)):
+                for branch in (n.body, n.orelse):  # type: ignore[attr-defined]
+                    _emitted(out, branch)
+            elif isinstance(n, ast.Dict):
+                for value in n.values:
+                    _emitted(out, value)
+            elif isinstance(n, ast.Attribute):
+                if isinstance(n.value, ast.Name) and n.value.id == 'config':
+                    out.add(n.attr)
+                _emitted(out, n.value)
+            else:
+                for child in ast.iter_child_nodes(n):
+                    _emitted(out, child)
+
+        fields: Set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == 'config_to_dict':
+                _emitted(fields, node)
+        return fields
+
+    @classmethod
+    def _declared_fields(cls):
+        return {f.name for f in dataclass_fields(SimulationConfig)}
+
+    def test_every_declared_field_is_read(self):
+        """The read half must construct every dataclass field."""
+        declared = self._declared_fields()
+        read = self._read_half_fields()
+        missing = declared - read
+        self.assertEqual(
+            missing, set(),
+            f"fields read by from_dict but never declared on SimulationConfig, "
+            f"or declared but never constructed by the read half: {sorted(missing)}",
+        )
+        self.assertEqual(
+            read, declared,
+            "read half and dataclass declaration disagree "
+            f"(read-only: {sorted(read - declared)}; "
+            f"declared-only: {sorted(declared - read)})",
+        )
+
+    def test_every_field_is_written_back(self):
+        """The write half must re-emit every field the read half ingests,
+        except the mechanically-verified derived fields -- a field with a
+        read entry but no write entry is a silent data-loss defect (#729/
+        #730), and the test names the exact one-sided fields when it fails.
+        """
+        declared = self._declared_fields()
+        written = self._write_half_fields()
+        missing = (declared - self.DERIVED_NO_WRITE) - written
+        self.assertEqual(
+            missing, set(),
+            "one-sided mirrors: read by from_dict but never re-emitted by "
+            f"to_dict: {sorted(missing)}. Each needs a write entry in "
+            "config_to_dict (or a cited, mechanically-verified entry in "
+            "DERIVED_NO_WRITE if it is derived, not declared data).",
+        )
+
+    def test_write_half_touches_no_undeclared_field(self):
+        """The write half may only touch real fields -- a typo'd
+        ``config.horizon__age`` would crash production to_dict anyway, but
+        this pins it at the guard instead of at runtime."""
+        declared = self._declared_fields()
+        written = self._write_half_fields()
+        self.assertEqual(
+            sorted(written - declared), [],
+            "config_to_dict reads attributes that are not SimulationConfig "
+            "fields -- a typo or a dead write:",
+        )
+
+    def test_derived_exceptions_are_not_readable(self):
+        """DERIVED_NO_WRITE entries must really be derived: their read half
+        computes them by calling a helper, never by reading a config dict key
+        of the same name. If a future from_dict starts ingesting a declared
+        ``has_heloc`` key, this entry stops being an exception and must be
+        re-triaged -- the guard refuses to let it rot.
+        """
+        tree = ast.parse(Path(config_serde.__file__).read_text())
+        return_stmt = None
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.FunctionDef)
+                    and node.name == 'config_fields_from_dict'):
+                for n in ast.walk(node):
+                    if isinstance(n, ast.Return) and n.value is not None:
+                        return_stmt = n.value
+        self.assertIsNotNone(return_stmt, 'could not locate read half return')
+
+        kwargs = {}
+        if isinstance(return_stmt, ast.Call):
+            for kw in return_stmt.keywords:
+                kwargs[kw.arg] = kw.value
+        else:  # dict(...) literal with keyword form
+            self.fail('read half return is not a dict() call -- update guard')
+
+        for name in sorted(self.DERIVED_NO_WRITE):
+            self.assertIn(name, kwargs, f'{name} missing from read half')
+            self.assertNotIsInstance(
+                kwargs[name], ast.Attribute,
+                f'{name} is read via a .get(...) dict access -- it is declared '
+                f'data now, not derived; remove it from DERIVED_NO_WRITE and '
+                f'give it a write entry in config_to_dict',
+            )
+            self.assertTrue(
+                isinstance(kwargs[name], ast.Call),
+                f'{name} is computed by an expression, not a dict access -- '
+                f're-verify the derivation and update this guard if legitimate',
+            )
 
 
 if __name__ == '__main__':
