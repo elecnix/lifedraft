@@ -255,6 +255,169 @@ def find_birth_year_person_specific_defaults(root: str = ROOT) -> List[Finding]:
     return findings
 
 
+###############################################################################
+# RULE-ORDER COUPLING SCANNER  (see tests/architecture/test_coupling_guard.py)
+###############################################################################
+
+
+@dataclass(frozen=True)
+class WsAccess:
+    """One ``ws.<field>`` read or write found inside a registered rule (or a
+    helper the rule transitively calls).
+
+    ``kind`` is ``'read'`` or ``'write'``.  ``ws.field += x`` (AugAssign) is
+    both read and write, so the scanner emits TWO findings for one statement.
+    The scanner deduplicates by ``(rule_name, field, kind)``: a rule that
+    touches the same field in three branches still registers as one *reader*
+    of that field, and one *writer* if it also writes it.  This is the unit
+    the ordering check reasons about -- "does the rule that PRODUCES a field
+    precede the rule that CONSUMES it?" -- not the raw line count.
+    """
+    file: str
+    rule_name: str
+    field: str
+    kind: str  # 'read' or 'write'
+    line: int
+    snippet: str
+
+
+def _rule_name_from_decorator(dec: ast.expr):
+    """Extract the registered rule name from a ``@rule("name")`` call, or
+    ``None`` if ``dec`` is not that shape."""
+    if isinstance(dec, ast.Call):
+        if isinstance(dec.func, ast.Name) and dec.func.id == "rule":
+            if dec.args and isinstance(dec.args[0], ast.Constant):
+                return dec.args[0].value
+    return None
+
+
+def _collect_func_defs(func_node: ast.AST, acc: dict) -> None:
+    """Collect every ``FunctionDef`` / ``AsyncFunctionDef`` reachable from
+    ``func_node`` (itself + any nested helpers) into ``acc`` keyed by name.
+
+    Nested defs shadow nothing in this codebase (rule helpers have unique
+    names within their module), so registering them alongside the same-file
+    top-level functions is sufficient for transitive-call resolution.
+    """
+    for child in ast.walk(func_node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if child.name not in acc:
+                acc[child.name] = child
+
+
+def _transitive_callee_names(start: str, all_funcs: dict, seen: set | None = None) -> set:
+    """Return ``{start} + every function reachable by direct calls from start``
+    within the same file.  ``all_funcs`` is ``{name: FunctionDef}``.
+
+    Recurses through same-file helper functions so that a ``ws.field`` access
+    buried inside a helper called by a rule is attributed to that rule.
+    Cross-file imports are NOT resolved: pricing/calc helpers imported from
+    other modules take ``ws`` values as arguments and never access ``ws``
+    directly (verified by the field count matching YearWorkingState's total).
+    """
+    if seen is None:
+        seen = set()
+    if start not in all_funcs or start in seen:
+        return seen
+    seen.add(start)
+    for node in ast.walk(all_funcs[start]):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            _transitive_callee_names(node.func.id, all_funcs, seen)
+    return seen
+
+
+def _scan_ws_accesses_in_func(func_node: ast.AST, rule_name: str, file: str) -> List[WsAccess]:
+    """Return every ``ws.<field>`` read and write inside ``func_node``.
+
+    - ``ws.field`` in Load ctx  -> read
+    - ``ws.field`` in Store ctx -> write  (e.g. ``ws.field = x``)
+    - ``ws.field += x`` (AugAssign target) -> BOTH read and write, because
+      AugAssign loads the current value before storing the sum.
+    """
+    out: List[WsAccess] = []
+    for node in ast.walk(func_node):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "ws"
+        ):
+            kind = "write" if isinstance(node.ctx, ast.Store) else "read"
+            try:
+                snippet = ast.unparse(node)
+            except Exception:
+                snippet = f"ws.{node.attr}"
+            out.append(WsAccess(
+                file, rule_name, node.attr, kind, node.lineno, snippet))
+        if (
+            isinstance(node, ast.AugAssign)
+            and isinstance(node.target, ast.Attribute)
+            and isinstance(node.target.value, ast.Name)
+            and node.target.value.id == "ws"
+        ):
+            try:
+                snippet = ast.unparse(node.target)
+            except Exception:
+                snippet = f"ws.{node.target.attr}"
+            out.append(WsAccess(
+                file, rule_name, node.target.attr, "read", node.lineno, snippet))
+            out.append(WsAccess(
+                file, rule_name, node.target.attr, "write", node.lineno, snippet))
+    return out
+
+
+def find_ws_field_accesses(root: str = ROOT) -> List[WsAccess]:
+    """Coupling-guard scan (RULE_ORDER enforcement, DP#18 seam).
+
+    Finds every ``ws.<field>`` read and write across all ``rules_*.py`` files.
+    For each ``@rule("name")``-decorated function it resolves the *transitive*
+    set of same-file callees (helper functions called in the rule body,
+    including nested ``def``s) and scans all of them for ``ws.<field>``
+    accesses.  ``AugAssign`` targets (``ws.field += ...``) count as both a
+    read and a write.
+
+    The result is deduplicated by ``(rule_name, field, kind)``.  Only
+    ``rules_*.py`` files are scanned: every registered rule lives in one of
+    them (see ``simulation_rules.py``'s import list), and every rule function
+    is a top-level ``@rule(...)`` definition -- the ``@rule`` decorator in
+    ``rule_registry`` is the single registration gate, so scanning for it is
+    sound and can't miss a rule.
+    """
+    findings: List[WsAccess] = []
+    for relpath in iter_source_files(root):
+        if not (relpath.startswith("rules_") and relpath.endswith(".py")):
+            continue
+        tree = _parse(root, relpath)
+        if tree is None:
+            continue
+
+        top_funcs: dict[str, ast.AST] = {}
+        rule_fns: dict[str, ast.AST] = {}
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                top_funcs[node.name] = node
+                for dec in node.decorator_list:
+                    rn = _rule_name_from_decorator(dec)
+                    if rn:
+                        rule_fns[rn] = node
+
+        for rule_name, rule_fn in rule_fns.items():
+            all_funcs: dict[str, ast.AST] = dict(top_funcs)
+            _collect_func_defs(rule_fn, all_funcs)
+
+            callees = _transitive_callee_names(rule_fn.name, all_funcs)
+
+            seen_pairs: set = set()
+            for fname in callees:
+                func = all_funcs[fname]
+                for acc in _scan_ws_accesses_in_func(func, rule_name, relpath):
+                    key = (rule_name, acc.field, acc.kind)
+                    if key in seen_pairs:
+                        continue
+                    seen_pairs.add(key)
+                    findings.append(acc)
+    return findings
+
+
 def diff_against_allowlist(findings: List[Finding], allowlist: dict) -> tuple:
     """Compare scan ``findings`` against a ``{(file, snippet): {...}}``
     allowlist. Returns ``(unlisted, stale)``:
