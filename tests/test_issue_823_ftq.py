@@ -28,6 +28,7 @@ import contract_errors
 import contract_schema
 import input_contract as ic
 from simulation_config import SimulationConfig
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports
 from rule_registry import RULES, RuleContext, YearWorkingState
 from rules_contributions import _blended_pot_rate
 from rules_solvency import _still_locked

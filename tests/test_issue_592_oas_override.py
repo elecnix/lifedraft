@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import unittest
 
 from simulation import FamilySimulation, SimulationConfig
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports
 from countries.canada.retirement import CPP_OAS_BY_YEAR
 
 START_YEAR = 2026
