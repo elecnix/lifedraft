@@ -112,7 +112,8 @@ def _state_with_tfsa_and_lira(primary_tfsa=120000.0, spouse_tfsa=30000.0,
     """A real SimState carrying per-adult TFSA (primary + spouse) and a LIRA,
     the stores the engine's own ``YearWorkingState.from_state`` stamps the
     ``opening_*`` scalars from (issue #700/#643)."""
-    from simulation_state import SimState, _default_canada_state
+    from simulation_state import SimState
+    from canada_state_accessors import _default_canada_state
     canada = _default_canada_state()
     canada['adult_tfsa'] = {
         'primary': {'balance': primary_tfsa, 'room': 0.0},

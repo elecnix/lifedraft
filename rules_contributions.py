@@ -178,7 +178,7 @@ def apply_fhsa(ws: YearWorkingState, ctx: RuleContext) -> bool:
     declared fhsa composition (and override/fee) the blended rate IS the flat
     ``ctx.investment_return`` (golden no-op, DP#32).
     """
-    from simulation_state import _canada_fhsa_limits
+    from canada_state_accessors import _canada_fhsa_limits
 
     fhsa_lifetime_remaining = max(0, ws.opening_fhsa_lifetime_limit - ws.opening_fhsa_lifetime_used)
     fhsa_actual = min(ctx.fhsa_contribution, max(0, ws.opening_fhsa_room), fhsa_lifetime_remaining)

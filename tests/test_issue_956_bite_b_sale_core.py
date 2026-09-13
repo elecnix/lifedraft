@@ -557,7 +557,8 @@ class PreDesignationAndEdgeCases(unittest.TestCase):
         wrong number' failure this repo exists to prevent). The absence-safe
         no-op path (no sale) does NOT need brackets and does not raise."""
         from rule_registry import RuleContext, YearWorkingState, RULES
-        from simulation_state import SimState, _default_canada_state
+        from simulation_state import SimState
+        from canada_state_accessors import _default_canada_state
         prop = {
             'id': 'cottage', 'kind': 'recreational', 'net_equity': 200000.0,
             'value_share': 500000.0, 'secured_share': 0.0,

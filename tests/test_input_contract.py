@@ -536,9 +536,10 @@ class AccountKindCoverageTest(unittest.TestCase):
         """The exact reproduction from #647: p2's $60,000 spousal_rrsp and
         $12,000 fhsa must land in SimState's opening Canada balances, not
         vanish."""
-        from simulation_state import SimState, adult_fhsa_total
+        from simulation_state import SimState
+        from canada_state_accessors import adult_fhsa_total
 
-        from simulation_state import adult_rrsp_slot
+        from canada_state_accessors import adult_rrsp_slot
 
         legacy = ic.to_internal_config(self.doc)
         cfg = SimulationConfig.from_dict(legacy)

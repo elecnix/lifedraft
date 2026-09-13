@@ -30,7 +30,7 @@ from countries.canada.strategies import (
 )
 
 from simulation import FamilySimulation, SimulationConfig, YearResult
-from simulation_state import adult_fhsa_slot  # #700/#643/#704: per-adult FHSA store
+from canada_state_accessors import adult_fhsa_slot
 
 from objective import compute_net_benefit
 

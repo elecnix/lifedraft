@@ -174,7 +174,11 @@ class TestAllStateInSimState(unittest.TestCase):
         sim = FamilySimulation(config=config, use_readvanceable=False)
         results = sim.run()
 
-        from simulation_state import adult_rrsp_total, adult_rrsp_slot, adult_tfsa_total  # #700
+        from canada_state_accessors import (
+            adult_rrsp_total,
+            adult_rrsp_slot,
+            adult_tfsa_total,
+        )
         state = sim._state
         canada = state.jurisdiction_state['canada']
         # Key balances should be accessible from state
@@ -282,7 +286,7 @@ class TestFHSADeterminedFromConfig(unittest.TestCase):
         sim = FamilySimulation(config=config, use_readvanceable=False)
         # FHSA should be detected from state, not from a mutable object.
         # #700/#643/#704: FHSA room now lives in the per-adult store (slot 0).
-        from simulation_state import adult_fhsa_slot
+        from canada_state_accessors import adult_fhsa_slot
         self.assertGreater(
             adult_fhsa_slot(sim._state.jurisdiction_state['canada'], 0)['room'], 0)
         # sim.fhsa should NOT exist

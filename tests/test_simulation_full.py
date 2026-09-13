@@ -14,7 +14,7 @@ import unittest
 import json
 
 from simulation import FamilySimulation, SimulationConfig, YearResult
-from simulation_state import adult_fhsa_slot  # #700/#643/#704: per-adult FHSA store
+from canada_state_accessors import adult_fhsa_slot
 from countries.canada.rate_model import build_rate_path, HELOCPath
 
 

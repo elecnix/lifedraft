@@ -316,7 +316,7 @@ _register_strategies()
 # (countries.canada → simulation_state), never outward. The provider forwards
 # to LockedInAccount/LIFFund/must_convert_by_year, so simulate_year_pure's
 # LIRA→LIF conversion (incl. issue #343's calendar-year gate) is unchanged.
-from simulation_state import register_lif_conversion_provider
+from canada_state_accessors import register_lif_conversion_provider
 from countries.canada.locked_in_account import LIF_CONVERSION_PROVIDER
 register_lif_conversion_provider(LIF_CONVERSION_PROVIDER)
 

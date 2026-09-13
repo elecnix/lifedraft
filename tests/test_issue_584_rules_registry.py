@@ -39,7 +39,11 @@ import pytest
 import simulation_rules
 from rule_registry import RuleContext, YearWorkingState, RULES
 from simulation_rules import RULE_ORDER, run_rules, trace_firing
-from simulation_state import SimState, simulate_year_pure, _default_canada_state
+from simulation_state import (
+    SimState,
+    simulate_year_pure,
+)
+from canada_state_accessors import _default_canada_state
 from simulation_config import SimulationConfig
 
 from test_golden_trajectory_581 import golden_household_config, sm_only_config, _run as _run_golden

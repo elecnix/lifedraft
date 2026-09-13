@@ -126,7 +126,7 @@ def _run_and_get_room(amount: float, expenses=None) -> float:
     )
     sim = FamilySimulation(cfg, adapter=CanadaAdapter(cfg))
     sim.run()
-    from simulation_state import adult_rrsp_slot
+    from canada_state_accessors import adult_rrsp_slot
     return adult_rrsp_slot(sim._state.jurisdiction_state["canada"], 0)[1]
 
 

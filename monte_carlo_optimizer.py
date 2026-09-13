@@ -34,7 +34,9 @@ import statistics
 
 from optimizer import Optimizer, RankedScenario, RiskMeasures
 from simulation import SimulationConfig, YearResult
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import (
+    SimState, simulate_year_pure,
+)
 from return_model import ReturnModel, StochasticReturn, FixedReturn, build_return_model
 from objective import ObjectiveFunction, MAX_NET_BENEFIT
 from strategy import AllocationStrategy

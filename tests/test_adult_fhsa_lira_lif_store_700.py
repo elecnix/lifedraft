@@ -27,12 +27,11 @@ from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
 from simulation_state import (
-    adult_fhsa_slot, adult_fhsa_total, adult_fhsa_active,
-    adult_lira_total, adult_lif_total, adult_lira_slot, adult_lif_slot,
-    rebuild_adult_lira, rebuild_adult_lif,
-    _default_canada_state, _host_account_balance, _carve_from_canada,
+    _host_account_balance, _carve_from_canada,
 )
-
+from canada_state_accessors import (
+    adult_fhsa_slot, adult_fhsa_total, adult_fhsa_active, adult_lira_total, adult_lif_total, adult_lira_slot, adult_lif_slot, rebuild_adult_lira, rebuild_adult_lif, _default_canada_state,
+)
 
 def _base(members, *, investment_return=0.0, projection_years=1, lira=None):
     cfg = {

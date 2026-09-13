@@ -47,10 +47,11 @@ from countries.canada.locked_in_account import (
 )
 from simulation_config import SimulationConfig
 from simulation_state import (
-    SimState, _default_canada_state, simulate_year_pure,
-    adult_lira_slot, adult_lif_slot,
+    SimState, simulate_year_pure,
 )
-
+from canada_state_accessors import (
+    _default_canada_state, adult_lira_slot, adult_lif_slot,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers (mirror tests/test_lira_wiring.py's legacy simulate_year_pure path)

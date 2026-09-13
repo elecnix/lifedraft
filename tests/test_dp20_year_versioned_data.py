@@ -17,7 +17,14 @@ from unittest.mock import MagicMock, patch
 from dataclasses import replace
 
 from simulation_config import SimulationConfig
-from simulation_state import SimState, simulate_year_pure, adult_rrsp_slot, adult_tfsa_slot  # #700
+from simulation_state import (
+    SimState,
+    simulate_year_pure,
+)
+from canada_state_accessors import (
+    adult_rrsp_slot,
+    adult_tfsa_slot,
+)
 from tax_data import TaxDataProvider
 
 

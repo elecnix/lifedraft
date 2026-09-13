@@ -180,7 +180,7 @@ class TestRRSPRoomExcludesEIEarnedIncome(unittest.TestCase):
         # allocations dict / config that fed it.
         # #700: RRSP room lives in the per-adult store now -- the primary
         # adult's own_room (slot 0).
-        from simulation_state import adult_rrsp_slot
+        from canada_state_accessors import adult_rrsp_slot
         return adult_rrsp_slot(sim._state.jurisdiction_state["canada"], 0)[1]
 
     def test_ei_income_adds_zero_rrsp_room(self):

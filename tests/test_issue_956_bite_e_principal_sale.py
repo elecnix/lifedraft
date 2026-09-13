@@ -633,7 +633,8 @@ class ConservationHoldsAcrossBothLegs(unittest.TestCase):
         under-taxing the gain. The no-sale / pre-sale / post-sale paths do NOT
         need brackets and do not raise."""
         from rule_registry import RuleContext, YearWorkingState, RULES
-        from simulation_state import SimState, _default_canada_state
+        from simulation_state import SimState
+        from canada_state_accessors import _default_canada_state
         sale = {
             'year': 2026, 'selling_costs': 30_000.0,
             'owner_roles': {'primary': 0.5, 'spouse': 0.5},

@@ -427,7 +427,7 @@ class Optimizer:
         primary_income = primary.get('gross_income', 0)
         spouse_income = spouse.get('gross_income', 0)
 
-        from simulation_state import adult_fhsa_active  # #700/#643: per-adult FHSA store
+        from canada_state_accessors import adult_fhsa_active
         canada = state.jurisdiction_state.get('canada', {})
         has_fhsa = adult_fhsa_active(canada)
 

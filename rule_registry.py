@@ -948,9 +948,8 @@ class YearWorkingState:
         # Imported lazily (DP#25: no module-level countries.canada import,
         # and this keeps simulation_rules.py free of a hard dependency on
         # simulation_state.py's private helpers at import time).
-        from simulation_state import (
-            _default_heloc_tracing, adult_rrsp_slot, adult_tfsa_slot,
-            adult_fhsa_slot, adult_lira_slot, adult_lif_slot,
+        from canada_state_accessors import (
+            _default_heloc_tracing, adult_rrsp_slot, adult_tfsa_slot, adult_fhsa_slot, adult_lira_slot, adult_lif_slot,
         )
 
         canada = state.jurisdiction_state.get('canada')

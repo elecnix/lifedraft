@@ -22,8 +22,12 @@ Tests cover:
 import pytest
 from copy import deepcopy
 from simulation_state import (
-    SimState, simulate_year_pure, adult_lira_slot, adult_lif_slot,
+    SimState, simulate_year_pure,
 )
+from canada_state_accessors import (
+    adult_lira_slot, adult_lif_slot,
+)
+
 from simulation_config import SimulationConfig
 from year_result import YearResult
 
@@ -66,7 +70,7 @@ def _make_state_with_lira(lira_balance=52837, lira_birth_year=1979,
 
     Issue #700/#643 (Step 4): LIRA/LIF are per-adult stores keyed by adult id
     (single primary-keyed slot today), not flat canada scalars."""
-    from simulation_state import _default_canada_state
+    from canada_state_accessors import _default_canada_state
     canada = _default_canada_state()
     canada['adult_lira'] = {'primary': {
         'balance': lira_balance, 'birth_year': lira_birth_year,
@@ -112,7 +116,7 @@ class TestLIRAInTotalAssets:
     def test_zero_lira_balance_not_counted(self):
         """Zero-balance LIRA should not affect total_assets."""
         state = _make_state_with_lira(lira_balance=0)
-        from simulation_state import _default_canada_state as _dcs
+        from canada_state_accessors import _default_canada_state
         no_lira_state = SimState(
             non_reg_balance=0, non_reg_acb=0,
             mortgage_balance=300000, heloc_balance=0,
@@ -285,7 +289,7 @@ class TestLIRANoEffectWhenAbsent:
     def test_zero_lira_no_change_to_existing_results(self):
         """Simulation results should be identical when LIRA balance is 0."""
         config = _make_config()
-        from simulation_state import _default_canada_state
+        from canada_state_accessors import _default_canada_state
 
         # State WITHOUT LIRA data (defaults)
         state_no_lira = SimState(

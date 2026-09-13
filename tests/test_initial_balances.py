@@ -16,8 +16,12 @@ Fabricated round numbers, role-based names (DP#4, DP#15).
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-from simulation_state import (adult_rrsp_slot, adult_rrsp_total,
-                             adult_tfsa_slot, adult_tfsa_total)  # #700: per-adult stores
+from canada_state_accessors import (
+    adult_rrsp_slot,
+    adult_rrsp_total,
+    adult_tfsa_slot,
+    adult_tfsa_total,
+)
 
 
 def _base(members, portfolio=None):
