@@ -108,13 +108,7 @@ def rrsp_withdrawal_tax(final, cfg) -> float:
             # Compute CPP annual from monthly estimate
             cpp_annual = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
             # Compute OAS annual from config or defaults
-            _assumptions = cfg.get('assumptions', {})
-            # Lazily: dict.get's default is eager, so passing
-            # _default_oas_annual(cfg) would compute the fallback even when a
-            # value WAS supplied -- DP#13's "never a way to coerce a value that
-            # was supplied".
-            oas_annual = (_assumptions['oas_annual'] if 'oas_annual' in _assumptions
-                          else _default_oas_annual(cfg))
+            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
             # LIF withdrawal from simulation results (issue #230)
             lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
             ret_state = RetirementState(
@@ -139,13 +133,7 @@ def rrsp_withdrawal_tax(final, cfg) -> float:
             brackets = default_tax_provider().get_combined_brackets()
             cpp_monthly_estimated = primary.get('cpp_monthly_estimated', 0)
             cpp_annual_income = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
-            _assumptions = cfg.get('assumptions', {})
-            # Lazily: dict.get's default is eager, so passing
-            # _default_oas_annual(cfg) would compute the fallback even when a
-            # value WAS supplied -- DP#13's "never a way to coerce a value that
-            # was supplied".
-            oas_annual = (_assumptions['oas_annual'] if 'oas_annual' in _assumptions
-                          else _default_oas_annual(cfg))
+            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
             pension_income_annual = primary.get('pension_income_annual', 0)
             lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
             retirement_income = cpp_annual_income + oas_annual + pension_income_annual + lif_withdrawal
