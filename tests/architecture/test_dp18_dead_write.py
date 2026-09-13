@@ -248,3 +248,76 @@ class TestOverlayFunctionsReachTheEngine:
             "evaluate_overlay() with investment_return=4% vs 10% produced IDENTICAL "
             "future_value -- the ScenarioOverlay return-rate write is a dead write."
         )
+
+    def test_apply_income_scenario(self):
+        """_apply_income_scenario writes ``income_segments`` onto family
+        members from the income_scenario dict; this guard proves the
+        engine reads those segments (issue #674 -- a scenario that writes
+        dated segments but the engine never reads them is a dead write)."""
+        from optimize import _apply_income_scenario
+        base = _fixture_cfg()
+        loss = {
+            'id': 'job_loss_6m', 'label': 'Job loss 6 months',
+            'primary_income': 150000, 'spouse_income': 70000,
+            'primary_segments': [
+                {'kind': 'employment', 'amount': 150000,
+                 'from': '2026-01-01', 'to': '2026-06-30'},
+                {'kind': 'ei', 'amount': 40000,
+                 'from': '2026-07-01', 'to': '2026-12-31'},
+            ],
+            'spouse_segments': [],
+        }
+        full = {
+            'id': 'full_time', 'label': 'Full time',
+            'primary_income': 150000, 'spouse_income': 70000,
+            'primary_segments': [
+                {'kind': 'employment', 'amount': 150000,
+                 'from': '2026-01-01', 'to': '2026-12-31'},
+            ],
+            'spouse_segments': [],
+        }
+        cfg_loss = _apply_income_scenario(deepcopy(base), loss)
+        cfg_full = _apply_income_scenario(deepcopy(base), full)
+        assert _best_fingerprint(cfg_loss) != _best_fingerprint(cfg_full), (
+            "_apply_income_scenario('job_loss_6m') and ('full_time') produced "
+            "IDENTICAL engine output -- the income_segments write is a dead "
+            "write (#674-class bug)."
+        )
+
+    def test_apply_structure_scenario(self):
+        """_apply_structure_scenario replaces cfg['property'] via
+        apply_structure_overlay; this guard proves the engine reads the
+        resulting property split (issue #687 -- a structure overlay that
+        lands on a key nothing reads is a dead write)."""
+        from optimize import _apply_structure_scenario
+        base = _fixture_cfg()
+        all_mort = {'id': 'all_mortgage', 'label': 'All mortgage',
+                    'revolving_share': 0.0, 'readvanceable': False}
+        revolv = {'id': 'readvanceable', 'label': 'Readvanceable',
+                  'revolving_share': 0.3, 'readvanceable': True}
+        cfg_all = _apply_structure_scenario(deepcopy(base), all_mort)
+        cfg_rev = _apply_structure_scenario(deepcopy(base), revolv)
+        assert _best_fingerprint(cfg_all) != _best_fingerprint(cfg_rev), (
+            "_apply_structure_scenario('all_mortgage') and ('readvanceable') "
+            "produced IDENTICAL engine output -- the property split write is a "
+            "dead write (#687-class bug)."
+        )
+
+    def test_apply_sourcing_scenario(self):
+        """_apply_sourcing_scenario replaces cfg['property'] via
+        apply_sourcing_overlay (the cash-out counterpart of structure); this
+        guard proves the engine reads the sourced split (issue #845/#849)."""
+        from optimize import _apply_sourcing_scenario
+        base = _fixture_cfg()
+        base['property']['cash_out'] = 50000
+        revolv = {'id': 'revolving_draw', 'label': 'Revolving draw',
+                  'revolving_share': 0.8}
+        advance = {'id': 'mortgage_advance', 'label': 'Mortgage advance',
+                   'revolving_share': 0.0}
+        cfg_rev = _apply_sourcing_scenario(deepcopy(base), revolv)
+        cfg_adv = _apply_sourcing_scenario(deepcopy(base), advance)
+        assert _best_fingerprint(cfg_rev) != _best_fingerprint(cfg_adv), (
+            "_apply_sourcing_scenario('revolving_draw') and "
+            "('mortgage_advance') produced IDENTICAL engine output -- the "
+            "sourcing split write is a dead write (#845-class bug)."
+        )
