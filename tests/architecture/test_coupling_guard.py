@@ -209,14 +209,14 @@ class _Violation:
     kind: str  # 'single' or 'multi'
 
 
-def _check_ordering(inventory: _Inventory) -> list:
+def _check_ordering(inventory: _Inventory, order=None) -> list:
     """Run the RULE_ORDER preceding check on every cross-rule field.
 
     - Single-rule-writer fields: the writer must precede ALL pure consumers.
     - Multi-rule-writer fields: the FIRST writer (lowest position) must
       precede the LAST pure consumer (highest position).
     """
-    order_idx = {n: i for i, n in enumerate(sr.RULE_ORDER)}
+    order_idx = {n: i for i, n in enumerate(order if order is not None else sr.RULE_ORDER)}
     violations = []
 
     for f in inventory.fields.values():
@@ -322,23 +322,12 @@ def test_rerun_with_modified_order_catches_management_fee_misorder(inventory: _I
     modified = list(sr.RULE_ORDER)
     modified.remove("management_fee")
     modified.append("management_fee")
-    fake_idx = {n: i for i, n in enumerate(modified)}
 
-    violations = []
-    for f in inventory.fields.values():
-        if not f.writers or not f.pure_readers:
-            continue
-        if len(f.writers) == 1:
-            w = next(iter(f.writers))
-            wi = fake_idx[w]
-            for r in f.pure_readers:
-                ri = fake_idx[r]
-                if ri < wi:
-                    violations.append((f.field, w, wi, r, ri))
+    violations = _check_ordering(inventory, order=modified)
     assert violations, (
         "Expected violations when management_fee is moved to the end -- "
         "the guard is not detecting reorderings it should."
     )
-    assert any(v[0] == "management_fee" for v in violations), (
+    assert any(v.field == "management_fee" for v in violations), (
         "management_fee reordering was not detected"
     )
