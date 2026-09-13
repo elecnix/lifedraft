@@ -58,12 +58,12 @@ class TestFallbackTracksYearVersionedTable:
     """The absent-input default equals get_oas_annual_max(relevant year)."""
 
     def test_default_is_8908_for_2026_not_the_stale_8500(self):
-        from objective import _default_oas_annual
+        from net_benefit_legs import _default_oas_annual
         assert _default_oas_annual({}) == 8908
 
     def test_default_reads_table_for_cfg_start_year(self):
         from countries.canada.retirement import get_oas_annual_max
-        from objective import _default_oas_annual
+        from net_benefit_legs import _default_oas_annual
         cfg = {'tax': {'province': 'quebec', 'start_year': 2026}}
         assert _default_oas_annual(cfg) == get_oas_annual_max(2026)
 
