@@ -12,14 +12,14 @@ here to enforce DP#25: core has no imports from countries.canada.
 References:
     DESIGN_PRINCIPLES.md — Jurisdiction State (DP#9)
     countries/canada/provinces/quebec/quebec_deduction.py — QuebecDeductionTracker
-    simulation_state.py — RRSPListLedger (the canonical per-contribution ledger)
+    rrsp_ledger.py — RRSPListLedger (the canonical per-contribution ledger)
 """
 
 from dataclasses import dataclass, field
 from typing import List
 
 from countries.canada.provinces.quebec.quebec_deduction import QuebecDeductionTracker
-from simulation_state import RRSPListLedger
+from rrsp_ledger import RRSPListLedger
 
 
 @dataclass
@@ -99,7 +99,7 @@ class CanadaSimState:
     spousal_contribution_years: List[int] = field(default_factory=list)
 
     # RRSP per-contribution deduction ledger (DP#19). Uses the canonical
-    # simulation_state.RRSPListLedger; the dead countries.canada.rrsp_ledger
+    # rrsp_ledger.RRSPListLedger; the dead countries.canada.rrsp_ledger
     # clone was removed (#744, DP#9).
     rrsp_ledger: RRSPListLedger = field(default_factory=RRSPListLedger)
 

@@ -79,7 +79,7 @@ def apply_rrsp_ledger(ws: YearWorkingState, ctx: RuleContext) -> bool:
     (DP#19: deduction timing is recorded per contribution, not assumed).
     Depends on ``contributions`` for the *_actual amounts.
     """
-    from simulation_state import RRSPListLedger
+    from rrsp_ledger import RRSPListLedger
 
     # Issue #1059: the ledger entries are flat dicts of scalars (year, amount,
     #    role, deducted, deduction_year, deduction_marginal_rate) -- no nested
