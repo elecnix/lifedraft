@@ -56,11 +56,12 @@ order of magnitude serves that. If you want the exact number for your tree, run 
 the only source that cannot go stale. The ~6 min is just as soft: it was 6m06s on an idle
 workstation and 25m15s on one running three suites at once.
 
-**CI does not run on the maintainer's workstation.** `tests.yml`, `secret-scan.yml` and
-`clone-detection.yml` all declare `runs-on: arc-runners` and execute on Kubernetes ARC runner pods
-hosted at Hetzner; only `cite.yml` uses `ubuntu-latest`. The self-hosted runners registered on the
-workstation serve other repositories, not this one — `gh api repos/elecnix/lifedraft/actions/runners`
-returns nothing.
+**CI does not run on the maintainer's workstation.** Every workflow — `cite.yml`,
+`clone-detection.yml`, `pr-body-format.yml`, `secret-scan.yml`, and `tests.yml` (two jobs) — declares
+`runs-on: ubuntu-latest` and runs on GitHub-hosted runners. Since PR #212 (`fdb9b54`, "ci: move lifedraft
+workflows to GitHub-hosted runners"), the repo is public, so hosted minutes are free and the runners are
+larger (16 GB vs the 7 Gi the ARC pods had). If you want to confirm where CI runs, `grep runs-on
+.github/workflows/*` — that is the only source that cannot go stale.
 
 So a local full-suite run costs you wall-clock and nothing else: it cannot starve or SIGTERM a CI
 job. Still prefer a **targeted** run while you iterate — six minutes per edit is its own tax, and
