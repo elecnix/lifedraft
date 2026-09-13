@@ -569,11 +569,11 @@ CONSUMED = {
     # treats them as containers), so only their scalar children are cited.
     "people[].incomes[].employment.non_compete.months": ("contract_decisions.py", 'return nc["months"]'),
     "people[].incomes[].employment.notice_days": ("contract_decisions.py", 'return emp.get("notice_days", 0)'),
-    "people[].benefits.cpp.start_date": ("optimize.py", "cpp_start_age = primary.get('cpp_start_age'"),
-    "people[].benefits.cpp.monthly_amount": ("optimize.py", "cpp_monthly_estimated = primary.get('cpp_monthly_estimated'"),
-    "people[].benefits.oas.start_date": ("optimize.py", "oas_start_age = primary.get('oas_start_age'"),
-    "people[].benefits.oas.defer_months": ("optimize.py", "oas_defer_months = primary.get('oas_defer_months'"),
-    "people[].benefits.employer_pension.annual_amount": ("optimize.py", "pension_income_annual = primary.get('pension_income_annual'"),
+    "people[].benefits.cpp.start_date": ("objective.py", "cpp_start_age = primary.get('cpp_start_age'"),
+    "people[].benefits.cpp.monthly_amount": ("objective.py", "cpp_monthly_estimated = primary.get('cpp_monthly_estimated'"),
+    "people[].benefits.oas.start_date": ("objective.py", "oas_start_age = primary.get('oas_start_age'"),
+    "people[].benefits.oas.defer_months": ("objective.py", "oas_defer_months = primary.get('oas_defer_months'"),
+    "people[].benefits.employer_pension.annual_amount": ("objective.py", "pension_income_annual = primary.get('pension_income_annual'"),
     # #700/#643 (Steps 2/3): room now seeds the per-adult RRSP/TFSA stores.
     "people[].room.rrsp": ("simulation_state.py", "'own_room': primary.get('rrsp_room_accumulated'"),
     "people[].room.rrsp.contribution_room": ("simulation_state.py", "'own_room': primary.get('rrsp_room_accumulated'"),

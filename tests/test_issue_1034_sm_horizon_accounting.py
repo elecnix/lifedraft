@@ -35,6 +35,7 @@ from objective import compute_net_benefit
 from objective import compute_after_tax_estate
 from simulation_config import SimulationConfig
 from year_result import YearResult
+import simulation_rules  # noqa: F401 -- populates RULES via rules_* imports (issue #232 PR: make the file self-sufficient)
 from rule_registry import RULES, RuleContext, YearWorkingState
 from tax_data import default_tax_provider
 
