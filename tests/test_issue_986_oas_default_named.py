@@ -5,15 +5,18 @@ seam. Issue #1029 then made the deliberate decision #986 deferred: that seam
 now reads the year-versioned government table
 (``countries.canada.retirement.get_oas_annual_max``) instead of carrying the
 frozen 8500 literal, so the value-tracking assertions below assert the SEAM,
-not a frozen amount. The DP#13 shape is unchanged: a named fallback for ABSENT
-input only, applied via ``dict.get`` so an explicit ``0`` is honoured (DP#32).
+not a frozen amount. Issue #248 amended the SHAPE: the seam is reached only on
+ABSENCE, via a membership test instead of an eager ``dict.get`` default (whose
+default is evaluated even when a value WAS supplied). The DP#13 shape is
+unchanged: a named fallback for ABSENT input only, applied via a membership
+test so an explicit ``0`` is honoured (DP#32).
 """
 import inspect
 
 
 class TestOASDefaultIsNamed:
-    """DP#13 (#986, as amended by #1029): the OAS fallback is a single named
-    seam, not a scattered inline literal, and an explicit 0 is honoured."""
+    """DP#13 (#986, as amended by #1029 and #248): the OAS fallback is a single
+    named seam, not a scattered inline literal, and an explicit 0 is honoured."""
 
     def test_default_seam_exists_and_is_callable(self):
         import net_benefit_legs
@@ -43,37 +46,83 @@ class TestOASDefaultIsNamed:
         assert not bad, f"inline numeric OAS default remains at: {bad}"
 
     def test_all_three_call_sites_reference_the_seam(self):
-        # Every assumptions.oas_annual fallback reads _default_oas_annual --
-        # across the two modules the #232 split created (2 in the RRSP-tax
-        # leg, 1 in the capital-gains leg).
+        # Every assumptions.oas_annual fallback reads _default_oas_annual as
+        # the ELSE arm of a membership test -- across the two modules the #232
+        # split created (2 in the RRSP-tax leg, 1 in the capital-gains leg).
+        # Membership, not dict.get: a dict.get default is evaluated EAGERLY,
+        # so the fallback ran even when a value WAS supplied (#248). The
+        # membership arm (not ``or`` -- there is one membership test per call
+        # site) keeps an explicit 0 a real value (DP#32).
         import net_benefit_legs
         import objective
-        oas_gets = []
+        seam_sites = []
         for _mod in (net_benefit_legs, objective):
             source = inspect.getsource(_mod)
-            oas_gets += [ln for ln in source.split("\n")
-                         if ".get('oas_annual', " in ln or '.get("oas_annual", ' in ln]
-        assert len(oas_gets) == 3, f"expected 3 oas_annual get sites, got {len(oas_gets)}"
-        assert all("_default_oas_annual" in ln for ln in oas_gets), \
-            "an oas_annual fallback does not use _default_oas_annual"
+            for line_no, ln in enumerate(source.split("\n"), 1):
+                if "_default_oas_annual" not in ln:
+                    continue
+                stripped = ln.strip()
+                if stripped.startswith("def _default_oas_annual"):
+                    continue  # the seam's own definition
+                if stripped.startswith(("from ", "import ")):
+                    continue  # objective.py's import block
+                if stripped.rstrip(",") == "_default_oas_annual":
+                    continue  # a bare imported name (continuation line)
+                seam_sites.append((_mod.__name__, line_no, stripped))
+        assert len(seam_sites) == 3, (
+            f"expected 3 oas_annual fallback sites, got {len(seam_sites)}: "
+            f"{seam_sites}")
+        for _mod_name, _line_no, ln in seam_sites:
+            assert "else" in ln, (
+                f"{_mod_name} reaches _default_oas_annual outside the lazy "
+                f"fallback arm of a membership test: {ln!r}")
+        # One membership test per call site, so ``x or DEFAULT`` cannot stand
+        # in for the membership shape (DP#32: 0 must stay a real value).
+        membership = [
+            ln for _mod in (net_benefit_legs, objective)
+            for ln in inspect.getsource(_mod).split("\n")
+            if "'oas_annual' in " in ln and not ln.strip().startswith("#")
+        ]
+        assert len(membership) == len(seam_sites), (
+            f"expected {len(seam_sites)} 'oas_annual' in ... membership tests, "
+            f"got {len(membership)}: {membership}")
 
 
 class TestExplicitOASZeroHonoured:
     """DP#32: an explicit assumptions.oas_annual of 0 is a real value, never
-    coerced to the fallback (this is dict.get with a default, not
-    ``x or DEFAULT``)."""
+    coerced to the fallback. NOT because of dict.get but because the fallback
+    is only reached on ABSENCE: the membership arm short-circuits it (#248),
+    which a raising stand-in proves rather than asserts."""
 
     def test_explicit_zero_oas_not_replaced_by_default(self):
+        # The fallback is not evaluated at all: were it, the raising stand-in
+        # would explode. An explicit 0 short-circuits the membership test.
+        def _fallback(_cfg):
+            raise AssertionError("fallback ran for a supplied oas_annual")
         cfg = {"assumptions": {"oas_annual": 0}}
-        import net_benefit_legs
-        assert cfg.get("assumptions", {}).get(
-            "oas_annual", net_benefit_legs._default_oas_annual(cfg)) == 0
+        assumptions = cfg.get("assumptions", {})
+        assert (assumptions["oas_annual"] if "oas_annual" in assumptions
+                else _fallback(cfg)) == 0
+
+    def test_supplied_value_survives_a_raising_fallback(self):
+        # The #248 latent bug: dict.get's eager default would have run the
+        # fallback even against a supplied value, so a fallback that raises
+        # would crash the household. The membership shape returns the supplied
+        # value untouched.
+        def _fallback(_cfg):
+            raise AssertionError("fallback ran for a supplied oas_annual")
+        cfg = {"assumptions": {"oas_annual": 4321}}
+        assumptions = cfg.get("assumptions", {})
+        assert (assumptions["oas_annual"] if "oas_annual" in assumptions
+                else _fallback(cfg)) == 4321
 
     def test_absent_oas_uses_year_versioned_default(self):
-        # Absent input falls back to the live government table (#1029).
+        # Absent input reaches the fallback, which reads the live government
+        # table (#1029) for the simulation start year (2026 here).
         import net_benefit_legs
         from countries.canada.retirement import get_oas_annual_max
         cfg = {"assumptions": {}}
-        assert (cfg.get("assumptions", {}).get(
-            "oas_annual", net_benefit_legs._default_oas_annual(cfg))
-            == get_oas_annual_max(2026))
+        assumptions = cfg.get("assumptions", {})
+        assert (assumptions["oas_annual"] if "oas_annual" in assumptions
+                else net_benefit_legs._default_oas_annual(cfg)) \
+            == get_oas_annual_max(2026)

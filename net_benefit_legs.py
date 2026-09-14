@@ -43,9 +43,10 @@ from member_config import find_member_by_role  # data layer (DP#25 #998)
 
 # DP#13/DP#20: fallback OAS annual amount used by compute_net_benefit() when
 # the household's config supplies no ``assumptions.oas_annual``. This is a
-# named fallback for ABSENT input only -- an explicit ``0`` is honoured (the
-# ``dict.get`` calls below use it as the dict.get default, NOT
-# ``x or DEFAULT``, so DP#32 is respected: a configured zero stays zero).
+# named fallback for ABSENT input only -- the call sites below reach it via a
+# membership test (``'oas_annual' in assumptions``), NOT ``x or DEFAULT`` and
+# NOT an eager ``dict.get`` default, so DP#32 is respected: a configured zero
+# stays zero, and the fallback never runs against a supplied value (#248).
 #
 # Issue #1029 (the deliberate decision #986 deferred): the fallback AMOUNT is
 # read live from the year-versioned government table
@@ -65,9 +66,11 @@ _CURRENT_YEAR = 2026
 def _default_oas_annual(cfg) -> float:
     """Year-versioned OAS maximum for ABSENT ``assumptions.oas_annual`` (#1029).
 
-    Reads the live government table for the household's simulation start year;
-    an unknown year raises ValueError from ``get_oas_annual_max`` rather than
-    silently coercing (DP#32).
+    Reads the live government table for the household's simulation start year.
+    Out-of-table years resolve against the nearest registered data year and
+    ultimately the most recent published amount (``get_oas_annual_max``'s
+    documented DP#13/DP#20 fallback) -- an absent table year becomes a
+    published value, never a silent zero (DP#32).
     """
     start_year = cfg.get('tax', {}).get('start_year')
     if start_year is None:
@@ -108,7 +111,10 @@ def rrsp_withdrawal_tax(final, cfg) -> float:
             # Compute CPP annual from monthly estimate
             cpp_annual = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
             # Compute OAS annual from config or defaults
-            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
+            _assumptions = cfg.get('assumptions', {})
+            # dict.get's default is eager; membership defers the fallback (#248)
+            oas_annual = (_assumptions['oas_annual'] if 'oas_annual' in _assumptions
+                          else _default_oas_annual(cfg))
             # LIF withdrawal from simulation results (issue #230)
             lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
             ret_state = RetirementState(
@@ -133,7 +139,10 @@ def rrsp_withdrawal_tax(final, cfg) -> float:
             brackets = default_tax_provider().get_combined_brackets()
             cpp_monthly_estimated = primary.get('cpp_monthly_estimated', 0)
             cpp_annual_income = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
-            oas_annual = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
+            _assumptions = cfg.get('assumptions', {})
+            # dict.get's default is eager; membership defers the fallback (#248)
+            oas_annual = (_assumptions['oas_annual'] if 'oas_annual' in _assumptions
+                          else _default_oas_annual(cfg))
             pension_income_annual = primary.get('pension_income_annual', 0)
             lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
             retirement_income = cpp_annual_income + oas_annual + pension_income_annual + lif_withdrawal

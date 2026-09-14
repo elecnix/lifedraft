@@ -203,7 +203,10 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     # rate applied to capital gains. Use actual CPP/OAS/pension data from config.
     cpp_monthly_for_cg = primary.get('cpp_monthly_estimated', 0)
     cpp_annual_for_cg = cpp_monthly_for_cg * 12 if cpp_monthly_for_cg > 0 else 0
-    oas_annual_for_cg = cfg.get('assumptions', {}).get('oas_annual', _default_oas_annual(cfg))
+    _assumptions = cfg.get('assumptions', {})
+    # dict.get's default is eager; membership defers the fallback (#248)
+    oas_annual_for_cg = (_assumptions['oas_annual'] if 'oas_annual' in _assumptions
+                         else _default_oas_annual(cfg))
     pension_income_for_cg = primary.get('pension_income_annual', 0)
     lif_withdrawal_for_cg = getattr(final, 'lif_withdrawal', 0)
     retirement_income = cpp_annual_for_cg + oas_annual_for_cg + pension_income_for_cg + lif_withdrawal_for_cg
