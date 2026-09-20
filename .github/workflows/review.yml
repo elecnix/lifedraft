@@ -13,8 +13,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Review this pull request with Cite
+        # Pinned by SHA *and* tag, both deliberately:
+        #
+        #   uses:    the full commit SHA pins the ACTION. Upstream's docs/release.md
+        #            asks consumers to do this -- "a mutable tag is one compromised
+        #            release away from fleet-wide code execution in every consumer's
+        #            privileged CI context". The trailing comment records which tag
+        #            that commit is, so a human can read the version without a lookup.
+        #            (v0.8.0 is an annotated tag: its ref SHA is c52eb888, which
+        #            dereferences to this commit.)
+        #
+        #   version: pins the release BINARY the action downloads. Leaving it empty
+        #            is NOT equivalent -- the action then fetches via the
+        #            releases/latest redirect and picks up new releases silently, so
+        #            a SHA-pinned action would still run an unpinned binary. The
+        #            v0.2.0 tag defaulted this to v0.1.3 and a bare `uses:` bump
+        #            silently ran the old binary; keep the two in lockstep.
         uses: elecnix/cite@eaebbe70378689d61158f43515471544e43c6038  # v0.8.0
         with:
           model_id: deepseek/deepseek-v4-flash-0731
           model_base_url: https://openrouter.ai/api/v1
           model_api_key: ${{ secrets.MODEL_API_KEY }}
+          version: v0.8.0
