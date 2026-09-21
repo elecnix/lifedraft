@@ -2749,6 +2749,89 @@ def winners_by_borrow_to_invest(results: List[Dict]) -> List[Dict]:
     return winners
 
 
+# Issue #232: the one exploration surface of this module. ``explore(dimension,
+# cfg)`` routes to the dimension's candidate sweep, hands every candidate to
+# the ranking core (``run_optimization`` -- the ``run_*_exploration`` folds
+# below are all sweeps of it), and returns the RANKED rows. The seam returns
+# data and never prints; report rendering belongs to the caller (slice 3 moves
+# the ``_print_*`` reports into ``output_plugins.py``). The dimension is a
+# small closed set of strings (DP#8: data, not a class hierarchy), validated
+# loudly rather than defaulted (DP#32: an unknown dimension refused, never a
+# silently empty ranking).
+EXPLORE_DIMENSIONS = frozenset({
+    'ltv',
+    'income_scenario',
+    'mortgage_structure',
+    'property_funding',
+    'borrow_to_invest',
+})
+
+
+_EXPLORE_DISPATCH = {
+    'ltv': run_ltv_exploration,
+    'income_scenario': run_income_scenario_exploration,
+    'mortgage_structure': run_mortgage_structure_exploration,
+    'property_funding': run_property_funding_exploration,
+    'borrow_to_invest': run_borrow_to_invest_exploration,
+}
+
+
+def explore(dimension: str, cfg: Dict, input_path: str = "input.json",
+            objective: ObjectiveFunction = None, **kwargs) -> List[Dict]:
+    """Run ONE exploration dimension and return its ranked scenario rows.
+
+    The single public exploration seam of this module (issue #232): it
+    dispatches to the dimension's candidate sweep, which folds the ranking
+    core (``run_optimization``) over each candidate and sorts by the active
+    objective's score. Whatever the sweep would return, ``explore`` returns
+    unchanged -- same rows, same order, same keys, no added or dropped
+    columns, nothing printed. The caller renders; the seam only ranks.
+
+    Args:
+        dimension: one of ``EXPLORE_DIMENSIONS`` --
+
+            - ``'ltv'`` -- refinance-candidate sweep
+              (``run_ltv_exploration``); forwarded kwargs include
+              ``ltv_steps``.
+            - ``'income_scenario'`` -- declared income-scenario sweep
+              (``run_income_scenario_exploration``); forwarded kwargs
+              include ``ltv_max``.
+            - ``'mortgage_structure'`` -- (refinance option x structure
+              x income scenario) cross
+              (``run_mortgage_structure_exploration``); forwarded kwargs
+              include ``cells``.
+            - ``'property_funding'`` -- (funding option x income
+              scenario) cross (``run_property_funding_exploration``);
+              forwarded kwargs include ``cells``.
+            - ``'borrow_to_invest'`` -- borrow-to-invest amount-rung
+              sweep (``run_borrow_to_invest_exploration``).
+
+        cfg: configuration dict (``input_contract.load_and_map`` output).
+        input_path: forwarded to the sweep (``run_optimization`` takes it
+            for its legacy path; the new-format path ignores it).
+        objective: ObjectiveFunction the ranking is scored on (default:
+            ``MAX_NET_BENEFIT``).
+        **kwargs: dimension-specific options, forwarded unchanged.
+
+    Returns:
+        The dimension's ranked rows -- EXACTLY what the underlying
+        ``run_*_exploration`` returns for the same arguments (identical
+        rankings is the slice-2 contract; ``tests/test_explore_seam.py``
+        pins it per dimension).
+
+    Raises:
+        ValueError: ``dimension`` is not in ``EXPLORE_DIMENSIONS`` (DP#32:
+            refuse loudly, never return an empty ranking that looks clean).
+    """
+    if dimension not in EXPLORE_DIMENSIONS:
+        known = ', '.join(sorted(EXPLORE_DIMENSIONS))
+        raise ValueError(
+            f"unknown exploration dimension {dimension!r}; known dimensions: "
+            f"{known} (issue #232 explore())")
+    return _EXPLORE_DISPATCH[dimension](
+        cfg, input_path=input_path, objective=objective, **kwargs)
+
+
 def _print_borrow_to_invest_report(results: List[Dict]) -> None:
     """Issue #1036: print the borrow-to-invest ranking -- one row per amount
     rung in SCORE order (best first; the no-draw baseline is ranked on its
