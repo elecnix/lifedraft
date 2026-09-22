@@ -38,6 +38,7 @@ import pytest
 
 import input_contract as ic
 import optimize
+import output_plugins
 from charge_limits import ChargeLimitExceededError
 from property_structure import apply_sourcing_overlay, apply_structure_overlay
 from scenario_overlay import ScenarioOverlay, apply_overlay
@@ -352,7 +353,7 @@ class TestExplorationRanksTheProduct:
         """#849's acceptance. Same charge, same borrowed total, same invested
         surplus -- the ONLY difference is where the surplus came from, so the
         two figures differ for exactly one reason."""
-        winners = optimize.winners_by_structure_scenario(
+        winners = output_plugins.winners_by_structure_scenario(
             [r for r in self.results if r["structure_basis_id"] == "cash_out_80"])
         by_structure = {w["structure_id"]: w["net_benefit"] for w in winners
                         if w["income_scenario_id"] == winners[0]["income_scenario_id"]}
@@ -450,12 +451,12 @@ def _cross_rows():
 
 class TestReportStatesItsBasis:
     def test_one_table_per_declared_refinance_option(self, capsys):
-        optimize._print_structure_report(_cross_rows())
+        output_plugins._print_structure_report(_cross_rows())
         out = capsys.readouterr().out
         assert out.count("MORTGAGE STRUCTURE RANKING") == 2
 
     def test_the_cash_out_table_names_its_option_and_its_dollars(self, capsys):
-        optimize._print_structure_report(_cross_rows())
+        output_plugins._print_structure_report(_cross_rows())
         out = capsys.readouterr().out
         assert "✅ BASIS: your declared refinance option" in out
         assert "'Register the charge to 80% LTV'" in out
@@ -464,13 +465,13 @@ class TestReportStatesItsBasis:
 
     def test_the_cash_out_table_is_not_mistakable_for_the_ltv_sweep(self, capsys):
         """#845's whole complaint: two tables read side by side as one plan."""
-        optimize._print_structure_report(_cross_rows())
+        output_plugins._print_structure_report(_cross_rows())
         out = capsys.readouterr().out
         assert "This is NOT the LTV-sweep basis" in out
         assert "ranks STRUCTURES at ONE fixed charge" in out
 
     def test_the_cash_out_table_names_the_advance_vs_line_tap(self, capsys):
-        optimize._print_structure_report(_cross_rows())
+        output_plugins._print_structure_report(_cross_rows())
         out = capsys.readouterr().out
         assert "ADVANCE vs LINE" in out
         assert "revolving_share IS the tap" in out
@@ -478,7 +479,7 @@ class TestReportStatesItsBasis:
     def test_the_zero_cash_out_table_keeps_its_own_basis_notice(self, capsys):
         """DP#17, the other side: the cash-out $0 basis must NOT claim to have
         been scored at a leverage it was not."""
-        optimize._print_structure_report(_cross_rows())
+        output_plugins._print_structure_report(_cross_rows())
         out = capsys.readouterr().out
         assert "CASH-OUT $0" in out
         assert "NO cash-out sweep" in out
@@ -489,7 +490,7 @@ class TestReportStatesItsBasis:
         cash-out basis -- printing it there would be a false statement about
         the model (DP#32)."""
         rows = [r for r in _cross_rows() if r["structure_basis_id"] == "cash_out_80"]
-        optimize._print_structure_report(rows)
+        output_plugins._print_structure_report(rows)
         out = capsys.readouterr().out
         assert "issue #735" not in out
         assert "The line's draw is NOT swept here" in out
@@ -502,7 +503,7 @@ class TestReportStatesItsBasis:
         #735's "(draw 0%)" annotation means "this line won UNDRAWN: standby
         liquidity, not leverage", so printing it here would state the reverse."""
         rows = [r for r in _cross_rows() if r["structure_basis_id"] == "cash_out_80"]
-        optimize._print_structure_report(rows)
+        output_plugins._print_structure_report(rows)
         out = capsys.readouterr().out
         line_row = next(l for l in out.splitlines()
                         if "Surplus drawn from the line" in l)
@@ -516,14 +517,14 @@ class TestReportStatesItsBasis:
         for r in rows:
             if r["structure_id"] == "line":
                 r["draw_fraction"] = 0.25
-        optimize._print_structure_report(rows)
+        output_plugins._print_structure_report(rows)
         line_row = next(l for l in capsys.readouterr().out.splitlines()
                         if "Surplus drawn from the line" in l)
         assert "draw 25%" in line_row
 
     def test_a_zero_cash_out_table_keeps_issue_735s_disclosure(self, capsys):
         rows = [r for r in _cross_rows() if r["structure_basis_id"] == "no_cash_out"]
-        optimize._print_structure_report(rows)
+        output_plugins._print_structure_report(rows)
         out = capsys.readouterr().out
         assert "HOW THE REVOLVING SEGMENT IS MODELLED (issue #735)" in out
 
@@ -534,8 +535,8 @@ class TestReportStatesItsBasis:
                 if r["structure_basis_id"] == "no_cash_out"]
         for r in rows:
             del r["structure_basis_id"]
-        assert optimize.structure_basis_id(rows[0]) == "current_charge"
-        optimize._print_structure_report(rows)
+        assert output_plugins.structure_basis_id(rows[0]) == "current_charge"
+        output_plugins._print_structure_report(rows)
         assert capsys.readouterr().out.count("MORTGAGE STRUCTURE RANKING") == 1
 
 
@@ -551,7 +552,7 @@ class TestReportNamesRefusedCells:
         ]
 
     def test_a_refused_cell_is_named_with_its_reason(self, capsys):
-        optimize._print_structure_report(_cross_rows(), cells=self._cells())
+        output_plugins._print_structure_report(_cross_rows(), cells=self._cells())
         out = capsys.readouterr().out
         assert "NOT SCORED" in out
         assert "'Line over the ceiling' at 'Register the charge to 80% LTV'" in out
@@ -560,11 +561,11 @@ class TestReportNamesRefusedCells:
     def test_nothing_is_printed_when_nothing_was_refused(self, capsys):
         """DP#17: the notice appears where it applies, not indiscriminately."""
         cells = [c for c in self._cells() if c["refusal"] is None]
-        optimize._print_structure_report(_cross_rows(), cells=cells)
+        output_plugins._print_structure_report(_cross_rows(), cells=cells)
         assert "NOT SCORED" not in capsys.readouterr().out
 
     def test_no_cells_supplied_prints_no_notice(self, capsys):
-        optimize._print_structure_report(_cross_rows())
+        output_plugins._print_structure_report(_cross_rows())
         assert "NOT SCORED" not in capsys.readouterr().out
 
 
@@ -575,7 +576,7 @@ class TestReportNamesRefusedCells:
 # (the fed/QC cap valuation) rather than imply a settled number.
 
 def test_issue_850_caveat_states_deductibility_is_priced_and_names_the_limit():
-    from optimize import structure_deductibility_caveat_lines
+    from output_plugins import structure_deductibility_caveat_lines
     text = "\n".join(structure_deductibility_caveat_lines()).lower()
     assert "#850" in text, "must cite the tracking issue"
     assert "deductibility is priced" in text, "must state the asymmetry is now modelled"
@@ -586,7 +587,7 @@ def test_issue_850_caveat_states_deductibility_is_priced_and_names_the_limit():
 
 def test_issue_850_caveat_is_printed_beside_the_structure_ranking():
     import inspect
-    import optimize as _o
+    import output_plugins as _o
     src = ""
     for name in dir(_o):
         fn = getattr(_o, name)

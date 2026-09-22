@@ -825,15 +825,16 @@ class TestOptimizeRunwayConsoleAndSweep(unittest.TestCase):
         }
 
     def test_absent_runway_is_unengaged(self):
-        from optimize import _absent_runway
-        rw = _absent_runway()
+        from runway import absent_runway
+        rw = absent_runway()
         self.assertFalse(rw['engaged'])
         self.assertIsNotNone(rw['unengaged_reason'])
 
     def test_print_runway_report_engaged(self):
         import io, contextlib
-        from optimize import (run_optimization, winners_by_income_scenario,
-                              _print_runway_report)
+        from optimize import run_optimization
+        from output_plugins import (winners_by_income_scenario,
+                                    _print_runway_report)
         res = run_optimization(self._cfg_with_shock(), 'inline')
         for r in res:
             r['income_scenario_id'] = 'jobloss'
@@ -849,7 +850,7 @@ class TestOptimizeRunwayConsoleAndSweep(unittest.TestCase):
 
     def test_print_runway_report_not_checked(self):
         import io, contextlib
-        from optimize import _print_runway_report
+        from output_plugins import _print_runway_report
         # No winner carries an engaged runway -> the NOT-CHECKED notice fires.
         winners = [{'label': 'x', 'solvency': {'engaged': False},
                     'runway': {'engaged': False, 'unengaged_reason': 'absent',
@@ -894,7 +895,7 @@ class TestOptimizeRunwayConsoleAndSweep(unittest.TestCase):
         # A winner whose runway drew a revolving credit facility surfaces the
         # "leans on credit line" caveat in the console report.
         import io, contextlib
-        from optimize import _print_runway_report
+        from output_plugins import _print_runway_report
         winners = [{'label': 'shock', 'solvency': {'engaged': True},
                     'runway': {'engaged': True, 'runway_months': 10.0,
                                'runway_months_bracket': [9.0, 12.0],

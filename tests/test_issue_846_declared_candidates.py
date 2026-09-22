@@ -27,6 +27,7 @@ already forbids this for ``sensitivity.sweeps`` (#771).
 import pytest
 
 import optimize
+import output_plugins
 from scenario_discovery import discover_narrowings, format_narrowings
 
 
@@ -230,7 +231,7 @@ class TestRefinanceBasisIsStated:
         """#853/DP#33: a declaration now ANNOTATES the full ladder, so the basis
         names the whole sweep and marks the declared options ★ in situ rather
         than presenting the declaration as a replacement."""
-        optimize._print_refinance_basis(self._rows('ladder', 2, annotated=True))
+        output_plugins._print_refinance_basis(self._rows('ladder', 2, annotated=True))
         out = capsys.readouterr().out
         assert 'decisions.mortgage.refinance_options' in out
         assert 'FULL LTV sweep' in out
@@ -239,13 +240,13 @@ class TestRefinanceBasisIsStated:
     def test_ladder_overriding_a_declaration_says_so_loudly(self, capsys):
         """#845: never two contradictory authoritative answers from one run. An
         explicit caller ladder (not annotated) that overrides a declaration."""
-        optimize._print_refinance_basis(self._rows('ladder', 1, annotated=False))
+        output_plugins._print_refinance_basis(self._rows('ladder', 1, annotated=False))
         out = capsys.readouterr().out
         assert 'OVERRIDES' in out
         assert 'NOT your declared options' in out
 
     def test_ladder_with_no_declaration_states_it_is_generic(self, capsys):
-        optimize._print_refinance_basis(self._rows('ladder', 0))
+        output_plugins._print_refinance_basis(self._rows('ladder', 0))
         out = capsys.readouterr().out
         assert 'generic LTV ladder' in out
         assert 'OVERRIDES' not in out
@@ -370,13 +371,13 @@ class TestStructureRankingStatesItsLeverage:
         return rows
 
     def test_report_states_the_cash_out_and_ltv_it_was_computed_at(self, capsys):
-        optimize._print_structure_report(self._structure_rows())
+        output_plugins._print_structure_report(self._structure_rows())
         out = capsys.readouterr().out
         assert 'CASH-OUT $0' in out
         assert '37.5%' in out            # the basis LTV, named
         assert 'NO cash-out sweep' in out
 
     def test_report_warns_against_reading_it_with_the_ltv_sweep(self, capsys):
-        optimize._print_structure_report(self._structure_rows())
+        output_plugins._print_structure_report(self._structure_rows())
         out = capsys.readouterr().out
         assert 'do not read the two tables as one plan' in out.lower()

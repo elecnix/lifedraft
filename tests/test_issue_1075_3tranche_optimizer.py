@@ -47,6 +47,7 @@ import countries.canada  # noqa: F401 -- registers the Canada jurisdiction provi
 
 import input_contract as ic
 import optimize
+import output_plugins
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
 from charge_limits import ChargeLimitExceededError
@@ -449,7 +450,7 @@ class TestOptimizerSweepGeneratesTrancheAmounts(unittest.TestCase):
         three tranches summing to the $720k charge, and a non-negative
         line."""
         self.assertTrue(self.results)
-        winners = optimize.winners_by_structure_scenario(self.results)
+        winners = output_plugins.winners_by_structure_scenario(self.results)
         tranche_winners = [w for w in winners if w.get('tranche_amounts')]
         self.assertTrue(tranche_winners)
         for w in tranche_winners:
@@ -490,7 +491,7 @@ class TestOptimizerSweepGeneratesTrancheAmounts(unittest.TestCase):
         wrong) -- and the strategy that produced them."""
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(self.results, cells=self.cells)
+            output_plugins._print_structure_report(self.results, cells=self.cells)
         out = buf.getvalue()
         self.assertIn('OPTIMAL 3-TRANCHE SPLIT', out)
         self.assertRegex(out, r'house \$[0-9,]+,000')
@@ -580,7 +581,7 @@ class TestCashBackConditionalOnHouseAmount(unittest.TestCase):
         """The report states the verdict beside the winning split (DP#9: the
         printed verdict is the condition the printed net benefit was scored
         under)."""
-        winners = optimize.winners_by_structure_scenario(self.results)
+        winners = output_plugins.winners_by_structure_scenario(self.results)
         tranche_winners = [w for w in winners if w.get('tranche_amounts')]
         self.assertTrue(tranche_winners)
         for w in tranche_winners:
@@ -589,7 +590,7 @@ class TestCashBackConditionalOnHouseAmount(unittest.TestCase):
             self.assertEqual(w['cash_back_threshold'], HOUSE_MIN)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(self.results, cells=self.cells)
+            output_plugins._print_structure_report(self.results, cells=self.cells)
         out = buf.getvalue()
         self.assertIn('OPTIMAL 3-TRANCHE SPLIT', out)
         self.assertIn('cash-back $1,200', out)
@@ -620,7 +621,7 @@ class TestCashBackConditionalOnHouseAmount(unittest.TestCase):
         }
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report([row])
+            output_plugins._print_structure_report([row])
         out = buf.getvalue()
         self.assertIn('OPTIMAL 3-TRANCHE SPLIT', out)
         self.assertIn('cash-back $1,200 CREDITED', out)
@@ -862,7 +863,7 @@ class TestSweepCompositionDetails(unittest.TestCase):
         results = optimize.run_mortgage_structure_exploration(cfg)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(results, cells=cells)
+            output_plugins._print_structure_report(results, cells=cells)
         out = buf.getvalue()
         self.assertIn("OPTIMAL 3-TRANCHE SPLIT", out)
         self.assertIn("cash-out sourcing", out)
@@ -1211,7 +1212,7 @@ class TestShareFormUnchanged(unittest.TestCase):
                             for r in results))
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(results)
+            output_plugins._print_structure_report(results)
         out = buf.getvalue()
         self.assertIn("MORTGAGE STRUCTURE RANKING", out)
         self.assertNotIn("3-TRANCHE", out)

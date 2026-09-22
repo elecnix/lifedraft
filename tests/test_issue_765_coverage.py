@@ -9,11 +9,11 @@ grew:
 
   * decumulation.py -- the shortfall_of() return (the helper
     worst_drawdown_shortfall() routes every row through).
-  * optimize.py -- the _print_decumulation_shortfall_report() console
+  * output_plugins.py -- the _print_decumulation_shortfall_report() console
     deliverable #757 added (its "not engaged" early-return and its
-    "render the registered caveat" branch), plus compute_net_benefit()'s
-    no-birth_year retirement-income path (the retirement block #757 sits
-    beside).
+    "render the registered caveat" branch; relocated from optimize.py in #232
+    slice 3), plus optimize.py's compute_net_benefit() no-birth_year
+    retirement-income path (the retirement block #757 sits beside).
   * trajectory_invariants.py -- the invariant-harness helpers
     (all_invariant_names, the duplicate-registration guard, assert_invariant's
     failure-raise) and the no-op / violation branches of the per-year checks
@@ -30,6 +30,7 @@ import pytest
 import decumulation
 import objective
 import optimize
+import output_plugins
 import trajectory_invariants as ti
 from year_result import YearResult
 
@@ -95,7 +96,7 @@ class TestWorstDrawdownShortfallNotExhausted:
 
 
 # =============================================================================
-# optimize.py -- _print_decumulation_shortfall_report (the #757 console path)
+# output_plugins.py -- _print_decumulation_shortfall_report (the #757 console path)
 # =============================================================================
 
 def _engaged_exhausted_summary():
@@ -115,7 +116,7 @@ class TestPrintDecumulationShortfallReport:
         notice (NOT a '0 shortfall' falsehood)."""
         rows = [{'label': 'never retired',
                  'drawdown_shortfall': {'engaged': False, 'exhausted': False}}]
-        optimize._print_decumulation_shortfall_report(rows, {})
+        output_plugins._print_decumulation_shortfall_report(rows, {})
         out = capsys.readouterr().out
         assert 'DECUMULATION NOT CHECKED' in out
         assert 'not been checked' in out
@@ -127,7 +128,7 @@ class TestPrintDecumulationShortfallReport:
         rows = [{'label': 'Bankrupt plan', 'strategy': 'b',
                  'drawdown_shortfall': summary, 'exhausted': True}]
         cfg = {'assumptions': {'decumulation_shortfall': summary}}
-        optimize._print_decumulation_shortfall_report(rows, cfg)
+        output_plugins._print_decumulation_shortfall_report(rows, cfg)
         out = capsys.readouterr().out
         assert 'DECUMULATION SHORTFALL' in out
         # The per-scenario table names the first shortfall year and the gap.

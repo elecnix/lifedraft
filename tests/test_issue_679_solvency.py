@@ -1013,8 +1013,8 @@ class TestRuinedScenarioCannotReportAnUnqualifiedTerminalFigure(unittest.TestCas
         }
 
     def test_a_ruined_scenario_row_carries_the_ruin_verdict(self):
-        import optimize
-        winners = optimize.winners_by_income_scenario([
+        import output_plugins
+        winners = output_plugins.winners_by_income_scenario([
             self._row('stay', 'Stay at current job', 9_700_000, ruined=False),
             # A large, reassuring terminal figure for a household that is
             # cash-flow insolvent -- exactly the shape of the original bug.
@@ -1037,10 +1037,10 @@ class TestRuinedScenarioCannotReportAnUnqualifiedTerminalFigure(unittest.TestCas
         ordinary dollar amount with no verdict attached. That is what the
         household misreads as 'job loss is survivable and merely expensive'.
         """
-        import io, contextlib, optimize
+        import io, contextlib, output_plugins
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_income_scenario_report([
+            output_plugins._print_income_scenario_report([
                 self._row('stay', 'Stay at current job', 9_700_000, ruined=False),
                 self._row('job_loss', 'Job loss -- EI only', 4_431_353,
                           ruined=True, first_ruin_year=2),
@@ -1069,14 +1069,14 @@ class TestRuinedScenarioCannotReportAnUnqualifiedTerminalFigure(unittest.TestCas
     def test_an_unengaged_contract_is_reported_as_unchecked(self):
         """DP#32 at the reporting layer: no living-costs budget means the
         household was never CHECKED, and the report must not imply safety."""
-        import io, contextlib, optimize
+        import io, contextlib, output_plugins
         rows = [self._row('stay', 'Stay', 9_700_000, ruined=False),
                 self._row('job_loss', 'Job loss', 4_400_000, ruined=False)]
         for r in rows:
             r['solvency']['engaged'] = False
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_income_scenario_report(rows)
+            output_plugins._print_income_scenario_report(rows)
         out = buf.getvalue()
         self.assertIn('SOLVENCY NOT CHECKED', out)
         self.assertIn('not been checked, not cleared', out)
@@ -1089,14 +1089,14 @@ class TestRuinedScenarioCannotReportAnUnqualifiedTerminalFigure(unittest.TestCas
         AT THE ROW -- asserted on the RENDERED TEXT (the row line itself),
         never on the result object (which was already correct; only the
         rendering lost the information, per #733's own enforcement ask)."""
-        import io, contextlib, optimize
+        import io, contextlib, output_plugins
         rows = [self._row('stay', 'Stay', 9_700_000, ruined=False),
                 self._row('job_loss', 'Job loss -- EI only', 11_084_000, ruined=False)]
         for r in rows:
             r['solvency']['engaged'] = False
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_income_scenario_report(rows)
+            output_plugins._print_income_scenario_report(rows)
         out = buf.getvalue()
 
         unchecked_line = next(l for l in out.splitlines()
@@ -1118,12 +1118,12 @@ class TestRuinedScenarioCannotReportAnUnqualifiedTerminalFigure(unittest.TestCas
         actually solvency-checked and found solvent must NOT be marked
         UNCHECKED -- the marker is reserved for genuine absence of a check,
         never applied indiscriminately."""
-        import io, contextlib, optimize
+        import io, contextlib, output_plugins
         rows = [self._row('stay', 'Stay', 9_700_000, ruined=False),
                 self._row('salary_cut', 'Salary cut', 8_100_000, ruined=False)]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_income_scenario_report(rows)
+            output_plugins._print_income_scenario_report(rows)
         out = buf.getvalue()
         self.assertNotIn('UNCHECKED', out)
         stay_line = next(l for l in out.splitlines() if 'Stay' in l and 'Salary' not in l)

@@ -58,8 +58,12 @@ def _runway_by_scenario(results: List[Dict]) -> List[Dict]:
 # Issue #758: the runway rendering is ONE spelling (DP#9), in runway.py;
 # import it rather than inventing a second. (output_plugins deliberately
 # does not import optimize -- circular at module load -- so the shared home
-# is the metric module itself, which both layers may import.)
-from runway import format_runway as _format_runway_inline  # noqa: E402
+# is the metric module itself, which both layers may import.) The same home
+# holds ``absent_runway`` -- the explicit un-engaged runway verdict for a row
+# that carries none -- while decumulation owns the shortfall accessors; all
+# three feed the console reports at the foot of this module (#232 slice 3).
+from decumulation import shortfall_of, summarize_drawdown_shortfall  # noqa: E402
+from runway import absent_runway, format_runway as _format_runway_inline  # noqa: E402
 
 
 # =============================================================================
@@ -2151,3 +2155,1079 @@ def write_report(fmt: OutputFormat, results: List[Dict], base_cfg: Dict,
                            include_sensitivity=include_sensitivity,
                            indent=indent)
     report.write(path)
+
+# =============================================================================
+# Console reports for the exploration dimensions (issue #232, slice 3)
+#
+# Moved out of optimize.py: these render the ranked rows a dimension sweep
+# returns (``explore(dimension, cfg)`` or the ``run_*_exploration`` entry
+# point it dispatches to). DP#25: the reporting layer consumes result dicts
+# and never imports optimize; the caller -- optimize.py's CLI entry -- renders.
+# =============================================================================
+
+
+def _print_refinance_basis(results: List[Dict]) -> None:
+    """State WHERE the refinance candidates below came from (#845/#846).
+
+    The reader must never have to infer whether this table swept their declared
+    ``decisions.mortgage.refinance_options`` or a ladder this tool made up. Read
+    off the same rows whose net_benefit is printed, so the basis cannot disagree
+    with the numbers (DP#9).
+    """
+    annotated = any(r.get('refinance_annotated') for r in results)
+    declared_counts = {r.get('refinance_declared_count', 0) for r in results}
+    declared_count = max(declared_counts) if declared_counts else 0
+
+    if annotated and declared_count > 0:
+        # Issue #853 / DP#33: the declaration is a LENS on the full sweep, not a
+        # blindfold that hides it. The whole LTV ladder was explored; the
+        # household's own options are MARKED in situ (★) rather than replacing
+        # the curve, so a rung they did not declare can still win and be seen.
+        marked = sorted({r.get('refinance_declared_label')
+                         for r in results if r.get('refinance_declared')})
+        print(f"\n  ✅ BASIS: the FULL LTV sweep, with your {declared_count} declared refinance")
+        print(f"      option(s) (decisions.mortgage.refinance_options) marked ★ in situ (#853).")
+        print(f"      The whole curve is ranked, NOT just your options — a rung you did not declare")
+        print(f"      can still win, and you will see it. ★ = your declared option:")
+        for label in marked:
+            print(f"        ★ {label}")
+        return
+
+    if declared_count > 0:
+        # A caller forced an explicit ladder while the household HAD declared
+        # options. Overriding is allowed; doing it quietly is not -- that is
+        # exactly how #845's two contradictory authoritative answers happened.
+        print(f"\n  ⚠️  BASIS: a generic LTV ladder authored by this tool — it OVERRIDES the")
+        print(f"      {declared_count} refinance option(s) you declared at "
+              f"decisions.mortgage.refinance_options.")
+        print(f"      The rows below are NOT your declared options and must not be read as a")
+        print(f"      ranking of them (#845).")
+        return
+
+    print(f"\n  ℹ️  BASIS: a generic LTV ladder authored by this tool — you declared no")
+    print(f"      decisions.mortgage.refinance_options, so there is nothing to rank against it.")
+    print(f"      Declare them to have this table sweep YOUR options instead (#846).")
+
+
+def structure_deductibility_caveat_lines() -> List[str]:
+    """What this ranking now prices, and the one limitation that remains (#850).
+
+    #845 makes advance-vs-line rankable at equal leverage; #850 now prices the
+    s.20(1)(c) asymmetry that motivates the choice — a ``borrowing_purpose``
+    trace deducts interest on the invested portion of both the advance and the
+    drawn line, and the advance's deductible balance amortizes away with the
+    principal (the erosion #849 names) while the line's does not. Only the
+    portion of the lump that lands in a NON-registered account is traced as
+    deductible; a dollar borrowed to fill RRSP/TFSA room is not (correct).
+
+    Remaining limitation (issue on ``apply_sm_interest``): the Quebec deduction
+    cap is applied but valued at the combined fed+QC rate, and the FEDERAL
+    deduction has no such cap. That understates the deductible benefit on the
+    LINE specifically (the capped leg), i.e. it works against the line. The
+    ranking has been shown robust to it: removing the cap from the line's
+    federal leg entirely still leaves the advance ahead. Stated here rather
+    than left implied (DP#32). Extracted as a tested helper so ``main()`` gains
+    no statements.
+    """
+    return [
+        "",
+        "  ℹ️  DEDUCTIBILITY IS PRICED (issue #850): interest on the invested portion of both the",
+        "      advance and the drawn line is deducted; the advance's deductible balance amortizes",
+        "      away with principal, the line's does not (the s.20(1)(c) asymmetry #849 asks about).",
+        "      Only the NON-registered portion of the lump is deductible (filling RRSP/TFSA is not).",
+        "  ⚠️  One known limit: apply_sm_interest values the Quebec cap at the combined fed+QC rate",
+        "      and the federal deduction has no cap — this UNDERSTATES the line's benefit, not the",
+        "      advance's. The ranking is robust to it (advance still leads with the cap removed).",
+    ]
+
+
+def _print_structure_deductibility_caveat() -> None:
+    """Print :func:`structure_deductibility_caveat_lines` (issue #850)."""
+    for line in structure_deductibility_caveat_lines():
+        print(line)
+
+
+def _print_refinance_refusals(results: List[Dict]) -> None:
+    """Name every declared refinance option the engine REFUSED to score, and why
+    (issue #891, DP#32/#681).
+
+    Mirror of ``_print_structure_refusals``: a declared option whose cash-out
+    breaches the 80% charge limit is ABSENT from the tables above (it was never
+    simulable), and an absence read as a poor ranking would be exactly the
+    silent-drop #681 forbids. So it is named here with its reason IN WORDS.
+    """
+    refused = [r for r in results if r.get('refinance_refused')]
+    if not refused:
+        return
+    print(f"\n  ⚠️  NOT SCORED — {len(refused)} declared refinance option(s) the engine REFUSED:")
+    for r in refused:
+        print(f"      • '{r.get('refinance_label')}' (cash-out ${r.get('cashout', 0):,.0f})")
+        print(f"        {r.get('refinance_refusal')}")
+    print(f"      These options are ABSENT from the tables above — do not read their absence as a")
+    print(f"      poor ranking; the charge cannot support them at all (#891/#664).")
+
+
+def _print_ltv_exploration(results: List[Dict]) -> None:
+    """Print formatted LTV exploration results."""
+    print(f"\n{'=' * 120}")
+    print(f"  📊 LTV EXPLORATION — Strategies at each LTV level")
+    print(f"{'=' * 120}")
+
+    # Issue #891: a refused over-limit declared option is a marker row carrying
+    # no net_benefit -- keep it out of the ranking tables (it was never scored)
+    # and name it in a loud NOT SCORED notice below, exactly as the structure
+    # cross does. Feasible rows alone drive every table.
+    refusals = [r for r in results if r.get('refinance_refused')]
+    results = [r for r in results if not r.get('refinance_refused')]
+
+    _print_refinance_basis(results)
+
+    # Best strategy at each LTV
+    print(f"\n  Best strategy per LTV level:")
+    print(f"  {'LTV':>5s}  {'Cash-out':>10s}  {'Strategy':<40s}  {'Net Benefit':>12s}  {'Total Debt':>12s}  {'TFSA':>10s}  {'RRSP':>10s}")
+    print(f"  {'-' * 100}")
+    
+    ltvs = sorted(set(r.get('ltv', 0) for r in results))
+    for ltv in ltvs:
+        ltv_rows = [r for r in results if r.get('ltv') == ltv]
+        best = max(ltv_rows, key=lambda r: r.get('net_benefit', 0))
+        cash = best.get('cashout', 0)
+        strategy_name = best.get('strategy', '?')
+        if best.get('deduct_later'):
+            strategy_name += ' 📋'
+        net = best.get('net_benefit', 0)
+        debt = best.get('total_debt', 0)
+        tfsa = best.get('TFSA', 0)
+        rrsp = best.get('RRSP', 0)
+        # Issue #853 / DP#33: mark the rungs the household declared with ★ so the
+        # declaration is a visible lens on the full curve, not a hidden filter.
+        marker = ''
+        declared_labels = sorted({r.get('refinance_declared_label')
+                                  for r in ltv_rows if r.get('refinance_declared')})
+        if declared_labels:
+            marker = '  ★ ' + ', '.join(declared_labels)
+        print(f"  {ltv:>4.0%}  ${cash:>9,.0f}  {strategy_name:<40s}  ${net:>10,.0f}  ${debt:>10,.0f}  ${tfsa:>9,.0f}  ${rrsp:>9,.0f}{marker}")
+    
+    # Strategy comparison across LTVs
+    print(f"\n  Strategy comparison (averaged across LTVs):")
+    print(f"  {'Strategy':<40s}  {'Avg Net':>10s}  {'Max Net':>10s}")
+    print(f"  {'-' * 65}")
+    
+    strategies = sorted(set(r.get('strategy', '?') for r in results))
+    strat_data = []
+    for s in strategies:
+        s_rows = [r for r in results if r.get('strategy') == s]
+        avg_net = sum(r.get('net_benefit', 0) for r in s_rows) / len(s_rows) if s_rows else 0
+        max_net = max(r.get('net_benefit', 0) for r in s_rows) if s_rows else 0
+        strat_data.append((s, avg_net, max_net))
+    
+    strat_data.sort(key=lambda x: x[1], reverse=True)
+    for s, avg, mx in strat_data:
+        label = s
+        if any(r.get('deduct_later') for r in results if r.get('strategy') == s):
+            label += ' 📋'
+        print(f"  {label:<40s}  ${avg/1000:>8,.0f}k  ${mx/1000:>8,.0f}k")
+
+    # Issue #891: name any declared option refused for breaching the charge
+    # limit, from the SAME rows the sweep returned (DP#9) -- never a silent drop.
+    _print_refinance_refusals(refusals)
+
+    print()
+
+
+def winners_by_income_scenario(results: List[Dict]) -> List[Dict]:
+    """Pure logic half of the income-scenario report (issue #665): for each
+    income scenario present in ``results`` (in first-seen/declaration order),
+    find the winning strategy and record whether it differs from the FIRST
+    scenario's winner (the household's base/current-income case).
+
+    Split out from ``_print_income_scenario_report`` so "does the
+    recommendation change across income scenarios" is a directly testable
+    fact, not something only observable by parsing printed text.
+
+    Issue #679: each row also carries the winner's ``solvency`` summary and a
+    ``ruined`` flag. This is the whole point of the feature -- a scenario the
+    household CANNOT SURVIVE must not be representable in this list as merely
+    a smaller number. ``ruined`` being a first-class key here (not a
+    formatting decision inside the printer) is what makes
+    "a ruined scenario never reports an unqualified terminal net benefit" a
+    testable assertion.
+
+    Returns one dict per scenario:
+        {id, label, strategy, deduct_later, net_benefit, changed_from_base,
+         ruined, solvency}
+    ``changed_from_base`` is always False for the first scenario itself.
+    """
+    scenario_ids = list(dict.fromkeys(r['income_scenario_id'] for r in results))
+    winners = []
+    base_strategy = None
+    for sid in scenario_ids:
+        rows = [r for r in results if r['income_scenario_id'] == sid]
+        best = max(rows, key=lambda r: r.get('net_benefit', 0))
+        strategy = best.get('strategy', '?')
+        if base_strategy is None:
+            base_strategy = strategy
+        # DP#32: an explicit default, never `or {}` -- a row that carries no
+        # solvency summary at all (an older/synthetic result) is ABSENT, and
+        # absence must not be silently laundered into "solvent".
+        solvency = best.get('solvency', {})
+        winners.append({
+            'id': sid,
+            'label': rows[0]['income_scenario_label'],
+            'strategy': strategy,
+            'deduct_later': best.get('deduct_later', False),
+            'net_benefit': best.get('net_benefit', 0),
+            'changed_from_base': strategy != base_strategy,
+            'ruined': bool(solvency.get('ruined', False)),
+            'solvency': solvency,
+            # Issue #707: decumulation shortfall beside the solvency verdict.
+            # Explicit absence test (DP#32): a row carrying no summary is
+            # given an all-False one, never via `.get(k) or DEFAULT`.
+            'drawdown_shortfall': (
+                best['drawdown_shortfall'] if 'drawdown_shortfall' in best
+                else summarize_drawdown_shortfall([])),
+            'exhausted': bool(
+                (best.get('drawdown_shortfall')
+                 if best.get('drawdown_shortfall') is not None else {})
+                .get('exhausted', False)),
+            # Issue #758: runway (months-to-ruin) beside the solvency verdict.
+            # Explicit absence test (DP#32): a synthetic row carrying no
+            # runway is given an un-engaged one, never a falsy-coerced number.
+            'runway': best['runway'] if 'runway' in best else absent_runway(),
+        })
+    return winners
+
+
+def _print_income_scenario_report(results: List[Dict]) -> None:
+    """Print the winning strategy under EACH declared income scenario, and
+    flag explicitly whether the recommendation changes vs. the first
+    (current-income) scenario -- issue #665: "a strategy that is optimal at
+    full income and ruinous on EI is the entire point of the feature," and
+    the tool must say so, not just rank silently.
+
+    Only prints when the contract declares MORE than one income scenario --
+    a household that never authored decisions.income[] gets the single
+    auto-discovered "current income" scenario and this section is skipped
+    (nothing to compare).
+
+    Issue #679: a RUINED scenario's terminal figure is NOT printed as a
+    dollar amount here. It is replaced by ``RUIN (year N)``, because the
+    entire defect this fixes is that the tool answered "what happens if I
+    lose my job?" with a large, reassuring number that is only reachable on
+    the assumption the job loss did not destroy the household. A household
+    reading `$4.4M` concludes job loss is survivable and merely expensive.
+    The ledger figure is still reported -- immediately below, explicitly
+    labelled NOT ACHIEVABLE -- because suppressing it entirely would hide
+    what the engine computed; the requirement is that it can never be
+    mistaken for an achievable outcome (DP#32: fail loudly).
+    """
+    winners = winners_by_income_scenario(results)
+    if len(winners) <= 1:
+        return
+
+    print(f"\n{'=' * 120}")
+    print(f"  ⚖️  RECOMMENDATION BY INCOME SCENARIO (decisions.income[] -- issue #665)")
+    print(f"{'=' * 120}")
+    print(f"\n  {'Scenario':<28} {'Winning strategy':<40} {'Net Benefit':>14}")
+    print(f"  {'-' * 90}")
+
+    base_label = winners[0]['label']
+    base_strategy = winners[0]['strategy']
+    for w in winners:
+        strategy_name = w['strategy'] + (' 📋' if w['deduct_later'] else '')
+        if w['ruined']:
+            ruin_year = w['solvency'].get('first_ruin_year')
+            verdict = f"RUIN (yr {ruin_year})" if ruin_year else "RUIN"
+            print(f"  {w['label']:<28} {strategy_name:<40} {verdict:>14}")
+            print(f"    ⛔ INSOLVENT: this household cannot fund its own obligations under "
+                  f"'{w['label']}'.")
+            print(f"       The ledger figure (${w['net_benefit']:,.0f}) is NOT ACHIEVABLE -- it "
+                  f"assumes the shortfall never happened.")
+            print(f"       See the SOLVENCY section below for the runway, the year it runs out, "
+                  f"and what it was forced to sell.")
+        elif not w['solvency'].get('engaged'):
+            # Issue #733: a scenario whose cash-flow identity was never
+            # checked (no `household_budget.annual_living_costs` declared,
+            # the normal case for every existing contract, #679) must not
+            # render here as an ordinary, achievable figure -- that IS the
+            # defect #679 exists to kill, just reached through the row that
+            # falls back to the bare number instead of through 'ruined'.
+            # Marked INLINE, in the cell itself (not only 74 lines below in
+            # the SOLVENCY footer, where a household reading top-to-bottom
+            # never reaches it before drawing a conclusion).
+            verdict = f"${w['net_benefit']:,.0f} (UNCHECKED)"
+            print(f"  {w['label']:<28} {strategy_name:<40} {verdict:>22}")
+        else:
+            print(f"  {w['label']:<28} {strategy_name:<40} ${w['net_benefit']:>12,.0f}")
+        if w['changed_from_base']:
+            print(f"    ⚠ Recommendation CHANGES under '{w['label']}': "
+                  f"{w['strategy']} (vs. '{base_label}' recommends {base_strategy})")
+
+    print()
+    _print_solvency_report(winners)
+    # Issue #758: the months-to-ruin metric, right beside the solvency verdict.
+    _print_runway_report(winners)
+
+
+def winners_by_structure_scenario(results: List[Dict]) -> List[Dict]:
+    """Pure logic half of the structure-ranking report (issue #687): the
+    winning strategy for each (structure, income scenario) pair present in
+    ``results``, so "do these structures rank differently, and does the
+    ranking change under job loss" is a directly testable fact, not
+    something only observable by parsing printed text (mirrors
+    ``winners_by_income_scenario``'s split, DP#8).
+
+    Returns one dict per (refinance option, structure, income scenario) triple
+    (#845 -- two structures are only comparable at the SAME charge), in
+    first-seen/declaration order:
+        {structure_basis_id, structure_basis_label, structure_basis_cash_out,
+         structure_basis_ltv, structure_id, structure_label,
+         income_scenario_id, income_scenario_label, strategy, deduct_later,
+         net_benefit, ruined, solvency}
+    """
+    # Issue #845: the refinance option is part of the key. Two structures are
+    # only comparable at the SAME charge, so collapsing 'advance at cash-out $0'
+    # and 'advance at cash-out $480,000' into one winner would silently pick the
+    # better LEVERAGE and report it as the better STRUCTURE -- the exact
+    # confusion #845 exists to end. A row that carries no basis tag is the
+    # pre-#845 single basis (``structure_basis_id``), so a caller that never
+    # crossed anything gets byte-identical grouping.
+    pairs = list(dict.fromkeys(
+        (structure_basis_id(r), r['structure_id'], r['income_scenario_id'])
+        for r in results))
+    winners = []
+    for bid, sid, iid in pairs:
+        rows = [r for r in results
+                if structure_basis_id(r) == bid
+                and r['structure_id'] == sid and r['income_scenario_id'] == iid]
+        best = max(rows, key=lambda r: r.get('net_benefit', 0))
+        # DP#32: an explicit default, never `or {}` -- see
+        # winners_by_income_scenario's identical comment.
+        solvency = best.get('solvency', {})
+        winners.append({
+            # Issue #845: the basis travels onto the winner too -- a winner
+            # without the charge it won at is exactly what #845 filed.
+            'structure_basis_id': bid,
+            'structure_basis_label': rows[0].get('structure_basis_label'),
+            'structure_basis_cash_out': rows[0].get('structure_basis_cash_out'),
+            'structure_basis_ltv': rows[0].get('structure_basis_ltv'),
+            'structure_id': sid,
+            'structure_label': rows[0]['structure_label'],
+            'income_scenario_id': iid,
+            'income_scenario_label': rows[0]['income_scenario_label'],
+            'strategy': best.get('strategy', '?'),
+            'deduct_later': best.get('deduct_later', False),
+            # issue #735: which draw fraction won for THIS structure -- the
+            # question "keep this structure's line undrawn, or draw it?" is
+            # answered per-structure, not assumed away.
+            'draw_fraction': best.get('draw_fraction', 0.0),
+            # issue #1075: the 3-tranche sweep point that won for THIS
+            # structure -- the optimal {house, investment, line} split, read
+            # off the row that produced it (None for a share-form structure)
+            # -- and the cash-back verdict the split was scored under.
+            'tranche_amounts': best.get('structure_tranche_amounts'),
+            'cash_back_amount': best.get('structure_cash_back_amount'),
+            'cash_back_threshold': best.get('structure_cash_back_threshold'),
+            'cash_back_credited': best.get('structure_cash_back_credited'),
+            'net_benefit': best.get('net_benefit', 0),
+            'ruined': bool(solvency.get('ruined', False)),
+            'solvency': solvency,
+            # Issue #707: decumulation shortfall beside the solvency verdict.
+            # Explicit absence test (DP#32): a row carrying no summary is
+            # given an all-False one, never via `.get(k) or DEFAULT`.
+            'drawdown_shortfall': (
+                best['drawdown_shortfall'] if 'drawdown_shortfall' in best
+                else summarize_drawdown_shortfall([])),
+            'exhausted': bool(
+                (best.get('drawdown_shortfall')
+                 if best.get('drawdown_shortfall') is not None else {})
+                .get('exhausted', False)),
+            # Issue #758: runway (months-to-ruin) beside the solvency verdict,
+            # so every mortgage-structure option in the ranking shows BOTH
+            # numbers at once -- a structure that wins on terminal net worth
+            # but halves your runway is not obviously the better structure.
+            'runway': best['runway'] if 'runway' in best else absent_runway(),
+        })
+    return winners
+
+
+def structure_ranking_by_income_scenario(winners: List[Dict]) -> Dict[str, List[Dict]]:
+    """Group ``winners_by_structure_scenario``'s rows by income scenario,
+    each group sorted by ``net_benefit`` descending (issue #687) -- so "do
+    the structures rank differently" and "does the ranking change under
+    job loss" are both directly answerable from this, not just printable.
+
+    Returns ``{income_scenario_id: [row, ...]}``, rows sorted best-first,
+    in first-seen income-scenario order (dict insertion order, Python
+    3.7+).
+
+    Issue #845: give this the winners of ONE refinance option. Structures are
+    only comparable at the SAME charge, and this groups by income scenario
+    ALONE -- feeding it a whole cross would rank 'advance at cash-out $0'
+    against 'advance at $480,000' in one table and report the better LEVERAGE
+    as the better STRUCTURE. ``_print_structure_report`` splits by
+    ``structure_basis_id`` before calling this, which is why it can.
+    """
+    by_income: Dict[str, List[Dict]] = {}
+    for w in winners:
+        by_income.setdefault(w['income_scenario_id'], []).append(w)
+    for iid in by_income:
+        by_income[iid].sort(key=lambda w: w.get('net_benefit', 0), reverse=True)
+    return by_income
+
+
+def structure_basis_id(row: Dict) -> str:
+    """The refinance option ONE structure-ranking row was scored at (#845).
+
+    DP#32: an explicit fallback for a row that predates the basis tags (the
+    fabricated rows the pure-logic tests build, and any caller still passing
+    the old shape) -- 'current_charge' is exactly what
+    ``structure_refinance_bases`` calls the no-declaration basis, so the two
+    producers agree on the name (DP#9).
+    """
+    basis_id = row.get('structure_basis_id')
+    return 'current_charge' if basis_id is None else basis_id
+
+
+def _print_structure_refusals(cells: Optional[List[Dict]]) -> None:
+    """Name every (refinance option x structure) cell the engine REFUSED to
+    score, and why (#845, DP#32/#681).
+
+    A cell missing from the tables above is otherwise indistinguishable from
+    one that was never asked for. #681's rule -- an infeasible scenario is
+    recorded with the reason IN WORDS, never collapsed to silence -- applies to
+    this new cross too.
+    """
+    if not cells:
+        return
+    refused = [c for c in cells if c['refusal'] is not None]
+    if not refused:
+        return
+    print(f"\n  ⚠️  NOT SCORED — {len(refused)} (refinance option x structure) cell(s) the engine refused:")
+    for c in refused:
+        print(f"      • '{c['structure']['label']}' at '{c['basis']['label']}'")
+        print(f"        {c['refusal']}")
+    print(f"      These cells are ABSENT from the tables above — do not read their absence as a")
+    print(f"      poor ranking (#845).")
+
+
+def _print_structure_report(results: List[Dict], cells: Optional[List[Dict]] = None) -> None:
+    """Issue #845: print ONE structure ranking PER refinance option the cross
+    scored, each stating its own basis, then name every refused cell.
+
+    Delegates each option's table to ``_print_structure_report_for_basis``
+    below; a household that declared no refinance option has exactly one basis
+    and sees exactly the report it saw before this fix.
+    """
+    for basis_id in dict.fromkeys(structure_basis_id(r) for r in results):
+        _print_structure_report_for_basis(
+            [r for r in results if structure_basis_id(r) == basis_id])
+    _print_structure_refusals(cells)
+
+
+def _print_structure_report_for_basis(results: List[Dict]) -> None:
+    """Issue #687: print the mortgage-STRUCTURE ranking -- all-mortgage vs.
+    readvanceable vs. mortgage+revolving-line -- PER declared income scenario
+    (DP#5/DP#22: the optimizer ranks, the household chooses).
+
+    Only prints when the contract actually declares
+    ``decisions.mortgage.structure_options`` with more than one candidate
+    (``scenario_discovery`` returns a single auto-discovered 'declared'
+    identity option otherwise) -- a household that never asked this
+    question sees nothing extra, same gating discipline as
+    ``_print_income_scenario_report``.
+
+    Issue #1075 exception: a single tranches-declared structure still prints
+    -- its ranking has one row per income scenario, but the OPTIMAL
+    3-TRANCHE SPLIT block below is the deliverable (the optimizer GENERATED
+    the amounts), so a tranche sweep must not be silenced by the
+    one-candidate gate.
+
+    Issue #733's fix applies here too (DP#32): a row whose scenario was
+    never solvency-checked is marked ``(UNCHECKED)`` inline, and a ruined
+    row prints ``RUIN (yr N)``, never a bare achievable-looking figure --
+    a NEW ranking surface must not reintroduce the defect #733 just closed
+    on the income-scenario table.
+    """
+    winners = winners_by_structure_scenario(results)
+    structure_ids = list(dict.fromkeys(w['structure_id'] for w in winners))
+    has_tranche_rows = any(w.get('tranche_amounts') for w in winners)
+    if len(structure_ids) <= 1 and not has_tranche_rows:
+        return
+
+    ranking = structure_ranking_by_income_scenario(winners)
+    income_ids = list(dict.fromkeys(w['income_scenario_id'] for w in winners))
+
+    print(f"\n{'=' * 120}")
+    print(f"  🏗️  MORTGAGE STRUCTURE RANKING (decisions.mortgage.structure_options -- issue #687)")
+    print(f"{'=' * 120}")
+    _print_structure_deductibility_caveat()
+
+    # Issue #845: state the leverage this ranking was computed at, BEFORE the
+    # table -- the structural choice (line vs no line) is irreversible on notary
+    # day, and a reader must not mistake this ranking's basis for the LTV
+    # sweep's. The two tables answer different questions at different leverage.
+    basis_ltvs = {r.get('structure_basis_ltv') for r in results
+                  if r.get('structure_basis_ltv') is not None}
+    # DP#32: explicit absence-testing. A cash-out of exactly 0 is a REAL basis
+    # (the household's current charge, or a declared no-cash-out option), not
+    # an unset one -- `or 0` would make the two indistinguishable.
+    basis_cash_outs = {r.get('structure_basis_cash_out') for r in results
+                       if r.get('structure_basis_cash_out') is not None}
+    basis_cash_out = max(basis_cash_outs) if basis_cash_outs else 0.0
+    basis_labels = [r.get('structure_basis_label') for r in results
+                    if r.get('structure_basis_label') is not None]
+    if basis_ltvs and basis_cash_out <= 0:
+        basis_ltv = max(basis_ltvs)
+        print(f"\n  📍 BASIS: computed at CASH-OUT $0 — your current leverage "
+              f"(LTV {basis_ltv:.1%}). NO cash-out sweep.")
+        if basis_labels:
+            print(f"      Refinance option: '{basis_labels[0]}' "
+                  f"(decisions.mortgage.refinance_options).")
+        print(f"      These structures are ranked as SPLITS of the charge you already carry, so the")
+        print(f"      comparison isolates structure from leverage. If the LTV EXPLORATION above")
+        print(f"      recommends a different LTV, these structures were NOT ranked at that leverage")
+        print(f"      — do not read the two tables as one plan (#845).")
+    elif basis_ltvs:
+        # Issue #845/#849: a REAL cash-out basis. The reader must not mistake
+        # this for the LTV sweep's table (which ranks STRATEGIES across
+        # leverage) -- this one ranks STRUCTURES at ONE fixed charge.
+        basis_ltv = max(basis_ltvs)
+        print(f"\n  ✅ BASIS: your declared refinance option "
+              f"'{basis_labels[0] if basis_labels else '?'}' — "
+              f"CASH-OUT ${basis_cash_out:,.0f} (LTV {basis_ltv:.1%}).")
+        print(f"      Every structure below is scored at THAT charge, so they are comparable to each")
+        print(f"      other AT the leverage this option takes — not at your current one (#845).")
+        print(f"      This is NOT the LTV-sweep basis: that table ranks STRATEGIES across cash-out")
+        print(f"      levels; this one ranks STRUCTURES at ONE fixed charge.")
+        print(f"      ⚖️  ADVANCE vs LINE (#849): at this fixed charge, the structure's")
+        print(f"          revolving_share IS the tap — 0% takes the whole ${basis_cash_out:,.0f} surplus as an")
+        print(f"          amortizing mortgage advance; a share large enough to hold it draws the whole")
+        print(f"          surplus from the revolving line instead; in between splits it, line first.")
+
+    # DP#32 / model_fidelity (#585): issue #735 FIXED the approximation this
+    # block used to warn about (a revolving line used to be drawn in full,
+    # unconditionally, at year 0 -- `lump_sum = margin_available +
+    # cash_out`). Now each structure that carves out a line is evaluated at
+    # SEVERAL draw fractions (0%/25%/50%/100% of that structure's own
+    # margin_available -- scenario_discovery._discover_draw_fraction_options)
+    # and the winning row below already reflects the best one FOUND, so a
+    # structure carrying an undrawn line is no longer scored as though it
+    # had been spent. Still disclosed here (DP#32: the reader should not
+    # have to infer this from a column header) -- the DRAWN FRACTION each
+    # winning row actually assumed is what makes the row's real leverage
+    # legible, not something to take on faith.
+    # DP#32: explicit absence-testing, never `x or 0` -- a structure with a
+    # declared share of exactly 0.0 is a REAL declaration (structure A), not
+    # an unset one, and the two must stay distinguishable.
+    shares = [r.get('structure_revolving_share') for r in results]
+    # Issue #1075: a tranches-declared structure's drawn/undrawn question is
+    # answered by ITS OWN line amount and the cash-out sourcing -- the #735
+    # draw-fraction ladder is pinned to [0.0] for it (see
+    # run_mortgage_structure_exploration), so the share-form disclosures
+    # below would describe a sweep that did not happen (DP#32). Print the
+    # tranche-specific disclosure instead.
+    has_tranche_rows = any(r.get('structure_tranche_amounts') for r in results)
+    if has_tranche_rows:
+        if basis_cash_out > 0:
+            print(f"\n  ℹ️  HOW THE REVOLVING SEGMENT IS MODELLED at this cash-out (#1075):")
+            print(f"      Each tranche point's line is drawn by the cash-out sourcing: "
+                  f"min(${basis_cash_out:,.0f} cash-out, its line amount) comes off the line, ")
+            print(f"      the remainder of the surplus stays on the mortgage as the (deductible)"
+                  f" investment tranche, and any residual line room stays UNDRAWN standby")
+            print(f"      liquidity. The line is NOT also swept at #735 draw fractions.")
+        else:
+            print(f"\n  ℹ️  HOW THE REVOLVING SEGMENT IS MODELLED (#1075):")
+            print(f"      The line AMOUNT is the swept variable -- each sweep point carries its own")
+            print(f"      line, and the winning row's split is printed below. The #735 draw-")
+            print(f"      fraction ladder is pinned to undrawn: at cash-out $0 the line is standby")
+            print(f"      liquidity, and drawing it is a separate decision this ranking does not")
+            print(f"      make for the tranched form.")
+    elif any(s is not None and s > 0 for s in shares) and basis_cash_out > 0:
+        # Issue #845/#849: on a cash-out basis the draw is NOT swept -- it is
+        # IMPLIED by the sourcing split (run_mortgage_structure_exploration
+        # pins draw_fraction to 0.0; apply_sourcing_overlay already booked
+        # min(cash_out, revolving) as the line's opening balance). Printing
+        # #735's "evaluated at several draw fractions" here would describe a
+        # sweep that did not happen (DP#32).
+        print(f"\n  ℹ️  HOW THE REVOLVING SEGMENT IS MODELLED at this cash-out (#845/#849):")
+        print(f"      The line's draw is NOT swept here — it is IMPLIED by the sourcing split. Each")
+        print(f"      structure draws min(cash-out, its revolving segment) of the "
+              f"${basis_cash_out:,.0f} surplus")
+        print(f"      from the line and takes the remainder as a mortgage advance; any room left over")
+        print(f"      stays UNDRAWN standby liquidity. Total borrowed is identical across structures,")
+        print(f"      so what the ranking below measures is the SOURCE, not the amount.")
+    elif any(s is not None and s > 0 for s in shares):
+        print(f"\n  ℹ️  HOW THE REVOLVING SEGMENT IS MODELLED (issue #735):")
+        print(f"      A structure that carves out a line is evaluated at SEVERAL draw fractions "
+              f"of that line")
+        print(f"      (0%/25%/50%/100% of ITS OWN margin_available) -- the winning row below is "
+              f"the best one")
+        print(f"      found, and shows its own drawn fraction inline. A 0% row means the line "
+              f"won UNDRAWN:")
+        print(f"      standby liquidity, not leverage.")
+
+    base_income_id = income_ids[0]
+    base_winning_structure = ranking[base_income_id][0]['structure_id']
+    base_winning_label = ranking[base_income_id][0]['structure_label']
+    base_income_label = ranking[base_income_id][0]['income_scenario_label']
+
+    # issue #735: which structure_ids actually carry a revolving segment at
+    # all -- only those get a "(draw N%)" annotation; a line-free structure
+    # (e.g. structure A) would otherwise show a meaningless "draw 0%" on
+    # every one of its own rows.
+    #
+    # Issue #845: NOT on a cash-out basis. There the draw_fraction is pinned to
+    # 0.0 because the draw is IMPLIED by the sourcing split -- so a literal
+    # "(draw 0%)" would tell the reader the line won UNDRAWN, when
+    # apply_sourcing_overlay in fact drew min(cash_out, revolving) of it. The
+    # exact opposite of the truth, in the column meant to make the row's real
+    # leverage legible. The disclosure block above says what happened instead.
+    structures_with_a_line = set() if basis_cash_out > 0 else {
+        r['structure_id'] for r in results
+        # Issue #1075: a tranches-declared row's "(draw N%)" annotation would
+        # be the #735 sweep's marker, but the fraction is pinned to [0.0] for
+        # the tranched form -- its line status is carried by its own amounts,
+        # not by a fraction it never swept.
+        if (r.get('structure_revolving_share') not in (None, 0.0)
+            or r.get('structure_readvanceable'))
+        and not r.get('structure_tranche_amounts')
+    }
+
+    for iid in income_ids:
+        rows = ranking[iid]
+        label = rows[0]['income_scenario_label']
+        print(f"\n  Under '{label}':")
+        # Issue #758: runway sits BESIDE net benefit for every structure --
+        # a structure that wins on terminal net worth but halves your runway
+        # is not obviously the better structure, and the household must see
+        # both numbers at once (the comparison that matters before a notary).
+        print(f"  {'#':<3} {'Structure':<48} {'Strategy':<20} {'Net Benefit':>14} {'Runway':>22}")
+        print(f"  {'-' * 110}")
+        for i, w in enumerate(rows):
+            strategy_name = w['strategy'] + (' 📋' if w['deduct_later'] else '')
+            if w['structure_id'] in structures_with_a_line:
+                strategy_name += f" (draw {w.get('draw_fraction', 0.0):.0%})"
+            runway_txt = _format_runway_inline(w.get('runway', {}))
+            if w['ruined']:
+                ruin_year = w['solvency'].get('first_ruin_year')
+                verdict = f"RUIN (yr {ruin_year})" if ruin_year else "RUIN"
+                print(f"  {i+1:<3} {w['structure_label']:<48} {strategy_name:<20} {verdict:>14} {runway_txt:>22}")
+            elif not w['solvency'].get('engaged'):
+                verdict = f"${w['net_benefit']:,.0f} (UNCHECKED)"
+                print(f"  {i+1:<3} {w['structure_label']:<48} {strategy_name:<20} {verdict:>20} {runway_txt:>22}")
+            else:
+                print(f"  {i+1:<3} {w['structure_label']:<48} {strategy_name:<20} ${w['net_benefit']:>13,.0f} {runway_txt:>22}")
+
+        winning_structure = rows[0]['structure_id']
+        if iid != base_income_id and winning_structure != base_winning_structure:
+            print(f"    ⚠ Best STRUCTURE changes under '{label}': "
+                  f"'{rows[0]['structure_label']}' wins here (vs. '{base_winning_label}' "
+                  f"under '{base_income_label}')")
+
+    # Issue #1075: the OPTIMAL 3-tranche split -- the whole point of a
+    # tranches-declared structure is that the optimizer GENERATES the amounts
+    # (house / deductible investment / line) rather than the household fixing
+    # them. Read off the winning rows' OWN ``tranche_amounts`` (DP#9: the
+    # printed split is the very split the printed net benefit was scored at),
+    # and on a cash-out basis the sourcing (#849: the surplus is drawn
+    # line-first up to the structure's line, the rest as a mortgage advance)
+    # is stated beside it.
+    tranche_rows = [w for w in winners if w.get('tranche_amounts')]
+    if tranche_rows:
+        print(f"\n  🧱  OPTIMAL 3-TRANCHE SPLIT (structure_options.tranches -- issue #1075):")
+        for w in tranche_rows:
+            a = w['tranche_amounts']
+            total = a['house'] + a['investment'] + a['line']
+            print(f"      • '{w['structure_label']}' under '{w['income_scenario_label']}':")
+            print(f"          house ${a['house']:,.0f}  +  investment ${a['investment']:,.0f}"
+                  f" (deductible)  +  line ${a['line']:,.0f}  =  ${total:,.0f} charge")
+            print(f"          net benefit ${w['net_benefit']:,.0f}"
+                  f" (strategy {w['strategy']})")
+            # Issue #1075 (optimizer half): state the cash-back verdict the
+            # winning split was scored under -- credited (house >= the
+            # threshold) or FORGONE (house below it, the trade-off this
+            # sweep exists to price). Only a CONDITIONAL cash-back prints
+            # anything (``cash_back_amount`` is carried only when the
+            # declared origination inflow is conditional): a household with
+            # no such declaration sees the exact pre-#1075 report.
+            if w.get('cash_back_amount') is not None:
+                thresh = w.get('cash_back_threshold')
+                if w.get('cash_back_credited'):
+                    verdict = (f"cash-back ${w['cash_back_amount']:,.0f} CREDITED "
+                               f"(house ${a['house']:,.0f} >= the "
+                               f"${thresh:,.0f} threshold)")
+                else:
+                    verdict = (f"cash-back ${w['cash_back_amount']:,.0f} FORGONE "
+                               f"(house ${a['house']:,.0f} below the "
+                               f"${thresh:,.0f} threshold)")
+                print(f"          {verdict}")
+            if basis_cash_out > 0:
+                line_draw = min(basis_cash_out, a['line'])
+                advance = basis_cash_out - line_draw
+                print(f"          cash-out sourcing (#849): ${advance:,.0f} as a mortgage advance,"
+                      f" ${line_draw:,.0f} drawn from the line")
+    print()
+
+
+# Human labels for the waterfall's source names (liquidation_waterfall's
+# LiquidationSource.name). DP#2-adjacent: presentation text, not a rule.
+_LIQUIDATION_SOURCE_LABELS = {
+    'emergency_reserve': 'Emergency reserve (cash sleeve)',
+    'revolving_credit': 'Revolving credit facility',
+    'non_reg': 'Non-registered (taxable sale)',
+    'tfsa': 'TFSA',
+    'registered': 'RRSP/RRIF (fully taxable)',
+}
+
+
+def winners_by_property_funding(results: List[Dict]) -> List[Dict]:
+    """Pure logic half of the funding ranking report (issue #1011): for each
+    funding candidate present in ``results`` (in first-seen/declaration
+    order), find the winning strategy and record it.
+
+    Split out from ``_print_property_funding_report`` so "which funding does
+    the objective prefer" is a directly testable fact, not something only
+    observable by parsing printed text -- the same split
+    ``winners_by_structure_scenario`` makes for #687.
+
+    Returns one dict per funding candidate:
+        {id, label, strategy, net_benefit, objective_score}
+    The winner is selected by the RESOLVED objective's score (defaulting to
+    net_benefit), so a non-default ``decisions.objective`` reorders the
+    funding ranking exactly as it reorders the headline (DP#22).
+    """
+    seen = list(dict.fromkeys(r['property_funding_id'] for r in results))
+    winners = []
+    for fid in seen:
+        rows = [r for r in results if r['property_funding_id'] == fid]
+        best = max(rows, key=lambda r: r.get(
+            'objective_score', r.get('net_benefit', 0)))
+        winners.append({
+            'id': fid,
+            'label': rows[0]['property_funding_label'],
+            'strategy': best.get('strategy', '?'),
+            'net_benefit': best.get('net_benefit', 0),
+            'objective_score': best.get(
+                'objective_score', best.get('net_benefit', 0)),
+        })
+    return winners
+
+
+def _print_property_funding_report(results: List[Dict]) -> None:
+    """Issue #1011: print the property-purchase FUNDING ranking -- one row per
+    declared funding candidate, ranked by the active objective, naming the
+    winning strategy each funding produces. The objective-winner is the top
+    row (DP#22: the optimizer ranks, the user reads the winner)."""
+    winners = winners_by_property_funding(results)
+    if not winners:
+        return
+    obj_name = _objective_name_for_results(results) or 'max_net_benefit'
+    print(f"\n  🏠  PROPERTY FUNDING RANKING (purchase.funding_options -- issue #1011)")
+    print(f"      objective: {obj_name}")
+    print(f"\n  {'#':<3} {'Funding':<36} {'Strategy':<30} {'Net':>9}")
+    print(f"  {'-'*82}")
+    for i, w in enumerate(winners):
+        print(f"  {i+1:<3} {w['label']:<36} {w['strategy']:<30} "
+              f"${w['net_benefit']/1000:>7.0f}k")
+    print(f"\n  The objective-winner is row 1. Each funding method is a real")
+    print(f"  re-optimisation, not a restated input (DP#22).")
+
+
+def winners_by_borrow_to_invest(results: List[Dict]) -> List[Dict]:
+    """Pure logic half of the borrow-to-invest ranking report (issue #1036):
+    for each amount rung present in ``results`` (in SCORE order -- best first,
+    because ``run_borrow_to_invest_exploration`` sorts by objective before
+    ``dict.fromkeys``; the no-draw baseline is NOT necessarily row 1, it is the
+    frame of reference ranked on its merits, DP#33), find the winning strategy
+    and record it. Split out from ``_print_borrow_to_invest_report`` so 'which
+    draw amount does the objective prefer' is a directly testable fact, not
+    something only observable by parsing printed text (mirrors
+    ``winners_by_property_funding``).
+
+    Returns one dict per amount rung:
+        {id, label, amount, strategy, net_benefit, objective_score}
+    The winner is selected by the RESOLVED objective's score (defaulting to
+    net_benefit), so a non-default ``decisions.objective`` reorders the
+    borrow-to-invest ranking exactly as it reorders the headline (DP#22).
+    """
+    seen = list(dict.fromkeys(r['borrow_to_invest_id'] for r in results))
+    winners = []
+    for bid in seen:
+        rows = [r for r in results if r['borrow_to_invest_id'] == bid]
+        best = max(rows, key=lambda r: r.get(
+            'objective_score', r.get('net_benefit', 0)))
+        winners.append({
+            'id': bid,
+            'label': rows[0]['borrow_to_invest_label'],
+            'amount': rows[0]['borrow_to_invest_amount'],
+            'strategy': best.get('strategy', '?'),
+            'net_benefit': best.get('net_benefit', 0),
+            'objective_score': best.get(
+                'objective_score', best.get('net_benefit', 0)),
+        })
+    return winners
+
+
+def _print_borrow_to_invest_report(results: List[Dict]) -> None:
+    """Issue #1036: print the borrow-to-invest ranking -- one row per amount
+    rung in SCORE order (best first; the no-draw baseline is ranked on its
+    merits, not pinned to row 1, DP#33), naming the winning strategy each
+    rung produces. The objective-winner is the top row (DP#22: the optimizer
+    ranks, the user reads the winner).
+
+    D9: the numeric column shown is the RESOLVED objective's score
+    (``objective_score`` -- the value that drove the order), not ``net_benefit``.
+    Under ``min_after_tax_estate`` the score is the negated after-tax estate
+    and ``net_benefit`` decreases monotonically down the ranking, so showing
+    ``net_benefit`` would contradict the order; showing the score makes the
+    table self-consistent. Under ``max_net_benefit`` the two are equal."""
+    winners = winners_by_borrow_to_invest(results)
+    if not winners:
+        return
+    obj_name = _objective_name_for_results(results) or 'max_net_benefit'
+    print(f"\n  🏦  BORROW-TO-INVEST RANKING (decisions.borrow_to_invest -- issue #1036)")
+    print(f"      objective: {obj_name}")
+    print(f"\n  {'#':<3} {'Draw':<36} {'Amount':>10} {'Strategy':<28} {'Score':>12}")
+    print(f"  {'-'*92}")
+    for i, w in enumerate(winners):
+        amt = f"${w['amount']/1000:.0f}k" if w['amount'] else '—'
+        score = w.get('objective_score', w.get('net_benefit', 0))
+        print(f"  {i+1:<3} {w['label']:<36} {amt:>10} {w['strategy']:<28} "
+              f"{score:>12,.0f}")
+    print(f"\n  The objective-winner is row 1. The no-draw baseline (—) is the")
+    print(f"  frame of reference every draw is read against (DP#33); each draw")
+    print(f"  amount is a real re-optimisation, not a restated input (DP#22).")
+
+
+def _print_decumulation_shortfall_report(results: List[Dict], cfg: Dict) -> None:
+    """Issue #707's console deliverable: a plan that runs out of money before
+    the horizon is surfaced as a FIRST-CLASS output, not a confident terminal
+    number.
+
+    "The money runs out in year N, $G short of the net spending target" --
+    that is the answer to "can I retire on this?", and the terminal
+    net-benefit figure is not. Mirrors ``_print_solvency_report`` (#679):
+    the two shortfalls are distinct (solvency = the cash-flow identity
+    against declared ``household_budget.annual_living_costs``; this = the
+    retirement drawdown against ``retirement.spending_target``), and a run
+    may hit either, both, or neither.
+
+    The caveat text itself is the single registered ``decumulation_shortfall``
+    Approximation in model_fidelity.py -- this function renders THAT
+    definition (so the console and the TXT/JSON/HTML reports say the same
+    thing, one spelling, DP#9), then adds a per-scenario table the reports
+    already carry as data.
+
+    Skipped with a loud DP#32 notice when no scenario ever engaged the
+    drawdown (no member retired within the horizon, or no spending_target):
+    "0 shortfall years" for a run that never checked is the most dangerous
+    thing this section could print.
+    """
+    engaged = [r for r in results
+               if shortfall_of(r) is not None
+               and shortfall_of(r).get('engaged')]
+    if not engaged:
+        print(f"  ℹ️  DECUMULATION NOT CHECKED -- no member retires within the "
+              f"horizon or no retirement.spending_target was declared, so the "
+              f"drawdown shortfall (issue #707) could not be evaluated. This is "
+              f"NOT a finding of safety: the household has not been checked, not "
+              f"cleared.")
+        print()
+        return
+
+    exhausted = [r for r in engaged if r['drawdown_shortfall'].get('exhausted')]
+    # Render the registered caveat's own summary + findings (one spelling).
+    active = {a.id: a for a in model_fidelity.active_approximations(
+        cfg, _objective_name_for_results(results))}
+    approx = active.get('decumulation_shortfall')
+
+    print(f"{'=' * 120}")
+    print(f"  📉  DECUMULATION SHORTFALL (issue #707) -- did the money last?")
+    print(f"{'=' * 120}")
+    if not exhausted:
+        print(f"  ✅ No shortfall: every scenario that drew down met its net "
+              f"spending target from its own assets through the horizon.")
+        print()
+        return
+
+    if approx is not None:
+        print(f"\n  ⛔ {approx.summary}")
+        ctx = model_fidelity.FidelityContext(cfg=cfg, objective_name=_objective_name_for_results(results))
+        for finding in approx.findings_for(ctx):
+            print(f"     {finding}")
+
+    print(f"\n  {'Scenario':<40} {'1st shortfall':>15} {'Gap $':>12} "
+          f"{'Shortfall yrs':>15} {'Total unmet $':>15}")
+    print(f"  {'-' * 100}")
+    for r in engaged:
+        s = r['drawdown_shortfall']
+        # Explicit absence test (DP#32): not `r.get('strategy') or ...`.
+        label = r.get('strategy')
+        if label is None:
+            label = r.get('label')
+        if label is None:
+            label = '?'
+        label = label[:39]
+        if s.get('exhausted'):
+            yr = s.get('first_shortfall_year')
+            yr_txt = f"year {yr}" if yr else "?"
+            print(f"  {label:<40} {yr_txt:>15} ${s.get('first_shortfall_gap', 0):>11,.0f} "
+                  f"{s.get('shortfall_years', 0):>15} ${s.get('total_unmet', 0):>14,.0f}")
+    print()
+
+
+def _objective_name_for_results(results: List[Dict]) -> Optional[str]:
+    """The objective the ranked results were scored on, for the model_fidelity
+    caveat's objective-sensitive predicates (issue #585).
+
+    Issue #232 slice 3: moved here from optimize.py with the console reports.
+    Deliberately NOT the module's ``_objective_name`` above -- that one names
+    the objective off the top row of ``_sort_results`` (which drops exhausted
+    trajectories, #707), while this names it off the max-net-benefit row. The
+    two agree whenever every row carries the run's one ``objective_name`` and
+    nothing was exhausted; unifying them would change which row names the
+    objective for an exhausted run -- a behaviour change, not a relocation.
+    """
+    if not results:
+        return None
+    best = max(results, key=lambda r: r.get('net_benefit', 0))
+    # Explicit: `.get()` already returns None when absent; no `or None`
+    # (DP#32 -- a present falsy objective name would be clobbered by `or`).
+    return best.get('objective_name')
+
+
+def _print_solvency_report(winners: List[Dict]) -> None:
+    """Issue #679's actual deliverable: solvency as a FIRST-CLASS output.
+
+    "Months of runway, the year the money runs out, and what the household
+    was forced to sell" -- these three facts ARE the answer to the job-loss
+    question. The terminal net-benefit figure is not; it is the number the
+    household reads when nobody tells it the truth.
+
+    Skipped entirely (with a loud DP#32 notice) when the solvency module was
+    never engaged, because a household that never declared
+    ``household_budget.annual_living_costs`` has not been found SAFE -- it
+    has not been CHECKED, and printing "0 shortfalls" for it would be the
+    single most dangerous thing this report could say.
+    """
+    engaged = [w for w in winners if w['solvency'].get('engaged')]
+    if not engaged:
+        print(f"  ℹ️  SOLVENCY NOT CHECKED -- the contract declares no "
+              f"`household_budget.annual_living_costs`, so the cash-flow identity "
+              f"(issue #679)")
+        print(f"      could not be evaluated. This is NOT a finding of solvency: the "
+              f"household has not been checked, not cleared.")
+        print()
+        return
+
+    print(f"{'=' * 120}")
+    print(f"  🩺  SOLVENCY BY INCOME SCENARIO (issue #679) -- can the household actually "
+          f"fund its obligations?")
+    print(f"{'=' * 120}")
+    print(f"\n  {'Scenario':<28} {'Runway':>10} {'1st shortfall':>15} {'Ruin':>10} "
+          f"{'Forced-sale tax':>17} {'Realised loss':>15}")
+    print(f"  {'-' * 100}")
+
+    for w in engaged:
+        s = w['solvency']
+        runway = f"{s.get('runway_months_at_start', 0.0):.1f} mo"
+        first = s.get('first_shortfall_year')
+        first_txt = f"year {first}" if first else "none"
+        ruin_year = s.get('first_ruin_year')
+        ruin_txt = f"year {ruin_year}" if ruin_year else "no"
+        tax = s.get('forced_liquidation_tax', 0.0)
+        loss = s.get('forced_liquidation_realized_loss', 0.0)
+        print(f"  {w['label']:<28} {runway:>10} {first_txt:>15} {ruin_txt:>10} "
+              f"${tax:>16,.0f} ${loss:>14,.0f}")
+
+    for w in engaged:
+        s = w['solvency']
+        if not s.get('first_shortfall_year'):
+            continue
+        print(f"\n  ── '{w['label']}' -- what the household was FORCED TO SELL ──")
+        print(f"     Shortfall years: {s.get('shortfall_years', 0)}"
+              f"   |   Declared reserve at start: "
+              f"{s.get('runway_months_at_start', 0.0):.1f} months of essential outflows")
+        by_source = s.get('forced_liquidation_gross_by_source', {})
+        if by_source:
+            # Printed in WATERFALL ORDER (the order actually drawn), because the
+            # order and its cost are the answer the household needs -- not an
+            # alphabetical list.
+            for src in ('emergency_reserve', 'revolving_credit', 'non_reg', 'tfsa', 'registered'):
+                if src in by_source and by_source[src] > 0:
+                    label = _LIQUIDATION_SOURCE_LABELS.get(src, src)
+                    print(f"       {label:<36} ${by_source[src]:>14,.0f} (gross drawn)")
+        else:
+            print(f"       (nothing left to sell -- every source was already empty)")
+        if s.get('uncovered_shortfall', 0.0) > 0:
+            print(f"     ⛔ UNCOVERED SHORTFALL: ${s['uncovered_shortfall']:,.0f} -- the waterfall "
+                  f"exhausted EVERY source and the household is still short.")
+        if s.get('credit_facility_unrepresentable'):
+            # Issue #689. An honest understatement beats a silent one.
+            print(f"     ⚠️  RESILIENCE UNDERSTATED (issue #689): the waterfall's second step -- a "
+                  f"revolving, unsecured credit")
+            print(f"        facility (a line of credit) -- CANNOT be declared in the input contract "
+                  f"today, so it was drawn as $0.")
+            print(f"        A household that HOLDS such a facility is more resilient than this "
+                  f"report shows. The HELOC margin is")
+            print(f"        deliberately NOT substituted: a HELOC is SECURED against the same "
+                  f"charge as the mortgage (#664/#681),")
+            print(f"        and spending investment-loan room as an emergency line would model a "
+                  f"different product.")
+    print()
+
+
+def _print_runway_report(winners: List[Dict]) -> None:
+    """Issue #758's console deliverable: months-to-ruin as a FIRST-CLASS
+    output, beside the solvency verdict.
+
+    "You have N months if the shock lands now" -- that is the number a
+    household wants before signing a mortgage, and the bracket + the
+    interpolation label travel with it so a year-granular engine never
+    prints a false-precision month. Mirrors ``_print_solvency_report`` /
+    ``_print_decumulation_shortfall_report``: the facts are DATA on the
+    ranking row (``runway``), this only renders them.
+
+    Skipped with a loud DP#32 notice when no scenario engaged the cash-flow
+    identity -- "UNCHECKED" for every row is the only honest thing to say.
+    """
+    # A row carrying no `runway` (an older/synthetic winner) is ABSENT, not
+    # an un-engaged one -- guard with `in`, never truthiness (DP#32).
+    with_runway = [w for w in winners if 'runway' in w and w['runway'].get('engaged')]
+    if not with_runway:
+        print(f"  ℹ️  RUNWAY NOT CHECKED (issue #758) -- no scenario engaged the "
+              f"cash-flow identity (declare `household_budget.annual_living_costs` "
+              f"and a dated `decisions.income[]` shock).")
+        print(f"      This is NOT a finding of safety: the household has not been "
+              f"checked, not cleared.")
+        print()
+        return
+
+    print(f"{'=' * 120}")
+    print(f"  🛟  RUNWAY — months to insolvency after the income shock (issue #758)")
+    print(f"{'=' * 120}")
+    print(f"  The headline is a LABELLED interpolation inside an honest bracket")
+    print(f"  (the engine steps in years; ~N mo is a point estimate, [lo–hi] is the")
+    print(f"  structural range). '>=N mo (survives)' = the cushion outlasts the horizon.")
+    print(f"\n  {'Scenario':<28} {'Runway':>22} {'Stress begins':>16} {'Caveats':<40}")
+    print(f"  {'-' * 110}")
+    for w in with_runway:
+        rw = w['runway']
+        runway_txt = _format_runway_inline(rw)
+        stress = rw.get('stress_begins_months')
+        stress_txt = f"~{stress:.0f} mo" if stress is not None else "—"
+        caveats = []
+        if rw.get('relies_on_credit_facility'):
+            caveats.append("leans on credit line")
+        if rw.get('drew_registered'):
+            caveats.append("drew RRSP (taxed at low yr-rate)")
+        caveat_txt = "; ".join(caveats) if caveats else "—"
+        print(f"  {w['label']:<28} {runway_txt:>22} {stress_txt:>16}   {caveat_txt:<40}")
+    print(f"\n  Interpolation method: linear within the ruin year (uniform monthly")
+    print(f"  burn); the fraction is the #679 waterfall's own covered/shortfall.")
+    print(f"  Runway UNDERSTATES reality: all spend treated as rigid (no")
+    print(f"  discretionary/non-discretionary split exists in the contract yet) and")
+    print(f"  contributions are counted as committed -- a household in real distress")
+    print(f"  stops both, so the true runway is longer. See the model-fidelity section.")
+    print()
