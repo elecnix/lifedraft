@@ -151,20 +151,22 @@ Container-mandated rules for ${REPO} (repo CLAUDE.md is injected already; this n
 - Definition of done: behaviour fixed AND a regression detector lands in the SAME PR; full suite read by the agent; no guard silenced; no personal data; method stated.`
 
 const WORKTREE_PREP = (wt, branch) => `
-Worktree: create (or reuse) and prepare it for the branch EXPLICITLY, then do all work inside it:
+Worktree: create it on FIRST use; on reuse, NEVER destroy the work already on the branch.
   if [ -d ${wt} ]; then
-    git -C ${wt} fetch origin '+refs/heads/main:refs/remotes/origin/main'
-    git -C ${wt} reset --hard origin/main
-    git -C ${wt} checkout -B ${branch}
+    # REUSE: the branch already carries the implementation under review. Do NOT reset it.
+    git -C ${wt} fetch origin '+refs/heads/${branch}:refs/remotes/origin/${branch}' || true
+    git -C ${wt} checkout ${branch}
   else
     git -C ~/Source/lifedraft/main fetch origin '+refs/heads/main:refs/remotes/origin/main'
     git -C ~/Source/lifedraft/main worktree add ${wt} -b ${branch} origin/main
   fi
   cd ${wt}
+  git status --porcelain   # must be empty before you start
   if [ ! -d .venv ]; then VIRTUAL_ENV=$PWD/.venv uv venv && VIRTUAL_ENV=$PWD/.venv uv pip install -q -e ".[dev]"; fi
 Run the full suite with a memory budget capped (multiple agents share the box):
   PYTEST_MEM_BUDGET_MB=8192 VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q
-Use the explicit-refspec fetch above for origin/main; a plain 'git fetch origin main' silently does nothing in this bare-repo setup.`
+Never 'git reset --hard origin/main' inside a reused worktree: that would discard the commits under review. A plain
+'git fetch origin main' silently does nothing in this bare-repo setup; use the explicit refspec above.`
 
 // ---- helpers ---------------------------------------------------------------
 function slug(title) {
@@ -336,6 +338,10 @@ if (!implementation) throw new Error('Implementer agent returned null')
 if (!implementation.pushed) throw new Error('Implementer did not push ' + BRANCH + ' — aborting. ' + implementation.problems.join('; '))
 log('Implemented on ' + BRANCH + ' (' + implementation.commitSha.slice(0, 8) + '): ' + implementation.filesChanged.length + ' files changed')
 
+// The branch head moves when a fixer pushes; all later stages must judge the CURRENT head,
+// never the implementer's original sha (otherwise round 2+ reports a false HEAD mismatch).
+let headSha = implementation.commitSha
+
 phase('Validate')
 
 // 5) Validate + fix loop. Fresh validator each round; a fixer between failed rounds.
@@ -359,21 +365,21 @@ do {
     'testCommands:\n  ' + testPlan.testCommands.join('\n  - ') + '\n' +
     'verificationApproach: ' + testPlan.verificationApproach + '\n\n' +
     '=== WHAT THE IMPLEMENTER REPORTED ===\n' +
-    'worktree: ' + implementation.worktreePath + ' (branch ' + implementation.branchName + ', commit ' + implementation.commitSha + ')\n' +
+    'worktree: ' + implementation.worktreePath + ' (branch ' + implementation.branchName + ', current HEAD ' + headSha + ')\n' +
     'filesChanged: ' + implementation.filesChanged.join(', ') + '\n' +
     'their testsRun: ' + implementation.testsRun + '\n' +
     'their acceptanceMet: ' + implementation.acceptanceMet.join('; ') + '\n' +
     'their problems: ' + implementation.problems.join('; ') + '\n\n' +
     '=== PROCEDURE (do in order, READ the output yourself) ===\n' +
     '1. cd ' + implementation.worktreePath + '; git log -1 --format="%H %s"; git status --porcelain; git diff --stat origin/main.\n' +
-    '   Confirm ' + implementation.branchName + ' is a real branch, ' + implementation.commitSha + ' is HEAD, the working tree is clean.\n' +
+    '   Confirm ' + implementation.branchName + ' is a real branch, ' + headSha + ' is HEAD, the working tree is clean.\n' +
     '2. Determine the diff shape: git diff origin/main --diff-filter=MDR --name-only. Assert EACH engine/sim behaviour invariant\n' +
     '   (golden invariant, conservation, ACB<=FMV, RRIF min) holds: either by construction (only non-code files changed, so no\n' +
     '   code path differs) or by running the proof. Name the exact argument you made in rationale.\n' +
     '3. PEDESTAL OF EVIDENCE: run the target test commands first-hand, including the full suite. Use PYTEST_MEM_BUDGET_MB=8192\n' +
     '   as the env. Record results.\n' +
     '4. Spot-check at least ONE sabotage from the test plan by injecting it temporarily, confirming the expected test faults,\n' +
-    '   then reverting the injection cleanly (git checkout of the sabotaged file) so the tree returns exactly to ' + implementation.commitSha + '.\n' +
+    '   then reverting the injection cleanly (git checkout of the sabotaged file) so the tree returns exactly to ' + headSha + '.\n' +
     '5. Scan the diff for DP#15 violations (grep for anything that looks like a real person/account/figure).\n' +
     '6. Confirm DoD: regression detector in the same PR; no guard silenced via allowlist entry; no --no-verify anywhere in history\n' +
     '   for this branch (git log --oneline ' + implementation.branchName + ').\n\n' +
@@ -412,7 +418,7 @@ do {
     '=== VALIDATOR’S FAILURES (this is the executable spec of what to fix) ===\n' +
     JSON.stringify(verdict.failures, null, 2) + '\n\n' +
     '=== WHERE THE WORK IS ===\n' +
-    'cd ' + implementation.worktreePath + '   (branch ' + implementation.branchName + ', currently at ' + implementation.commitSha + ' — reuse the existing worktree, do NOT delete it)\n\n' +
+    'cd ' + implementation.worktreePath + '   (branch ' + implementation.branchName + ', currently at ' + headSha + ' — reuse the existing worktree, do NOT delete it)\n\n' +
     WORKTREE_PREP(WT_DIR, BRANCH) + '\n\n' +
     '1. Fix EVERY validator failure (the finding/evidence/requiredFix triplet tells you what and why). Do not stop at the first.\n' +
     '2. Add/extend tests so each fixed item has a detector that fails if it regresses.\n' +
@@ -425,6 +431,7 @@ do {
   )
   if (!fix) throw new Error('Fixer ' + fixRound + ' returned null')
   if (!fix.pushed) throw new Error('Fixer ' + fixRound + ' did not push — aborting. ' + fix.summary)
+  headSha = fix.commitSha
   log('Fixer ' + fixRound + ' pushed ' + fix.commitSha.slice(0, 8) + ' — re-validating')
 } while (verdict.verdict !== 'pass')
 
@@ -438,7 +445,7 @@ const pr = await agent(
   fetched.title + ' — ' + fetched.url + '\n\n' +
   '=== WHAT WAS IMPLEMENTED ===\n' +
   'worktree: ' + implementation.worktreePath + '\n' +
-  'branch/head: ' + implementation.branchName + ' @ ' + implementation.commitSha + '\n' +
+  'branch/head: ' + implementation.branchName + ' @ ' + headSha + '\n' +
   'files changed: ' + (implementation.filesChanged.join(', ') || '(see diff)') + '\n' +
   'implementation summary (their testsRun): ' + implementation.testsRun + '\n' +
   'validator rationale: ' + verdict.rationale + '\n\n' +
@@ -474,9 +481,12 @@ while (ciRound < MAX_CI_ROUNDS) {
     '\nwas just opened from branch ' + BRANCH + '. Your job: determine the real CI state and report it — you do NOT fix anything\n' +
     'here; you return pending / green / fail and the pipeline decides.\n\n' +
     '=== ACTIONS ===\n' +
-    '1. Run gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,state,conclusion,url,description,detailsUrl --jq .\n' +
-    '   Categorize each check: conclusion in (FAILURE, TIME_OUT, CANCELLED, ACTION_REQUIRED, STALE) => FAIL; state in\n' +
-    '   (PENDING, QUEUED, IN_PROGRESS) => still running; SUCCESS/NEUTRAL/SKIPPED => ok.\n' +
+    '1. Run gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,state,bucket,link,description,workflow --jq .\n' +
+    '   The ONLY valid --json fields are bucket, completedAt, description, event, link, name, startedAt, state, workflow —\n' +
+    '   there is no conclusion/url/detailsUrl field, so requesting one is an error, not a finding. Categorize with bucket:\n' +
+    '   fail => FAIL, pending => still running, pass/skipping => ok. If bucket is absent, fall back to state:\n' +
+    '   FAILURE/ERROR/ACTION_REQUIRED/TIMED_OUT/CANCELLED/STALE => FAIL; PENDING/QUEUED/IN_PROGRESS/EXPECTED => running;\n' +
+    '   SUCCESS/NEUTRAL/SKIPPED => ok.\n' +
     '2. If any check is still running (the Tests job on a PR runs the full suite, minutes), BLOCK and watch:\n' +
     '   timeout 540 gh pr checks ' + pr.number + ' --repo ' + REPO + ' --watch --interval 30 || true\n' +
     '   then re-run step 1. You may repeat this bounded watch up to ~4 times; each returns a fresh snapshot. Do not let it\n' +
@@ -515,11 +525,12 @@ while (ciRound < MAX_CI_ROUNDS) {
       '=== THE TEST PLAN ===\n' +
       JSON.stringify(testPlan, null, 2) + '\n\n' +
       '=== CURRENT WORK ===\n' +
-      'cd ' + implementation.worktreePath + '   (branch ' + BRANCH + ', synced to origin/main)\n\n' +
+      'cd ' + implementation.worktreePath + '   (branch ' + BRANCH + '; worktree already set up — do NOT reset it)\n\n' +
       '1. git -C ' + implementation.worktreePath + ' fetch origin \'+refs/heads/main:refs/remotes/origin/main\' and make sure\n' +
       '   you are on ' + BRANCH + ' with the pushed HEAD.\n' +
-      '2. For each failed check, READ its actual failure: pull the run logs (gh run view --log-failed with the run id, or\n' +
-      '   gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,detailsUrl) and extract the exact failing assertion/step.\n' +
+      '2. For each failed check, READ its actual failure: pull the run logs (gh run view --log-failed with the run id from the\n' +
+      '   check link, or gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,link,bucket) and extract the exact failing\n' +
+      '   assertion/step.\n' +
       '   Never guess what failed.\n' +
       '3. Fix the root cause, add/extend a detector test, run the targeted check locally, then the full suite with\n' +
       '   PYTEST_MEM_BUDGET_MB=8192. For a coverage-gate failure, regenerate the baseline in the same PR: python tools/coverage_gate.py --update.\n' +
@@ -554,7 +565,7 @@ return {
   issue: { number: fetched.issueNumber, title: fetched.title, url: fetched.url },
   ask: fetched.ask,
   plan: plan.summary,
-  implementation: { branch: implementation.branchName, headSha: implementation.commitSha, files: implementation.filesChanged },
+  implementation: { branch: implementation.branchName, headSha: headSha, files: implementation.filesChanged },
   pr: { number: pr.number, url: pr.url, title: pr.title },
   ciState: ciState.state,
   fixRoundsUsed: fixRound,
