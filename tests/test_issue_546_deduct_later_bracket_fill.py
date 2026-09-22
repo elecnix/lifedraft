@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from simulation_config import SimulationConfig
 from rrsp_ledger import RRSPListLedger
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 from tax_calculator import (
     deduction_value,
     marginal_rate,
@@ -117,10 +117,13 @@ def _run_pure_years(lump, incomes, bracket_target):
     res = None
     for y, income in enumerate(incomes):
         res, state = simulate_year_pure(
-            state=state, year=y,
-            allocations={"_primary_income": income, "_spouse_income": 0},
-            config=cfg, investment_return=0.0, deduct_later=True,
-            primary_marginal_rate=mtr, spouse_marginal_rate=0.0,
+            state=state,
+            year=y,
+            inputs=_build_year_inputs(
+                allocations={"_primary_income": income, "_spouse_income": 0},
+                config=cfg, investment_return=0.0, deduct_later=True,
+                primary_marginal_rate=mtr, spouse_marginal_rate=0.0,
+            ),
         )
     return res
 

@@ -24,7 +24,7 @@ import pytest
 
 from simulation_state import (
     SimState,
-    simulate_year_pure,
+    simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import _default_canada_state
 from simulation_config import SimulationConfig
@@ -134,13 +134,16 @@ class TestCreditThreadsThroughFoldState:
             jurisdiction_state={'canada': _default_canada_state()},
         )
         _, next_state = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 0, '_annual_savings': 0},
-            config=_quebec_config(), investment_return=0.05,
-            primary_marginal_rate=0.53, retiree_marginal_rate=0.53,
-            calendar_year=2026,
-            drawdown_net_target=1_200_000, drawdown_order=['non_reg'],
-            any_retired=True, retirement_spending_target=1_200_000,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 0, '_annual_savings': 0},
+                config=_quebec_config(), investment_return=0.05,
+                primary_marginal_rate=0.53, retiree_marginal_rate=0.53,
+                calendar_year=2026,
+                drawdown_net_target=1_200_000, drawdown_order=['non_reg'],
+                any_retired=True, retirement_spending_target=1_200_000,
+            ),
         )
         buckets = next_state.jurisdiction_state['canada']['amt_credit_buckets']
         assert buckets, "the AMT paid this year must be carried forward as a credit"
@@ -153,10 +156,13 @@ class TestCreditThreadsThroughFoldState:
             jurisdiction_state={'canada': _default_canada_state()},
         )
         _, next_state = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 150_000, '_annual_savings': 0},
-            config=_quebec_config(), investment_return=0.05,
-            primary_marginal_rate=0.45, calendar_year=2026,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 150_000, '_annual_savings': 0},
+                config=_quebec_config(), investment_return=0.05,
+                primary_marginal_rate=0.45, calendar_year=2026,
+            ),
         )
         assert next_state.jurisdiction_state['canada']['amt_credit_buckets'] == []
 

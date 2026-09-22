@@ -31,7 +31,7 @@ from superficial_loss import (
 from simulation_config import SimulationConfig
 from simulation_state import (
     SimState,
-    simulate_year_pure,
+    simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import _default_canada_state
 
@@ -214,12 +214,15 @@ class TestEngineDrivenDenial:
             state.jurisdiction_state['canada']['superficial_loss_pending'] \
                 = list(opening_pending)
         yr, _state = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 130_000, 'non_reg': 10_000,
-                         '_annual_savings': 10_000},
-            config=config, investment_return=0.06,
-            primary_marginal_rate=0.30,
-            living_costs=60_000, after_tax_income=45_000,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130_000, 'non_reg': 10_000,
+                             '_annual_savings': 10_000},
+                config=config, investment_return=0.06,
+                primary_marginal_rate=0.30,
+                living_costs=60_000, after_tax_income=45_000,
+            ),
         )
         return yr
 
@@ -265,11 +268,14 @@ class TestEngineDrivenDenial:
             jurisdiction_state={'canada': _default_canada_state()},
         )
         yr, _ = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 130_000, '_annual_savings': 0},
-            config=_make_config(), investment_return=0.06,
-            primary_marginal_rate=0.30,
-            living_costs=0.0, after_tax_income=100_000,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130_000, '_annual_savings': 0},
+                config=_make_config(), investment_return=0.06,
+                primary_marginal_rate=0.30,
+                living_costs=0.0, after_tax_income=100_000,
+            ),
         )
         assert yr.superficial_loss_denied == 0.0
         assert yr.superficial_loss_pended == 0.0

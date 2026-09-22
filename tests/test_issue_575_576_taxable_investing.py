@@ -37,7 +37,7 @@ import unittest
 
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 from countries.canada.adapter import CanadaAdapter
 
 
@@ -219,9 +219,13 @@ class TestSMInvestmentSharesTheSameModel(unittest.TestCase):
                   '_primary_income': 150000, '_spouse_income': 0, '_annual_savings': 0}
 
         result, new_state = simulate_year_pure(
-            state=state, year=0, allocations=allocs, config=config,
-            investment_return=0.07, non_reg_after_tax_return=0.03,
-            use_readvanceable=True, mortgage_data=self._no_readvance_mortgage_data(state),
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocs, config=config,
+                investment_return=0.07, non_reg_after_tax_return=0.03,
+                use_readvanceable=True, mortgage_data=self._no_readvance_mortgage_data(state),
+            ),
         )
 
         new_sm_balance = new_state.jurisdiction_state['canada']['sm_investment_balance']
@@ -243,9 +247,13 @@ class TestSMInvestmentSharesTheSameModel(unittest.TestCase):
                   '_primary_income': 150000, '_spouse_income': 0, '_annual_savings': 0}
 
         result, new_state = simulate_year_pure(
-            state=state, year=0, allocations=allocs, config=config,
-            investment_return=0.07, non_reg_after_tax_return=None,
-            use_readvanceable=True, mortgage_data=self._no_readvance_mortgage_data(state),
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocs, config=config,
+                investment_return=0.07, non_reg_after_tax_return=None,
+                use_readvanceable=True, mortgage_data=self._no_readvance_mortgage_data(state),
+            ),
         )
 
         new_sm_balance = new_state.jurisdiction_state['canada']['sm_investment_balance']
@@ -262,9 +270,13 @@ class TestSMInvestmentSharesTheSameModel(unittest.TestCase):
                   '_primary_income': 150000, '_spouse_income': 0, '_annual_savings': 0}
 
         _, new_state = simulate_year_pure(
-            state=state, year=0, allocations=allocs, config=config,
-            investment_return=0.07, non_reg_after_tax_return=0.03,
-            use_readvanceable=True, mortgage_data=self._no_readvance_mortgage_data(state),
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocs, config=config,
+                investment_return=0.07, non_reg_after_tax_return=0.03,
+                use_readvanceable=True, mortgage_data=self._no_readvance_mortgage_data(state),
+            ),
         )
 
         self.assertEqual(

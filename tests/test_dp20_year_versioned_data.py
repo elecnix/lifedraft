@@ -19,7 +19,7 @@ from dataclasses import replace
 from simulation_config import SimulationConfig
 from simulation_state import (
     SimState,
-    simulate_year_pure,
+    simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import (
     adult_rrsp_slot,
@@ -92,9 +92,13 @@ class TestSimulateYearPureYearSpecificLimits(unittest.TestCase):
         
         # Year 0 = sim_year 2026
         result0, state1 = simulate_year_pure(
-            state=state, year=0, allocations=allocations, config=config,
-            investment_return=0.0, mortgage_rate=0.05, heloc_rate=0.05,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=config,
+                investment_return=0.0, mortgage_rate=0.05, heloc_rate=0.05,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            ),
         )
         
         # Check that RRSP room added matches 2026 limit
@@ -111,9 +115,13 @@ class TestSimulateYearPureYearSpecificLimits(unittest.TestCase):
         alloc_2036 = _make_allocations(config_2036, year=0)
         
         result_2036, state1_2036 = simulate_year_pure(
-            state=state_2036, year=0, allocations=alloc_2036, config=config_2036,
-            investment_return=0.0, mortgage_rate=0.05, heloc_rate=0.05,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            state=state_2036,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=alloc_2036, config=config_2036,
+                investment_return=0.0, mortgage_rate=0.05, heloc_rate=0.05,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            ),
         )
         
         # Currently both use config.rrsp_annual_max which is the same.
@@ -160,10 +168,14 @@ class TestSimulateYearPureYearSpecificLimits(unittest.TestCase):
         }
         
         result_2026, state1_2026 = simulate_year_pure(
-            state=state_2026, year=0, allocations=alloc_2026,
-            config=config_2026_high, investment_return=0.0,
-            mortgage_rate=0.05, heloc_rate=0.05,
-            primary_marginal_rate=0.50, spouse_marginal_rate=0.30,
+            state=state_2026,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=alloc_2026,
+                config=config_2026_high, investment_return=0.0,
+                mortgage_rate=0.05, heloc_rate=0.05,
+                primary_marginal_rate=0.50, spouse_marginal_rate=0.30,
+            ),
         )
         
         # Room added for primary: min(rrsp_annual_max, 0.18 * 300000)
@@ -176,12 +188,16 @@ class TestSimulateYearPureYearSpecificLimits(unittest.TestCase):
         # 2036 limit is ~$41,214
         # DP#20: caller provides year-specific limits to simulate_year_pure
         result_2036, state1_2036 = simulate_year_pure(
-            state=state_2026, year=10, allocations=alloc_2026,
-            config=config_2026_high, investment_return=0.0,
-            mortgage_rate=0.05, heloc_rate=0.05,
-            primary_marginal_rate=0.50, spouse_marginal_rate=0.30,
-            rrsp_annual_limit=limit_2036,
-            tfsa_annual_limit=provider.get_tfsa_limit(2036),
+            state=state_2026,
+            year=10,
+            inputs=_build_year_inputs(
+                allocations=alloc_2026,
+                config=config_2026_high, investment_return=0.0,
+                mortgage_rate=0.05, heloc_rate=0.05,
+                primary_marginal_rate=0.50, spouse_marginal_rate=0.30,
+                rrsp_annual_limit=limit_2036,
+                tfsa_annual_limit=provider.get_tfsa_limit(2036),
+            ),
         )
         
         # BUG: simulate_year_pure uses config.rrsp_annual_max (33810)
@@ -219,10 +235,14 @@ class TestSimulateYearPureYearSpecificLimits(unittest.TestCase):
         }
         
         result0, state1 = simulate_year_pure(
-            state=state, year=0, allocations=allocations_drain,
-            config=config, investment_return=0.0,
-            mortgage_rate=0.05, heloc_rate=0.05,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations_drain,
+                config=config, investment_return=0.0,
+                mortgage_rate=0.05, heloc_rate=0.05,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            ),
         )
         
         # TFSA room after year 0:
@@ -236,12 +256,16 @@ class TestSimulateYearPureYearSpecificLimits(unittest.TestCase):
         # TFSA room added should be ~$8,533, not $7,000
         # DP#20: caller provides year-specific limits to simulate_year_pure
         result_2036, state1_2036 = simulate_year_pure(
-            state=state1, year=10, allocations=allocations_drain,
-            config=config, investment_return=0.0,
-            mortgage_rate=0.05, heloc_rate=0.05,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
-            rrsp_annual_limit=provider.get_rrsp_limit(2036),
-            tfsa_annual_limit=limit_2036,
+            state=state1,
+            year=10,
+            inputs=_build_year_inputs(
+                allocations=allocations_drain,
+                config=config, investment_return=0.0,
+                mortgage_rate=0.05, heloc_rate=0.05,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                rrsp_annual_limit=provider.get_rrsp_limit(2036),
+                tfsa_annual_limit=limit_2036,
+            ),
         )
         
         # With the bug: TFSA room added = 7000 (static config)
@@ -498,10 +522,14 @@ class TestFrozenBracketsMode(unittest.TestCase):
         
         # Without rrsp_annual_limit, should use config.rrsp_annual_max = 33810
         result, state1 = simulate_year_pure(
-            state=state, year=0, allocations=allocations,
-            config=config, investment_return=0.0,
-            mortgage_rate=0.05, heloc_rate=0.05,
-            primary_marginal_rate=0.50, spouse_marginal_rate=0.30,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations,
+                config=config, investment_return=0.0,
+                mortgage_rate=0.05, heloc_rate=0.05,
+                primary_marginal_rate=0.50, spouse_marginal_rate=0.30,
+            ),
         )
         
         rrsp_room_added = adult_rrsp_slot(state1.jurisdiction_state['canada'], 0)[1] - adult_rrsp_slot(state.jurisdiction_state['canada'], 0)[1]  # #700
@@ -521,10 +549,14 @@ class TestFrozenBracketsMode(unittest.TestCase):
         }
         
         result, state1 = simulate_year_pure(
-            state=state, year=0, allocations=allocations,
-            config=config, investment_return=0.0,
-            mortgage_rate=0.05, heloc_rate=0.05,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations,
+                config=config, investment_return=0.0,
+                mortgage_rate=0.05, heloc_rate=0.05,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            ),
         )
         
         # After contributing 5000 from 5000 room → 0, add 7000 = 7000

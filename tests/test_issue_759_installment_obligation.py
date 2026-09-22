@@ -458,7 +458,7 @@ class TestRoundTripAndGuards(unittest.TestCase):
         (DP#32, mirroring apply_consumer_loans' guard)."""
         from simulation_state import (
             SimState,
-            simulate_year_pure,
+            simulate_year_pure, _build_year_inputs,
         )
         from canada_state_accessors import _default_canada_state
         cfg = _config_from(_doc_with_installments(_installment_plan()))
@@ -480,9 +480,13 @@ class TestRoundTripAndGuards(unittest.TestCase):
         )
         with self.assertRaises(ValueError) as cm:
             simulate_year_pure(
-                state=mismatched, year=0,
-                allocations={'_primary_income': 130_000, '_annual_savings': 0},
-                config=cfg2, investment_return=0.06, primary_marginal_rate=0.40)
+                state=mismatched,
+                year=0,
+                inputs=_build_year_inputs(
+                    allocations={'_primary_income': 130_000, '_annual_savings': 0},
+                    config=cfg2, investment_return=0.06, primary_marginal_rate=0.40
+                ),
+            )
         self.assertIn("installments", str(cm.exception))
 
     def test_simstate_deepcopy_and_fork_carry_installment_balances(self):

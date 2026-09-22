@@ -516,7 +516,7 @@ class TestLockedBalanceReachesEngineOutput(unittest.TestCase):
         dict — the RRSP balance is declared on the family member (the config
         key the engine reads), and SimState.initial wires it into the
         per-adult store that YearWorkingState.from_state reads back."""
-        from simulation_state import SimState, simulate_year_pure
+        from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 
         # A retiree born in 1955, age 70 in calendar year 2025.
         # With unlock_age=71 the RRSP is still locked in 2025 (age 70 < 71).
@@ -556,16 +556,24 @@ class TestLockedBalanceReachesEngineOutput(unittest.TestCase):
         # Create a solvency shortfall: $0 income, $50k living costs.
         allocations = {'_primary_income': 0, '_annual_savings': 0}
         unlocked_result, _ = simulate_year_pure(
-            state=base_state, year=0, allocations=allocations,
-            config=config_unlocked, investment_return=0.05,
-            primary_marginal_rate=0.40, calendar_year=2025,
-            living_costs=50_000, after_tax_income=0,
+            state=base_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations,
+                config=config_unlocked, investment_return=0.05,
+                primary_marginal_rate=0.40, calendar_year=2025,
+                living_costs=50_000, after_tax_income=0,
+            ),
         )
         locked_result, _ = simulate_year_pure(
-            state=base_state, year=0, allocations=allocations,
-            config=config_locked, investment_return=0.05,
-            primary_marginal_rate=0.40, calendar_year=2025,
-            living_costs=50_000, after_tax_income=0,
+            state=base_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations,
+                config=config_locked, investment_return=0.05,
+                primary_marginal_rate=0.40, calendar_year=2025,
+                living_costs=50_000, after_tax_income=0,
+            ),
         )
         # Before unlock (age 70 < 71), the locked RRSP cannot be drawn by
         # solvency. The unlocked run CAN draw it, so it covers more shortfall.

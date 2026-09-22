@@ -14,7 +14,7 @@ import unittest
 import logging
 from io import StringIO
 
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 from simulation_config import SimulationConfig
 from countries.canada.strategies import STRATEGY_BALANCED
 
@@ -80,10 +80,14 @@ class TestNonRegFallbackWarning(unittest.TestCase):
         try:
             # Call simulate_year_pure without non_reg_after_tax_return
             result, next_state = simulate_year_pure(
-                state=state, year=0, allocations=allocations, config=config,
-                investment_return=0.07, mortgage_rate=0.05, heloc_rate=0.05,
-                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
-                # non_reg_after_tax_return is NOT provided → should trigger warning
+                state=state,
+                year=0,
+                inputs=_build_year_inputs(
+                    allocations=allocations, config=config,
+                    investment_return=0.07, mortgage_rate=0.05, heloc_rate=0.05,
+                    primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                    # non_reg_after_tax_return is NOT provided → should trigger warning
+                ),
             )
             log_output = handler.stream.getvalue()
 
@@ -112,10 +116,14 @@ class TestNonRegFallbackWarning(unittest.TestCase):
         try:
             # Call simulate_year_pure WITH non_reg_after_tax_return
             result, next_state = simulate_year_pure(
-                state=state, year=0, allocations=allocations, config=config,
-                investment_return=0.07, mortgage_rate=0.05, heloc_rate=0.05,
-                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
-                non_reg_after_tax_return=0.04,  # Provided → should NOT trigger warning
+                state=state,
+                year=0,
+                inputs=_build_year_inputs(
+                    allocations=allocations, config=config,
+                    investment_return=0.07, mortgage_rate=0.05, heloc_rate=0.05,
+                    primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                    non_reg_after_tax_return=0.04,  # Provided → should NOT trigger warning
+                ),
             )
             log_output = handler.stream.getvalue()
 

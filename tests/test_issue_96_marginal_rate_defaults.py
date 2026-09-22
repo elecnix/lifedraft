@@ -8,11 +8,18 @@ keeping 0.20 as it's already round.
 
 Similarly, ird_penalty.py and hbp_rules.py had marginal_rate=0.43 defaults
 that have been changed to 0.40.
+
+Issue #231 (slice 1): simulate_year_pure's 56 keyword parameters are now
+bundled into the frozen ``YearInputs`` dataclass, so the two round-defaults
+checks below read the FIELD defaults there. Same intent, same values -- the
+fallback that a caller inherits by omitting the rate must stay obviously
+fake. The method names are kept (and the perf baseline keyed on them) even
+though they now inspect ``YearInputs``.
 """
 
 import unittest
 import inspect
-from simulation_state import simulate_year_pure
+from simulation_state import YearInputs
 from countries.canada.ird_penalty import refinance_with_penalty_analysis, break_for_readvanceable_analysis
 from countries.canada.hbp_rules import hbp_missed_repayment_tax_impact
 
@@ -22,17 +29,20 @@ class TestMarginalRateDefaultsAreRound(unittest.TestCase):
 
     def test_simulate_year_pure_primary_marginal_rate_default_is_round(self):
         """DP#13/26: primary_marginal_rate default must be a round number (0.40),
-        not the household-specific 0.43 that was previously hardcoded."""
-        sig = inspect.signature(simulate_year_pure)
-        default = sig.parameters['primary_marginal_rate'].default
+        not the household-specific 0.43 that was previously hardcoded.
+
+        Issue #231: the default now lives on ``YearInputs`` (the frozen bundle
+        simulate_year_pure takes); inspect the dataclass's field default."""
+        default = inspect.signature(YearInputs).parameters['primary_marginal_rate'].default
         # Round defaults are obviously fake, preventing silent misuse
         self.assertEqual(default, 0.40,
                          f"primary_marginal_rate default should be 0.40 (round), got {default}")
 
     def test_simulate_year_pure_spouse_marginal_rate_default_is_round(self):
-        """spouse_marginal_rate default is already 0.20 (round), verify it stays round."""
-        sig = inspect.signature(simulate_year_pure)
-        default = sig.parameters['spouse_marginal_rate'].default
+        """spouse_marginal_rate default is already 0.20 (round), verify it stays round.
+
+        Issue #231: read the ``YearInputs`` field default (see above)."""
+        default = inspect.signature(YearInputs).parameters['spouse_marginal_rate'].default
         self.assertEqual(default, 0.20,
                          f"spouse_marginal_rate default should be 0.20 (round), got {default}")
 

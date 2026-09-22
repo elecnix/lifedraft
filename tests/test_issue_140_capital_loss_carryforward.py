@@ -234,7 +234,7 @@ class TestPersistenceAndSurfacing(unittest.TestCase):
         from simulation_config import SimulationConfig
         from simulation_state import (
             SimState,
-            simulate_year_pure,
+            simulate_year_pure, _build_year_inputs,
         )
         from canada_state_accessors import _default_canada_state
         from test_issue_584_rules_registry import (
@@ -261,12 +261,17 @@ class TestPersistenceAndSurfacing(unittest.TestCase):
             canada['capital_loss_carryforward'] = seeded_pool
         state = SimState(jurisdiction_state={'canada': canada})
         result, new_state = simulate_year_pure(
-            state=state, year=0, calendar_year=2026,
-            allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
-                         '_annual_savings': 0},
-            config=cfg, investment_return=0.0,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
-            year_brackets=_default_tax_provider_combined_brackets())
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                calendar_year=2026,
+                allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
+                             '_annual_savings': 0},
+                config=cfg, investment_return=0.0,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                year_brackets=_default_tax_provider_combined_brackets()
+            ),
+        )
         return result, new_state
 
     def test_sale_gain_with_seeded_pool_offsets_and_carries(self):

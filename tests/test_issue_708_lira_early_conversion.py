@@ -47,7 +47,7 @@ from countries.canada.locked_in_account import (
 )
 from simulation_config import SimulationConfig
 from simulation_state import (
-    SimState, simulate_year_pure,
+    SimState, simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import (
     _default_canada_state, adult_lira_slot, adult_lif_slot,
@@ -107,10 +107,13 @@ def _make_state_with_lira(lira_balance=100000, lira_birth_year=1979,
 
 def _run_year(state, year, config, investment_return=0.07):
     return simulate_year_pure(
-        state=state, year=year,
-        allocations={'_primary_income': 130000, '_annual_savings': 0},
-        config=config, investment_return=investment_return,
-        primary_marginal_rate=0.40,
+        state=state,
+        year=year,
+        inputs=_build_year_inputs(
+            allocations={'_primary_income': 130000, '_annual_savings': 0},
+            config=config, investment_return=investment_return,
+            primary_marginal_rate=0.40,
+        ),
     )
 
 

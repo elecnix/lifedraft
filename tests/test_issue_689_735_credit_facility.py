@@ -48,7 +48,7 @@ import countries.canada  # noqa: F401 -- registers the Canada jurisdiction provi
 
 import input_contract as ic
 from simulation_config import SimulationConfig
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 from trajectory_invariants import assert_invariant, run_invariant
 import contract_errors
 import contract_schema
@@ -221,10 +221,13 @@ class TestUndrawnAtYearZero(unittest.TestCase):
         cfg = _base_config(credit_facility_limit=30_000, credit_facility_rate=0.0725)
         state = SimState.initial(cfg)
         result, new_state = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 95_000, '_annual_savings': 0},
-            config=cfg, investment_return=0.05, primary_marginal_rate=0.30,
-            mortgage_data=_mort_data(cfg.mortgage_balance),
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                config=cfg, investment_return=0.05, primary_marginal_rate=0.30,
+                mortgage_data=_mort_data(cfg.mortgage_balance),
+            ),
         )
         self.assertEqual(result.credit_facility_balance, 0.0)
         self.assertEqual(new_state.credit_facility_balance, 0.0)
@@ -238,10 +241,13 @@ class TestUndrawnAtYearZero(unittest.TestCase):
         state = SimState.initial(cfg)
         for year in range(4):
             result, state = simulate_year_pure(
-                state=state, year=year,
-                allocations={'_primary_income': 95_000, '_annual_savings': 0},
-                config=cfg, investment_return=0.05, primary_marginal_rate=0.30,
-                mortgage_data=_mort_data(cfg.mortgage_balance),
+                state=state,
+                year=year,
+                inputs=_build_year_inputs(
+                    allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                    config=cfg, investment_return=0.05, primary_marginal_rate=0.30,
+                    mortgage_data=_mort_data(cfg.mortgage_balance),
+                ),
             )
             self.assertEqual(result.credit_facility_balance, 0.0,
                               f"year {year}: an untouched facility must stay at $0")
@@ -283,10 +289,13 @@ def _run_income_collapse(collapse_year, n_years=4, credit_facility_limit=0.0,
         allocations = {'_primary_income': 95_000, '_annual_savings': 0}
         mort = _mort_data(state.mortgage_balance, payment=MORTGAGE_PAYMENT)
         result, state = simulate_year_pure(
-            state=state, year=year,
-            allocations=allocations, config=cfg, investment_return=0.05,
-            primary_marginal_rate=0.30, mortgage_data=mort,
-            living_costs=LIVING_COSTS, after_tax_income=after_tax_income,
+            state=state,
+            year=year,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=cfg, investment_return=0.05,
+                primary_marginal_rate=0.30, mortgage_data=mort,
+                living_costs=LIVING_COSTS, after_tax_income=after_tax_income,
+            ),
         )
         results.append(result)
     return results
@@ -357,10 +366,13 @@ def _year_with_drawn_facility(limit=100_000, shortfall=60_000):
     state = SimState(non_reg_balance=0, non_reg_acb=0)
     mort = {'end_balance': 0.0, 'total_payment': 0.0, 'total_interest': 0.0, 'total_principal': 0.0}
     result, _ = simulate_year_pure(
-        state=state, year=0,
-        allocations={'_primary_income': 0, '_annual_savings': 0},
-        config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
-        mortgage_data=mort, living_costs=shortfall, after_tax_income=0.0,
+        state=state,
+        year=0,
+        inputs=_build_year_inputs(
+            allocations={'_primary_income': 0, '_annual_savings': 0},
+            config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
+            mortgage_data=mort, living_costs=shortfall, after_tax_income=0.0,
+        ),
     )
     return [result]
 

@@ -90,7 +90,7 @@ class TestPureFoldHonoursWhtDrag:
     a per-pot WHT drag is supplied -- and byte-identically when it is not."""
 
     def _run_year(self, registered_wht_drag):
-        from simulation_state import SimState, simulate_year_pure
+        from simulation_state import SimState, simulate_year_pure, _build_year_inputs
         from simulation_config import SimulationConfig
 
         config = SimulationConfig(
@@ -112,9 +112,13 @@ class TestPureFoldHonoursWhtDrag:
                        '_primary_income': 130000, '_spouse_income': 50000,
                        '_annual_savings': 0}
         result, _ = simulate_year_pure(
-            state=state, year=0, allocations=allocations, config=config,
-            investment_return=0.07, registered_wht_drag=registered_wht_drag,
-            use_readvanceable=False, mortgage_data={'end_balance': 0},
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=config,
+                investment_return=0.07, registered_wht_drag=registered_wht_drag,
+                use_readvanceable=False, mortgage_data={'end_balance': 0},
+            ),
         )
         return result
 

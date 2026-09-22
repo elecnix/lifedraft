@@ -451,7 +451,7 @@ class TestSimStateJurisdictionOpaque(unittest.TestCase):
     
     def test_simulate_year_pure_works(self):
         """simulate_year_pure works without direct Canada imports."""
-        from simulation_state import simulate_year_pure
+        from simulation_state import simulate_year_pure, _build_year_inputs
         config = self._make_config()
         state = self.SimState.initial(config)
         
@@ -463,10 +463,14 @@ class TestSimStateJurisdictionOpaque(unittest.TestCase):
             '_annual_savings': 20000,
         }
         result, new_state = simulate_year_pure(
-            state=state, year=0, allocations=allocs, config=config,
-            investment_return=0.07, mortgage_rate=0.05, heloc_rate=0.05,
-            mortgage_data={'end_balance': 180000, 'total_payment': 14000,
-                          'total_interest': 10000, 'total_principal': 4000},
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocs, config=config,
+                investment_return=0.07, mortgage_rate=0.05, heloc_rate=0.05,
+                mortgage_data={'end_balance': 180000, 'total_payment': 14000,
+                              'total_interest': 10000, 'total_principal': 4000},
+            ),
         )
         self.assertIsNotNone(result)
         self.assertIsInstance(new_state, self.SimState)

@@ -39,6 +39,10 @@ def _offset(src: str, lineno: int, col: int) -> int:
     return line_begin + col
 
 
+class _AlreadyConverted(Exception):
+    """Raised for a call site that already passes ``inputs=``."""
+
+
 def _line_begin(src: str, lineno: int) -> int:
     line_begin = 0
     for _ in range(lineno - 1):
@@ -83,6 +87,8 @@ def transform_call(src: str, node: ast.Call) -> str:
     args = list(node.args) + list(node.keywords)
     if any(isinstance(k, ast.keyword) and k.arg is None for k in node.keywords):
         raise ValueError(f"line {node.lineno}: **kwargs splat is not supported")
+    if len(args) >= 3 and isinstance(args[2], ast.keyword) and args[2].arg == 'inputs':
+        raise _AlreadyConverted()
     if len(args) < 4:
         raise ValueError(f"line {node.lineno}: expected >=4 args, got {len(args)}")
 
@@ -175,10 +181,18 @@ def convert_file(path: str, dry_run: bool) -> int:
         return 0
 
     replacements = []
+    skipped = 0
     for node in calls:
         start = _offset(src, node.lineno, node.col_offset)
         end = _offset(src, node.end_lineno, node.end_col_offset)
-        replacements.append((start, end, transform_call(src, node)))
+        try:
+            replacements.append((start, end, transform_call(src, node)))
+        except _AlreadyConverted:
+            skipped += 1
+    if skipped:
+        print(f"[skip] {path}: {skipped} already converted")
+    if not replacements:
+        return 0
 
     new_src = src
     for start, end, rep in sorted(replacements, key=lambda t: -t[0]):
