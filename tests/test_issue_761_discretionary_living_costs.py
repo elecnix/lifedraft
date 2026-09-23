@@ -53,7 +53,7 @@ from test_issue_679_solvency import (
 import countries.canada  # noqa: F401 -- registers the Canada jurisdiction providers
 from runway import compute_runway
 from simulation_config import SimulationConfig
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 import contract_errors
 
 # ─── A one-year pure-step helper that varies ONLY the discretionary split ──
@@ -81,11 +81,15 @@ def _one_shock_year(*, discretionary_fraction, income_shock_active,
     }
     mort = _mort_data(state.mortgage_balance, payment=RUIN_MORTGAGE_PAYMENT)
     result, _ = simulate_year_pure(
-        state=state, year=0, calendar_year=2026,
-        allocations=allocations, config=cfg, investment_return=0.05,
-        primary_marginal_rate=0.30, mortgage_data=mort,
-        living_costs=living_costs, after_tax_income=after_tax_income,
-        income_shock_active=income_shock_active,
+        state=state,
+        year=0,
+        inputs=_build_year_inputs(
+            calendar_year=2026,
+            allocations=allocations, config=cfg, investment_return=0.05,
+            primary_marginal_rate=0.30, mortgage_data=mort,
+            living_costs=living_costs, after_tax_income=after_tax_income,
+            income_shock_active=income_shock_active,
+        ),
     )
     return result
 
@@ -237,14 +241,18 @@ class TestRunwayIsLongerWithSplitThanWithout(unittest.TestCase):
             mort = _mort_data(state.mortgage_balance,
                               payment=RUIN_MORTGAGE_PAYMENT)
             result, state = simulate_year_pure(
-                state=state, year=year, calendar_year=2026 + year,
-                allocations=allocations, config=cfg, investment_return=0.05,
-                primary_marginal_rate=0.30, mortgage_data=mort,
-                living_costs=RUIN_LIVING_COSTS,
-                after_tax_income=after_tax_income,
-                # The shock is active exactly in the collapse-year-onward
-                # working years (the same years income is EI-level).
-                income_shock_active=(not working),
+                state=state,
+                year=year,
+                inputs=_build_year_inputs(
+                    calendar_year=2026 + year,
+                    allocations=allocations, config=cfg, investment_return=0.05,
+                    primary_marginal_rate=0.30, mortgage_data=mort,
+                    living_costs=RUIN_LIVING_COSTS,
+                    after_tax_income=after_tax_income,
+                    # The shock is active exactly in the collapse-year-onward
+                    # working years (the same years income is EI-level).
+                    income_shock_active=(not working),
+                ),
             )
             results.append(result)
         return results
@@ -300,14 +308,18 @@ class TestRetirementDoesNotCompressDiscretionary(unittest.TestCase):
         allocations = {'_primary_income': 95_000, '_annual_savings': 0}
         mort = _mort_data(state.mortgage_balance, payment=RUIN_MORTGAGE_PAYMENT)
         result, _ = simulate_year_pure(
-            state=state, year=0, calendar_year=2026,
-            allocations=allocations, config=cfg, investment_return=0.05,
-            primary_marginal_rate=0.30, mortgage_data=mort,
-            living_costs=RUIN_LIVING_COSTS, after_tax_income=10_000,
-            # Retired: the identity charges the retirement target, not the
-            # working budget; income_shock_active is irrelevant here.
-            any_retired=True, retirement_spending_target=40_000,
-            income_shock_active=True,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                calendar_year=2026,
+                allocations=allocations, config=cfg, investment_return=0.05,
+                primary_marginal_rate=0.30, mortgage_data=mort,
+                living_costs=RUIN_LIVING_COSTS, after_tax_income=10_000,
+                # Retired: the identity charges the retirement target, not the
+                # working budget; income_shock_active is irrelevant here.
+                any_retired=True, retirement_spending_target=40_000,
+                income_shock_active=True,
+            ),
         )
         self.assertEqual(result.solvency_discretionary_compressed, 0.0)
         # The spending outflow is the retirement target, not a compressed

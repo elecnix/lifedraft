@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from scenario_overlay import ScenarioOverlay, apply_overlay
 from simulation_config import SimulationConfig
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 from rule_registry import RULES, RuleContext, YearWorkingState
 from simulation_rules import RULE_ORDER
 from rules_growth import (
@@ -357,10 +357,14 @@ class TestRankingIsScored(unittest.TestCase):
         state = SimState.initial(cfg)
         for year in range(3):
             _result, state = simulate_year_pure(
-                state, year=year, allocations={}, config=cfg,
-                investment_return=cfg.investment_return,
-                primary_marginal_rate=0.40,
-                non_reg_after_tax_return=non_reg_after_tax,
+                state,
+                year=year,
+                inputs=_build_year_inputs(
+                    allocations={}, config=cfg,
+                    investment_return=cfg.investment_return,
+                    primary_marginal_rate=0.40,
+                    non_reg_after_tax_return=non_reg_after_tax,
+                ),
             )
         return state.total_assets()
 

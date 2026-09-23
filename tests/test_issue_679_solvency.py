@@ -46,7 +46,7 @@ from liquidation_waterfall import (
 from simulation_config import SimulationConfig
 from simulation_state import (
     SimState,
-    simulate_year_pure,
+    simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import adult_tfsa_slot
 from trajectory_invariants import assert_invariant, run_invariant
@@ -242,11 +242,14 @@ class TestSolvencyThresholdBothSides(unittest.TestCase):
             jurisdiction_state=({'canada': canada} if canada else {}),
         )
         return simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 95_000, '_annual_savings': 0},
-            config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
-            mortgage_data=_mort_data(cfg.mortgage_balance),
-            living_costs=living_costs, after_tax_income=after_tax_income,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
+                mortgage_data=_mort_data(cfg.mortgage_balance),
+                living_costs=living_costs, after_tax_income=after_tax_income,
+            ),
         )
 
     def test_module_off_when_living_costs_not_supplied(self):
@@ -380,10 +383,13 @@ def _run_income_collapse_trajectory(collapse_year: int, n_years: int = 4,
         }
         mort = _mort_data(state.mortgage_balance, payment=RUIN_MORTGAGE_PAYMENT)
         result, state = simulate_year_pure(
-            state=state, year=year,
-            allocations=allocations, config=cfg, investment_return=0.05,
-            primary_marginal_rate=0.30, mortgage_data=mort,
-            living_costs=living_costs, after_tax_income=after_tax_income,
+            state=state,
+            year=year,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=cfg, investment_return=0.05,
+                primary_marginal_rate=0.30, mortgage_data=mort,
+                living_costs=living_costs, after_tax_income=after_tax_income,
+            ),
         )
         results.append(result)
     return results
@@ -512,14 +518,17 @@ class TestReserveGrowsAtItsOwnRate(unittest.TestCase):
         cfg = _reserve_config(emergency_reserve_rate=reserve_rate)
         state = SimState(emergency_reserve_balance=10_000)
         _, new_state = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 95_000, '_annual_savings': 0},
-            config=cfg, investment_return=investment_return,
-            primary_marginal_rate=0.30,
-            mortgage_data=_mort_data(cfg.mortgage_balance),
-            # Comfortably solvent -- nothing is drawn, so the ONLY thing that
-            # moves the reserve this year is its own growth.
-            living_costs=20_000, after_tax_income=200_000,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                config=cfg, investment_return=investment_return,
+                primary_marginal_rate=0.30,
+                mortgage_data=_mort_data(cfg.mortgage_balance),
+                # Comfortably solvent -- nothing is drawn, so the ONLY thing that
+                # moves the reserve this year is its own growth.
+                living_costs=20_000, after_tax_income=200_000,
+            ),
         )
         return new_state.emergency_reserve_balance
 
@@ -552,10 +561,14 @@ class TestReserveGrowsAtItsOwnRate(unittest.TestCase):
         state = SimState(emergency_reserve_balance=10_000)
         with self.assertRaises(ValueError) as ctx:
             simulate_year_pure(
-                state=state, year=0,
-                allocations={'_primary_income': 95_000, '_annual_savings': 0},
-                config=cfg, investment_return=0.07, primary_marginal_rate=0.30,
-                mortgage_data=_mort_data(cfg.mortgage_balance))
+                state=state,
+                year=0,
+                inputs=_build_year_inputs(
+                    allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                    config=cfg, investment_return=0.07, primary_marginal_rate=0.30,
+                    mortgage_data=_mort_data(cfg.mortgage_balance)
+                ),
+            )
         self.assertIn('emergency_reserve_rate', str(ctx.exception))
 
 
@@ -656,11 +669,14 @@ class TestReserveIsDrawnFirst(unittest.TestCase):
                 'adult_rrsp': {'primary': {'own': 50_000, 'own_room': 0.0, 'spousal_as_annuitant': 0.0}}}},
         )
         result, _ = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 95_000, '_annual_savings': 0},
-            config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
-            mortgage_data=_mort_data(cfg.mortgage_balance),
-            living_costs=54_000, after_tax_income=28_000,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
+                mortgage_data=_mort_data(cfg.mortgage_balance),
+                living_costs=54_000, after_tax_income=28_000,
+            ),
         )
         sources = [e['source'] for e in result.forced_liquidation_events]
         self.assertEqual(sources[0], 'emergency_reserve')
@@ -686,11 +702,14 @@ class TestReserveIsDrawnFirst(unittest.TestCase):
             jurisdiction_state={'canada': {}},
         )
         return simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 95_000, '_annual_savings': 0},
-            config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
-            mortgage_data=_mort_data(cfg.mortgage_balance),
-            living_costs=54_000, after_tax_income=28_000,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
+                mortgage_data=_mort_data(cfg.mortgage_balance),
+                living_costs=54_000, after_tax_income=28_000,
+            ),
         )
 
     def test_reserve_reports_months_covered_and_its_target(self):
@@ -738,10 +757,14 @@ class TestReserveTargetIsSweepable(unittest.TestCase):
         cfg = SimulationConfig.from_dict(cfg_dict)
         state = SimState.initial(cfg)
         _, new_state = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 95_000, '_annual_savings': 0},
-            config=cfg, investment_return=0.08, primary_marginal_rate=0.30,
-            living_costs=60_000, after_tax_income=200_000)   # solvent: nothing drawn
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                config=cfg, investment_return=0.08, primary_marginal_rate=0.30,
+                living_costs=60_000, after_tax_income=200_000
+            ),
+        )   # solvent: nothing drawn
         return new_state.total_assets()
 
     def test_sweeping_the_target_moves_the_engine_s_output(self):
@@ -806,11 +829,14 @@ class TestCreditFacilityGapIsDisclosed(unittest.TestCase):
         cfg = _reserve_config(margin_available=100_000, emergency_reserve_rate=0.0)
         state = SimState(emergency_reserve_balance=1_000, heloc_balance=0.0)
         result, new_state = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 95_000, '_annual_savings': 0},
-            config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
-            mortgage_data=_mort_data(cfg.mortgage_balance),
-            living_costs=54_000, after_tax_income=28_000,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 95_000, '_annual_savings': 0},
+                config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
+                mortgage_data=_mort_data(cfg.mortgage_balance),
+                living_costs=54_000, after_tax_income=28_000,
+            ),
         )
         drawn = {e['source']: e['gross_drawn'] for e in result.forced_liquidation_events}
         self.assertNotIn('revolving_credit', drawn)
@@ -849,13 +875,16 @@ class TestBorrowedMoneyIsAnInflowNotJustAnOutflow(unittest.TestCase):
         # A big year-0 lump, invested -- exactly what fill_room() books when a
         # leveraged strategy deploys borrowed money.
         return simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 150_000, '_annual_savings': 200_000,
-                          'non_reg': 200_000},
-            config=cfg, investment_return=0.0, primary_marginal_rate=0.40,
-            mortgage_data=_mort_data(cfg.mortgage_balance),
-            living_costs=60_000, after_tax_income=100_000,
-            borrowed_investment=borrowed_investment,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 150_000, '_annual_savings': 200_000,
+                              'non_reg': 200_000},
+                config=cfg, investment_return=0.0, primary_marginal_rate=0.40,
+                mortgage_data=_mort_data(cfg.mortgage_balance),
+                living_costs=60_000, after_tax_income=100_000,
+                borrowed_investment=borrowed_investment,
+            ),
         )[0]
 
     def test_investing_borrowed_money_does_not_manufacture_a_shortfall(self):
@@ -886,15 +915,18 @@ class TestBorrowedMoneyIsAnInflowNotJustAnOutflow(unittest.TestCase):
         state = SimState(mortgage_balance=cfg.mortgage_balance,
                           non_reg_balance=50_000, non_reg_acb=50_000)
         result, _ = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 95_000, '_annual_savings': 100_000,
-                          'non_reg': 100_000},
-            config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
-            mortgage_data=_mort_data(cfg.mortgage_balance),
-            # EI-level income: cannot cover living costs + the mortgage, even
-            # though the whole $100k contribution is borrowed.
-            living_costs=54_000, after_tax_income=28_000,
-            borrowed_investment=100_000,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 95_000, '_annual_savings': 100_000,
+                              'non_reg': 100_000},
+                config=cfg, investment_return=0.0, primary_marginal_rate=0.30,
+                mortgage_data=_mort_data(cfg.mortgage_balance),
+                # EI-level income: cannot cover living costs + the mortgage, even
+                # though the whole $100k contribution is borrowed.
+                living_costs=54_000, after_tax_income=28_000,
+                borrowed_investment=100_000,
+            ),
         )
         self.assertGreater(
             result.solvency_shortfall, 0.0,

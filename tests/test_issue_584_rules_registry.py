@@ -41,7 +41,7 @@ from rule_registry import RuleContext, YearWorkingState, RULES
 from simulation_rules import RULE_ORDER, run_rules, trace_firing
 from simulation_state import (
     SimState,
-    simulate_year_pure,
+    simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import _default_canada_state
 from simulation_config import SimulationConfig
@@ -460,19 +460,31 @@ def test_every_rule_fires_somewhere_in_representative_households():
     with trace_firing() as fired:
         # Accumulation year (LIRA present, not yet 71).
         _, lira_state_2020 = simulate_year_pure(
-            state=lira_state, year=2020,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config, investment_return=0.06, primary_marginal_rate=0.40)
+            state=lira_state,
+            year=2020,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config, investment_return=0.06, primary_marginal_rate=0.40
+            ),
+        )
         # Conversion year.
         _, converted_state = simulate_year_pure(
-            state=lira_state_2020, year=2021,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config, investment_return=0.06, primary_marginal_rate=0.40)
+            state=lira_state_2020,
+            year=2021,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config, investment_return=0.06, primary_marginal_rate=0.40
+            ),
+        )
         # Post-conversion: mandatory LIF withdrawal.
         simulate_year_pure(
-            state=converted_state, year=2022,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config, investment_return=0.06, primary_marginal_rate=0.40)
+            state=converted_state,
+            year=2022,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config, investment_return=0.06, primary_marginal_rate=0.40
+            ),
+        )
     _merge(fired)
 
     # ── Scenario D: a drawn personal HELOC margin balance + a same-year
@@ -485,11 +497,15 @@ def test_every_rule_fires_somewhere_in_representative_households():
     heloc_state = _state_with_heloc_and_rrsp_room(heloc_balance=50_000, rrsp_room=30_000)
     with trace_firing() as fired:
         simulate_year_pure(
-            state=heloc_state, year=0,
-            allocations={'primary_rrsp': 20_000, '_primary_income': 130000,
-                         '_annual_savings': 20_000},
-            config=heloc_config, investment_return=0.06, heloc_rate=0.06,
-            primary_marginal_rate=0.40)
+            state=heloc_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'primary_rrsp': 20_000, '_primary_income': 130000,
+                             '_annual_savings': 20_000},
+                config=heloc_config, investment_return=0.06, heloc_rate=0.06,
+                primary_marginal_rate=0.40
+            ),
+        )
     _merge(fired)
 
     # ── Scenario E: FHSA contribution + growth. Deliberately separate from
@@ -507,11 +523,15 @@ def test_every_rule_fires_somewhere_in_representative_households():
     fhsa_state = _state_with_fhsa_room(fhsa_room=8_000)
     with trace_firing() as fired:
         simulate_year_pure(
-            state=fhsa_state, year=0,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=_make_config(), investment_return=0.06,
-            primary_marginal_rate=0.40,
-            fhsa_contribution=5_000, fhsa_annual_limit=8_000)
+            state=fhsa_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=_make_config(), investment_return=0.06,
+                primary_marginal_rate=0.40,
+                fhsa_contribution=5_000, fhsa_annual_limit=8_000
+            ),
+        )
     _merge(fired)
 
     # ── Scenario F: a household with a declared emergency reserve whose
@@ -539,11 +559,14 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=solvency_state, year=0,
-            allocations={'_primary_income': 60_000, '_annual_savings': 0},
-            config=solvency_config, investment_return=0.06,
-            primary_marginal_rate=0.30,
-            living_costs=80_000, after_tax_income=45_000,
+            state=solvency_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 60_000, '_annual_savings': 0},
+                config=solvency_config, investment_return=0.06,
+                primary_marginal_rate=0.30,
+                living_costs=80_000, after_tax_income=45_000,
+            ),
         )
     _merge(fired)
 
@@ -568,10 +591,13 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=consumer_state, year=0,
-            allocations={'_primary_income': 130_000, '_annual_savings': 0},
-            config=consumer_config, investment_return=0.06,
-            primary_marginal_rate=0.40,
+            state=consumer_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130_000, '_annual_savings': 0},
+                config=consumer_config, investment_return=0.06,
+                primary_marginal_rate=0.40,
+            ),
         )
     _merge(fired)
 
@@ -600,15 +626,18 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=installment_state, year=0,
-            allocations={'_primary_income': 130_000, '_annual_savings': 0},
-            config=installment_config, investment_return=0.06,
-            primary_marginal_rate=0.40,
-            # calendar_year is the ABSOLUTE year apply_installments compares
-            # against the plan's start_date; simulate_year_pure falls back to
-            # the year INDEX (0) when omitted, which would place year 0 in
-            # calendar year 0 and the plan (start 2026) would never fire.
-            calendar_year=2026,
+            state=installment_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130_000, '_annual_savings': 0},
+                config=installment_config, investment_return=0.06,
+                primary_marginal_rate=0.40,
+                # calendar_year is the ABSOLUTE year apply_installments compares
+                # against the plan's start_date; simulate_year_pure falls back to
+                # the year INDEX (0) when omitted, which would place year 0 in
+                # calendar year 0 and the plan (start 2026) would never fire.
+                calendar_year=2026,
+            ),
         )
     _merge(fired)
 
@@ -629,26 +658,29 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=borrowing_state, year=0,
-            allocations={
-                '_primary_income': 130_000, '_annual_savings': 0,
-                # $200,000 borrowed at year 0, all of it into the
-                # non-registered account -- an income-producing use, so both
-                # borrowings trace as deductible.
-                '_lump_sum': 200_000, '_lump_non_reg': 200_000,
-                'non_reg': 200_000,
-            },
-            config=borrowing_config, investment_return=0.06,
-            primary_marginal_rate=0.40,
-            # Issue #1034: this scenario also exercises heloc_interest_servicing
-            # (the drawn HELOC's interest is serviced from the non-reg pot,
-            # which carries a gain after a year of growth) -- the rule prices
-            # that gain and needs real brackets, like property_disposition does
-            # in scenarios M/N. The prologue resolves these for the marginal
-            # rates; pass the same combined brackets and the primary's taxable
-            # income so the gain bands against it.
-            year_brackets=_default_tax_provider_combined_brackets(),
-            primary_taxable_income=130_000.0, spouse_taxable_income=0.0,
+            state=borrowing_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={
+                    '_primary_income': 130_000, '_annual_savings': 0,
+                    # $200,000 borrowed at year 0, all of it into the
+                    # non-registered account -- an income-producing use, so both
+                    # borrowings trace as deductible.
+                    '_lump_sum': 200_000, '_lump_non_reg': 200_000,
+                    'non_reg': 200_000,
+                },
+                config=borrowing_config, investment_return=0.06,
+                primary_marginal_rate=0.40,
+                # Issue #1034: this scenario also exercises heloc_interest_servicing
+                # (the drawn HELOC's interest is serviced from the non-reg pot,
+                # which carries a gain after a year of growth) -- the rule prices
+                # that gain and needs real brackets, like property_disposition does
+                # in scenarios M/N. The prologue resolves these for the marginal
+                # rates; pass the same combined brackets and the primary's taxable
+                # income so the gain bands against it.
+                year_brackets=_default_tax_provider_combined_brackets(),
+                primary_taxable_income=130_000.0, spouse_taxable_income=0.0,
+            ),
         )
     _merge(fired)
 
@@ -675,13 +707,16 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=amt_state, year=0,
-            allocations={'_primary_income': 0, '_annual_savings': 0},
-            config=amt_config, investment_return=0.05,
-            primary_marginal_rate=0.53, retiree_marginal_rate=0.53,
-            calendar_year=2026,
-            drawdown_net_target=1_200_000, drawdown_order=['non_reg'],
-            any_retired=True, retirement_spending_target=1_200_000,
+            state=amt_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 0, '_annual_savings': 0},
+                config=amt_config, investment_return=0.05,
+                primary_marginal_rate=0.53, retiree_marginal_rate=0.53,
+                calendar_year=2026,
+                drawdown_net_target=1_200_000, drawdown_order=['non_reg'],
+                any_retired=True, retirement_spending_target=1_200_000,
+            ),
         )
     _merge(fired)
 
@@ -710,10 +745,13 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=deposit_state, year=0,
-            allocations={'_primary_income': 130_000, '_annual_savings': 0},
-            config=deposit_config, investment_return=0.06,
-            primary_marginal_rate=0.40,
+            state=deposit_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130_000, '_annual_savings': 0},
+                config=deposit_config, investment_return=0.06,
+                primary_marginal_rate=0.40,
+            ),
         )
     _merge(fired)
 
@@ -744,19 +782,21 @@ def test_every_rule_fires_somewhere_in_representative_households():
         simulate_year_pure(
             state=SimState(jurisdiction_state={'canada': _default_canada_state()}),
             year=0,
-            allocations={'_primary_income': 120_000, '_spouse_income': 45_000,
-                         '_annual_savings': 0},
-            config=tuition_config, investment_return=0.0,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
-            calendar_year=2026,
-            # epic #795 bite 3: the prologue passes the pre-credit tax_before
-            # + the tax provider; use the default provider (the rule falls
-            # back to it when tax_provider is None) and round-number tax_before
-            # figures large enough that the credit (fed 14% + QC 8% = 22% of
-            # tuition) is less than tax, so it APPLIES (fired=True) rather than
-            # only carrying forward.
-            tax_provider=None,
-            primary_tax_before=20_000.0, spouse_tax_before=8_000.0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 120_000, '_spouse_income': 45_000,
+                             '_annual_savings': 0},
+                config=tuition_config, investment_return=0.0,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                calendar_year=2026,
+                # epic #795 bite 3: the prologue passes the pre-credit tax_before
+                # + the tax provider; use the default provider (the rule falls
+                # back to it when tax_provider is None) and round-number tax_before
+                # figures large enough that the credit (fed 14% + QC 8% = 22% of
+                # tuition) is less than tax, so it APPLIES (fired=True) rather than
+                # only carrying forward.
+                tax_provider=None,
+                primary_tax_before=20_000.0, spouse_tax_before=8_000.0,
+            ),
         )
     _merge(fired)
 
@@ -794,19 +834,22 @@ def test_every_rule_fires_somewhere_in_representative_households():
     sale_state = SimState(jurisdiction_state={'canada': _default_canada_state()})
     with trace_firing() as fired:
         simulate_year_pure(
-            state=sale_state, year=0,
-            calendar_year=2026,
-            allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
-                         '_annual_savings': 0},
-            config=sale_config, investment_return=0.0,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
-            # The prologue resolves year_brackets for the marginal rates; pass
-            # the same combined brackets the tax_calculator uses so the gain
-            # bands against the owner's taxable income. The property_disposition
-            # rule needs these to band the gain (a real bracket list, not None).
-            year_brackets=_default_tax_provider_combined_brackets(),
-            # Issue #956 bite B: the taxable income base the gain bands against.
-            primary_taxable_income=130_000.0, spouse_taxable_income=50_000.0,
+            state=sale_state,
+            year=0,
+            inputs=_build_year_inputs(
+                calendar_year=2026,
+                allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
+                             '_annual_savings': 0},
+                config=sale_config, investment_return=0.0,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                # The prologue resolves year_brackets for the marginal rates; pass
+                # the same combined brackets the tax_calculator uses so the gain
+                # bands against the owner's taxable income. The property_disposition
+                # rule needs these to band the gain (a real bracket list, not None).
+                year_brackets=_default_tax_provider_combined_brackets(),
+                # Issue #956 bite B: the taxable income base the gain bands against.
+                primary_taxable_income=130_000.0, spouse_taxable_income=50_000.0,
+            ),
         )
     _merge(fired)
 
@@ -852,14 +895,17 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=principal_sale_state, year=0,
-            calendar_year=2026,
-            allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
-                         '_annual_savings': 0},
-            config=principal_sale_config, investment_return=0.0,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
-            year_brackets=_default_tax_provider_combined_brackets(),
-            primary_taxable_income=130_000.0, spouse_taxable_income=50_000.0,
+            state=principal_sale_state,
+            year=0,
+            inputs=_build_year_inputs(
+                calendar_year=2026,
+                allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
+                             '_annual_savings': 0},
+                config=principal_sale_config, investment_return=0.0,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                year_brackets=_default_tax_provider_combined_brackets(),
+                primary_taxable_income=130_000.0, spouse_taxable_income=50_000.0,
+            ),
         )
     _merge(fired)
 
@@ -919,12 +965,15 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=financed_state, year=0,
-            calendar_year=2026,
-            allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
-                         '_annual_savings': 0},
-            config=financed_config, investment_return=0.0,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            state=financed_state,
+            year=0,
+            inputs=_build_year_inputs(
+                calendar_year=2026,
+                allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
+                             '_annual_savings': 0},
+                config=financed_config, investment_return=0.0,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+            ),
         )
     _merge(fired)
 
@@ -943,14 +992,17 @@ def test_every_rule_fires_somewhere_in_representative_households():
                        'capital_loss_carryforward': 5_000.0}})
     with trace_firing() as fired:
         simulate_year_pure(
-            state=seeded_loss_state, year=0,
-            calendar_year=2026,
-            allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
-                         '_annual_savings': 0},
-            config=sale_config, investment_return=0.0,
-            primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
-            year_brackets=_default_tax_provider_combined_brackets(),
-            primary_taxable_income=130_000.0, spouse_taxable_income=50_000.0,
+            state=seeded_loss_state,
+            year=0,
+            inputs=_build_year_inputs(
+                calendar_year=2026,
+                allocations={'_primary_income': 130_000, '_spouse_income': 50_000,
+                             '_annual_savings': 0},
+                config=sale_config, investment_return=0.0,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                year_brackets=_default_tax_provider_combined_brackets(),
+                primary_taxable_income=130_000.0, spouse_taxable_income=50_000.0,
+            ),
         )
     _merge(fired)
 
@@ -971,12 +1023,15 @@ def test_every_rule_fires_somewhere_in_representative_households():
     )
     with trace_firing() as fired:
         simulate_year_pure(
-            state=superficial_state, year=0,
-            allocations={'_primary_income': 130_000, 'non_reg': 10_000,
-                         '_annual_savings': 10_000},
-            config=_make_config(), investment_return=0.06,
-            primary_marginal_rate=0.30,
-            living_costs=60_000, after_tax_income=45_000,
+            state=superficial_state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130_000, 'non_reg': 10_000,
+                             '_annual_savings': 10_000},
+                config=_make_config(), investment_return=0.06,
+                primary_marginal_rate=0.30,
+                living_costs=60_000, after_tax_income=45_000,
+            ),
         )
     _merge(fired)
 

@@ -69,7 +69,7 @@ import input_contract as ic
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
 from rules_solvency import _expense_segment_contribution_in_year
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 import contract_errors
 import contract_schema
 
@@ -100,11 +100,15 @@ def _one_year(*, expense_segments, calendar_year=2026,
     }
     mort = _mort_data(state.mortgage_balance, payment=RUIN_MORTGAGE_PAYMENT)
     result, _ = simulate_year_pure(
-        state=state, year=0, calendar_year=calendar_year,
-        allocations=allocations, config=cfg, investment_return=0.05,
-        primary_marginal_rate=0.30, mortgage_data=mort,
-        living_costs=living_costs, after_tax_income=after_tax_income,
-        income_shock_active=income_shock_active,
+        state=state,
+        year=0,
+        inputs=_build_year_inputs(
+            calendar_year=calendar_year,
+            allocations=allocations, config=cfg, investment_return=0.05,
+            primary_marginal_rate=0.30, mortgage_data=mort,
+            living_costs=living_costs, after_tax_income=after_tax_income,
+            income_shock_active=income_shock_active,
+        ),
     )
     return result
 

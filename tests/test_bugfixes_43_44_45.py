@@ -15,7 +15,7 @@ from dataclasses import replace
 
 from simulation import SimulationConfig
 from scenario_overlay import apply_ltv_overlay, apply_overlay, ScenarioOverlay
-from simulation_state import SimState, simulate_year_pure
+from simulation_state import SimState, simulate_year_pure, _build_year_inputs
 from scipy_optimizer import ScipyOptimizer
 from optimizer import GridOptimizer
 from monte_carlo_optimizer import MonteCarloOptimizer
@@ -182,11 +182,15 @@ class TestBug45DeductLaterBracketAware(unittest.TestCase):
         }
         
         result, new_state = simulate_year_pure(
-            state, year=0, allocations=allocations, config=cfg,
-            investment_return=0.07, mortgage_rate=0.05,
-            use_readvanceable=False, deduct_later=True,
-            primary_marginal_rate=0.4571,
-            spouse_marginal_rate=0.3071,
+            state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=cfg,
+                investment_return=0.07, mortgage_rate=0.05,
+                use_readvanceable=False, deduct_later=True,
+                primary_marginal_rate=0.4571,
+                spouse_marginal_rate=0.3071,
+            ),
         )
         
         # With deduct_later=True, the ledger should have undeducted contributions
@@ -225,11 +229,15 @@ class TestBug45DeductLaterBracketAware(unittest.TestCase):
         }
         
         result, new_state = simulate_year_pure(
-            state, year=0, allocations=allocations, config=cfg,
-            investment_return=0.07, mortgage_rate=0.05,
-            use_readvanceable=False, deduct_later=False,
-            primary_marginal_rate=0.4571,
-            spouse_marginal_rate=0.3071,
+            state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=cfg,
+                investment_return=0.07, mortgage_rate=0.05,
+                use_readvanceable=False, deduct_later=False,
+                primary_marginal_rate=0.4571,
+                spouse_marginal_rate=0.3071,
+            ),
         )
         
         # All RRSP contributions should be deducted

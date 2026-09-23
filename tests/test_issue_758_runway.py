@@ -28,7 +28,7 @@ from runway import (
     RunwayResult, compute_runway, runway_curve, shift_income_scenario_dates,
 )
 from simulation_state import (
-    SimState, simulate_year_pure,
+    SimState, simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import (
     adult_lira_slot, adult_fhsa_slot,
@@ -184,10 +184,14 @@ class TestRuinAndStressBeginsAreDistinctEndpoints(unittest.TestCase):
             mort = _mort_data(state.mortgage_balance,
                              payment=RUIN_MORTGAGE_PAYMENT)
             result, state = simulate_year_pure(
-                state=state, year=year, allocations=allocations, config=cfg,
-                investment_return=0.0, primary_marginal_rate=0.30,
-                mortgage_data=mort, living_costs=RUIN_LIVING_COSTS,
-                after_tax_income=after_tax,
+                state=state,
+                year=year,
+                inputs=_build_year_inputs(
+                    allocations=allocations, config=cfg,
+                    investment_return=0.0, primary_marginal_rate=0.30,
+                    mortgage_data=mort, living_costs=RUIN_LIVING_COSTS,
+                    after_tax_income=after_tax,
+                ),
             )
             results.append(result)
         runway = compute_runway(results, shock_date=date(2026, 1, 1),
@@ -987,7 +991,7 @@ class TestSolvencyRetirementBranch(unittest.TestCase):
 
     def test_retirement_shortfall_equals_debt_service_not_living_costs(self):
         from simulation_config import SimulationConfig
-        from simulation_state import SimState, simulate_year_pure
+        from simulation_state import SimState, simulate_year_pure, _build_year_inputs
         from test_issue_679_solvency import (
             _reserve_config, _mort_data, RUIN_MORTGAGE_PAYMENT,
         )
@@ -1008,14 +1012,18 @@ class TestSolvencyRetirementBranch(unittest.TestCase):
         # debt_service + (living_costs - spending_target) -- i.e. no double-
         # count of spending the drawdown already funds.
         result, _ = simulate_year_pure(
-            state=state, year=5, allocations={'_primary_income': 0,
-                                               '_annual_savings': 0},
-            config=cfg, investment_return=0.0,
-            primary_marginal_rate=0.30, mortgage_data=mort,
-            living_costs=80_000, after_tax_income=0.0,
-            cpp_income=15_000, oas_income=10_000, pension_income=5_000,
-            drawdown_net_target=60_000, retiree_marginal_rate=0.20,
-            any_retired=True, retirement_spending_target=90_000,
+            state=state,
+            year=5,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 0,
+                                                   '_annual_savings': 0},
+                config=cfg, investment_return=0.0,
+                primary_marginal_rate=0.30, mortgage_data=mort,
+                living_costs=80_000, after_tax_income=0.0,
+                cpp_income=15_000, oas_income=10_000, pension_income=5_000,
+                drawdown_net_target=60_000, retiree_marginal_rate=0.20,
+                any_retired=True, retirement_spending_target=90_000,
+            ),
         )
         self.assertTrue(result.any_retired)
         # available = after_tax(0) + drawdown_net(60k) + cpp+oas+pension(30k)
@@ -1030,7 +1038,7 @@ class TestSolvencyRetirementBranch(unittest.TestCase):
     def test_working_life_branch_unchanged_charges_living_costs(self):
         # The pre-retirement branch still charges the working living_costs
         # (a shock-induced shortfall) -- the fix only changes retirement.
-        from simulation_state import SimState, simulate_year_pure
+        from simulation_state import SimState, simulate_year_pure, _build_year_inputs
         from test_issue_679_solvency import (
             _reserve_config, _mort_data, RUIN_MORTGAGE_PAYMENT,
             RUIN_LIVING_COSTS, RUIN_AFTER_TAX_EI,
@@ -1042,12 +1050,16 @@ class TestSolvencyRetirementBranch(unittest.TestCase):
             jurisdiction_state={'canada': {}})
         mort = _mort_data(state.mortgage_balance, payment=RUIN_MORTGAGE_PAYMENT)
         result, _ = simulate_year_pure(
-            state=state, year=1, allocations={'_primary_income': 0,
-                                               '_annual_savings': 0},
-            config=cfg, investment_return=0.0,
-            primary_marginal_rate=0.30, mortgage_data=mort,
-            living_costs=RUIN_LIVING_COSTS, after_tax_income=RUIN_AFTER_TAX_EI,
-            # working life: any_retired=False (default), no drawdown.
+            state=state,
+            year=1,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 0,
+                                                   '_annual_savings': 0},
+                config=cfg, investment_return=0.0,
+                primary_marginal_rate=0.30, mortgage_data=mort,
+                living_costs=RUIN_LIVING_COSTS, after_tax_income=RUIN_AFTER_TAX_EI,
+                # working life: any_retired=False (default), no drawdown.
+            ),
         )
         self.assertFalse(result.any_retired)
         # required = debt_service + living_costs; the working-life identity
@@ -1094,15 +1106,20 @@ class TestRetirementDrawdownFromLiraAndFhsa(unittest.TestCase):
                              'tfsa_room_accumulated': 0}],
             children=[])
         result, nxt = simulate_year_pure(
-            state=state, year=0, calendar_year=2025,
-            allocations={'_primary_income': 0, '_annual_savings': 0},
-            config=cfg, investment_return=0.06,
-            primary_marginal_rate=0.30, retiree_marginal_rate=0.30,
-            # LIRA first (fully taxable, exhausts), then FHSA (tax-free) --
-            # so a target above the LIRA's after-tax capacity spills into the
-            # FHSA branch.
-            drawdown_order=['lira', 'fhsa'],
-            drawdown_net_target=net_target)
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                calendar_year=2025,
+                allocations={'_primary_income': 0, '_annual_savings': 0},
+                config=cfg, investment_return=0.06,
+                primary_marginal_rate=0.30, retiree_marginal_rate=0.30,
+                # LIRA first (fully taxable, exhausts), then FHSA (tax-free) --
+                # so a target above the LIRA's after-tax capacity spills into the
+                # FHSA branch.
+                drawdown_order=['lira', 'fhsa'],
+                drawdown_net_target=net_target
+            ),
+        )
         return result, nxt.jurisdiction_state['canada']
 
     def test_lira_branch_applies_its_delta(self):

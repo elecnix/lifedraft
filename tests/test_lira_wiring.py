@@ -22,7 +22,7 @@ Tests cover:
 import pytest
 from copy import deepcopy
 from simulation_state import (
-    SimState, simulate_year_pure,
+    SimState, simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import (
     adult_lira_slot, adult_lif_slot,
@@ -135,10 +135,12 @@ class TestLIRAGrowth:
         result, new_state = simulate_year_pure(
             state=state,
             year=2026,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config,
-            investment_return=0.07,
-            primary_marginal_rate=0.40,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config,
+                investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         # LIRA should grow by 7%: 52837 * 1.07 = 56535.59
         expected = 52837 * 1.07
@@ -153,10 +155,12 @@ class TestLIRAGrowth:
         result, new_state = simulate_year_pure(
             state=state,
             year=2026,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config,
-            investment_return=0.07,
-            primary_marginal_rate=0.40,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config,
+                investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         assert _lira_bal(new_state) == 0
 
@@ -176,10 +180,12 @@ class TestLIRAConversionToLIF:
         result, new_state = simulate_year_pure(
             state=state,
             year=2021,  # Year they turn 71
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config,
-            investment_return=0.07,
-            primary_marginal_rate=0.40,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config,
+                investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         # LIRA should be depleted (converted to LIF)
         assert _lira_bal(new_state) == 0, \
@@ -201,10 +207,12 @@ class TestLIRAConversionToLIF:
         result, new_state = simulate_year_pure(
             state=state,
             year=2021,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config,
-            investment_return=0.07,
-            primary_marginal_rate=0.40,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config,
+                investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         assert _lif_juris(new_state) == 'quebec', \
             "LIF should preserve Quebec jurisdiction from CRI"
@@ -219,10 +227,12 @@ class TestLIRAConversionToLIF:
         result, new_state = simulate_year_pure(
             state=state,
             year=2026,  # Age 47, well before 71
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config,
-            investment_return=0.07,
-            primary_marginal_rate=0.40,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config,
+                investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         # LIRA should still exist (not converted)
         assert _lira_bal(new_state) > 0, \
@@ -246,10 +256,12 @@ class TestLIFWithdrawals:
         result, new_state = simulate_year_pure(
             state=state,
             year=2026,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config,
-            investment_return=0.07,
-            primary_marginal_rate=0.40,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config,
+                investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         assert result.lif_withdrawal > 0, \
             f"LIF withdrawal should be positive, got {result.lif_withdrawal}"
@@ -267,10 +279,12 @@ class TestLIFWithdrawals:
         result, new_state = simulate_year_pure(
             state=state,
             year=2026,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config,
-            investment_return=0.07,
-            primary_marginal_rate=0.40,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config,
+                investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         # LIF balance after withdrawal and growth:
         # (100000 - withdrawal) * (1 + 0.07)
@@ -316,14 +330,20 @@ class TestLIRANoEffectWhenAbsent:
 
         allocs = {'_primary_income': 130000, '_annual_savings': 0, 'primary_rrsp': 5000}
         result_no_lira, _ = simulate_year_pure(
-            state=state_no_lira, year=2026,
-            allocations=allocs, config=config,
-            investment_return=0.07, primary_marginal_rate=0.40,
+            state=state_no_lira,
+            year=2026,
+            inputs=_build_year_inputs(
+                allocations=allocs, config=config,
+                investment_return=0.07, primary_marginal_rate=0.40,
+            ),
         )
         result_with_zero, _ = simulate_year_pure(
-            state=state_with_zero_lira, year=2026,
-            allocations=allocs, config=config,
-            investment_return=0.07, primary_marginal_rate=0.40,
+            state=state_with_zero_lira,
+            year=2026,
+            inputs=_build_year_inputs(
+                allocations=allocs, config=config,
+                investment_return=0.07, primary_marginal_rate=0.40,
+            ),
         )
 
         # Total assets should be the same
@@ -339,10 +359,13 @@ class TestYearResultLIRAFields:
         config = _make_config()
         state = _make_state_with_lira(lira_balance=52837)
         result, _ = simulate_year_pure(
-            state=state, year=2026,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config, investment_return=0.07,
-            primary_marginal_rate=0.40,
+            state=state,
+            year=2026,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config, investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         assert result.lira_balance == 52837 * 1.07, \
             f"YearResult.lira_balance should reflect growth, got {result.lira_balance:.2f}"
@@ -352,10 +375,13 @@ class TestYearResultLIRAFields:
         config = _make_config()
         state = _make_state_with_lira(lira_balance=52837, lif_balance=0)
         result, _ = simulate_year_pure(
-            state=state, year=2026,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config, investment_return=0.07,
-            primary_marginal_rate=0.40,
+            state=state,
+            year=2026,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config, investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         # During accumulation (no LIF), withdrawal should be 0
         assert result.lif_withdrawal == 0, \
@@ -369,10 +395,13 @@ class TestYearResultLIRAFields:
             lira_birth_year=1950,  # Turns 71 in 2021
         )
         result, _ = simulate_year_pure(
-            state=state, year=2021,
-            allocations={'_primary_income': 130000, '_annual_savings': 0},
-            config=config, investment_return=0.07,
-            primary_marginal_rate=0.40,
+            state=state,
+            year=2021,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 130000, '_annual_savings': 0},
+                config=config, investment_return=0.07,
+                primary_marginal_rate=0.40,
+            ),
         )
         assert result.lif_balance > 0, \
             f"YearResult.lif_balance should be positive after conversion, got {result.lif_balance}"

@@ -28,7 +28,7 @@ class TestNonRegAfterTaxReturn:
     def test_simulate_year_pure_with_non_reg_atr(self):
         """When non_reg_after_tax_return is provided, non-reg grows at that rate
         instead of the flat investment_return."""
-        from simulation_state import SimState, simulate_year_pure
+        from simulation_state import SimState, simulate_year_pure, _build_year_inputs
         from simulation_config import SimulationConfig
 
         config = SimulationConfig(
@@ -49,9 +49,13 @@ class TestNonRegAfterTaxReturn:
 
         # Without non_reg_after_tax_return: flat rate
         result_flat, _ = simulate_year_pure(
-            state=state, year=0, allocations=allocations, config=config,
-            investment_return=0.07,
-            use_readvanceable=False, mortgage_data={'end_balance': 0},
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=config,
+                investment_return=0.07,
+                use_readvanceable=False, mortgage_data={'end_balance': 0},
+            ),
         )
         flat_non_reg = result_flat.non_reg_balance
 
@@ -62,10 +66,14 @@ class TestNonRegAfterTaxReturn:
         state2.non_reg_acb = 80000
 
         result_atr, _ = simulate_year_pure(
-            state=state2, year=0, allocations=allocations, config=config,
-            investment_return=0.07,
-            non_reg_after_tax_return=0.04,
-            use_readvanceable=False, mortgage_data={'end_balance': 0},
+            state=state2,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=config,
+                investment_return=0.07,
+                non_reg_after_tax_return=0.04,
+                use_readvanceable=False, mortgage_data={'end_balance': 0},
+            ),
         )
         atr_non_reg = result_atr.non_reg_balance
 
@@ -82,7 +90,7 @@ class TestNonRegAfterTaxReturn:
 
     def test_simulate_year_pure_atr_none_falls_back_to_gross(self):
         """When non_reg_after_tax_return is None, falls back to flat investment_return."""
-        from simulation_state import SimState, simulate_year_pure
+        from simulation_state import SimState, simulate_year_pure, _build_year_inputs
         from simulation_config import SimulationConfig
 
         config = SimulationConfig(
@@ -103,10 +111,14 @@ class TestNonRegAfterTaxReturn:
 
         # None should fall back to investment_return
         result, _ = simulate_year_pure(
-            state=state, year=0, allocations=allocations, config=config,
-            investment_return=0.07,
-            non_reg_after_tax_return=None,
-            use_readvanceable=False, mortgage_data={'end_balance': 0},
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=config,
+                investment_return=0.07,
+                non_reg_after_tax_return=None,
+                use_readvanceable=False, mortgage_data={'end_balance': 0},
+            ),
         )
 
         assert result.non_reg_balance == pytest.approx(107000, abs=1)
@@ -114,7 +126,7 @@ class TestNonRegAfterTaxReturn:
     def test_registered_accounts_always_grow_at_gross_rate(self):
         """RRSP, TFSA, and FHSA grow at gross investment_return regardless
         of non_reg_after_tax_return (they're tax-sheltered)."""
-        from simulation_state import SimState, simulate_year_pure
+        from simulation_state import SimState, simulate_year_pure, _build_year_inputs
         from simulation_config import SimulationConfig
 
         config = SimulationConfig(
@@ -137,10 +149,14 @@ class TestNonRegAfterTaxReturn:
 
         # With low non-reg after-tax return
         result, _ = simulate_year_pure(
-            state=state, year=0, allocations=allocations, config=config,
-            investment_return=0.07,
-            non_reg_after_tax_return=0.03,
-            use_readvanceable=False, mortgage_data={'end_balance': 0},
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations=allocations, config=config,
+                investment_return=0.07,
+                non_reg_after_tax_return=0.03,
+                use_readvanceable=False, mortgage_data={'end_balance': 0},
+            ),
         )
 
         # RRSP and TFSA grow at 7% (gross, tax-sheltered)

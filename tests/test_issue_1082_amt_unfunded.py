@@ -35,7 +35,7 @@ import pytest
 
 from simulation_state import (
     SimState,
-    simulate_year_pure,
+    simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import _default_canada_state
 from simulation_config import SimulationConfig
@@ -70,13 +70,16 @@ def _run_year(non_reg_balance, non_reg_acb, net_target, **config_over):
         jurisdiction_state={'canada': _default_canada_state()},
     )
     result, _ = simulate_year_pure(
-        state=state, year=0,
-        allocations={'_primary_income': 0, '_annual_savings': 0},
-        config=_config(**config_over), investment_return=0.05,
-        primary_marginal_rate=0.53, retiree_marginal_rate=0.53,
-        calendar_year=2026,
-        drawdown_net_target=net_target, drawdown_order=['non_reg'],
-        any_retired=True, retirement_spending_target=net_target,
+        state=state,
+        year=0,
+        inputs=_build_year_inputs(
+            allocations={'_primary_income': 0, '_annual_savings': 0},
+            config=_config(**config_over), investment_return=0.05,
+            primary_marginal_rate=0.53, retiree_marginal_rate=0.53,
+            calendar_year=2026,
+            drawdown_net_target=net_target, drawdown_order=['non_reg'],
+            any_retired=True, retirement_spending_target=net_target,
+        ),
     )
     return result
 
@@ -151,10 +154,13 @@ class TestUnfundedMinimumTaxIsSurfaced:
             jurisdiction_state={'canada': _default_canada_state()},
         )
         r, _ = simulate_year_pure(
-            state=state, year=0,
-            allocations={'_primary_income': 150_000, '_annual_savings': 0},
-            config=_config(), investment_return=0.05,
-            primary_marginal_rate=0.45, calendar_year=2026,
+            state=state,
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 150_000, '_annual_savings': 0},
+                config=_config(), investment_return=0.05,
+                primary_marginal_rate=0.45, calendar_year=2026,
+            ),
         )
         assert r.realized_capital_gains == pytest.approx(0.0)
         assert r.amt_net_charge == pytest.approx(0.0)

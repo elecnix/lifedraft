@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from simulation_state import (
     SimState,
-    simulate_year_pure,
+    simulate_year_pure, _build_year_inputs,
 )
 from canada_state_accessors import (
     adult_rrsp_slot,
@@ -310,9 +310,13 @@ class TestSimulateYearPureUsesJurisdictionState(unittest.TestCase):
             '_annual_savings': 34000,
         }
         _, new_state = simulate_year_pure(
-            state, 0, allocs, cfg, investment_return=0.07,
-            mortgage_data={'end_balance': 190000, 'total_payment': 14000,
-                          'total_interest': 10000, 'total_principal': 10000},
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07,
+                mortgage_data={'end_balance': 190000, 'total_payment': 14000,
+                              'total_interest': 10000, 'total_principal': 10000},
+            ),
         )
         # rrsp_balance should be in jurisdiction_state['canada']
         canada = new_state.jurisdiction_state['canada']
@@ -329,9 +333,13 @@ class TestSimulateYearPureUsesJurisdictionState(unittest.TestCase):
             '_annual_savings': 34000,
         }
         _, new_state = simulate_year_pure(
-            state, 0, allocs, cfg, investment_return=0.07,
-            mortgage_data={'end_balance': 190000, 'total_payment': 14000,
-                          'total_interest': 10000, 'total_principal': 10000},
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07,
+                mortgage_data={'end_balance': 190000, 'total_payment': 14000,
+                              'total_interest': 10000, 'total_principal': 10000},
+            ),
         )
         canada = new_state.jurisdiction_state['canada']
         self.assertIn('adult_tfsa', canada)  # #700: TFSA now in the per-adult store

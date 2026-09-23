@@ -1224,7 +1224,8 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     -> the ``retirement_income`` rule leaves GIS at its seeded 0.0 (DP#32).
     """
     from simulation_state import (
-        simulate_year_pure, child_savings_for_year, child_gift_funding_for_year,
+        simulate_year_pure, _build_year_inputs, child_savings_for_year,
+        child_gift_funding_for_year,
         child_loan_funded_for_year,
         child_after_tax_savings_for_year,
     )
@@ -1709,105 +1710,107 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     result, next_state = simulate_year_pure(
         state=state,
         year=year,
-        calendar_year=sim_year,  # issue #343: drives LIRA→LIF conversion at age 71
-        allocations=allocations,
-        config=cfg,
-        investment_return=ctx.return_model.return_for_year(year),
-        mortgage_rate=mortgage_rate,
-        heloc_rate=heloc_rate,
-        mortgage_data=mort,
-        use_readvanceable=ctx.use_readvanceable,
-        deduct_later=ctx.deduct_later,
-        primary_marginal_rate=primary_rate,
-        spouse_marginal_rate=spouse_rate,
-        resp_data=resp_data if resp_data else None,
-        fhsa_contribution=fhsa_contrib,
-        fhsa_annual_limit=ctx.tax_provider.get_fhsa_limit(sim_year) if ctx.has_fhsa else None,
-        rrsp_annual_limit=rrsp_limit,
-        tfsa_annual_limit=tfsa_limit,
-        non_reg_after_tax_return=non_reg_atr,
-        # Issue #641: registered pots' foreign-WHT drag from their declared
-        # holdings (None when no registered composition -- golden no-op).
-        registered_wht_drag=_registered_wht_drag_for(ctx.portfolio),
-        # epic #795 bite 1: the retirement transition OUTPUTS (cpp_income,
-        # oas_income, drawdown_net_target, any_retired, ...) are no longer
-        # passed by the prologue -- the registered `retirement_income` rule
-        # computes them inside simulate_year_pure and writes them to
-        # YearWorkingState. The prologue passes only the INPUTS the rule
-        # needs: the pre-retirement grown incomes, the resolved retirement
-        # status, the base year-0 incomes (for the NET replacement target),
-        # the resolved year-brackets, and the tax indexation rate.
-        primary_income_pre=primary_income_pre,
-        spouse_income_pre=spouse_income_pre,
-        primary_retired=p_retired,
-        spouse_retired=s_retired,
-        base_primary_income=ctx.primary_income,
-        base_spouse_income=ctx.spouse_income,
-        year_brackets=year_brackets,
-        tax_indexation_rate=ctx.tax_provider.indexation_rate,
-        # Issue #761: compresses the discretionary portion of living_costs
-        # under a shock when a split is declared (see apply_solvency).
-        income_shock_active=income_shock_active,
-        # Issue #679: cfg.living_costs is None when household_budget was
-        # never supplied (DP#32 explicit-absence test, not `or`) -- 0.0 is
-        # the solvency rule's own "not engaged" sentinel (DP#16).
-        living_costs=cfg.living_costs if cfg.living_costs is not None else 0.0,
-        after_tax_income=after_tax_income,
-        # epic #795 bite 3: inputs for the registered tuition_credit rule --
-        # the prologue passes the PRE-credit tax_before (above) + the tax
-        # provider; the rule applies the credit inside simulate_year_pure and
-        # apply_solvency adds the reduction to `available` and to
-        # YearResult.after_tax_income (POST-credit, byte-identical to the
-        # pre-refactor prologue output).
-        tax_provider=ctx.tax_provider,
-        primary_tax_before=primary_tax_before,
-        spouse_tax_before=spouse_tax_before,
-        # Issue #956 bite B (sale-core): the property_disposition rule bands a
-        # sold property's gain against the owner's taxable income.
-        primary_taxable_income=primary_taxable_income,
-        spouse_taxable_income=spouse_taxable_income,
-        borrowed_investment=borrowed_investment,
-        # Issue #914: the non-borrowed year-0 free cash (RESP proceeds) invested
-        # this year -- an inflow the solvency identity counts so the year-0
-        # contribution it funds is not misread as a shortfall. 0.0 after year 0.
-        free_cash_invested=free_cash_invested,
-        # Issue #137: surface the year-0 deployment-lag carry cost on the
-        # year-0 result so output plugins can render it. 0.0 in every year but
-        # year 0 (this is the yearly path; the carry is a year-0 fact).
-        deployment_lag_cost=ctx.deployment_lag_cost if year == 0 else 0.0,
-        # Issue #74: surface the year-0 staggered-deployment schedule cost on
-        # the year-0 result so output plugins can render the cost of
-        # staggering. 0.0 in every year but year 0 (this is the yearly path;
-        # the schedule cost is a year-0-equivalent fact).
-        deployment_schedule_cost=ctx.deployment_schedule_cost if year == 0 else 0.0,
-        # Issue #139: surface the year-0 net refinance-origination
-        # transaction cost/credit on the year-0 result so output plugins can
-        # render the gross-vs-net gap. 0.0 in every year but year 0 (this is
-        # the yearly path; the net cost is a year-0 fact).
-        transaction_cost_year0=ctx.transaction_cost_year0 if year == 0 else 0.0,
-        # Epic #841 bite 2 / issue #812: the strategy's child-allocation targets
-        # drive where each child's OWN savings land (the contract's opinion,
-        # DP#13). Passing them (vs None) is what makes the fold MODEL the child
-        # accounts this year -- grown once, by this real per-year step.
-        child_allocation_pcts={
-            'tfsa': ctx.strategy.child_tfsa_pct,
-            'fhsa': ctx.strategy.child_fhsa_pct,
-            'rrsp': ctx.strategy.child_rrsp_pct,
-            'non_reg': ctx.strategy.child_non_reg_pct,
-        },
-        # Epic #841 bite 3: the per-child gift funding computed above, added to
-        # each child's own savings inside the fold so it fills the child's
-        # registered room. None-equivalent (all zeros) for the golden household.
-        child_gift_amounts=child_gifts,
-        # Issue #859 (Part A): the loan-kind subset, accumulated onto the child's
-        # loan_funded_principal for the family balance sheet (all zeros golden).
-        child_loan_amounts=child_loans,
-        # Issue #899 (part a): each additional accumulating adult's OWN
-        # end-of-year RRSP/TFSA (empty for a two-adult household).
-        extra_adult_accounts=extra_adult_accounts,
-        # Issue #1020 (S04 Step 1): prior-year GIS-countable income for the
-        # retirement_income rule's gis_benefit call (CRA prior-year test).
-        prior_gis_countable_income=prior_gis_countable_income,
+        inputs=_build_year_inputs(
+            calendar_year=sim_year,  # issue #343: drives LIRA→LIF conversion at age 71
+            allocations=allocations,
+            config=cfg,
+            investment_return=ctx.return_model.return_for_year(year),
+            mortgage_rate=mortgage_rate,
+            heloc_rate=heloc_rate,
+            mortgage_data=mort,
+            use_readvanceable=ctx.use_readvanceable,
+            deduct_later=ctx.deduct_later,
+            primary_marginal_rate=primary_rate,
+            spouse_marginal_rate=spouse_rate,
+            resp_data=resp_data if resp_data else None,
+            fhsa_contribution=fhsa_contrib,
+            fhsa_annual_limit=ctx.tax_provider.get_fhsa_limit(sim_year) if ctx.has_fhsa else None,
+            rrsp_annual_limit=rrsp_limit,
+            tfsa_annual_limit=tfsa_limit,
+            non_reg_after_tax_return=non_reg_atr,
+            # Issue #641: registered pots' foreign-WHT drag from their declared
+            # holdings (None when no registered composition -- golden no-op).
+            registered_wht_drag=_registered_wht_drag_for(ctx.portfolio),
+            # epic #795 bite 1: the retirement transition OUTPUTS (cpp_income,
+            # oas_income, drawdown_net_target, any_retired, ...) are no longer
+            # passed by the prologue -- the registered `retirement_income` rule
+            # computes them inside simulate_year_pure and writes them to
+            # YearWorkingState. The prologue passes only the INPUTS the rule
+            # needs: the pre-retirement grown incomes, the resolved retirement
+            # status, the base year-0 incomes (for the NET replacement target),
+            # the resolved year-brackets, and the tax indexation rate.
+            primary_income_pre=primary_income_pre,
+            spouse_income_pre=spouse_income_pre,
+            primary_retired=p_retired,
+            spouse_retired=s_retired,
+            base_primary_income=ctx.primary_income,
+            base_spouse_income=ctx.spouse_income,
+            year_brackets=year_brackets,
+            tax_indexation_rate=ctx.tax_provider.indexation_rate,
+            # Issue #761: compresses the discretionary portion of living_costs
+            # under a shock when a split is declared (see apply_solvency).
+            income_shock_active=income_shock_active,
+            # Issue #679: cfg.living_costs is None when household_budget was
+            # never supplied (DP#32 explicit-absence test, not `or`) -- 0.0 is
+            # the solvency rule's own "not engaged" sentinel (DP#16).
+            living_costs=cfg.living_costs if cfg.living_costs is not None else 0.0,
+            after_tax_income=after_tax_income,
+            # epic #795 bite 3: inputs for the registered tuition_credit rule --
+            # the prologue passes the PRE-credit tax_before (above) + the tax
+            # provider; the rule applies the credit inside simulate_year_pure and
+            # apply_solvency adds the reduction to `available` and to
+            # YearResult.after_tax_income (POST-credit, byte-identical to the
+            # pre-refactor prologue output).
+            tax_provider=ctx.tax_provider,
+            primary_tax_before=primary_tax_before,
+            spouse_tax_before=spouse_tax_before,
+            # Issue #956 bite B (sale-core): the property_disposition rule bands a
+            # sold property's gain against the owner's taxable income.
+            primary_taxable_income=primary_taxable_income,
+            spouse_taxable_income=spouse_taxable_income,
+            borrowed_investment=borrowed_investment,
+            # Issue #914: the non-borrowed year-0 free cash (RESP proceeds) invested
+            # this year -- an inflow the solvency identity counts so the year-0
+            # contribution it funds is not misread as a shortfall. 0.0 after year 0.
+            free_cash_invested=free_cash_invested,
+            # Issue #137: surface the year-0 deployment-lag carry cost on the
+            # year-0 result so output plugins can render it. 0.0 in every year but
+            # year 0 (this is the yearly path; the carry is a year-0 fact).
+            deployment_lag_cost=ctx.deployment_lag_cost if year == 0 else 0.0,
+            # Issue #74: surface the year-0 staggered-deployment schedule cost on
+            # the year-0 result so output plugins can render the cost of
+            # staggering. 0.0 in every year but year 0 (this is the yearly path;
+            # the schedule cost is a year-0-equivalent fact).
+            deployment_schedule_cost=ctx.deployment_schedule_cost if year == 0 else 0.0,
+            # Issue #139: surface the year-0 net refinance-origination
+            # transaction cost/credit on the year-0 result so output plugins can
+            # render the gross-vs-net gap. 0.0 in every year but year 0 (this is
+            # the yearly path; the net cost is a year-0 fact).
+            transaction_cost_year0=ctx.transaction_cost_year0 if year == 0 else 0.0,
+            # Epic #841 bite 2 / issue #812: the strategy's child-allocation targets
+            # drive where each child's OWN savings land (the contract's opinion,
+            # DP#13). Passing them (vs None) is what makes the fold MODEL the child
+            # accounts this year -- grown once, by this real per-year step.
+            child_allocation_pcts={
+                'tfsa': ctx.strategy.child_tfsa_pct,
+                'fhsa': ctx.strategy.child_fhsa_pct,
+                'rrsp': ctx.strategy.child_rrsp_pct,
+                'non_reg': ctx.strategy.child_non_reg_pct,
+            },
+            # Epic #841 bite 3: the per-child gift funding computed above, added to
+            # each child's own savings inside the fold so it fills the child's
+            # registered room. None-equivalent (all zeros) for the golden household.
+            child_gift_amounts=child_gifts,
+            # Issue #859 (Part A): the loan-kind subset, accumulated onto the child's
+            # loan_funded_principal for the family balance sheet (all zeros golden).
+            child_loan_amounts=child_loans,
+            # Issue #899 (part a): each additional accumulating adult's OWN
+            # end-of-year RRSP/TFSA (empty for a two-adult household).
+            extra_adult_accounts=extra_adult_accounts,
+            # Issue #1020 (S04 Step 1): prior-year GIS-countable income for the
+            # retirement_income rule's gis_benefit call (CRA prior-year test).
+            prior_gis_countable_income=prior_gis_countable_income,
+        ),
     )
     # Issue #693 (epic #690 bite 2): surface this year's rental income on the
     # result. `net_rental_income` is the household total of each owner's net
@@ -2386,6 +2389,7 @@ class FamilySimulation:
         """
         from simulation_state import (
             simulate_year_pure,
+            _build_year_inputs,
             child_savings_for_year,
             child_gift_funding_for_year,
             child_loan_funded_for_year,
@@ -2501,50 +2505,52 @@ class FamilySimulation:
             result0, state = simulate_year_pure(
                 state=state,
                 year=0,
-                calendar_year=self.start_year,  # issue #343: calendar year for date-computed gates
-                allocations=lump_allocations,
-                config=cfg,
-                investment_return=lump_return,
-                mortgage_rate=self.rate_path.get_rate(0),
-                heloc_rate=self.heloc_path.get_heloc_rate(0, self.rate_path.rate_type),
-                mortgage_data=self._get_mortgage_data(0),
-                use_readvanceable=self.use_readvanceable,
-                deduct_later=self.deduct_later,
-                primary_marginal_rate=primary_rate,
-                spouse_marginal_rate=spouse_rate,
-                resp_data=None,
-                fhsa_contribution=lump_alloc.fhsa if self.has_fhsa else 0.0,
-                fhsa_annual_limit=self.tax_provider.get_fhsa_limit(self.start_year) if self.has_fhsa else None,
-                rrsp_annual_limit=self.tax_provider.get_rrsp_limit(self.start_year),
-                tfsa_annual_limit=self.tax_provider.get_tfsa_limit(self.start_year),
-                non_reg_after_tax_return=self._get_non_reg_after_tax_return(
-                    0, primary_rate, lump_return),
-                registered_wht_drag=_registered_wht_drag_for(self._portfolio),
-                # Issue #679: every dollar of this lump is BORROWED (margin draw
-                # + mortgage cash-out), so it is an inflow as well as an outflow.
-                # The solvency rule is inert on this monthly path today (it never
-                # receives living_costs, so it no-ops), but threading this now
-                # means whoever wires the budget through here does not silently
-                # reintroduce the false-ruin-on-leverage bug.
-                borrowed_investment=(
-                    lump_alloc.primary_rrsp + lump_alloc.spousal_rrsp
-                    + lump_alloc.spouse_rrsp + lump_alloc.primary_tfsa
-                    + lump_alloc.spouse_tfsa + lump_alloc.fhsa + lump_alloc.non_reg
+                inputs=_build_year_inputs(
+                    calendar_year=self.start_year,  # issue #343: calendar year for date-computed gates
+                    allocations=lump_allocations,
+                    config=cfg,
+                    investment_return=lump_return,
+                    mortgage_rate=self.rate_path.get_rate(0),
+                    heloc_rate=self.heloc_path.get_heloc_rate(0, self.rate_path.rate_type),
+                    mortgage_data=self._get_mortgage_data(0),
+                    use_readvanceable=self.use_readvanceable,
+                    deduct_later=self.deduct_later,
+                    primary_marginal_rate=primary_rate,
+                    spouse_marginal_rate=spouse_rate,
+                    resp_data=None,
+                    fhsa_contribution=lump_alloc.fhsa if self.has_fhsa else 0.0,
+                    fhsa_annual_limit=self.tax_provider.get_fhsa_limit(self.start_year) if self.has_fhsa else None,
+                    rrsp_annual_limit=self.tax_provider.get_rrsp_limit(self.start_year),
+                    tfsa_annual_limit=self.tax_provider.get_tfsa_limit(self.start_year),
+                    non_reg_after_tax_return=self._get_non_reg_after_tax_return(
+                        0, primary_rate, lump_return),
+                    registered_wht_drag=_registered_wht_drag_for(self._portfolio),
+                    # Issue #679: every dollar of this lump is BORROWED (margin draw
+                    # + mortgage cash-out), so it is an inflow as well as an outflow.
+                    # The solvency rule is inert on this monthly path today (it never
+                    # receives living_costs, so it no-ops), but threading this now
+                    # means whoever wires the budget through here does not silently
+                    # reintroduce the false-ruin-on-leverage bug.
+                    borrowed_investment=(
+                        lump_alloc.primary_rrsp + lump_alloc.spousal_rrsp
+                        + lump_alloc.spouse_rrsp + lump_alloc.primary_tfsa
+                        + lump_alloc.spouse_tfsa + lump_alloc.fhsa + lump_alloc.non_reg
+                    ),
+                    # Issue #914: the non-borrowed free cash invested this year --
+                    # the inflow that funds its own non-reg contribution (no debt).
+                    free_cash_invested=self.free_cash,
+                    # Issue #137: surface the year-0 deployment-lag carry cost on
+                    # the year-0 result (this is the monthly path's year-0 step).
+                    deployment_lag_cost=self.deployment_lag_cost,
+                    # Issue #74: surface the year-0 staggered-deployment
+                    # schedule cost on the monthly path's year-0 step (mirrors
+                    # the yearly path's field).
+                    deployment_schedule_cost=self.deployment_schedule_cost,
+                    # Issue #139: surface the year-0 net refinance-origination
+                    # transaction cost/credit on the monthly path's year-0 step
+                    # too (mirrors the yearly path's field below).
+                    transaction_cost_year0=self.transaction_cost_year0,
                 ),
-                # Issue #914: the non-borrowed free cash invested this year --
-                # the inflow that funds its own non-reg contribution (no debt).
-                free_cash_invested=self.free_cash,
-                # Issue #137: surface the year-0 deployment-lag carry cost on
-                # the year-0 result (this is the monthly path's year-0 step).
-                deployment_lag_cost=self.deployment_lag_cost,
-                # Issue #74: surface the year-0 staggered-deployment
-                # schedule cost on the monthly path's year-0 step (mirrors
-                # the yearly path's field).
-                deployment_schedule_cost=self.deployment_schedule_cost,
-                # Issue #139: surface the year-0 net refinance-origination
-                # transaction cost/credit on the monthly path's year-0 step
-                # too (mirrors the yearly path's field below).
-                transaction_cost_year0=self.transaction_cost_year0,
             )
             # Lump sum uses year 0 result; don't append to results (it's pre-projection)
 
@@ -2907,103 +2913,105 @@ class FamilySimulation:
             result, state = simulate_year_pure(
                 state=state,
                 year=year,
-                calendar_year=sim_year,  # issue #343: drives LIRA→LIF conversion at age 71
-                allocations=allocations,
-                config=cfg,
-                investment_return=ret_effective,
-                mortgage_rate=mortgage_rate,
-                heloc_rate=heloc_rate,
-                mortgage_data=mort,
-                use_readvanceable=self.use_readvanceable,
-                deduct_later=self.deduct_later,
-                primary_marginal_rate=primary_rate,
-                spouse_marginal_rate=spouse_rate,
-                resp_data=resp_data if resp_data else None,
-                fhsa_contribution=fhsa_contrib,
-                fhsa_annual_limit=self.tax_provider.get_fhsa_limit(sim_year) if self.has_fhsa else None,
-                rrsp_annual_limit=rrsp_limit,
-                tfsa_annual_limit=tfsa_limit,
-                non_reg_after_tax_return=non_reg_atr,
-                registered_wht_drag=_registered_wht_drag_for(self._portfolio),
-                # epic #795 bite 1: the retirement transition OUTPUTS are no
-                # longer passed by the prologue -- the registered
-                # `retirement_income` rule computes them inside
-                # simulate_year_pure and writes them to YearWorkingState.
-                # The prologue passes only the INPUTS the rule needs (see
-                # simulate_year's identical block for the full rationale).
-                primary_income_pre=primary_income_pre,
-                spouse_income_pre=spouse_income_pre,
-                primary_retired=p_retired,
-                spouse_retired=s_retired,
-                base_primary_income=self._primary_income,
-                base_spouse_income=self._spouse_income,
-                year_brackets=year_brackets,
-                tax_indexation_rate=self.tax_provider.indexation_rate,
-                # Issue #761: compresses the discretionary portion of
-                # living_costs under a shock when a split is declared.
-                income_shock_active=income_shock_active,
-                living_costs=cfg.living_costs if cfg.living_costs is not None else 0.0,
-                after_tax_income=after_tax_income,
-                # epic #795 bite 3: inputs for the registered tuition_credit
-                # rule (see the annual path's identical block). The prologue
-                # passes the PRE-credit tax_before + the tax provider; the rule
-                # applies the credit inside simulate_year_pure and
-                # apply_solvency restores the POST-credit figure on
-                # YearResult.after_tax_income.
-                tax_provider=self.tax_provider,
-                primary_tax_before=primary_tax_before,
-                spouse_tax_before=spouse_tax_before,
-                # Issue #956 bite B (sale-core): the taxable income base the
-                # property_disposition rule bands a sold property's gain against
-                # (mirrors the annual path, DP#9).
-                primary_taxable_income=primary_taxable_income,
-                spouse_taxable_income=spouse_taxable_income,
-                # Epic #841 bite 2 / issue #812: model each child's OWN accounts
-                # this year (DP#9: same targets, same fold step as the yearly
-                # path). The year-0 lump-sum PRE-step above passes no such
-                # targets, so a child's accounts grow exactly ONCE per year --
-                # here, in this real per-year step.
-                child_allocation_pcts={
-                    'tfsa': self.strategy.child_tfsa_pct,
-                    'fhsa': self.strategy.child_fhsa_pct,
-                    'rrsp': self.strategy.child_rrsp_pct,
-                    'non_reg': self.strategy.child_non_reg_pct,
-                },
-                # Epic #841 bite 3: the per-child gift funding computed above.
-                child_gift_amounts=child_gifts,
-                # Issue #859 (Part A): the loan-kind subset for the balance sheet.
-                child_loan_amounts=child_loans,
-                # Issue #899 (part a): each additional accumulating adult's OWN
-                # end-of-year RRSP/TFSA (empty for a two-adult household).
-                extra_adult_accounts=extra_adult_accounts,
-                # Issue #1020 (S04 Step 1): prior-year GIS-countable income
-                # for the retirement_income rule's gis_benefit call (CRA
-                # prior-year test). None for year 0 (no prior year).
-                prior_gis_countable_income=_prior_gis_countable(results),
-                # Issue #137 (finding #2): surface the year-0 deployment-lag
-                # carry cost on this per-year step's result, mirroring the yearly
-                # path (simulate_year's `deployment_lag_cost=ctx
-                # .deployment_lag_cost if year == 0 else 0.0`). The monthly path's
-                # pre-projection step computes a year-0 result0 that is NOT
-                # appended (it only deploys the lump), so without this the first
-                # appended result would carry deployment_lag_cost=0.0 even when a
-                # carry was applied -- the cost would be paid but invisible.
-                deployment_lag_cost=(
-                    self.deployment_lag_cost if year == 0 else 0.0),
-                # Issue #74: surface the year-0 staggered-deployment schedule
-                # cost on this per-year step's result, mirroring the yearly
-                # path. The monthly path's pre-projection step computes a
-                # year-0 result0 that is NOT appended, so this per-year loop
-                # is where the year-0 schedule cost must surface.
-                deployment_schedule_cost=(
-                    self.deployment_schedule_cost if year == 0 else 0.0),
-                # Issue #139: surface the year-0 net refinance-origination
-                # transaction cost/credit on this per-year step's result,
-                # mirroring the yearly path. The monthly path's pre-projection
-                # step computes a year-0 result0 that is NOT appended, so this
-                # per-year loop is where the year-0 net cost must surface.
-                transaction_cost_year0=(
-                    self.transaction_cost_year0 if year == 0 else 0.0),
+                inputs=_build_year_inputs(
+                    calendar_year=sim_year,  # issue #343: drives LIRA→LIF conversion at age 71
+                    allocations=allocations,
+                    config=cfg,
+                    investment_return=ret_effective,
+                    mortgage_rate=mortgage_rate,
+                    heloc_rate=heloc_rate,
+                    mortgage_data=mort,
+                    use_readvanceable=self.use_readvanceable,
+                    deduct_later=self.deduct_later,
+                    primary_marginal_rate=primary_rate,
+                    spouse_marginal_rate=spouse_rate,
+                    resp_data=resp_data if resp_data else None,
+                    fhsa_contribution=fhsa_contrib,
+                    fhsa_annual_limit=self.tax_provider.get_fhsa_limit(sim_year) if self.has_fhsa else None,
+                    rrsp_annual_limit=rrsp_limit,
+                    tfsa_annual_limit=tfsa_limit,
+                    non_reg_after_tax_return=non_reg_atr,
+                    registered_wht_drag=_registered_wht_drag_for(self._portfolio),
+                    # epic #795 bite 1: the retirement transition OUTPUTS are no
+                    # longer passed by the prologue -- the registered
+                    # `retirement_income` rule computes them inside
+                    # simulate_year_pure and writes them to YearWorkingState.
+                    # The prologue passes only the INPUTS the rule needs (see
+                    # simulate_year's identical block for the full rationale).
+                    primary_income_pre=primary_income_pre,
+                    spouse_income_pre=spouse_income_pre,
+                    primary_retired=p_retired,
+                    spouse_retired=s_retired,
+                    base_primary_income=self._primary_income,
+                    base_spouse_income=self._spouse_income,
+                    year_brackets=year_brackets,
+                    tax_indexation_rate=self.tax_provider.indexation_rate,
+                    # Issue #761: compresses the discretionary portion of
+                    # living_costs under a shock when a split is declared.
+                    income_shock_active=income_shock_active,
+                    living_costs=cfg.living_costs if cfg.living_costs is not None else 0.0,
+                    after_tax_income=after_tax_income,
+                    # epic #795 bite 3: inputs for the registered tuition_credit
+                    # rule (see the annual path's identical block). The prologue
+                    # passes the PRE-credit tax_before + the tax provider; the rule
+                    # applies the credit inside simulate_year_pure and
+                    # apply_solvency restores the POST-credit figure on
+                    # YearResult.after_tax_income.
+                    tax_provider=self.tax_provider,
+                    primary_tax_before=primary_tax_before,
+                    spouse_tax_before=spouse_tax_before,
+                    # Issue #956 bite B (sale-core): the taxable income base the
+                    # property_disposition rule bands a sold property's gain against
+                    # (mirrors the annual path, DP#9).
+                    primary_taxable_income=primary_taxable_income,
+                    spouse_taxable_income=spouse_taxable_income,
+                    # Epic #841 bite 2 / issue #812: model each child's OWN accounts
+                    # this year (DP#9: same targets, same fold step as the yearly
+                    # path). The year-0 lump-sum PRE-step above passes no such
+                    # targets, so a child's accounts grow exactly ONCE per year --
+                    # here, in this real per-year step.
+                    child_allocation_pcts={
+                        'tfsa': self.strategy.child_tfsa_pct,
+                        'fhsa': self.strategy.child_fhsa_pct,
+                        'rrsp': self.strategy.child_rrsp_pct,
+                        'non_reg': self.strategy.child_non_reg_pct,
+                    },
+                    # Epic #841 bite 3: the per-child gift funding computed above.
+                    child_gift_amounts=child_gifts,
+                    # Issue #859 (Part A): the loan-kind subset for the balance sheet.
+                    child_loan_amounts=child_loans,
+                    # Issue #899 (part a): each additional accumulating adult's OWN
+                    # end-of-year RRSP/TFSA (empty for a two-adult household).
+                    extra_adult_accounts=extra_adult_accounts,
+                    # Issue #1020 (S04 Step 1): prior-year GIS-countable income
+                    # for the retirement_income rule's gis_benefit call (CRA
+                    # prior-year test). None for year 0 (no prior year).
+                    prior_gis_countable_income=_prior_gis_countable(results),
+                    # Issue #137 (finding #2): surface the year-0 deployment-lag
+                    # carry cost on this per-year step's result, mirroring the yearly
+                    # path (simulate_year's `deployment_lag_cost=ctx
+                    # .deployment_lag_cost if year == 0 else 0.0`). The monthly path's
+                    # pre-projection step computes a year-0 result0 that is NOT
+                    # appended (it only deploys the lump), so without this the first
+                    # appended result would carry deployment_lag_cost=0.0 even when a
+                    # carry was applied -- the cost would be paid but invisible.
+                    deployment_lag_cost=(
+                        self.deployment_lag_cost if year == 0 else 0.0),
+                    # Issue #74: surface the year-0 staggered-deployment schedule
+                    # cost on this per-year step's result, mirroring the yearly
+                    # path. The monthly path's pre-projection step computes a
+                    # year-0 result0 that is NOT appended, so this per-year loop
+                    # is where the year-0 schedule cost must surface.
+                    deployment_schedule_cost=(
+                        self.deployment_schedule_cost if year == 0 else 0.0),
+                    # Issue #139: surface the year-0 net refinance-origination
+                    # transaction cost/credit on this per-year step's result,
+                    # mirroring the yearly path. The monthly path's pre-projection
+                    # step computes a year-0 result0 that is NOT appended, so this
+                    # per-year loop is where the year-0 net cost must surface.
+                    transaction_cost_year0=(
+                        self.transaction_cost_year0 if year == 0 else 0.0),
+                ),
             )
             # Issue #693 (epic #690 bite 2): surface this year's rental income
             # (see simulate_year's identical block). Issue #694 (bite 3): the

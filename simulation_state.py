@@ -1824,41 +1824,56 @@ def borrowing_purpose_tracings(
     return advance_tracing, margin_tracing
 
 
-def simulate_year_pure(
-    state: SimState,
-    year: int,
-    allocations: Dict[str, float],
-    config: SimulationConfig,
-    investment_return: Optional[float] = None,
-    mortgage_rate: float = 0.05,
-    heloc_rate: float = 0.05,
-    mortgage_data: Dict = None,
-    use_readvanceable: bool = False,
-    deduct_later: bool = False,
+@dataclass(frozen=True)
+class YearInputs:
+    """Everything the year step needs besides the carried state (issue #231).
+
+    DP#26: ``simulate_year_pure`` is a pure function over explicit state.
+    Before #231 it took 58 parameters -- 56 of them per-call inputs threaded
+    from the caller. They are bundled here so a call site passes ONE object,
+    and so slice 2 can derive ``RuleContext`` from it directly.
+
+    Frozen: no rule may rebind or replace a field. The fold reads this and
+    never writes it.
+
+    Field defaults are EXACTLY the old ``simulate_year_pure`` keyword
+    defaults, so an omitted field keeps the value it always had. The builder
+    (``_build_year_inputs``) is a pure pass-through and never falls back on
+    falsiness -- a supplied ``0`` is a value and survives (DP#32/#13).
+    """
+
+    allocations: Dict[str, float]
+    config: SimulationConfig
+    investment_return: Optional[float] = None
+    mortgage_rate: float = 0.05
+    heloc_rate: float = 0.05
+    mortgage_data: Dict = None
+    use_readvanceable: bool = False
+    deduct_later: bool = False
     # DP#13/26: Round fallback defaults. Callers should always provide actual marginal rates
     # computed from tax brackets. 0.40 is a rough national average, NOT this household's rate.
-    primary_marginal_rate: float = 0.40,
+    primary_marginal_rate: float = 0.40
     # 0.20 is a round placeholder for lower-bracket spouse rate.
-    spouse_marginal_rate: float = 0.20,
-    resp_data: List[Dict] = None,
-    fhsa_contribution: float = 0.0,
-    rrsp_annual_limit: Optional[float] = None,
-    tfsa_annual_limit: Optional[float] = None,
-    fhsa_annual_limit: Optional[float] = None,
-    non_reg_after_tax_return: Optional[float] = None,
+    spouse_marginal_rate: float = 0.20
+    resp_data: List[Dict] = None
+    fhsa_contribution: float = 0.0
+    rrsp_annual_limit: Optional[float] = None
+    tfsa_annual_limit: Optional[float] = None
+    fhsa_annual_limit: Optional[float] = None
+    non_reg_after_tax_return: Optional[float] = None
     # Issue #641: per-registered-pot foreign-withholding-tax drag derived from
     # each account's OWN declared holdings ({kind: drag_rate} for rrsp/tfsa).
     # None (or an absent kind) preserves the flat gross rate exactly -- the
     # no-op a household with no registered composition relies on (golden).
-    registered_wht_drag: Optional[Dict[str, float]] = None,
+    registered_wht_drag: Optional[Dict[str, float]] = None
     # Issue #294: retirement transition. When a member crosses retirement_age,
     # the engine passes the family's government income (already computed from
     # member data + clawback) and a NET drawdown target; the pure step executes
     # the drawdown against state and surfaces everything in YearResult.
-    cpp_income: float = 0.0,
-    oas_income: float = 0.0,
-    pension_income: float = 0.0,
-    drawdown_order: Optional[List[str]] = None,
+    cpp_income: float = 0.0
+    oas_income: float = 0.0
+    pension_income: float = 0.0
+    drawdown_order: Optional[List[str]] = None
     # RRIF minimum withdrawals (mandatory decumulation once the RRSP is a RRIF,
     # required by age 71 — CRA T4040). The caller supplies the age-based minimum
     # *rate* for each spouse's RRIF (0 before conversion) and the retiree's
@@ -1867,23 +1882,23 @@ def simulate_year_pure(
     # after-tax proceeds in the taxable non-reg account (the retiree did not need
     # the cash for spending). Defaults of 0.0 preserve pre-retirement / unit-test
     # behavior exactly.
-    rrif_min_rate_primary: float = 0.0,
-    rrif_min_rate_spouse: float = 0.0,
+    rrif_min_rate_primary: float = 0.0
+    rrif_min_rate_spouse: float = 0.0
     # Net-target drawdown (issues #363/#579 — the only drawdown model; the old
     # blended-rate gross path has been deleted). The spending drawdown fills
     # drawdown_net_target (an after-tax need) via plan_drawdown_net, grossing up
     # only the taxable portion of each source. Default 0.0 preserves
     # pre-retirement / unit-test behavior exactly (no drawdown fires).
-    drawdown_net_target: float = 0.0,
-    retiree_marginal_rate: float = 0.0,
+    drawdown_net_target: float = 0.0
+    retiree_marginal_rate: float = 0.0
     # Issue #618: bracket-filling drawdown order. When drawdown_order contains
     # the 'rrsp_bracket_fill' token, the RRSP/RRIF draw against it is capped
     # at max(0, drawdown_bracket_target - drawdown_other_taxable_income)
     # instead of drawn without limit (see plan_drawdown_net). None disables
     # the cap (DP#13 — absence, not a hardcoded opinion), matching every
     # drawdown_order that does not use the bracket-fill token.
-    drawdown_bracket_target: Optional[float] = None,
-    drawdown_other_taxable_income: float = 0.0,
+    drawdown_bracket_target: Optional[float] = None
+    drawdown_other_taxable_income: float = 0.0
     # Issue #679: the household's own measured working-phase living-cost
     # budget and this year's after-tax employment income, both required by
     # the cash-flow solvency identity (simulation_rules.apply_solvency).
@@ -1891,14 +1906,14 @@ def simulate_year_pure(
     # that does not supply them (DP#16: living_costs<=0 is the module's
     # "not engaged" state -- see that rule's docstring for why this is not
     # a DP#32 zero-as-fallback trap).
-    living_costs: float = 0.0,
-    after_tax_income: float = 0.0,
+    living_costs: float = 0.0
+    after_tax_income: float = 0.0
     # Issue #679: the portion of THIS year's contributions funded by borrowing
     # (the year-0 leveraged lump sum) rather than by income. See
     # RuleContext.borrowed_investment -- counting the invested borrowing as an
     # outflow without counting the borrowing itself as an inflow invents a
     # shortfall and reports a FALSE ruin on every leveraged strategy.
-    borrowed_investment: float = 0.0,
+    borrowed_investment: float = 0.0
     # Issue #914: the non-borrowed year-0 free cash (RESP-collapse/EAP proceeds)
     # invested this year. Like borrowed_investment it is both an inflow and an
     # outflow in the cash-flow identity (apply_solvency) -- counting the
@@ -1906,7 +1921,7 @@ def simulate_year_pure(
     # arriving as an inflow would invent a false shortfall. Unlike
     # borrowed_investment it creates NO debt (it was never borrowed). 0.0 after
     # year 0 and for any run with no free cash (DP#32).
-    free_cash_invested: float = 0.0,
+    free_cash_invested: float = 0.0
     # Issue #137: the year-0 opportunity cost of a declared deployment lag on
     # the refinance cash-out advance, surfaced on the year-0 YearResult so output
     # plugins can render the cost of the delay. 0.0 in every year but year 0
@@ -1918,7 +1933,7 @@ def simulate_year_pure(
     # the deployable principal (capped at the lump for a negative carry,
     # finding #6); this parameter only surfaces it on the result for
     # observability.
-    deployment_lag_cost: float = 0.0,
+    deployment_lag_cost: float = 0.0
     # Issue #74: the year-0-equivalent opportunity cost of a declared
     # staggered deployment schedule on the refinance cash-out advance,
     # surfaced on the year-0 YearResult so output plugins can render the cost
@@ -1930,7 +1945,7 @@ def simulate_year_pure(
     # regardless of the schedule) and applied there as a reduction of the
     # deployable principal (capped at the lump for a negative cost); this
     # parameter only surfaces it on the result for observability.
-    deployment_schedule_cost: float = 0.0,
+    deployment_schedule_cost: float = 0.0
     # Issue #139: the signed NET year-0 LUMP cost of a refinance origination
     # (one-time transaction costs and credits attached to a financial event),
     # surfaced on the year-0 YearResult so output plugins can render the
@@ -1944,28 +1959,28 @@ def simulate_year_pure(
     # and applied there as a reduction of the deployable principal (the SAME
     # seam #137's deployment-lag carry uses); this parameter only surfaces it
     # on the result for observability.
-    transaction_cost_year0: float = 0.0,
+    transaction_cost_year0: float = 0.0
     # Issue #343: calendar year for date-computed gates (LIRA→LIF conversion at
     # age 71, LIF min/max factor lookups). `year` is a 0-based projection index;
     # the locked-in-account rules are date-computed from birth_year and therefore
     # need the absolute calendar year, not the index. Callers in the live run
     # loop pass calendar_year=start_year+year. When None, falls back to `year`
     # so direct unit-test callers that already pass a calendar year keep working.
-    calendar_year: Optional[int] = None,
+    calendar_year: Optional[int] = None
     # Issue #758: the retirement-phase flag + effective retirement spending
     # target, forwarded to apply_solvency so it charges the RETIREMENT spending
     # figure in retirement (not the working-phase living_costs) and does not
     # double-count spending the drawdown already funds. Defaults preserve
     # pre-retirement / unit-test behaviour exactly (any_retired=False).
-    any_retired: bool = False,
-    retirement_spending_target: float = 0.0,
+    any_retired: bool = False
+    retirement_spending_target: float = 0.0
     # Issue #761: True in a working-life year whose income is reduced below
     # the no-override baseline by a dated decisions.income[] shock. When a
     # discretionary split is declared, apply_solvency compresses the
     # discretionary portion of living_costs to zero this year. Default False
     # preserves pre-existing behaviour exactly for every caller that does
     # not supply it (no split declared OR no shock -> full scalar charged).
-    income_shock_active: bool = False,
+    income_shock_active: bool = False
     # ── epic #795 bite 1 (DP#26): inputs for the registered
     # `retirement_income` rule. The fold's prologue used to compute the
     # whole retirement transition inline and pass the OUTPUTS (cpp_income,
@@ -1978,20 +1993,20 @@ def simulate_year_pure(
     # rule OVERWRITES them when it fires (retirement inputs present), which
     # is the only path the live fold takes. Defaults preserve pre-retirement
     # / direct-unit-test behaviour exactly.
-    primary_income_pre: float = 0.0,
-    spouse_income_pre: float = 0.0,
-    primary_retired: bool = False,
-    spouse_retired: bool = False,
-    base_primary_income: float = 0.0,
-    base_spouse_income: float = 0.0,
-    year_brackets: Optional[List[Dict]] = None,
-    tax_indexation_rate: float = 0.0,
+    primary_income_pre: float = 0.0
+    spouse_income_pre: float = 0.0
+    primary_retired: bool = False
+    spouse_retired: bool = False
+    base_primary_income: float = 0.0
+    base_spouse_income: float = 0.0
+    year_brackets: Optional[List[Dict]] = None
+    tax_indexation_rate: float = 0.0
     # Issue #1020 (S04 Step 1): the prior year's GIS-countable income
     # (retirement income excluding OAS), threaded from the prior YearResult by
     # the live fold's prologue. The retirement_income rule calls gis_benefit on
     # this. None (default) -> GIS stays at its seeded 0.0, byte-identical for
     # every direct unit-test caller and every GIS-ineligible household (DP#32).
-    prior_gis_countable_income: Optional[float] = None,
+    prior_gis_countable_income: Optional[float] = None
     # Epic #841 bite 2 / issue #812: the strategy's child-allocation targets
     # ({'tfsa','fhsa','rrsp','non_reg': pct}). When provided, each child's OWN
     # income funds contributions into the child's OWN accounts, which grow this
@@ -1999,7 +2014,7 @@ def simulate_year_pure(
     # call" -- the signal the year-0 lump-sum PRE-step (monthly path) and
     # direct unit-test callers use so children are grown exactly ONCE per
     # projection year, by the real per-year fold step, never double-counted.
-    child_allocation_pcts: Optional[Dict[str, float]] = None,
+    child_allocation_pcts: Optional[Dict[str, float]] = None
     # Epic #841 bite 3: per-child parent->child GIFT funding for this year
     # (aligned to config.children by index), already capped to each child's
     # remaining registered room by child_gift_funding_for_year. Added to each
@@ -2007,20 +2022,20 @@ def simulate_year_pure(
     # child's registered room beyond their income. None -> no gifts (the golden
     # household); the child accounts grow on the child's own savings alone,
     # bit-identical to bite 2.
-    child_gift_amounts: Optional[list] = None,
+    child_gift_amounts: Optional[list] = None
     # Issue #859 (Part A): the LOAN-kind (repayable-gift) portion of this year's
     # child funding (aligned to config.children by index), a subset of
     # child_gift_amounts. Accumulated onto each child's loan_funded_principal so
     # the family balance sheet can book it as the lender's receivable / the
     # child's liability (DP#18). None -> no loans; loan_funded_principal stays 0.
-    child_loan_amounts: Optional[list] = None,
+    child_loan_amounts: Optional[list] = None
     # Issue #899 (part a): the precomputed end-of-year OWN RRSP/TFSA for each
     # ADDITIONAL accumulating adult (store slots >= 2), one dict per extra adult
     # from step_extra_adult_accounts (the prologue computes it where income/tax/
     # brackets are available). None/[] for a two-adult household -> nothing is
     # written back over the carried-forward slots -> byte-identical (the golden
     # invariant reads the two-slot YearResult total, not the store).
-    extra_adult_accounts: Optional[list] = None,
+    extra_adult_accounts: Optional[list] = None
     # epic #795 bite 3 (DP#26): inputs for the registered `tuition_credit`
     # rule. The prologue used to compute the tuition credit inline (own
     # credit + carry-forward + transfers) and pass POST-credit tax onward;
@@ -2032,15 +2047,34 @@ def simulate_year_pure(
     # loop already computed them). Defaults preserve the no-tuition /
     # direct-unit-test behaviour exactly: when no tuition is declared the
     # rule is a no-op (0 credit, carry-forwards untouched).
-    tax_provider: object = None,
-    primary_tax_before: float = 0.0,
-    spouse_tax_before: float = 0.0,
+    tax_provider: object = None
+    primary_tax_before: float = 0.0
+    spouse_tax_before: float = 0.0
     # Issue #956 bite B (sale-core): each taxed member's taxable income base,
     # passed to the registered property_disposition rule so a sold property's
     # gain bands against the owner's actual taxable income (DP#9 -- reuses
     # estate.tax_on_capital_gain_at_death's ``other_income`` argument).
-    primary_taxable_income: float = 0.0,
-    spouse_taxable_income: float = 0.0,
+    primary_taxable_income: float = 0.0
+    spouse_taxable_income: float = 0.0
+
+
+def _build_year_inputs(allocations: Dict[str, float],
+                       config: SimulationConfig,
+                       **kwargs) -> YearInputs:
+    """Bundle the year step's inputs into a frozen ``YearInputs`` (issue #231).
+
+    Pure pass-through: ``kwargs`` become the dataclass fields verbatim, so a
+    supplied ``0``/``False``/``None`` survives untouched -- there is no ``or``
+    fallback here and there must never be one (DP#32/#13). An unrecognized
+    keyword raises ``TypeError`` loudly rather than being dropped, which is
+    exactly what the old 58-parameter signature did.
+    """
+    return YearInputs(allocations=allocations, config=config, **kwargs)
+
+def simulate_year_pure(
+    state: SimState,
+    year: int,
+    inputs: YearInputs,
 ) -> Tuple[YearResult, SimState]:
     """Pure function: advance the simulation by one year.
 
@@ -2051,8 +2085,8 @@ def simulate_year_pure(
     19 named rules in ``simulation_rules.py`` (``RULE_ORDER``), each a small
     pure function over an explicit ``YearWorkingState``/``RuleContext`` --
     not inlined here. This function's job is the seam: build the working
-    state and context from ``state``/``allocations``/the keyword arguments
-    below, fold ``simulation_rules.run_rules`` over the registry (which
+    state and context from ``state``/``inputs``, fold
+    ``simulation_rules.run_rules`` over the registry (which
     raises loudly if any declared rule has no implementation -- DP#32), and
     assemble the ``YearResult``/``SimState`` from whatever the rules
     produced.
@@ -2075,34 +2109,82 @@ def simulate_year_pure(
         state: Current simulation state
         year: Year index (0-based). Used for the output YearResult.year and
             index-keyed bookkeeping. Date-computed rules (LIRA→LIF conversion,
-            LIF withdrawal factors) use calendar_year instead (issue #343).
-        calendar_year: Absolute calendar year for this step (e.g. 2050). When
-            None, falls back to `year`. The live run loop passes
-            start_year + year so the LIRA→LIF conversion gate (age 71) fires.
-        allocations: Dict of contribution amounts per account
-        config: Simulation configuration (immutable)
-        investment_return: Investment return for this year (required; compute from ReturnModel)
-        mortgage_rate: Mortgage rate for this year
-        heloc_rate: HELOC rate for this year
-        mortgage_data: Pre-computed mortgage amortization data for this year
-        use_readvanceable: Whether Smith Manoeuvre is active
-        deduct_later: Whether to defer RRSP deductions
-        primary_marginal_rate: Primary earner's marginal tax rate
-        spouse_marginal_rate: Spouse's marginal tax rate
-        resp_data: Pre-computed RESP per-child data
-        fhsa_contribution: FHSA contribution this year
-        fhsa_annual_limit: DP#20 year-specific FHSA dollar limit for this
-            simulation year. If None, no annual room is added.
-        rrsp_annual_limit: DP#20 year-specific RRSP dollar limit for this
-            simulation year. If None, falls back to config.rrsp_annual_max.
-        tfsa_annual_limit: DP#20 year-specific TFSA dollar limit for this
-            simulation year. If None, falls back to config.tfsa_annual_room_per_person.
-        non_reg_after_tax_return: DP#27 income-type-specific after-tax return
-            for non-reg investments. If None, falls back to investment_return.
+            LIF withdrawal factors) use ``inputs.calendar_year`` instead (#343).
+        inputs: The year step's bundled inputs (issue #231) -- ``allocations``
+            and ``config`` plus this year's rates and every per-call input the
+            registered rules read. See ``YearInputs`` for the full field list
+            and each field's default.
+            ``inputs.calendar_year`` is the absolute calendar year for this
+            step (e.g. 2050); when None it falls back to ``year``, so the live
+            run loop passes ``start_year + year`` to fire the LIRA→LIF gate
+            (issue #343). ``inputs.investment_return`` is required -- None
+            raises.
 
     Returns:
         (YearResult, SimState) — the year's result and the next state.
     """
+    # Issue #231 slice 1: ``inputs`` bundles the 56 parameters that used to be
+    # spelled out here. Unpacking into locals keeps the fold body byte-identical
+    # for this slice; slice 2 removes these lines when ``RuleContext`` is derived
+    # from ``YearInputs`` directly (DP#26). Each read is a plain attribute access --
+    # no ``or`` fallback, so a supplied 0 survives (DP#32/#13).
+    allocations = inputs.allocations
+    config = inputs.config
+    investment_return = inputs.investment_return
+    mortgage_rate = inputs.mortgage_rate
+    heloc_rate = inputs.heloc_rate
+    mortgage_data = inputs.mortgage_data
+    use_readvanceable = inputs.use_readvanceable
+    deduct_later = inputs.deduct_later
+    primary_marginal_rate = inputs.primary_marginal_rate
+    spouse_marginal_rate = inputs.spouse_marginal_rate
+    resp_data = inputs.resp_data
+    fhsa_contribution = inputs.fhsa_contribution
+    rrsp_annual_limit = inputs.rrsp_annual_limit
+    tfsa_annual_limit = inputs.tfsa_annual_limit
+    fhsa_annual_limit = inputs.fhsa_annual_limit
+    non_reg_after_tax_return = inputs.non_reg_after_tax_return
+    registered_wht_drag = inputs.registered_wht_drag
+    cpp_income = inputs.cpp_income
+    oas_income = inputs.oas_income
+    pension_income = inputs.pension_income
+    drawdown_order = inputs.drawdown_order
+    rrif_min_rate_primary = inputs.rrif_min_rate_primary
+    rrif_min_rate_spouse = inputs.rrif_min_rate_spouse
+    drawdown_net_target = inputs.drawdown_net_target
+    retiree_marginal_rate = inputs.retiree_marginal_rate
+    drawdown_bracket_target = inputs.drawdown_bracket_target
+    drawdown_other_taxable_income = inputs.drawdown_other_taxable_income
+    living_costs = inputs.living_costs
+    after_tax_income = inputs.after_tax_income
+    borrowed_investment = inputs.borrowed_investment
+    free_cash_invested = inputs.free_cash_invested
+    deployment_lag_cost = inputs.deployment_lag_cost
+    deployment_schedule_cost = inputs.deployment_schedule_cost
+    transaction_cost_year0 = inputs.transaction_cost_year0
+    calendar_year = inputs.calendar_year
+    any_retired = inputs.any_retired
+    retirement_spending_target = inputs.retirement_spending_target
+    income_shock_active = inputs.income_shock_active
+    primary_income_pre = inputs.primary_income_pre
+    spouse_income_pre = inputs.spouse_income_pre
+    primary_retired = inputs.primary_retired
+    spouse_retired = inputs.spouse_retired
+    base_primary_income = inputs.base_primary_income
+    base_spouse_income = inputs.base_spouse_income
+    year_brackets = inputs.year_brackets
+    tax_indexation_rate = inputs.tax_indexation_rate
+    prior_gis_countable_income = inputs.prior_gis_countable_income
+    child_allocation_pcts = inputs.child_allocation_pcts
+    child_gift_amounts = inputs.child_gift_amounts
+    child_loan_amounts = inputs.child_loan_amounts
+    extra_adult_accounts = inputs.extra_adult_accounts
+    tax_provider = inputs.tax_provider
+    primary_tax_before = inputs.primary_tax_before
+    spouse_tax_before = inputs.spouse_tax_before
+    primary_taxable_income = inputs.primary_taxable_income
+    spouse_taxable_income = inputs.spouse_taxable_income
+
     # Issue #28: investment_return must be provided explicitly
     if investment_return is None:
         raise ValueError(

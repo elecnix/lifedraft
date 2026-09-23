@@ -26,7 +26,7 @@ from dataclasses import replace
 from copy import deepcopy
 
 from simulation_state import (
-    SimState, simulate_year_pure, compute_heloc_deductible_proportion, # #700: per-adult RRSP store, # #700: per-adult TFSA store, # #700/#643/#704: per-adult FHSA store,
+    SimState, simulate_year_pure, _build_year_inputs, compute_heloc_deductible_proportion, # #700: per-adult RRSP store, # #700: per-adult TFSA store, # #700/#643/#704: per-adult FHSA store,
 )
 from canada_state_accessors import (
     adult_rrsp_slot, adult_rrsp_total, adult_tfsa_slot, adult_tfsa_total, adult_fhsa_slot,
@@ -199,8 +199,20 @@ class TestSimulateYearPure(unittest.TestCase):
         allocs = _base_allocs()
         mort = _mort_data(state)
         
-        r1, s1 = simulate_year_pure(state, 0, allocs, cfg, investment_return=0.07, mortgage_data=mort)
-        r2, s2 = simulate_year_pure(state, 0, allocs, cfg, investment_return=0.07, mortgage_data=mort)
+        r1, s1 = simulate_year_pure(
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07, mortgage_data=mort
+            ),
+        )
+        r2, s2 = simulate_year_pure(
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07, mortgage_data=mort
+            ),
+        )
         
         self.assertEqual(r1.total_assets, r2.total_assets)
         self.assertEqual(_rrsp_total(s1), _rrsp_total(s2))
@@ -210,7 +222,13 @@ class TestSimulateYearPure(unittest.TestCase):
         state = SimState.initial(cfg)
         original_room = _rrsp_room(state)
         
-        simulate_year_pure(state, 0, _base_allocs(), cfg, investment_return=0.07, mortgage_data=_mort_data(state))
+        simulate_year_pure(
+            state,
+            0,
+            inputs=_build_year_inputs(
+                _base_allocs(), cfg, investment_return=0.07, mortgage_data=_mort_data(state)
+            ),
+        )
         
         self.assertEqual(_rrsp_room(state), original_room)
 
@@ -231,10 +249,22 @@ class TestStateForking(unittest.TestCase):
         state = SimState.initial(cfg)
         forked = replace(state, mortgage_balance=100000)
         
-        _, state2 = simulate_year_pure(state, 0, _base_allocs(), cfg, investment_return=0.07, 
-                                        mortgage_data=_mort_data(state))
-        _, forked2 = simulate_year_pure(forked, 0, _base_allocs(), cfg, investment_return=0.07,
-                                         mortgage_data=_mort_data(forked, principal=5000))
+        _, state2 = simulate_year_pure(
+            state,
+            0,
+            inputs=_build_year_inputs(
+                _base_allocs(), cfg, investment_return=0.07, 
+                                            mortgage_data=_mort_data(state)
+            ),
+        )
+        _, forked2 = simulate_year_pure(
+            forked,
+            0,
+            inputs=_build_year_inputs(
+                _base_allocs(), cfg, investment_return=0.07,
+                                             mortgage_data=_mort_data(forked, principal=5000)
+            ),
+        )
         
         self.assertNotEqual(state2.mortgage_balance, forked2.mortgage_balance)
 
@@ -289,7 +319,13 @@ class TestHelocTracing(unittest.TestCase):
         cfg = _make_config()
         state = SimState.initial(cfg)
         allocs = {'non_reg': 10000, '_primary_income': 120000, '_spouse_income': 50000, '_annual_savings': 34000}
-        _, new_state = simulate_year_pure(state, 0, allocs, cfg, investment_return=0.07, mortgage_data=_mort_data(state))
+        _, new_state = simulate_year_pure(
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07, mortgage_data=_mort_data(state)
+            ),
+        )
         
         tracing = _c(new_state, 'heloc_tracing', {})
         self.assertEqual(tracing.get('investment_advances', 0), 10000)
@@ -306,8 +342,12 @@ class TestSmithManoeuvre(unittest.TestCase):
         mort = _mort_data(state, principal=10000)
         
         _, new_state = simulate_year_pure(
-            state, 0, allocs, cfg, investment_return=0.07, use_readvanceable=True,
-            mortgage_data=mort, mortgage_rate=0.05, heloc_rate=0.055,
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07, use_readvanceable=True,
+                mortgage_data=mort, mortgage_rate=0.05, heloc_rate=0.055,
+            ),
         )
         
         self.assertGreater(_c(new_state, 'readvance_heloc_balance'), 0)
@@ -318,7 +358,13 @@ class TestSmithManoeuvre(unittest.TestCase):
         state = SimState.initial(cfg)
         allocs = _base_allocs()
         
-        _, new_state = simulate_year_pure(state, 0, allocs, cfg, investment_return=0.07, use_readvanceable=False)
+        _, new_state = simulate_year_pure(
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07, use_readvanceable=False
+            ),
+        )
 
         self.assertEqual(_c(new_state, 'readvance_heloc_balance'), 0)
         self.assertEqual(_c(new_state, 'sm_investment_balance'), 0)
@@ -329,8 +375,12 @@ class TestSmithManoeuvre(unittest.TestCase):
         allocs = _base_allocs()
         mort = _mort_data(state, principal=10000)
         result, _ = simulate_year_pure(
-            state, 0, allocs, cfg, investment_return=0.07, use_readvanceable=True,
-            mortgage_data=mort, mortgage_rate=0.05, heloc_rate=0.055,
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07, use_readvanceable=True,
+                mortgage_data=mort, mortgage_rate=0.05, heloc_rate=0.055,
+            ),
         )
         return result
 
@@ -366,8 +416,12 @@ class TestMultiYearFold(unittest.TestCase):
         for year in range(5):
             allocs = _base_allocs(year)
             result, state = simulate_year_pure(
-                state, year, allocs, cfg, investment_return=0.07,
-                mortgage_rate=0.05, mortgage_data=_mort_data(state),
+                state,
+                year,
+                inputs=_build_year_inputs(
+                    allocs, cfg, investment_return=0.07,
+                    mortgage_rate=0.05, mortgage_data=_mort_data(state),
+                ),
             )
             results.append(result)
         
@@ -383,8 +437,12 @@ class TestMultiYearFold(unittest.TestCase):
         for year in range(5):
             allocs = _base_allocs(year)
             result, state = simulate_year_pure(
-                state, year, allocs, cfg, investment_return=0.07,
-                mortgage_rate=0.05, mortgage_data=_mort_data(state),
+                state,
+                year,
+                inputs=_build_year_inputs(
+                    allocs, cfg, investment_return=0.07,
+                    mortgage_rate=0.05, mortgage_data=_mort_data(state),
+                ),
             )
             results.append(result)
         
@@ -403,8 +461,14 @@ class TestEdgeCases(unittest.TestCase):
         allocs = {'primary_rrsp': 10000, '_primary_income': 120000, 
                   '_spouse_income': 50000, '_annual_savings': 34000}
         
-        _, new_state = simulate_year_pure(state, 0, allocs, cfg, investment_return=0.07, 
-                                           mortgage_data=_mort_data(state))
+        _, new_state = simulate_year_pure(
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07, 
+                                               mortgage_data=_mort_data(state)
+            ),
+        )
         
         self.assertEqual(_rrsp_total(new_state), 0)
     
@@ -413,7 +477,13 @@ class TestEdgeCases(unittest.TestCase):
         state = SimState.initial(cfg)
         allocs = {'_primary_income': 120000, '_spouse_income': 50000, '_annual_savings': 0}
         
-        result, _ = simulate_year_pure(state, 0, allocs, cfg, investment_return=0.07, mortgage_data=_mort_data(state))
+        result, _ = simulate_year_pure(
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg, investment_return=0.07, mortgage_data=_mort_data(state)
+            ),
+        )
         
         self.assertEqual(result.rrsp_tax_savings, 0)
 
@@ -465,9 +535,13 @@ class TestFHSASimulation(unittest.TestCase):
             '_annual_savings': 34000,
         }
         result, new_state = simulate_year_pure(
-            state, 0, allocs, _make_config(), investment_return=0.07,
-            fhsa_contribution=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, _make_config(), investment_return=0.07,
+                fhsa_contribution=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertGreater(_cf(new_state, 'fhsa_balance'), 0)
         self.assertLess(_cf(new_state, 'fhsa_room'), 8000)
@@ -475,8 +549,12 @@ class TestFHSASimulation(unittest.TestCase):
     def test_fhsa_contribution_clamped_to_room(self):
         state = _fhsa_state(fhsa_room=3000)
         result, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
+            ),
         )
         self.assertAlmostEqual(_cf(new_state, 'fhsa_room'), 0)
 
@@ -484,54 +562,78 @@ class TestFHSASimulation(unittest.TestCase):
         state = _fhsa_state(fhsa_room=8000, fhsa_balance=0)
         allocs = {'fhsa': 8000, '_primary_income': 120000, '_spouse_income': 50000}
         result, new_state = simulate_year_pure(
-            state, 0, allocs, _make_config(), investment_return=0.07,
-            fhsa_contribution=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, _make_config(), investment_return=0.07,
+                fhsa_contribution=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertGreaterEqual(result.total_assets, _cf(new_state, 'fhsa_balance'))
 
     def test_fhsa_annual_room_added(self):
         state = _fhsa_state(fhsa_room=0, fhsa_balance=0)
         result, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertEqual(_cf(new_state, 'fhsa_room'), 8000)
 
     def test_fhsa_annual_limit_none_no_room_added(self):
         state = _fhsa_state(fhsa_room=0, fhsa_balance=0)
         result, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=None,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=None,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertEqual(_cf(new_state, 'fhsa_room'), 0)
 
     def test_fhsa_carry_forward_exact_value(self):
         state = _fhsa_state(fhsa_room=8000, fhsa_balance=0)
         _, state_y1 = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertEqual(_cf(state_y1, 'fhsa_room'), 16000)
 
     def test_fhsa_carry_forward_capped_at_one_year(self):
         state = _fhsa_state(fhsa_room=12000, fhsa_balance=0)
         _, state_y1 = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertEqual(_cf(state_y1, 'fhsa_room'), 16000)
 
     def test_fhsa_contribution_then_annual_room(self):
         state = _fhsa_state(fhsa_room=8000, fhsa_balance=0)
         _, state_y1 = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=8000, fhsa_annual_limit=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=8000, fhsa_annual_limit=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertEqual(_cf(state_y1, 'fhsa_room'), 8000)
 
@@ -539,17 +641,25 @@ class TestFHSASimulation(unittest.TestCase):
         state = _fhsa_state(fhsa_room=8000, fhsa_balance=0)
         allocs = {'fhsa': 8000, '_primary_income': 120000, '_spouse_income': 50000}
         result, new_state = simulate_year_pure(
-            state, 0, allocs, _make_config(), investment_return=0.07,
-            fhsa_contribution=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, _make_config(), investment_return=0.07,
+                fhsa_contribution=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertAlmostEqual(_cf(new_state, 'fhsa_balance'), 8000 * 1.07, places=1)
 
     def test_fhsa_zero_contribution_when_no_room(self):
         state = _fhsa_state(fhsa_room=0, fhsa_balance=0)
         result, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=5000, mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=5000, mortgage_data=_mort_data(state),
+            ),
         )
         self.assertAlmostEqual(_cf(new_state, 'fhsa_balance'), 0)
 
@@ -558,8 +668,12 @@ class TestFHSASimulation(unittest.TestCase):
         original_room = _cf(state, 'fhsa_room')
         original_bal = _cf(state, 'fhsa_balance')
         simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
+            ),
         )
         self.assertEqual(_cf(state, 'fhsa_room'), original_room)
         self.assertEqual(_cf(state, 'fhsa_balance'), original_bal)
@@ -581,17 +695,25 @@ class TestFHSASimulation(unittest.TestCase):
     def test_fhsa_lifetime_used_increases_with_contribution(self):
         state = _fhsa_state(fhsa_room=8000, fhsa_lifetime_used=0)
         _, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=5000, fhsa_annual_limit=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=5000, fhsa_annual_limit=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertAlmostEqual(_cf(new_state, 'fhsa_lifetime_used'), 5000)
 
     def test_fhsa_contribution_clamped_by_lifetime_remaining(self):
         state = _fhsa_state(fhsa_room=8000, fhsa_lifetime_used=37000, fhsa_lifetime_limit=40000)
         result, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
+            ),
         )
         self.assertAlmostEqual(_cf(new_state, 'fhsa_lifetime_used'), 40000)
         self.assertAlmostEqual(_cf(new_state, 'fhsa_balance') / 1.07, 3000, places=1)
@@ -599,8 +721,12 @@ class TestFHSASimulation(unittest.TestCase):
     def test_fhsa_lifetime_used_cannot_exceed_limit(self):
         state = _fhsa_state(fhsa_room=8000, fhsa_lifetime_used=39000, fhsa_lifetime_limit=40000)
         _, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
+            ),
         )
         self.assertLessEqual(_cf(new_state, 'fhsa_lifetime_used'), _cf(new_state, 'fhsa_lifetime_limit'))
 
@@ -608,9 +734,13 @@ class TestFHSASimulation(unittest.TestCase):
         state = _fhsa_state(fhsa_room=8000, fhsa_balance=5000)
         allocs = {'fhsa': 8000, '_primary_income': 120000, '_spouse_income': 50000}
         result, new_state = simulate_year_pure(
-            state, 0, allocs, _make_config(), investment_return=0.07,
-            fhsa_contribution=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, _make_config(), investment_return=0.07,
+                fhsa_contribution=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         non_fhsa_assets = (
             _rrsp_total(new_state) + _tfsa_total(new_state) + new_state.non_reg_balance
@@ -643,9 +773,13 @@ class TestFHSASimulationExtra(unittest.TestCase):
                 'lifetime_used': 0.0, 'lifetime_limit': 50000,
             }}
         _, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            cfg, investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                cfg, investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertEqual(_cf(new_state, 'fhsa_lifetime_limit'), 50000)
 
@@ -673,8 +807,12 @@ class TestCanadaPropertyDescriptor(unittest.TestCase):
         state.jurisdiction_state['canada'] = None
         # simulate_year_pure should initialize a default canada dict
         result, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            cfg, investment_return=0.07, mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                cfg, investment_return=0.07, mortgage_data=_mort_data(state),
+            ),
         )
         # Should have created a valid canada dict
         self.assertIsInstance(new_state.jurisdiction_state.get('canada'), dict)
@@ -690,8 +828,12 @@ class TestLegacyJurisdictionStateDeprecation(unittest.TestCase):
         state.jurisdiction_state['canada'] = 'not_a_dict'
         # Should not crash — simulate_year_pure should create a fresh dict
         result, new_state = simulate_year_pure(
-            state, 0, {'_primary_income': 120000, '_spouse_income': 50000},
-            cfg, investment_return=0.07, mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                {'_primary_income': 120000, '_spouse_income': 50000},
+                cfg, investment_return=0.07, mortgage_data=_mort_data(state),
+            ),
         )
         self.assertIsInstance(new_state.jurisdiction_state.get('canada'), dict)
 
@@ -706,7 +848,13 @@ class TestInvestmentReturnRequired(unittest.TestCase):
         state = SimState.initial(cfg)
         allocs = _base_allocs()
         with self.assertRaises(ValueError) as ctx:
-            simulate_year_pure(state, 0, allocs, cfg, mortgage_data=_mort_data(state))
+            simulate_year_pure(
+                state,
+                0,
+                inputs=_build_year_inputs(
+                    allocs, cfg, mortgage_data=_mort_data(state)
+                ),
+            )
         self.assertIn('investment_return', str(ctx.exception))
 
     def test_raises_value_error_when_investment_return_is_none(self):
@@ -715,9 +863,13 @@ class TestInvestmentReturnRequired(unittest.TestCase):
         allocs = _base_allocs()
         with self.assertRaises(ValueError):
             simulate_year_pure(
-                state, 0, allocs, cfg,
-                investment_return=None,
-                mortgage_data=_mort_data(state),
+                state,
+                0,
+                inputs=_build_year_inputs(
+                    allocs, cfg,
+                    investment_return=None,
+                    mortgage_data=_mort_data(state),
+                ),
             )
 
     def test_works_with_explicit_investment_return(self):
@@ -725,9 +877,13 @@ class TestInvestmentReturnRequired(unittest.TestCase):
         state = SimState.initial(cfg)
         allocs = _base_allocs()
         result, new_state = simulate_year_pure(
-            state, 0, allocs, cfg,
-            investment_return=0.07,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg,
+                investment_return=0.07,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertGreater(result.total_assets, 0)
 
@@ -736,9 +892,13 @@ class TestInvestmentReturnRequired(unittest.TestCase):
         state = SimState.initial(cfg)
         allocs = _base_allocs()
         result, new_state = simulate_year_pure(
-            state, 0, allocs, cfg,
-            investment_return=0.0,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg,
+                investment_return=0.0,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertGreater(result.total_assets, 0)
 
@@ -747,8 +907,12 @@ class TestInvestmentReturnRequired(unittest.TestCase):
         state = SimState.initial(cfg)
         allocs = _base_allocs()
         result, new_state = simulate_year_pure(
-            state, 0, allocs, cfg,
-            investment_return=-0.10,
-            mortgage_data=_mort_data(state),
+            state,
+            0,
+            inputs=_build_year_inputs(
+                allocs, cfg,
+                investment_return=-0.10,
+                mortgage_data=_mort_data(state),
+            ),
         )
         self.assertIsInstance(result.total_assets, float)
