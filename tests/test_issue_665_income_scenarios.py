@@ -42,6 +42,7 @@ from simulation import SimulationConfig
 from countries.canada.strategies import STRATEGY_BALANCED
 from scenario_discovery import _convert_income_scenarios
 import optimize
+import output_plugins
 
 
 def _fixture_cfg(income_scenarios=None):
@@ -282,7 +283,7 @@ class TestWinnersByIncomeScenario(unittest.TestCase):
             {"income_scenario_id": "job_loss", "income_scenario_label": "Job loss",
              "strategy": "readvance_priority", "net_benefit": 90000, "deduct_later": False},
         ]
-        winners = optimize.winners_by_income_scenario(results)
+        winners = output_plugins.winners_by_income_scenario(results)
         self.assertEqual(len(winners), 2)
         self.assertEqual(winners[0]["strategy"], "readvance_priority")
         self.assertFalse(winners[0]["changed_from_base"])
@@ -300,7 +301,7 @@ class TestWinnersByIncomeScenario(unittest.TestCase):
             {"income_scenario_id": "job_loss", "income_scenario_label": "Job loss",
              "strategy": "readvance_priority", "net_benefit": 200000, "deduct_later": False},
         ]
-        winners = optimize.winners_by_income_scenario(results)
+        winners = output_plugins.winners_by_income_scenario(results)
         self.assertFalse(winners[1]["changed_from_base"])
 
     def test_single_scenario_has_no_comparison(self):
@@ -308,7 +309,7 @@ class TestWinnersByIncomeScenario(unittest.TestCase):
             {"income_scenario_id": "current", "income_scenario_label": "Current income",
              "strategy": "readvance_priority", "net_benefit": 500000, "deduct_later": False},
         ]
-        winners = optimize.winners_by_income_scenario(results)
+        winners = output_plugins.winners_by_income_scenario(results)
         self.assertEqual(len(winners), 1)
         self.assertFalse(winners[0]["changed_from_base"])
 

@@ -47,6 +47,7 @@ import pytest
 
 import input_contract as ic
 import optimize
+import output_plugins
 import scenario_discovery as sd
 from countries.canada.adapter import CanadaAdapter
 from simulation import FamilySimulation
@@ -497,7 +498,7 @@ class TestOptimizeStructureExploration(unittest.TestCase):
     def test_the_three_structures_rank_differently(self):
         """The whole point of #687: these are genuinely different
         structures, and the engine must not report them as equivalent."""
-        winners = optimize.winners_by_structure_scenario(self.results)
+        winners = output_plugins.winners_by_structure_scenario(self.results)
         by_structure = {w["structure_id"]: w["net_benefit"] for w in winners
                         if w["income_scenario_id"] == winners[0]["income_scenario_id"]}
         values = set(round(v, 2) for v in by_structure.values())
@@ -548,8 +549,8 @@ class TestStructureRankingPureLogic(unittest.TestCase):
             self._row('a', 'All-mortgage', 'job_loss', 'Job loss', 3_000_000),
             self._row('b', 'Readvanceable', 'job_loss', 'Job loss', 5_000_000),
         ]
-        winners = optimize.winners_by_structure_scenario(rows)
-        ranking = optimize.structure_ranking_by_income_scenario(winners)
+        winners = output_plugins.winners_by_structure_scenario(rows)
+        ranking = output_plugins.structure_ranking_by_income_scenario(winners)
         self.assertEqual(ranking['stay'][0]['structure_id'], 'a')
         self.assertEqual(
             ranking['job_loss'][0]['structure_id'], 'b',
@@ -565,7 +566,7 @@ class TestStructureRankingPureLogic(unittest.TestCase):
         ]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(rows)
+            output_plugins._print_structure_report(rows)
         out = buf.getvalue()
         ruin_line = next(l for l in out.splitlines() if 'Readvanceable' in l)
         self.assertIn('RUIN', ruin_line)
@@ -582,7 +583,7 @@ class TestStructureRankingPureLogic(unittest.TestCase):
         ]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(rows)
+            output_plugins._print_structure_report(rows)
         out = buf.getvalue()
         for l in out.splitlines():
             if 'All-mortgage' in l or 'Readvanceable' in l:
@@ -603,7 +604,7 @@ class TestStructureRankingPureLogic(unittest.TestCase):
         ]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(rows)
+            output_plugins._print_structure_report(rows)
         out = buf.getvalue()
         self.assertIn('HOW THE REVOLVING SEGMENT IS MODELLED', out)
         self.assertIn('draw fractions', out)
@@ -628,7 +629,7 @@ class TestStructureRankingPureLogic(unittest.TestCase):
         ]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(rows)
+            output_plugins._print_structure_report(rows)
         self.assertNotIn('HOW THE REVOLVING SEGMENT IS MODELLED', buf.getvalue())
 
     def test_a_single_structure_prints_nothing(self):
@@ -639,7 +640,7 @@ class TestStructureRankingPureLogic(unittest.TestCase):
         rows = [self._row('declared', 'Declared structure', 'stay', 'Stay', 9_000_000)]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_structure_report(rows)
+            output_plugins._print_structure_report(rows)
         self.assertEqual(buf.getvalue(), '')
 
 

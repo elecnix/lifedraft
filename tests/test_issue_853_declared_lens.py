@@ -17,6 +17,7 @@ All data is fabricated with round numbers — no personal data (DP#15).
 import pytest
 
 import optimize
+import output_plugins
 from scenario_discovery import annotate_declared_over_sweep
 
 
@@ -191,7 +192,7 @@ class TestRefinanceBasisIsALens:
         cfg = _declared(_cfg(),
                         {'id': 'advance', 'label': 'Mortgage advance', 'cash_out': 200000})
         results = optimize.run_ltv_exploration(cfg)
-        optimize._print_refinance_basis(results)
+        output_plugins._print_refinance_basis(results)
         out = capsys.readouterr().out
         assert '★' in out
         assert 'FULL LTV sweep' in out
@@ -205,7 +206,7 @@ class TestRefinanceBasisIsALens:
         cfg = _declared(_cfg(),
                         {'id': 'advance', 'label': 'Mortgage advance', 'cash_out': 200000})
         results = optimize.run_ltv_exploration(cfg, ltv_steps=[0.0, 0.5])
-        optimize._print_refinance_basis(results)
+        output_plugins._print_refinance_basis(results)
         out = capsys.readouterr().out
         assert 'OVERRIDES' in out
         assert '★' not in out

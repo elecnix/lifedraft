@@ -38,6 +38,7 @@ import input_contract as ic
 import contract_errors
 import contract_schema
 import optimize
+import output_plugins
 import output_paths
 from objective import MAX_NET_BENEFIT
 from simulation import FamilySimulation
@@ -134,7 +135,7 @@ class TestBorrowToInvestIsModelled(unittest.TestCase):
             _btv_option("btv_100k", "Draw $100k", 100_000),
         ]
         results = self._run(doc)
-        winners = optimize.winners_by_borrow_to_invest(results)
+        winners = output_plugins.winners_by_borrow_to_invest(results)
         # Winners are ranked by the active objective (best first), so the
         # no-draw baseline is NOT necessarily row 1 -- it is the frame of
         # reference every draw is read against (DP#33), ranked on its merits.
@@ -189,7 +190,7 @@ class TestBorrowToInvestIsModelled(unittest.TestCase):
         import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_borrow_to_invest_report([])
+            output_plugins._print_borrow_to_invest_report([])
         self.assertEqual(buf.getvalue(), "")
 
     def test_no_silent_smith_manoeuvre_unavailable_for_a_borrow_to_invest_household(self):

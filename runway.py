@@ -597,6 +597,21 @@ def _days(n: int):
     return timedelta(days=n)
 
 
+def absent_runway() -> Dict:
+    """The un-engaged runway dict for a synthetic/older ranking row that
+    carries no ``runway`` (issue #758).
+
+    Explicit absence (DP#32): a row with no runway is reported as un-engaged
+    and named, never a falsy-coerced '0 months' that would flatter. Lives here
+    (issue #232 slice 3) because both layers need the ONE spelling: the
+    exploration sweep in ``optimize.py`` and the console reports in
+    ``output_plugins.py``.
+    """
+    return RunwayResult(engaged=False, unengaged_reason=(
+        "no runway summary on this row (older/synthetic result) -- runway "
+        "could not be evaluated. This is NOT a finding of safety.")).to_dict()
+
+
 def format_runway(rw: Dict) -> str:
     """One-line rendering of a runway verdict for console/TXT/HTML (issue #758).
 

@@ -44,10 +44,9 @@ from simulation_config import SimulationConfig
 from simulation import FamilySimulation
 
 import optimize
-from optimize import (
-    run_property_funding_exploration,
-    winners_by_property_funding,
-)
+import output_plugins
+from optimize import run_property_funding_exploration
+from output_plugins import winners_by_property_funding
 
 from test_input_contract import _load_example, _two_generation_subset
 import contract_schema
@@ -458,7 +457,7 @@ class ExplorationRanksTheFundingTest(unittest.TestCase):
         # _print_property_funding_report's print path.
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_property_funding_report(self.results)
+            output_plugins._print_property_funding_report(self.results)
         out = buf.getvalue()
         self.assertIn("PROPERTY FUNDING RANKING", out)
         for fid in ("all_cash", "mortgage_20", "mortgage_50"):
@@ -473,7 +472,7 @@ class ExplorationRanksTheFundingTest(unittest.TestCase):
         # function must be a no-op, not a mis-print.
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            optimize._print_property_funding_report([])
+            output_plugins._print_property_funding_report([])
         self.assertEqual(buf.getvalue(), "")
 
 

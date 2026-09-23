@@ -26,6 +26,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import optimize
+import output_plugins
 
 
 def _cfg(refinance_options):
@@ -127,7 +128,7 @@ class TestOverLimitRefinanceReported:
             {'id': 'over', 'label': 'Over-limit advance', 'cash_out': 500000},
         ])
         results = optimize.run_ltv_exploration(cfg)
-        optimize._print_ltv_exploration(results)
+        output_plugins._print_ltv_exploration(results)
         out = capsys.readouterr().out
         assert 'Over-limit advance' in out
         assert 'REFUSED' in out or 'NOT SCORED' in out
