@@ -24,9 +24,6 @@ from typing import Dict, List, Optional
 from tax_calculator import (
     marginal_rate,
 )
-from countries.canada.tax_calc import (
-    federal_tax, quebec_tax,
-)
 from strategy import (
     AllocationStrategy, StrategyEngine, FamilyState, AllocationResult,
     create_strategy_from_config,
@@ -50,21 +47,33 @@ from member_config import find_member_by_role  # DP#25 (#998): data-layer helper
 # Importing simulation_deps configures the injection point at import time.
 import simulation_deps  # noqa: F401  (import side-effect: configures scenario_discovery)
 from countries.canada.rate_model import (
-    RatePath, HELOCPath, build_rate_path, build_broker_scenarios,
-    amortization_schedule, annual_summary, monthly_payment,
+    RatePath, build_rate_path,
 )
+# Issue #232 slice 5: compute_min_extraction / print_cashout_report are the ONLY
+# static production edges into countries.canada.cashout_optimizer. The reach
+# guard (tests/architecture/test_unreached_rule_modules.py) follows CALLS from
+# the production entry points, and a jurisdiction_providers registry lookup is
+# invisible to it -- routing these through the seam would orphan the module and
+# fire the guard. It is not on KNOWN_UNREACHED (and must not be added), so the
+# direct import and call stay.
 from countries.canada.cashout_optimizer import compute_min_extraction, print_cashout_report
 # Issue #732 (DP#25): objective.py resolves the estate math through the
-# jurisdiction provider seam and cannot import countries.canada.estate. The
-# static reach-detector (tests/architecture/test_unreached_rule_modules.py)
-# follows CALLS from the production entry points, and a runtime registry
-# lookup is invisible to it -- so the production reach edge to
-# countries.canada.estate.compute_estate must be a real CALL in a reached
-# module. optimize.py is that reached module (it already imports
-# countries.canada.* directly), and it needs the reporting estate value
-# below, so it calls compute_estate directly via the shared arg-prep helper
-# objective._estate_call_args (one source for the terminal-YearResult ->
-# compute_estate mapping, no restated logic).
+# jurisdiction provider seam and cannot import countries.canada.estate. A
+# runtime registry lookup is invisible to the static call graph, so the
+# production reach edge to countries.canada.estate.compute_estate must be a real
+# CALL in a reached module; optimize.py is that reached module and calls
+# compute_estate directly via the shared arg-prep helper objective._estate_call_args
+# (one source for the terminal-YearResult -> compute_estate mapping, no restated
+# logic).
+#
+# The guard that ENFORCES this is not test_unreached_rule_modules.py -- that one
+# only asks that SOME public entry point of countries.canada.estate be reached,
+# which rules_disposition._disposition_gain_tax already satisfies by calling
+# tax_on_capital_gain_at_death (deleting this import alone leaves it 6/6 green).
+# The enforcing test is
+# tests/test_jurisdiction_agnostic.py::TestObjectiveNoCanadaImports::
+# test_estate_is_statically_reached_from_production, which pins compute_estate
+# by name and fails the moment this call moves behind the seam.
 from countries.canada.estate import compute_estate
 from objective import (
     ObjectiveFunction, MAX_NET_BENEFIT,
