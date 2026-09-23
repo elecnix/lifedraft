@@ -407,7 +407,7 @@ class TestOptimizerSweepGeneratesTrancheAmounts(unittest.TestCase):
     def setUpClass(cls):
         cls.cfg = ic.to_internal_config(_doc())
         cls.cells = optimize.structure_refinance_cells(cls.cfg)
-        cls.results = optimize.run_mortgage_structure_exploration(cls.cfg)
+        cls.results = optimize.explore('mortgage_structure', cls.cfg)
 
     def test_the_sweep_grid_partitions_house_and_split(self):
         """The template expands into the FULL 2-D grid: 8 house amounts
@@ -521,7 +521,7 @@ class TestCashBackConditionalOnHouseAmount(unittest.TestCase):
     def setUpClass(cls):
         cls.cfg = ic.to_internal_config(_doc(cash_back=CONDITIONAL_CASH_BACK))
         cls.cells = optimize.structure_refinance_cells(cls.cfg)
-        cls.results = optimize.run_mortgage_structure_exploration(cls.cfg)
+        cls.results = optimize.explore('mortgage_structure', cls.cfg)
 
     def test_below_the_threshold_the_cash_back_is_forgone(self):
         """The sweep EXPLORES below the threshold (the whole point: house
@@ -860,7 +860,7 @@ class TestSweepCompositionDetails(unittest.TestCase):
             a = c['structure']['tranche_amounts']
             self.assertAlmostEqual(
                 a['house'] + a['investment'] + a['line'], CHARGE)
-        results = optimize.run_mortgage_structure_exploration(cfg)
+        results = optimize.explore('mortgage_structure', cfg)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             output_plugins._print_structure_report(results, cells=cells)
@@ -1206,7 +1206,7 @@ class TestShareFormUnchanged(unittest.TestCase):
         cfg = ic.to_internal_config(_doc(
             [ALL_MORTGAGE, READVANCEABLE, SPLIT_WITH_LINE],
             house_mortgage=450_000, heloc_room=110_000))
-        results = optimize.run_mortgage_structure_exploration(cfg)
+        results = optimize.explore('mortgage_structure', cfg)
         self.assertTrue(results)
         self.assertTrue(all(r.get('structure_tranche_amounts') is None
                             for r in results))

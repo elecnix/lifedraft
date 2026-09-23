@@ -435,7 +435,7 @@ class TestOptimizeStructureExploration(unittest.TestCase):
         doc = _two_gen_doc()
         doc["decisions"]["mortgage"]["structure_options"] = [ALL_MORTGAGE, READVANCEABLE, SPLIT_WITH_LINE]
         cls.cfg = ic.to_internal_config(doc)
-        cls.results = optimize.run_mortgage_structure_exploration(cls.cfg)
+        cls.results = optimize.explore('mortgage_structure', cls.cfg)
 
     def test_three_structures_are_swept(self):
         ids = set(r["structure_id"] for r in self.results)

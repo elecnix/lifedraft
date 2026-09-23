@@ -2159,9 +2159,9 @@ def write_report(fmt: OutputFormat, results: List[Dict], base_cfg: Dict,
 # =============================================================================
 # Console reports for the exploration dimensions (issue #232, slice 3)
 #
-# Moved out of optimize.py: these render the ranked rows a dimension sweep
-# returns (``explore(dimension, cfg)`` or the ``run_*_exploration`` entry
-# point it dispatches to). DP#25: the reporting layer consumes result dicts
+# Moved out of optimize.py: these render the ranked rows the module's one
+# exploration seam returns (``explore(dimension, cfg)``). DP#25: the
+# reporting layer consumes result dicts
 # and never imports optimize; the caller -- optimize.py's CLI entry -- renders.
 # =============================================================================
 
@@ -2724,7 +2724,7 @@ def _print_structure_report_for_basis(results: List[Dict]) -> None:
     # Issue #1075: a tranches-declared structure's drawn/undrawn question is
     # answered by ITS OWN line amount and the cash-out sourcing -- the #735
     # draw-fraction ladder is pinned to [0.0] for it (see
-    # run_mortgage_structure_exploration), so the share-form disclosures
+    # explore('mortgage_structure', ...)), so the share-form disclosures
     # below would describe a sweep that did not happen (DP#32). Print the
     # tranche-specific disclosure instead.
     has_tranche_rows = any(r.get('structure_tranche_amounts') for r in results)
@@ -2745,7 +2745,7 @@ def _print_structure_report_for_basis(results: List[Dict]) -> None:
             print(f"      make for the tranched form.")
     elif any(s is not None and s > 0 for s in shares) and basis_cash_out > 0:
         # Issue #845/#849: on a cash-out basis the draw is NOT swept -- it is
-        # IMPLIED by the sourcing split (run_mortgage_structure_exploration
+        # IMPLIED by the sourcing split (explore('mortgage_structure', ...)
         # pins draw_fraction to 0.0; apply_sourcing_overlay already booked
         # min(cash_out, revolving) as the line's opening balance). Printing
         # #735's "evaluated at several draw fractions" here would describe a
@@ -2937,7 +2937,7 @@ def _print_property_funding_report(results: List[Dict]) -> None:
 def winners_by_borrow_to_invest(results: List[Dict]) -> List[Dict]:
     """Pure logic half of the borrow-to-invest ranking report (issue #1036):
     for each amount rung present in ``results`` (in SCORE order -- best first,
-    because ``run_borrow_to_invest_exploration`` sorts by objective before
+    because ``explore('borrow_to_invest', ...)`` sorts by objective before
     ``dict.fromkeys``; the no-draw baseline is NOT necessarily row 1, it is the
     frame of reference ranked on its merits, DP#33), find the winning strategy
     and record it. Split out from ``_print_borrow_to_invest_report`` so 'which

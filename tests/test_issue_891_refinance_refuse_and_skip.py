@@ -2,7 +2,7 @@
 """Issue #891: a DECLARED over-limit refinance option must refuse-and-skip, not
 crash the whole optimizer run.
 
-``run_ltv_exploration`` sweeps the household's declared
+``explore('ltv', ...)`` sweeps the household's declared
 ``decisions.mortgage.refinance_options`` (#846) unioned over the LTV ladder
 (#853). One declared option whose ``cash_out`` pushes secured debt past the 80%
 charge limit used to raise ``ChargeLimitExceededError`` UNCAUGHT out of
@@ -67,7 +67,7 @@ class TestOverLimitRefinanceRefuseAndSkip:
             {'id': 'over', 'label': 'Over-limit advance', 'cash_out': 500000},
         ])
         # Must NOT raise ChargeLimitExceededError (or anything else).
-        results = optimize.run_ltv_exploration(cfg)
+        results = optimize.explore('ltv', cfg)
         assert results, "the sweep produced no rows at all"
 
     def test_feasible_candidates_are_still_scored(self):
@@ -77,7 +77,7 @@ class TestOverLimitRefinanceRefuseAndSkip:
             {'id': 'ok', 'label': 'Modest cash-out', 'cash_out': 100000},
             {'id': 'over', 'label': 'Over-limit advance', 'cash_out': 500000},
         ])
-        results = optimize.run_ltv_exploration(cfg)
+        results = optimize.explore('ltv', cfg)
         scored = [r for r in results if not r.get('refinance_refused')]
         assert scored, "no feasible rows scored"
         # every scored row carries a real net_benefit number
@@ -93,7 +93,7 @@ class TestOverLimitRefinanceRefuseAndSkip:
             {'id': 'ok', 'label': 'Modest cash-out', 'cash_out': 100000},
             {'id': 'over', 'label': 'Over-limit advance', 'cash_out': 500000},
         ])
-        results = optimize.run_ltv_exploration(cfg)
+        results = optimize.explore('ltv', cfg)
         refused = [r for r in results if r.get('refinance_refused')]
         assert len(refused) == 1
         row = refused[0]
@@ -113,7 +113,7 @@ class TestOverLimitRefinanceRefuseAndSkip:
         cfg = _cfg([
             {'id': 'ok', 'label': 'Modest cash-out', 'cash_out': 100000},
         ])
-        results = optimize.run_ltv_exploration(cfg)
+        results = optimize.explore('ltv', cfg)
         assert results
         assert not any(r.get('refinance_refused') for r in results)
 
@@ -127,7 +127,7 @@ class TestOverLimitRefinanceReported:
             {'id': 'ok', 'label': 'Modest cash-out', 'cash_out': 100000},
             {'id': 'over', 'label': 'Over-limit advance', 'cash_out': 500000},
         ])
-        results = optimize.run_ltv_exploration(cfg)
+        results = optimize.explore('ltv', cfg)
         output_plugins._print_ltv_exploration(results)
         out = capsys.readouterr().out
         assert 'Over-limit advance' in out

@@ -673,7 +673,7 @@ class SimulationConfig:
     # household's cash and flows to the usual allocation instead -- while the
     # interest is still priced, deducted, and serviced/capitalized per
     # capitalize_interest. Mapped from property.borrow_to_invest_hold_draw
-    # (set per exploration cell by optimize.run_borrow_to_invest_exploration
+    # (set per exploration cell by explore('borrow_to_invest', ...)
     # for options that declare hold_draw). The internal-config default (absent
     # key, e.g. every test that builds the internal dict directly, and the
     # golden fixture) is False -- the pre-#1040 debt-sweep behaviour,

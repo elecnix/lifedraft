@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for optimize.py: run_ltv_exploration, run_optimization,
+"""Unit tests for optimize.py: explore('ltv', ...), run_optimization,
 evaluate_strategy_with_simulation, auto-detection helpers.
 
 Tests verify that:
@@ -21,7 +21,7 @@ import json
 import tempfile
 
 from optimize import (
-    run_ltv_exploration,
+    explore,
     run_optimization,
     evaluate_strategy_with_simulation,
     simulated_deduct_timing,
@@ -205,7 +205,7 @@ class TestRunOptimization(unittest.TestCase):
             os.unlink(path)
 
 
-# ── run_ltv_exploration ────────────────────────────────────────────────────
+# ── explore('ltv', ...) ────────────────────────────────────────────────────
 
 class TestRunLTVExploration(unittest.TestCase):
     """Test LTV exploration loop."""
@@ -214,7 +214,7 @@ class TestRunLTVExploration(unittest.TestCase):
         cfg = _make_test_cfg()
         path = _write_cfg_to_file(cfg)
         try:
-            results = run_ltv_exploration(cfg, path)
+            results = explore('ltv', cfg, path)
             self.assertIsInstance(results, list)
             for r in results:
                 self.assertIn('ltv', r)
@@ -227,7 +227,7 @@ class TestRunLTVExploration(unittest.TestCase):
         cfg = _make_test_cfg()
         path = _write_cfg_to_file(cfg)
         try:
-            results = run_ltv_exploration(cfg, path)
+            results = explore('ltv', cfg, path)
             ltv0 = [r for r in results if r['ltv'] == 0.0]
             self.assertGreaterEqual(len(ltv0), 2)  # At least 2 strategies at LTV 0
             for r in ltv0:
@@ -239,7 +239,7 @@ class TestRunLTVExploration(unittest.TestCase):
         cfg = _make_test_cfg(house_value=500000, mortgage_balance=100000)
         path = _write_cfg_to_file(cfg)
         try:
-            results = run_ltv_exploration(cfg, path)
+            results = explore('ltv', cfg, path)
             ltv80 = [r for r in results if r['ltv'] == 0.80]
             self.assertGreater(len(ltv80), 0)
             for r in ltv80:
@@ -253,7 +253,7 @@ class TestRunLTVExploration(unittest.TestCase):
         cfg = _make_test_cfg(house_value=500000, mortgage_balance=100000)
         path = _write_cfg_to_file(cfg)
         try:
-            results = run_ltv_exploration(cfg, path)
+            results = explore('ltv', cfg, path)
             ltvs = sorted(set(r['ltv'] for r in results))
             # Cashout should increase with LTV
             cashouts = {}
@@ -271,7 +271,7 @@ class TestRunLTVExploration(unittest.TestCase):
         cfg = _make_test_cfg()
         path = _write_cfg_to_file(cfg)
         try:
-            results = run_ltv_exploration(cfg, path, ltv_steps=[0.0, 0.50])
+            results = explore('ltv', cfg, path, ltv_steps=[0.0, 0.50])
             ltvs = sorted(set(r['ltv'] for r in results))
             self.assertEqual(len(ltvs), 2)
             self.assertIn(0.0, ltvs)
@@ -341,7 +341,7 @@ class TestUnifiedConfigPath(unittest.TestCase):
             overlay = _scenario_overlay(cfg, self.LTV, label="LTV 80%")
             headline = run_optimization(cfg, path, overlay=overlay)
 
-            exploration = run_ltv_exploration(cfg, path)
+            exploration = explore('ltv', cfg, path)
             row_80 = [r for r in exploration if r['ltv'] == self.LTV]
 
             self.assertAlmostEqual(

@@ -49,17 +49,17 @@ class TestParallelEqualsSerial(unittest.TestCase):
 
     def test_ltv_exploration_parallel_matches_serial(self):
         optimize.set_workers(1)
-        serial = optimize.run_ltv_exploration(self.cfg, self.path)
+        serial = optimize.explore('ltv', self.cfg, self.path)
         optimize.set_workers(4)
-        parallel = optimize.run_ltv_exploration(self.cfg, self.path)
+        parallel = optimize.explore('ltv', self.cfg, self.path)
         self.assertEqual(_ranked_signature(serial), _ranked_signature(parallel),
                          "parallel LTV sweep must rank identically to serial")
 
     def test_income_scenario_exploration_parallel_matches_serial(self):
         optimize.set_workers(1)
-        serial = optimize.run_income_scenario_exploration(self.cfg, self.path)
+        serial = optimize.explore('income_scenario', self.cfg, self.path)
         optimize.set_workers(4)
-        parallel = optimize.run_income_scenario_exploration(self.cfg, self.path)
+        parallel = optimize.explore('income_scenario', self.cfg, self.path)
         self.assertEqual(_ranked_signature(serial), _ranked_signature(parallel),
                          "parallel income sweep must rank identically to serial")
 
@@ -77,7 +77,7 @@ class TestSerialFallback(unittest.TestCase):
         try:
             optimize._shutdown_pool()
             optimize.set_workers(1)
-            optimize.run_ltv_exploration(cfg, path)
+            optimize.explore('ltv', cfg, path)
             self.assertIsNone(
                 optimize._POOL,
                 "workers=1 must take the serial path and never open a pool")
@@ -210,7 +210,7 @@ class TestScenarioRefusedSentinel(unittest.TestCase):
         ])
         optimize.set_workers(2)
         try:
-            results = optimize.run_ltv_exploration(cfg)
+            results = optimize.explore('ltv', cfg)
         finally:
             optimize._shutdown_pool()
             optimize.set_workers(1)
