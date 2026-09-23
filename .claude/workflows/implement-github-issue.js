@@ -220,7 +220,8 @@ if (!fetched) throw new Error('Fetch agent returned null — aborting.')
 log('Issue #' + fetched.issueNumber + ' fetched: "' + fetched.title + '"')
 
 const ISSUE_FULL = issueText(fetched)
-const WT_DIR = '/home/nicolas/Source/lifedraft/impl-' + fetched.issueNumber + '-' + slug(fetched.title)
+// '~' is expanded by the agent's shell; never bake a user's absolute home path into the repo.
+const WT_DIR = '~/Source/lifedraft/impl-' + fetched.issueNumber + '-' + slug(fetched.title)
 const BRANCH = 'fix/' + fetched.issueNumber + '-' + slug(fetched.title)
 
 phase('Plan')
