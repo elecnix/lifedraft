@@ -20,7 +20,7 @@ This file covers:
      adjacent bug this fix surfaced: a "primary loses their job" scenario
      that only overrides the primary earner must not also silently zero the
      spouse's income).
-  3. optimize.py's production CLI pipeline (run_income_scenario_exploration)
+  3. optimize.py's production CLI pipeline (explore('income_scenario', ...))
      actually runs N income scenarios x M discovered strategies -- the
      scenarios reach the real optimizer, not just input_contract.py's leaf
      read.
@@ -187,7 +187,7 @@ class TestIncomeScenariosReachTheOptimizer(unittest.TestCase):
         (number of discovered strategies) ranked entries -- proof the
         scenarios reach the optimizer, not that they merely parse."""
         cfg = _fixture_cfg(self.INCOME_SCENARIOS)
-        results = optimize.run_income_scenario_exploration(cfg)
+        results = optimize.explore('income_scenario', cfg)
 
         counts = Counter(r["income_scenario_id"] for r in results)
         self.assertEqual(set(counts), {"stay", "salary_cut", "job_loss"},
@@ -207,7 +207,7 @@ class TestIncomeScenariosReachTheOptimizer(unittest.TestCase):
         substantially lower than under 'stay' (same strategy grid, real
         income drop feeding marginal rate / RRSP room / cash flow)."""
         cfg = _fixture_cfg(self.INCOME_SCENARIOS)
-        results = optimize.run_income_scenario_exploration(cfg)
+        results = optimize.explore('income_scenario', cfg)
 
         def best_net_benefit(scenario_id):
             rows = [r for r in results if r["income_scenario_id"] == scenario_id]
@@ -227,7 +227,7 @@ class TestIncomeScenariosReachTheOptimizer(unittest.TestCase):
         single-scenario run (the auto-discovered 'current income' entry),
         never an implicit multiplication or a crash."""
         cfg = _fixture_cfg(income_scenarios=[])
-        results = optimize.run_income_scenario_exploration(cfg)
+        results = optimize.explore('income_scenario', cfg)
         scenario_ids = set(r["income_scenario_id"] for r in results)
         self.assertEqual(len(scenario_ids), 1)
 
@@ -244,7 +244,7 @@ class TestIncomeScenariosReachTheOptimizer(unittest.TestCase):
                           "kind": "ei", "from": "2026-01-01", "to": None}]},
         ]
         correct_cfg = _fixture_cfg(scenario_primary_only)
-        correct_results = optimize.run_income_scenario_exploration(correct_cfg)
+        correct_results = optimize.explore('income_scenario', correct_cfg)
         correct_best = max(r.get("net_benefit", 0) for r in correct_results)
 
         # Reconstruct the PRE-#665-fix behaviour directly: both earners
@@ -254,7 +254,7 @@ class TestIncomeScenariosReachTheOptimizer(unittest.TestCase):
         for m in buggy_cfg["family"]["members"]:
             if m["role"] in ("primary", "spouse"):
                 m["gross_income"] = 0
-        buggy_results = optimize.run_income_scenario_exploration(buggy_cfg)
+        buggy_results = optimize.explore('income_scenario', buggy_cfg)
         buggy_best = max(r.get("net_benefit", 0) for r in buggy_results)
 
         self.assertGreater(

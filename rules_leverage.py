@@ -787,7 +787,7 @@ def apply_rrsp_refund_heloc_paydown(ws: YearWorkingState, ctx: RuleContext) -> b
     heloc_paydown = 0.0
     # Issue #1040: a borrow_to_invest option declared hold_draw=true opts its
     # draw OUT of this sweep (SimulationConfig.hold_borrow_to_invest_draw,
-    # set per exploration cell by optimize.run_borrow_to_invest_exploration).
+    # set per exploration cell by explore('borrow_to_invest', ...)).
     # The drawn balance is NOT reduced by the refund -- the refund stays in
     # the household's cash and flows to the usual allocation instead -- while
     # apply_margin_heloc_interest still prices/capitalizes (or cash-services,

@@ -45,7 +45,7 @@ from simulation import FamilySimulation
 
 import optimize
 import output_plugins
-from optimize import run_property_funding_exploration
+from optimize import explore
 from output_plugins import winners_by_property_funding
 
 from test_input_contract import _load_example, _two_generation_subset
@@ -398,7 +398,7 @@ class ExplorationRanksTheFundingTest(unittest.TestCase):
         cls.cfg = _cfg(_add_rental(
             base, funding_options=[_ALL_CASH, _MORTGAGE_20, _MORTGAGE_50]))
         with contextlib.redirect_stdout(io.StringIO()):
-            cls.results = run_property_funding_exploration(cls.cfg)
+            cls.results = explore('property_funding', cls.cfg)
 
     def test_every_declared_funding_is_enumerated(self):
         self.assertEqual(

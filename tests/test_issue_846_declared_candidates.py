@@ -165,8 +165,8 @@ class TestDeclaredRefinanceReachesTheOptimizer:
         it, so a different declared cash-out lands at a different in-situ rung.
         $200k → 62.5% (inserted), $300k → 75% (inserted); each appears in its own
         run and not the other's, so the declaration still moves the analysis."""
-        a = optimize.run_ltv_exploration(self._declared(200000))
-        b = optimize.run_ltv_exploration(self._declared(300000))
+        a = optimize.explore('ltv', self._declared(200000))
+        b = optimize.explore('ltv', self._declared(300000))
         assert 200000 in {r['cashout'] for r in a}
         assert 200000 not in {r['cashout'] for r in b}
         assert 300000 in {r['cashout'] for r in b}
@@ -176,7 +176,7 @@ class TestDeclaredRefinanceReachesTheOptimizer:
         """#846's opening ask ('compare advance VS line') — plus #853: both are
         MARKED within the full ladder, not ranked in isolation, so a rung the
         household did not declare can still win and be seen."""
-        results = optimize.run_ltv_exploration(self._declared(100000))
+        results = optimize.explore('ltv', self._declared(100000))
         declared_ids = {r['refinance_declared_id']
                         for r in results if r.get('refinance_declared')}
         assert {'line_draw', 'advance'} <= declared_ids
@@ -188,7 +188,7 @@ class TestDeclaredRefinanceReachesTheOptimizer:
         """DP#13: the ladder is a fallback for absent input. A household that
         declared nothing must see exactly the sweep it saw before #846, with no
         declared rungs marked."""
-        results = optimize.run_ltv_exploration(_cfg())
+        results = optimize.explore('ltv', _cfg())
         assert {r['refinance_source'] for r in results} == {'ladder'}
         assert not any(r.get('refinance_declared') for r in results)
         assert sorted({r['ltv'] for r in results}) == optimize.DEFAULT_LTV_LADDER
@@ -198,7 +198,7 @@ class TestDeclaredRefinanceReachesTheOptimizer:
         LTV, not 0%. This is #846's own 'take it from the line' option, and #846
         puts it in optimize.py's LTV table — where a 0% label would misstate the
         very basis #845 exists to have stated. 300000/800000 = 37.5%."""
-        results = optimize.run_ltv_exploration(self._declared(100000))
+        results = optimize.explore('ltv', self._declared(100000))
         line_rows = [r for r in results if r.get('refinance_declared_id') == 'line_draw']
         assert line_rows
         assert all(r['cashout'] == 0 for r in line_rows)
@@ -208,7 +208,7 @@ class TestDeclaredRefinanceReachesTheOptimizer:
         """A caller that passed an explicit ladder has already decided what to
         sweep; the override is allowed (it is _print_refinance_basis's job to
         say so out loud) — the union does not apply."""
-        results = optimize.run_ltv_exploration(self._declared(100000),
+        results = optimize.explore('ltv', self._declared(100000),
                                                ltv_steps=[0.0, 0.5])
         assert {r['refinance_source'] for r in results} == {'ladder'}
         assert not any(r.get('refinance_declared') for r in results)

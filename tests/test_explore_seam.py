@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
-"""Issue #232 (slice 2): ``explore(dimension, cfg)`` is one seam over the
-existing exploration entry points -- and proves it returns IDENTICAL rankings
-for every dimension before anything is deleted.
+"""Issue #232: ``explore(dimension, cfg)`` is the ONLY exploration surface.
 
-Slice 2's contract is: introduce ``explore()`` alongside the old entry
-points, dispatch to the existing sweep logic, and prove the new seam
-produces exactly what the old path produces. Each test below runs the SAME
-dimension through BOTH paths -- the old ``run_*_exploration`` entry point
-and ``explore()`` -- on deep-copied identical configs, and asserts the
-returned lists are equal: same rows, same order, same keys, same values.
-List equality is the strongest ranking-equality claim available: the ranked
-rows carry each cell's ``net_benefit``/``objective_score`` and every tag the
-reports read (``ltv``, ``structure_id``, ``income_scenario_id``,
-``property_funding_id``, ``borrow_to_invest_id``), so a seam that reordered,
-dropped, or re-tagged a single row fails this test.
+Slice 2 (c55cb89) introduced the seam alongside the five
+``run_*_exploration`` entry points and proved, dimension by dimension, that
+it returned their rankings byte-for-byte. Slice 4 deleted those entry
+points, so the equivalence arms this file used to carry are gone with them
+-- an equality assertion needs two sides, and one side no longer exists.
+What survives of the original contract is the part that is still testable:
+each dimension, driven through its real fixture, returns more than one
+scored row -- a sweep that silently returned ``[]`` (or one row) would read
+as a clean result while ranking nothing (DP#32) -- and ``explore()``'s
+``**kwargs`` reach the sweep (kwargs forwarding was the half of slice 2's
+contract that a deletion cannot retire).
+
+The equivalence itself is not re-asserted here because it cannot be: the
+proof is the slice-2 commit, and the behavioural guard that the seam still
+moves the engine is ``tests/architecture/test_dp18_dead_read.py``, whose
+``refinance``/``income`` probes drive ``explore()`` and assert two declared
+leaf values rank differently.
+
+What is NEW here is the enforcement slice 4 owes: the five entry points are
+GONE and must not come back as re-export shims or deprecation aliases
+(DP#9). ``TestOldEntryPointsAreGone`` fails on a ``run_ltv_exploration``
+reappearing anywhere on the module, so the deletion is pinned by a test
+rather than by memory.
 
 The configs are the exact fixtures the corresponding issue tests use
 (LTV: tests/test_optimize.py; income scenarios: #665; mortgage structure:
@@ -23,12 +33,7 @@ numbers and role-based names (DP#4/DP#15).
 The dimension is a small closed set of strings (DP#8: data, not a class
 hierarchy), validated loudly: an unknown dimension raises (DP#32), it never
 silently returns an empty ranking that reads as a clean result.
-
-This enforcement lands with the seam it pins. Slice 4 deletes the entry
-points this file compares against; it will be rewritten then, not carried
-forward as dead comparison code.
 """
-import copy
 import os
 import sys
 import unittest
@@ -101,44 +106,56 @@ def _borrow_to_invest_cfg():
     return ic.to_internal_config(doc)
 
 
-# (dimension, old entry point, cfg builder, dimension-specific kwargs).
-# The kwargs ride through ``explore()``'s ``**kwargs`` unchanged, so each arm
-# exercises the same forwarding the production caller (main()) will rely on.
+# (dimension, cfg builder, dimension-specific kwargs). The kwargs ride
+# through ``explore()``'s ``**kwargs`` unchanged, so each arm exercises the
+# same forwarding the production caller (main()) relies on.
 _DIMENSIONS = [
     # A custom ladder exercises kwargs forwarding too: explore('ltv', ...,
     # ltv_steps=...) must honour the caller's ladder, not silently substitute
     # the DEFAULT_LTV_LADDER.
-    ("ltv", optimize.run_ltv_exploration, _ltv_cfg,
-     {"ltv_steps": [0.0, 0.50]}),
-    ("income_scenario", optimize.run_income_scenario_exploration,
-     _income_scenario_cfg, {}),
-    ("mortgage_structure", optimize.run_mortgage_structure_exploration,
-     _structure_cfg, {}),
-    ("property_funding", optimize.run_property_funding_exploration,
-     _property_funding_cfg, {}),
-    ("borrow_to_invest", optimize.run_borrow_to_invest_exploration,
-     _borrow_to_invest_cfg, {}),
+    ("ltv", _ltv_cfg, {"ltv_steps": [0.0, 0.50]}),
+    ("income_scenario", _income_scenario_cfg, {}),
+    ("mortgage_structure", _structure_cfg, {}),
+    ("property_funding", _property_funding_cfg, {}),
+    ("borrow_to_invest", _borrow_to_invest_cfg, {}),
 ]
 
 
-class TestExploreMatchesOldEntryPoint(unittest.TestCase):
-    """The slice-2 contract: for every dimension, explore() returns EXACTLY
-    the old entry point's ranked rows, on identical input."""
+class TestEveryDimensionSweepsAndRanks(unittest.TestCase):
+    """The surviving half of slice 2's contract: each declared dimension,
+    driven through its own fixture, actually produces ranked rows. An arm
+    that silently returned ``[]`` -- or a single row, which ranks nothing --
+    would read as a clean result (DP#32), so the row-count assertion is the
+    load-bearing part."""
 
-    def test_identical_rankings_per_dimension(self):
-        for dimension, entry, builder, kwargs in _DIMENSIONS:
+    def test_every_dimension_returns_non_empty_ranked_rows(self):
+        for dimension, builder, kwargs in _DIMENSIONS:
             with self.subTest(dimension=dimension):
-                cfg_new = builder()
-                cfg_old = copy.deepcopy(cfg_new)
-                old = entry(cfg_old, objective=MAX_NET_BENEFIT, **kwargs)
-                self.assertTrue(old, f"{dimension}: fixture produced no rows")
-                new = optimize.explore(
-                    dimension, cfg_new, objective=MAX_NET_BENEFIT, **kwargs)
-                self.assertEqual(
-                    new, old,
-                    f"explore({dimension!r}) rankings differ from the old "
-                    f"entry point -- identical inputs must produce identical "
-                    f"ranked rows (issue #232 slice 2)")
+                rows = optimize.explore(
+                    dimension, builder(), objective=MAX_NET_BENEFIT, **kwargs)
+                self.assertGreater(
+                    len(rows), 1,
+                    f"explore({dimension!r}) returned {len(rows)} row(s) for "
+                    f"its own fixture -- the dimension is not wired to the "
+                    f"seam, or it produced nothing to rank")
+                for row in rows:
+                    self.assertIn("objective_score", row)
+                    self.assertIn("net_benefit", row)
+
+
+class TestExploreForwardsDimensionKwargs(unittest.TestCase):
+    """kwargs forwarding: the caller's options reach the sweep, rather than
+    being replaced by the module's default for that dimension."""
+
+    def test_ltv_steps_replaces_the_default_ladder(self):
+        rows = optimize.explore(
+            "ltv", _ltv_cfg(), objective=MAX_NET_BENEFIT,
+            ltv_steps=[0.0, 0.50])
+        self.assertTrue(rows, "fixture produced no rows")
+        self.assertEqual(
+            sorted({r["ltv"] for r in rows}), [0.0, 0.50],
+            "explore('ltv', ..., ltv_steps=[...]) must sweep the caller's "
+            "ladder, not DEFAULT_LTV_LADDER")
 
 
 class TestExploreRejectsUnknownDimension(unittest.TestCase):
@@ -154,6 +171,51 @@ class TestExploreRejectsUnknownDimension(unittest.TestCase):
         # The refusal names the closed set so a wrong spelling self-corrects.
         self.assertIn("income_scenario", message)
         self.assertIn("borrow_to_invest", message)
+
+
+# The five entry points slice 4 deleted (issue #232). Names only -- the point
+# is that the module no longer carries them.
+_DELETED_ENTRY_POINTS = (
+    "run_ltv_exploration",
+    "run_income_scenario_exploration",
+    "run_mortgage_structure_exploration",
+    "run_property_funding_exploration",
+    "run_borrow_to_invest_exploration",
+)
+
+
+class TestOldEntryPointsAreGone(unittest.TestCase):
+    """DP#9: no backward compatibility, no shims, no deprecation aliases.
+
+    ``explore()`` replaced five public entry points; the deletion is only
+    real if something fails when one comes back. A future "back-compat"
+    ``run_ltv_exploration = _sweep_ltv`` re-export makes this test the thing
+    that catches it, rather than a reviewer's memory of a commit message."""
+
+    def test_no_deleted_entry_point_survives_on_the_module(self):
+        for name in _DELETED_ENTRY_POINTS:
+            with self.subTest(name=name):
+                self.assertFalse(
+                    hasattr(optimize, name),
+                    f"optimize.{name} still exists -- slice 4 deletes the old "
+                    f"entry points; callers use explore() (DP#9: no re-export "
+                    f"shim, no deprecation alias)")
+
+    def test_the_seam_routes_every_declared_dimension(self):
+        """A dimension in EXPLORE_DIMENSIONS with no dispatch entry would
+        pass the ValueError check and then KeyError; a dispatch entry for an
+        undeclared dimension would be dead routing. Both are caught by
+        asserting the two sets equal."""
+        self.assertEqual(
+            set(optimize.EXPLORE_DIMENSIONS), set(optimize._EXPLORE_DISPATCH),
+            "EXPLORE_DIMENSIONS and _EXPLORE_DISPATCH must be the same closed "
+            "set: every declared dimension routed, and nothing routed that "
+            "the seam does not declare")
+        self.assertEqual(
+            set(optimize.EXPLORE_DIMENSIONS),
+            {dimension for dimension, _, _ in _DIMENSIONS},
+            "every dimension the seam declares must be exercised by an arm "
+            "of this test, or a new dimension lands unpinned")
 
 
 if __name__ == "__main__":

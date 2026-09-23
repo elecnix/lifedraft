@@ -47,8 +47,8 @@ closes that -- a new ``scenarios.<dim>`` override branch fails the build until
 it is either probed here or explicitly triaged in ``_NOT_YET_PROBED``.
 
 Scope, stated (not hidden): ``refinance`` (#846) and ``income`` (#665) probe
-through their dedicated single-dimension explorations (``run_ltv_exploration`` /
-``run_income_scenario_exploration``). #883 extends the SAME guard to the other
+through their dedicated single-dimension explorations (``explore('ltv', ...)`` /
+``explore('income_scenario', ...)``). #883 extends the SAME guard to the other
 three declarable dimensions -- ``mortgage``, ``strategy``, ``resp_action`` --
 which have no dedicated exploration and are instead consumed by the shipped
 ``compare-scenarios`` CLI (``simulate.py``: ``discover_anchors`` ->
@@ -172,7 +172,7 @@ def _probe_refinance() -> tuple:
         return c
 
     def fp(cash_out):
-        rows = _quiet(optimize.run_ltv_exploration, cfg(cash_out))
+        rows = _quiet(optimize.explore, "ltv", cfg(cash_out))
         advance = [r for r in rows if r["refinance_id"] == "advance"]
         return tuple(sorted(round(r.get("net_benefit", 0), 4) for r in advance))
 
@@ -197,7 +197,7 @@ def _probe_income() -> tuple:
         return c
 
     def fp(primary_income):
-        rows = _quiet(optimize.run_income_scenario_exploration, cfg(primary_income))
+        rows = _quiet(optimize.explore, "income_scenario", cfg(primary_income))
         plan = [r for r in rows if r["income_scenario_id"] == "plan"]
         return tuple(sorted(round(r.get("net_benefit", 0), 4) for r in plan))
 
@@ -206,8 +206,8 @@ def _probe_income() -> tuple:
 
 # ── #883: the three dimensions with no dedicated single-dimension exploration ─
 # mortgage / strategy / resp_action are consumed by the shipped
-# ``compare-scenarios`` CLI (simulate.py), not by a run_*_exploration entry
-# point. ``_grid_fingerprint`` runs that pipeline and reads the ranked output;
+# ``compare-scenarios`` CLI (simulate.py), not by the single-dimension
+# ``explore()`` seam. ``_grid_fingerprint`` runs that pipeline and reads the ranked output;
 # ``_grid_cfg`` pins every OTHER dimension to one declared candidate so the
 # fingerprint isolates the leaf a probe varies (the guard's two-configs-differ-
 # in-one-leaf standard, applied without a bespoke exploration to lean on).

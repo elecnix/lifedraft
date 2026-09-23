@@ -89,7 +89,7 @@ class TestBorrowToInvestIsModelled(unittest.TestCase):
 
     def _run(self, doc):
         cfg = ic.to_internal_config(doc)
-        return optimize.run_borrow_to_invest_exploration(
+        return optimize.explore('borrow_to_invest',
             cfg, "input.json", objective=MAX_NET_BENEFIT)
 
     def test_mortgage_free_household_with_borrow_to_invest_is_leveraged(self):
@@ -151,13 +151,13 @@ class TestBorrowToInvestIsModelled(unittest.TestCase):
 
     def test_absent_borrow_to_invest_is_a_strict_noop(self):
         """DP#32: a household that declares no borrow-to-invest gets NO sweep
-        -- run_borrow_to_invest_exploration returns [], and the golden
+        -- explore('borrow_to_invest', ...) returns [], and the golden
         trajectory is byte-identical (the gate in main() never calls it)."""
         doc = _mortgage_free_doc()  # no decisions.borrow_to_invest
         cfg = ic.to_internal_config(doc)
         self.assertEqual(cfg.get("borrow_to_invest_options"), None)
         self.assertEqual(
-            optimize.run_borrow_to_invest_exploration(cfg, "input.json"),
+            optimize.explore('borrow_to_invest', cfg, "input.json"),
             [])
 
     def test_borrow_to_invest_with_no_refinance_advance_split(self):
@@ -176,7 +176,7 @@ class TestBorrowToInvestIsModelled(unittest.TestCase):
             _btv_option("btv_50k", "Draw 50k into non-reg", 50_000)]
         cfg = ic.to_internal_config(doc)
         self.assertNotIn("refinance_advance_deductible_non_reg", cfg["property"])
-        results = optimize.run_borrow_to_invest_exploration(
+        results = optimize.explore('borrow_to_invest',
             cfg, "input.json", objective=MAX_NET_BENEFIT)
         # The draw ran (the no-advance-split branch did not short-circuit).
         self.assertTrue(any(r["borrow_to_invest_id"] == "btv_50k" for r in results))
@@ -355,7 +355,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         doc["assumptions"]["retirement"]["liquidate_to_target"] = True
         cfg = self._btv_cfg(doc)  # loads fine -- the refusal is at exploration
         with self.assertRaises(ValueError) as cm:
-            optimize.run_borrow_to_invest_exploration(cfg, "input.json")
+            optimize.explore('borrow_to_invest', cfg, "input.json")
         msg = str(cm.exception)
         self.assertIn("liquidate_to_target", msg)
         self.assertIn("#1037", msg)
@@ -376,7 +376,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         cfg = self._btv_cfg(doc)
         from objective import get_objective
         with self.assertRaises(ValueError) as cm:
-            optimize.run_borrow_to_invest_exploration(
+            optimize.explore('borrow_to_invest',
                 cfg, "input.json", objective=get_objective("min_after_tax_estate"))
         msg = str(cm.exception)
         self.assertIn("min_after_tax_estate", msg)
@@ -394,7 +394,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         cfg = self._btv_cfg(doc)  # default objective, loads fine
         from objective import get_objective
         with self.assertRaises(ValueError) as cm:
-            optimize.run_borrow_to_invest_exploration(
+            optimize.explore('borrow_to_invest',
                 cfg, "input.json", objective=get_objective("min_after_tax_estate"))
         self.assertIn("min_after_tax_estate", str(cm.exception))
 
@@ -406,7 +406,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         doc["decisions"]["borrow_to_invest"] = [
             _btv_option("btv_50k", "Draw 50k", 50_000)]
         cfg = self._btv_cfg(doc)  # default objective = max_net_benefit
-        results = optimize.run_borrow_to_invest_exploration(
+        results = optimize.explore('borrow_to_invest',
             cfg, "input.json", objective=MAX_NET_BENEFIT)
         self.assertTrue(any(r["borrow_to_invest_id"] == "btv_50k" for r in results))
         doc2 = _mortgage_free_doc()
@@ -415,7 +415,7 @@ class TestBorrowToInvestValidation(unittest.TestCase):
         doc2["decisions"]["objective"] = "max_after_tax_estate"
         from objective import get_objective
         cfg2 = self._btv_cfg(doc2)
-        results2 = optimize.run_borrow_to_invest_exploration(
+        results2 = optimize.explore('borrow_to_invest',
             cfg2, "input.json", objective=get_objective("max_after_tax_estate"))
         self.assertTrue(any(r["borrow_to_invest_id"] == "btv_50k" for r in results2))
 

@@ -118,7 +118,7 @@ _INTERNAL_ROOT_ALLOWED_KEYS = {
     # simulation_rules.apply_deposit_product_growth). Both absence-safe (DP#32).
     'deposit_products', 'deposit_product',
     # Issue #1036: the DECLARED borrow-to-invest options, read directly by
-    # optimize.run_borrow_to_invest_exploration (the optimizer, not the
+    # explore('borrow_to_invest', ...) (the optimizer, not the
     # simulator, DP#22). Not lifted onto a SimulationConfig field (a dead
     # surface -- D7); the raw key is the one spelling. Absence-safe (DP#32).
     'borrow_to_invest_options',

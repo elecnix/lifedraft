@@ -4,7 +4,7 @@ scored at the household's DECLARED refinance option(s), and "take the surplus
 as a mortgage advance vs. draw it from the revolving line" is rankable
 head-to-head at equal leverage.
 
-#845's defect: ``run_mortgage_structure_exploration`` scored every structure at
+#845's defect: ``explore('mortgage_structure', ...)`` scored every structure at
 the CURRENT charge, ignoring ``decisions.mortgage.refinance_options`` -- so an
 irreversible, notary-day choice was ranked at a leverage the report does not
 recommend, and a structure with no way to source the surplus at cash-out $0 was
@@ -333,7 +333,7 @@ class TestStructureRefinanceCells:
 class TestExplorationRanksTheProduct:
     @classmethod
     def setup_class(cls):
-        cls.results = optimize.run_mortgage_structure_exploration(_cfg())
+        cls.results = optimize.explore('mortgage_structure', _cfg())
 
     def test_every_row_is_tagged_with_the_refinance_option_it_was_scored_at(self):
         assert {r["structure_basis_id"] for r in self.results} == {
@@ -372,7 +372,7 @@ class TestExplorationRanksTheProduct:
         for a follow-up: it asserts the OUTPUT moves, not merely that the key
         is read."""
         other = dict(CASH_OUT_80, cash_out=SURPLUS / 2, ltv=0.50)
-        moved = optimize.run_mortgage_structure_exploration(
+        moved = optimize.explore('mortgage_structure',
             _cfg(refinance_options=(NO_CASH_OUT, other)))
 
         def _at_80(rows):
@@ -394,7 +394,7 @@ class TestExplorationRanksTheProduct:
         refused = [c for c in cells if c["refusal"] is not None]
         assert refused, "premise: this cross must contain a refused cell"
 
-        results = optimize.run_mortgage_structure_exploration(cfg, cells=cells)
+        results = optimize.explore('mortgage_structure', cfg, cells=cells)
         assert results, "the surviving cells must still be scored"
         scored = {(r["structure_basis_id"], r["structure_id"]) for r in results}
         for c in refused:

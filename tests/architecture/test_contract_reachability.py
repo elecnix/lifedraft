@@ -479,7 +479,7 @@ class EveryDecisionReachesTheEngineTest(unittest.TestCase):
     s.min_bracket_gap``, which this couple does not clear, so no mutation of it
     can move a number. ``allocation.resp_pct`` is read, and then capped by the
     CESG match, which binds. ``decisions.income[].overrides[].amount`` reaches
-    the engine through ``run_income_scenario_exploration``, an entry point
+    the engine through ``explore('income_scenario', ...)``, the seam
     ``run_optimization`` never calls. An output-level probe calls all three
     dead. All three are alive, and #665 already proved the last one is.
 

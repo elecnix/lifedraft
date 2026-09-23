@@ -63,7 +63,7 @@ def _engine_config(hold_draw):
         hold_borrow_to_invest_draw=hold_draw,
         heloc_rate=0.05,
         # Route the whole year-0 draw into non-reg (the same lever
-        # optimize.run_borrow_to_invest_exploration sets per cell, D3/#1036)
+        # optimize.explore('borrow_to_invest', ...) sets per cell, D3/#1036)
         # so the s.20(1)(c) trace is 100% investment and the deduction is
         # observable -- the registered-first waterfall would otherwise land
         # the draw in RRSP/TFSA and the deductible proportion would be 0.
@@ -216,7 +216,7 @@ class TestHoldDrawContractMapping(unittest.TestCase):
 
 
 class TestHoldDrawExplorationWiring(unittest.TestCase):
-    """optimize.run_borrow_to_invest_exploration must set the engine-facing
+    """optimize.explore('borrow_to_invest', ...) must set the engine-facing
     property.borrow_to_invest_hold_draw key on exactly the hold-draw cells'
     configs (DP#18: the decision modifies a key the engine reads)."""
 
@@ -247,7 +247,7 @@ class TestHoldDrawExplorationWiring(unittest.TestCase):
         orig = optimize._map_scenarios
         optimize._map_scenarios = fake_map_scenarios
         try:
-            results = optimize.run_borrow_to_invest_exploration(
+            results = optimize.explore('borrow_to_invest',
                 cfg, "input.json", objective=MAX_NET_BENEFIT)
         finally:
             optimize._map_scenarios = orig

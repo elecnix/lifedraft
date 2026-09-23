@@ -519,7 +519,7 @@ class ScheduleOptimizerVisibilityTest(unittest.TestCase):
 
 # ============================================================================
 # REAL OPTIMIZER PATH (Finding 3): drive the actual LTV/refinance
-# exploration entry point the optimizer uses (optimize.run_ltv_exploration)
+# exploration seam the optimizer uses (optimize.explore('ltv', ...))
 # with a schedule-declared config and assert the ranked results reflect the
 # schedule cost. This is NOT a direct-simulation ordering test -- it goes
 # through the optimizer's candidate discovery, overlay construction, and
@@ -532,7 +532,7 @@ import optimize  # noqa: E402
 
 def _opt_cfg():
     """A fabricated household in the INTERNAL config format
-    optimize.run_ltv_exploration expects, with a mortgage and undrawn margin
+    optimize.explore('ltv', ...) expects, with a mortgage and undrawn margin
     so the LTV ladder produces cash-out candidates. Round numbers, role-based
     names (DP#4/DP#15)."""
     return {
@@ -568,7 +568,7 @@ def _opt_cfg():
 
 class ScheduleOptimizerPathTest(unittest.TestCase):
     """Finding 3: drive the REAL optimizer entry point
-    (optimize.run_ltv_exploration) with a schedule-declared config and assert
+    (optimize.explore('ltv', ...)) with a schedule-declared config and assert
     the ranked results reflect the schedule cost. The schedule reduces the
     deployable principal at year 0, so a cash-out candidate's net_benefit is
     LOWER with a schedule than without one."""
@@ -587,8 +587,8 @@ class ScheduleOptimizerPathTest(unittest.TestCase):
         cfg_with_sched['property']['deployment_schedule_years'] = 6
         cfg_with_sched['property']['deployment_schedule_parking_rate'] = 0.0
 
-        results_no = optimize.run_ltv_exploration(cfg_no_sched)
-        results_with = optimize.run_ltv_exploration(cfg_with_sched)
+        results_no = optimize.explore('ltv', cfg_no_sched)
+        results_with = optimize.explore('ltv', cfg_with_sched)
 
         scored_no = [r for r in results_no if 'net_benefit' in r]
         scored_with = [r for r in results_with if 'net_benefit' in r]
@@ -607,7 +607,7 @@ class ScheduleOptimizerPathTest(unittest.TestCase):
         cfg = _opt_cfg()
         cfg['property']['deployment_schedule_years'] = 4
         cfg['property']['deployment_schedule_parking_rate'] = 0.0
-        results = optimize.run_ltv_exploration(cfg)
+        results = optimize.explore('ltv', cfg)
         scored = [r for r in results if 'net_benefit' in r and r.get('year_by_year')]
         self.assertGreater(len(scored), 0)
         has_cost = any(

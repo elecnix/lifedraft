@@ -115,7 +115,7 @@ class TestDecisionsIncomeReachesTheEngine(unittest.TestCase):
         declared_ids = {sc["id"] for sc in doc["decisions"]["income"]}
 
         cfg = _load_runnable_cfg()
-        results = optimize.run_income_scenario_exploration(cfg)
+        results = optimize.explore('income_scenario', cfg)
         reached_ids = {r["income_scenario_id"] for r in results}
 
         self.assertEqual(
@@ -132,7 +132,7 @@ class TestDecisionsIncomeReachesTheEngine(unittest.TestCase):
         must differ from the 'stay' scenario's -- proof the override
         actually reached simulate_year_pure, not just a results dict key."""
         cfg = _load_runnable_cfg()
-        results = optimize.run_income_scenario_exploration(cfg)
+        results = optimize.explore('income_scenario', cfg)
 
         def best_net_benefit(scenario_id):
             rows = [r for r in results if r["income_scenario_id"] == scenario_id]

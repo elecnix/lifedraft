@@ -648,7 +648,7 @@ def refinance_candidates(cfg: Dict, ltv_steps: List[float] = None) -> List[Dict]
     ``cfg['scenarios']['refinance']`` -- and that NOTHING in optimize.py ever
     read. Measured before this fix: raising a declared option's ``cash_out``
     from $50,000 to $400,000 left every number optimize.py printed byte-
-    identical, because ``run_ltv_exploration`` substituted the hardcoded ladder
+    identical, because the LTV sweep substituted the hardcoded ladder
     above for the household's declaration. The household could not influence the
     optimizer's refinance analysis at all -- "parsed, mapped, then never passed"
     (AGENTS.md), the same defect family as #713/#714/#830.
@@ -734,9 +734,9 @@ def _candidate_overlay(cfg: Dict, candidate: Dict) -> ScenarioOverlay:
     )
 
 
-def run_ltv_exploration(cfg: Dict, input_path: str = "input.json",
-                        ltv_steps: List[float] = None,
-                        objective: ObjectiveFunction = None) -> List[Dict]:
+def _sweep_ltv(cfg: Dict, input_path: str = "input.json",
+               ltv_steps: List[float] = None,
+               objective: ObjectiveFunction = None) -> List[Dict]:
     """Run strategies at each refinance candidate.
 
     At each candidate, the cash-out increases margin_available and the
@@ -966,9 +966,9 @@ def _apply_income_scenario(cfg: Dict, income_scenario: Dict) -> Dict:
     return cfg_variant
 
 
-def run_income_scenario_exploration(cfg: Dict, input_path: str = "input.json",
-                                     objective: ObjectiveFunction = None,
-                                     ltv_max: float = None) -> List[Dict]:
+def _sweep_income_scenario(cfg: Dict, input_path: str = "input.json",
+                           objective: ObjectiveFunction = None,
+                           ltv_max: float = None) -> List[Dict]:
     """Run the full optimizer once per declared income scenario (issue #665).
 
     ``decisions.income[]`` in the input contract exists so a household can
@@ -1146,7 +1146,7 @@ def _apply_sourcing_scenario(cfg: Dict, structure: Dict) -> Dict:
 def structure_refinance_bases(cfg: Dict) -> List[Dict]:
     """The refinance option(s) the STRUCTURE ranking is scored at (#845).
 
-    #845's defect: ``run_mortgage_structure_exploration`` scored every
+    #845's defect: ``explore('mortgage_structure', ...)`` scored every
     structure at the household's CURRENT charge, silently ignoring
     ``decisions.mortgage.refinance_options`` -- so the irreversible,
     notary-day structural choice was ranked at a leverage the report does not
@@ -1487,9 +1487,9 @@ def _compose_structure_cell(cfg: Dict, basis: Dict, structure: Dict) -> List[Dic
     return [cell]
 
 
-def run_mortgage_structure_exploration(cfg: Dict, input_path: str = "input.json",
-                                        objective: ObjectiveFunction = None,
-                                        cells: List[Dict] = None) -> List[Dict]:
+def _sweep_mortgage_structure(cfg: Dict, input_path: str = "input.json",
+                               objective: ObjectiveFunction = None,
+                               cells: List[Dict] = None) -> List[Dict]:
     """Run the full optimizer once per (refinance option) x (mortgage
     structure) x (income scenario) cell -- issues #687/#845/#849.
 
@@ -1552,7 +1552,7 @@ def run_mortgage_structure_exploration(cfg: Dict, input_path: str = "input.json"
     ``structure_id``/``structure_label``/``structure_revolving_share``/
     ``structure_readvanceable``, ``income_scenario_id``/
     ``income_scenario_label`` (DP#8: reuses the same income-scenario
-    tagging shape ``run_income_scenario_exploration`` uses), AND
+    tagging shape ``explore('income_scenario', ...)`` uses), AND
     ``structure_basis_id``/``structure_basis_label``/
     ``structure_basis_source``/``structure_basis_cash_out``/
     ``structure_basis_ltv`` (#845: the basis travels ON the row); the
@@ -1663,17 +1663,17 @@ def run_mortgage_structure_exploration(cfg: Dict, input_path: str = "input.json"
 # funding method and diff. ``purchase.funding_options`` (#1011) declares the
 # candidate funding methods; the optimizer ENUMERATES them, re-optimises per
 # candidate, and RANKS by the active objective (DP#22). The shape mirrors
-# ``run_mortgage_structure_exploration`` (#687): the declared options array is
+# ``explore('mortgage_structure', ...)`` (#687): the declared options array is
 # the trigger (DP#16), the sweep is a dedicated exploration (not a grid
 # overlay dimension -- a per-property purchase decision does not fit the
 # household-level grid), and every result row is tagged with the funding it
 # was scored at so the printed basis cannot disagree with the numbers (DP#9).
 
 
-def run_property_funding_exploration(cfg: Dict, input_path: str = "input.json",
-                                     objective: ObjectiveFunction = None,
-                                     cells: Optional[List[Dict]] = None
-                                     ) -> List[Dict]:
+def _sweep_property_funding(cfg: Dict, input_path: str = "input.json",
+                            objective: ObjectiveFunction = None,
+                            cells: Optional[List[Dict]] = None
+                            ) -> List[Dict]:
     """Run the full optimizer once per (funding candidate x income scenario)
     cell -- issue #1011.
 
@@ -1699,7 +1699,7 @@ def run_property_funding_exploration(cfg: Dict, input_path: str = "input.json",
     chosen method), THEN the income overlay -- and the PRODUCT is ranked,
     every row tagged with ``property_funding_id``/``property_funding_label``
     and ``income_scenario_id``/``income_scenario_label`` (DP#8: reuses the
-    same income-scenario tagging shape ``run_income_scenario_exploration``
+    same income-scenario tagging shape ``explore('income_scenario', ...)``
     uses).
 
     Returns the UNION of every (funding, income scenario) cell's ranked
@@ -1758,9 +1758,9 @@ def _apply_property_funding_scenario(cfg: Dict, assignment: Dict[str, Dict]) -> 
     return apply_property_funding_overlay(cfg, assignment)
 
 
-def run_borrow_to_invest_exploration(cfg: Dict, input_path: str = "input.json",
-                                     objective: ObjectiveFunction = None
-                                     ) -> List[Dict]:
+def _sweep_borrow_to_invest(cfg: Dict, input_path: str = "input.json",
+                             objective: ObjectiveFunction = None
+                             ) -> List[Dict]:
     """Run the full optimizer once per (borrow-to-invest amount rung x income
     scenario) cell -- issue #1036.
 
@@ -1935,8 +1935,8 @@ def run_borrow_to_invest_exploration(cfg: Dict, input_path: str = "input.json",
 
 # Issue #232: the one exploration surface of this module. ``explore(dimension,
 # cfg)`` routes to the dimension's candidate sweep, hands every candidate to
-# the ranking core (``run_optimization`` -- the ``run_*_exploration`` folds
-# below are all sweeps of it), and returns the RANKED rows. The seam returns
+# the ranking core (``run_optimization`` -- the ``_sweep_*`` folds below are
+# all sweeps of it), and returns the RANKED rows. The seam returns
 # data and never prints; report rendering belongs to the caller (slice 3 moved
 # the dimension ``_print_*`` reports into ``output_plugins.py``). The dimension is a
 # small closed set of strings (DP#8: data, not a class hierarchy), validated
@@ -1952,11 +1952,11 @@ EXPLORE_DIMENSIONS = frozenset({
 
 
 _EXPLORE_DISPATCH = {
-    'ltv': run_ltv_exploration,
-    'income_scenario': run_income_scenario_exploration,
-    'mortgage_structure': run_mortgage_structure_exploration,
-    'property_funding': run_property_funding_exploration,
-    'borrow_to_invest': run_borrow_to_invest_exploration,
+    'ltv': _sweep_ltv,
+    'income_scenario': _sweep_income_scenario,
+    'mortgage_structure': _sweep_mortgage_structure,
+    'property_funding': _sweep_property_funding,
+    'borrow_to_invest': _sweep_borrow_to_invest,
 }
 
 
@@ -1974,21 +1974,17 @@ def explore(dimension: str, cfg: Dict, input_path: str = "input.json",
     Args:
         dimension: one of ``EXPLORE_DIMENSIONS`` --
 
-            - ``'ltv'`` -- refinance-candidate sweep
-              (``run_ltv_exploration``); forwarded kwargs include
-              ``ltv_steps``.
-            - ``'income_scenario'`` -- declared income-scenario sweep
-              (``run_income_scenario_exploration``); forwarded kwargs
-              include ``ltv_max``.
+            - ``'ltv'`` -- refinance-candidate sweep; forwarded kwargs
+              include ``ltv_steps``.
+            - ``'income_scenario'`` -- declared income-scenario sweep;
+              forwarded kwargs include ``ltv_max``.
             - ``'mortgage_structure'`` -- (refinance option x structure
-              x income scenario) cross
-              (``run_mortgage_structure_exploration``); forwarded kwargs
-              include ``cells``.
+              x income scenario) cross; forwarded kwargs include
+              ``cells``.
             - ``'property_funding'`` -- (funding option x income
-              scenario) cross (``run_property_funding_exploration``);
-              forwarded kwargs include ``cells``.
+              scenario) cross; forwarded kwargs include ``cells``.
             - ``'borrow_to_invest'`` -- borrow-to-invest amount-rung
-              sweep (``run_borrow_to_invest_exploration``).
+              sweep.
 
         cfg: configuration dict (``input_contract.load_and_map`` output).
         input_path: forwarded to the sweep (``run_optimization`` takes it
@@ -1998,10 +1994,9 @@ def explore(dimension: str, cfg: Dict, input_path: str = "input.json",
         **kwargs: dimension-specific options, forwarded unchanged.
 
     Returns:
-        The dimension's ranked rows -- EXACTLY what the underlying
-        ``run_*_exploration`` returns for the same arguments (identical
-        rankings is the slice-2 contract; ``tests/test_explore_seam.py``
-        pins it per dimension).
+        The dimension's ranked rows -- the sweep's rows unchanged
+        (identical rankings is the slice-2 contract;
+        ``tests/test_explore_seam.py`` pins the per-dimension shapes).
 
     Raises:
         ValueError: ``dimension`` is not in ``EXPLORE_DIMENSIONS`` (DP#32:
@@ -3273,7 +3268,7 @@ def main():
 
     # ── Auto: LTV exploration (when property data available) ──
     if _has_property_data(cfg):
-        ltv_results = run_ltv_exploration(cfg, args.input, objective=objective)
+        ltv_results = explore('ltv', cfg, args.input, objective=objective)
         _print_ltv_exploration(ltv_results)
     else:
         ltv_results = None
@@ -3287,8 +3282,8 @@ def main():
     # issue #665: decisions.income[] ("stay at current job" / "salary cut" /
     # "job loss, EI only") is run for real here — one full optimization pass
     # PER declared income scenario, not just the base config's income.
-    results = run_income_scenario_exploration(cfg, args.input, ltv_max=ltv_max,
-                                              objective=objective)
+    results = explore('income_scenario', cfg, args.input, ltv_max=ltv_max,
+                      objective=objective)
     n_income_scenarios = len(set(r['income_scenario_id'] for r in results))
 
     # Issue #707: record the worst-case decumulation shortfall onto cfg BEFORE
@@ -3405,8 +3400,9 @@ def main():
     # cannot disagree about which cells existed (DP#9).
     if cfg.get('property', {}).get('structure_options'):
         structure_cells = structure_refinance_cells(cfg)
-        structure_results = run_mortgage_structure_exploration(
-            cfg, args.input, cells=structure_cells, objective=objective)
+        structure_results = explore(
+            'mortgage_structure', cfg, args.input, cells=structure_cells,
+            objective=objective)
         _print_structure_report(structure_results, cells=structure_cells)
 
     # Issue #1011: property-purchase FUNDING ranking (all-cash vs. down-
@@ -3420,8 +3416,8 @@ def main():
     # to #967/#696 (DP#32).
     from scenario_discovery import discover_property_funding_cells
     if discover_property_funding_cells(cfg):
-        funding_results = run_property_funding_exploration(
-            cfg, args.input, objective=objective)
+        funding_results = explore(
+            'property_funding', cfg, args.input, objective=objective)
         _print_property_funding_report(funding_results)
 
     # Issue #1036: borrow-to-invest ranking (draw $X against a declared HELOC
@@ -3433,8 +3429,8 @@ def main():
     # household that declares none never reaches the exploration and the golden
     # trajectory is byte-identical (DP#32).
     if cfg.get('borrow_to_invest_options'):
-        btv_results = run_borrow_to_invest_exploration(
-            cfg, args.input, objective=objective)
+        btv_results = explore(
+            'borrow_to_invest', cfg, args.input, objective=objective)
         _print_borrow_to_invest_report(btv_results)
 
     # ── Export ── (DP#15: output files go to ~/.cache, not repo root)

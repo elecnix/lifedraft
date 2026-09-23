@@ -173,7 +173,7 @@ class TestRunLtvExplorationCarriesTheAnnotation:
     def test_rows_carry_the_declared_annotation(self):
         cfg = _declared(_cfg(),
                         {'id': 'advance', 'label': 'Mortgage advance', 'cash_out': 200000})
-        results = optimize.run_ltv_exploration(cfg)
+        results = optimize.explore('ltv', cfg)
         # the full ladder is present (union, not replacement)
         ltvs = {round(r['ltv'], 4) for r in results}
         assert set(optimize.DEFAULT_LTV_LADDER) <= ltvs
@@ -191,7 +191,7 @@ class TestRefinanceBasisIsALens:
     def test_declared_union_prints_the_star_lens_legend(self, capsys):
         cfg = _declared(_cfg(),
                         {'id': 'advance', 'label': 'Mortgage advance', 'cash_out': 200000})
-        results = optimize.run_ltv_exploration(cfg)
+        results = optimize.explore('ltv', cfg)
         output_plugins._print_refinance_basis(results)
         out = capsys.readouterr().out
         assert '★' in out
@@ -205,7 +205,7 @@ class TestRefinanceBasisIsALens:
         must still say so loudly."""
         cfg = _declared(_cfg(),
                         {'id': 'advance', 'label': 'Mortgage advance', 'cash_out': 200000})
-        results = optimize.run_ltv_exploration(cfg, ltv_steps=[0.0, 0.5])
+        results = optimize.explore('ltv', cfg, ltv_steps=[0.0, 0.5])
         output_plugins._print_refinance_basis(results)
         out = capsys.readouterr().out
         assert 'OVERRIDES' in out

@@ -577,7 +577,7 @@ def apply_sourcing_overlay(property_cfg: dict, structure: Dict) -> dict:
     owes exactly ``drawn``, and ``optimizer.py`` still invests exactly
     ``cash_out`` (``margin_available * 0.0 + cash_out``) while booking
     ``margin_draw_for_lump_sum(cash_out, revolving) = line_draw`` of it as
-    HELOC debt. That is why ``run_mortgage_structure_exploration`` pins the
+    HELOC debt. That is why ``explore('mortgage_structure', ...)`` pins the
     draw fraction to 0.0 on a cash-out basis: at a fixed charge the draw is
     IMPLIED by the sourcing split, and sweeping it again would invest
     borrowed money twice. Any residual room (``revolving - line_draw``, when

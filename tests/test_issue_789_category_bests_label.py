@@ -17,7 +17,7 @@ import tempfile
 import unittest
 
 import countries.canada  # noqa: F401 -- registers the Canada jurisdiction providers
-from optimize import run_income_scenario_exploration, run_ltv_exploration
+from optimize import explore
 from output_plugins import _category_bests
 
 try:
@@ -90,13 +90,13 @@ class TestCategoryBestsLabelMatchesItsData(unittest.TestCase):
         """The headline winner's net_benefit equals the 80%-LTV max-refinance
         row (the data IS the max-refinance scenario), so its label must say
         "Maximum Refinance (80%)", not "No Refinance"."""
-        results = run_income_scenario_exploration(self.cfg, self.path)
+        results = explore('income_scenario', self.cfg, self.path)
         cats = _category_bests(results)
         self.assertTrue(cats, "category_bests must not be empty")
         winner = cats[0]
         # The winner's data IS the max-refinance scenario: its net_benefit
         # equals the best 80%-LTV row of the LTV exploration.
-        ltv_results = run_ltv_exploration(self.cfg, self.path)
+        ltv_results = explore('ltv', self.cfg, self.path)
         max_refi_rows = [r for r in ltv_results if r['ltv'] == 0.80]
         self.assertTrue(max_refi_rows, "LTV exploration must include 80% rows")
         max_refi_best = max(max_refi_rows, key=lambda r: r.get('net_benefit', 0))
@@ -120,7 +120,7 @@ class TestCategoryBestsLabelMatchesItsData(unittest.TestCase):
         """The winner's declared cash_out (dollars) equals the LTV-exploration
         row whose net_benefit matches -- the label and the data come from one
         source (DP#9)."""
-        results = run_income_scenario_exploration(self.cfg, self.path)
+        results = explore('income_scenario', self.cfg, self.path)
         cats = _category_bests(results)
         winner = cats[0]
         # The entry carries the cash-out DOLLARS it was derived from
@@ -131,7 +131,7 @@ class TestCategoryBestsLabelMatchesItsData(unittest.TestCase):
             "a category_bests entry must carry the cash-out DOLLARS its "
             "label was derived from, so the label and the data share one "
             "source (DP#9 / #789).")
-        ltv_results = run_ltv_exploration(self.cfg, self.path)
+        ltv_results = explore('ltv', self.cfg, self.path)
         max_refi_best = max(
             [r for r in ltv_results if r['ltv'] == 0.80],
             key=lambda r: r.get('net_benefit', 0))
@@ -148,9 +148,9 @@ class TestCategoryBestsLabelMatchesItsData(unittest.TestCase):
         """Invariant: the category_bests winner's net_benefit equals the max
         net_benefit over the LTV exploration's 80%-LTV rows (the headline runs
         at ltv_max, so its best IS the max-refi best)."""
-        results = run_income_scenario_exploration(self.cfg, self.path)
+        results = explore('income_scenario', self.cfg, self.path)
         cats = _category_bests(results)
-        ltv_results = run_ltv_exploration(self.cfg, self.path)
+        ltv_results = explore('ltv', self.cfg, self.path)
         max_over_ltv = max(
             (r.get('net_benefit', 0) for r in ltv_results if r['ltv'] == 0.80),
             default=0)

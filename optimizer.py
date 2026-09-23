@@ -620,7 +620,7 @@ class GridOptimizer(Optimizer):
                 made the omission invisible (no error, no warning, a
                 confidently-ranked table that answered a different question
                 than the one asked). See ``optimize.py``'s
-                ``run_income_scenario_exploration`` for the real caller.
+                ``explore('income_scenario', ...)`` for the real caller.
             search_space: DP#31: Strategy search space from discover_anchors().
                 When provided, sm_options and deduct_later_options are extracted
                 from this dict instead of using hardcoded defaults.
