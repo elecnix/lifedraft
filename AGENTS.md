@@ -212,6 +212,7 @@ This is load-bearing, because a false green is load-bearing: someone merges on i
 | `tests/trajectory_invariants.py` | break money conservation, `ACB <= FMV`, or the RRIF minimum at 71 — checked **every year** |
 | `tools/coverage_gate.py` (CI) | add a production file no test touches, **increase** any file's uncovered-line count, or add a `# pragma: no cover` |
 | `.github/workflows/clone-detection.yml` | duplicate logic that *this PR* introduces (dupdelta, warn-only) |
+| `tests/architecture/test_claude_workflow_scripts.py` | add or edit a `.claude/workflows/*.js` that does not compile as an async body, has a non-literal `meta`, lets `phase()` and `meta.phases` drift, or hardcodes a home path (needs `node` on PATH; fails without it) |
 
 **When a guard fires, fix the code — do not add an allowlist entry.** The allowlists exist for
 already-triaged exceptions carrying a citation and a mechanism. Growing one to make your build go
