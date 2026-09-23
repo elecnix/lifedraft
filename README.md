@@ -76,7 +76,7 @@ the conversation lives on top.
 
 ## Design principles you'll feel as a user
 
-These aren't decoration — most of them are enforced by tests in the repo itself.
+These aren't decoration; most of them are enforced by tests in the repo itself.
 
 - **It ranks, it doesn't choose.** The optimizer orders options by outcome; the
   decision stays yours. The simulator models tax consequences; it does not make
