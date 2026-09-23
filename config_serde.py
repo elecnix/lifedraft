@@ -248,8 +248,8 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         # config test built directly stays byte-identical to the pre-#1036
         # capitalization path (DP#32: absence is the fallback, never a
         # coercion of a supplied value). The raw cfg['borrow_to_invest_
-        # options'] key is read directly by optimize.run_borrow_to_invest_
-        # exploration (the optimizer, not the simulator, DP#22); it is NOT
+        # options'] key is read directly by explore('borrow_to_invest', ...)
+        # (the optimizer, not the simulator, DP#22); it is NOT
         # lifted onto a SimulationConfig field (a dead surface -- D7).
         capitalize_interest=prop.get('capitalize_interest', True),
         # Issue #1040: hold_draw defaults False when absent (the pre-#1040

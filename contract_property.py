@@ -415,8 +415,8 @@ def _map_owned_properties(doc: Dict, primary_id: str,
             # `financing` nor `funding_options` round-trips byte-identical to
             # #967/#696 (DP#32). The engine never reads `funding_options` or
             # `funding_recompute` itself -- they are sweep metadata consumed
-            # only by scenario_discovery / optimize.run_property_funding_
-            # exploration (DP#18: a write that reaches a real reader).
+            # only by scenario_discovery / explore('property_funding', ...)
+            # (DP#18: a write that reaches a real reader).
             if funding_options is not None:
                 owner_roles = {
                     role: shares.get(pid, 0.0)
