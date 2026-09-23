@@ -20,15 +20,35 @@ imported inside each rule function body.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from dataclasses import dataclass, field, fields
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from simulation_config import SimulationConfig
+
+if TYPE_CHECKING:  # the fold's input bundle; runtime import would point outward (DP#25)
+    from simulation_state import YearInputs
 
 
 # =============================================================================
 # Per-call context and working state
 # =============================================================================
+
+# ``RuleContext`` fields supplied from the CALL, not projected off a
+# ``YearInputs`` (issue #231 slice 2): ``year`` is the fold's 0-based index (a
+# ``simulate_year_pure`` parameter, not a per-call input) and the two
+# minimum-tax credit opening balances are projected from the prior year's
+# carried jurisdiction state, not declared this year. Every other
+# ``RuleContext`` field must exist on ``YearInputs``.
+# ``tests/architecture/test_rulecontext_derived_from_year_inputs.py`` pins this
+# set so it can neither grow silently (a new explicit field needs a decision)
+# nor rot (each member must still be RuleContext-only), the same allowlist
+# discipline the DP#32 guards use.
+RULE_CONTEXT_EXPLICIT_FIELDS = frozenset({
+    "year",
+    "amt_credit_opening",
+    "qc_imr_credit_opening",
+})
+
 
 @dataclass(frozen=True)
 class RuleContext:
@@ -207,6 +227,40 @@ class RuleContext:
     # household's pre-retirement years price the gain at the lowest bracket).
     primary_taxable_income: float = 0.0
     spouse_taxable_income: float = 0.0
+
+    @classmethod
+    def from_year_inputs(cls, inputs: "YearInputs", *, year: int,
+                         amt_credit_opening: tuple = (),
+                         qc_imr_credit_opening: tuple = ()) -> "RuleContext":
+        """Derive this context from one ``YearInputs`` (issue #231 slice 2).
+
+        Every field except ``RULE_CONTEXT_EXPLICIT_FIELDS`` is projected from
+        ``inputs`` by name. ``getattr`` raises ``AttributeError`` if the two
+        ever disagree on a name, so a drift is loud, never a silent default
+        (DP#32). The projection introspects this class's own dataclass fields,
+        so it needs no runtime import of ``simulation_state`` (the type-only
+        import keeps the dependency pointing one way, DP#25).
+
+        ``calendar_year`` is the one projected field whose value is resolved
+        rather than copied: ``YearInputs`` documents ``None`` as "use the
+        0-based index" (#343), while a rule's date-computed gates need an
+        absolute year. That resolution lives here, in one place, exactly as the
+        hand-spelled construction resolved it (``cal_year``).
+        """
+        projected = {
+            f.name: getattr(inputs, f.name)
+            for f in fields(cls)
+            if f.name not in RULE_CONTEXT_EXPLICIT_FIELDS
+        }
+        if projected["calendar_year"] is None:
+            projected["calendar_year"] = year
+        return cls(
+            year=year,
+            amt_credit_opening=amt_credit_opening,
+            qc_imr_credit_opening=qc_imr_credit_opening,
+            **projected,
+        )
+
 
 @dataclass
 class YearWorkingState:

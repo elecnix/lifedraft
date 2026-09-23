@@ -2123,28 +2123,25 @@ def simulate_year_pure(
     Returns:
         (YearResult, SimState) — the year's result and the next state.
     """
-    # Issue #231 slice 1: ``inputs`` bundles the 56 parameters that used to be
-    # spelled out here. Unpacking into locals keeps the fold body byte-identical
-    # for this slice; slice 2 removes these lines when ``RuleContext`` is derived
-    # from ``YearInputs`` directly (DP#26). Each read is a plain attribute access --
-    # no ``or`` fallback, so a supplied 0 survives (DP#32/#13).
+    # Issue #231 slice 2: ``inputs`` bundles the year step's per-call inputs.
+    # The fold body unpacks only the fields it reads itself; the context-only
+    # fields are projected straight off ``inputs`` by
+    # ``RuleContext.from_year_inputs`` and are deliberately NOT unpacked here,
+    # so there is no second list to keep in sync (DP#26). Each read is a plain
+    # attribute access -- no ``or`` fallback, so a supplied 0 survives
+    # (DP#32/#13).
     allocations = inputs.allocations
     config = inputs.config
     investment_return = inputs.investment_return
     mortgage_rate = inputs.mortgage_rate
     heloc_rate = inputs.heloc_rate
-    mortgage_data = inputs.mortgage_data
     use_readvanceable = inputs.use_readvanceable
     deduct_later = inputs.deduct_later
     primary_marginal_rate = inputs.primary_marginal_rate
     spouse_marginal_rate = inputs.spouse_marginal_rate
-    resp_data = inputs.resp_data
-    fhsa_contribution = inputs.fhsa_contribution
     rrsp_annual_limit = inputs.rrsp_annual_limit
     tfsa_annual_limit = inputs.tfsa_annual_limit
     fhsa_annual_limit = inputs.fhsa_annual_limit
-    non_reg_after_tax_return = inputs.non_reg_after_tax_return
-    registered_wht_drag = inputs.registered_wht_drag
     cpp_income = inputs.cpp_income
     oas_income = inputs.oas_income
     pension_income = inputs.pension_income
@@ -2155,35 +2152,17 @@ def simulate_year_pure(
     retiree_marginal_rate = inputs.retiree_marginal_rate
     drawdown_bracket_target = inputs.drawdown_bracket_target
     drawdown_other_taxable_income = inputs.drawdown_other_taxable_income
-    living_costs = inputs.living_costs
-    after_tax_income = inputs.after_tax_income
-    borrowed_investment = inputs.borrowed_investment
-    free_cash_invested = inputs.free_cash_invested
     deployment_lag_cost = inputs.deployment_lag_cost
     deployment_schedule_cost = inputs.deployment_schedule_cost
     transaction_cost_year0 = inputs.transaction_cost_year0
     calendar_year = inputs.calendar_year
     any_retired = inputs.any_retired
     retirement_spending_target = inputs.retirement_spending_target
-    income_shock_active = inputs.income_shock_active
-    primary_income_pre = inputs.primary_income_pre
-    spouse_income_pre = inputs.spouse_income_pre
-    primary_retired = inputs.primary_retired
-    spouse_retired = inputs.spouse_retired
-    base_primary_income = inputs.base_primary_income
-    base_spouse_income = inputs.base_spouse_income
     year_brackets = inputs.year_brackets
-    tax_indexation_rate = inputs.tax_indexation_rate
-    prior_gis_countable_income = inputs.prior_gis_countable_income
     child_allocation_pcts = inputs.child_allocation_pcts
     child_gift_amounts = inputs.child_gift_amounts
     child_loan_amounts = inputs.child_loan_amounts
     extra_adult_accounts = inputs.extra_adult_accounts
-    tax_provider = inputs.tax_provider
-    primary_tax_before = inputs.primary_tax_before
-    spouse_tax_before = inputs.spouse_tax_before
-    primary_taxable_income = inputs.primary_taxable_income
-    spouse_taxable_income = inputs.spouse_taxable_income
 
     # Issue #28: investment_return must be provided explicitly
     if investment_return is None:
@@ -2222,70 +2201,20 @@ def simulate_year_pure(
     _opening_canada = state.jurisdiction_state.get('canada')
     if not isinstance(_opening_canada, dict):
         _opening_canada = {}
-    ctx = RuleContext(
+    # Issue #231 slice 2: ``RuleContext`` is DERIVED from ``inputs`` -- the 49
+    # fields the two share are projected by name (``from_year_inputs``), so a
+    # new rule no longer means editing this construction list in parallel with
+    # ``YearInputs``. Only the three fields that are not inputs are spelled
+    # out: ``year`` (the fold's index) and the two minimum-tax credit openings
+    # projected from the prior year's carried state (issue #747). ``inputs``
+    # also carries 7 fold-internal fields (deployment carries, child funding,
+    # extra-adult accounts) that rules never read; they stay on the body's
+    # locals below, not on the context.
+    ctx = RuleContext.from_year_inputs(
+        inputs,
         year=year,
-        calendar_year=cal_year,
-        allocations=allocations,
-        config=config,
-        investment_return=investment_return,
-        mortgage_rate=mortgage_rate,
-        heloc_rate=heloc_rate,
-        mortgage_data=mortgage_data,
-        use_readvanceable=use_readvanceable,
-        deduct_later=deduct_later,
-        primary_marginal_rate=primary_marginal_rate,
-        spouse_marginal_rate=spouse_marginal_rate,
-        resp_data=resp_data,
-        fhsa_contribution=fhsa_contribution,
-        rrsp_annual_limit=rrsp_annual_limit,
-        tfsa_annual_limit=tfsa_annual_limit,
-        fhsa_annual_limit=fhsa_annual_limit,
-        non_reg_after_tax_return=non_reg_after_tax_return,
-        registered_wht_drag=registered_wht_drag,
-        cpp_income=cpp_income,
-        oas_income=oas_income,
-        pension_income=pension_income,
-        drawdown_order=drawdown_order,
-        rrif_min_rate_primary=rrif_min_rate_primary,
-        rrif_min_rate_spouse=rrif_min_rate_spouse,
-        drawdown_net_target=drawdown_net_target,
-        retiree_marginal_rate=retiree_marginal_rate,
-        drawdown_bracket_target=drawdown_bracket_target,
-        drawdown_other_taxable_income=drawdown_other_taxable_income,
-        living_costs=living_costs,
-        after_tax_income=after_tax_income,
-        borrowed_investment=borrowed_investment,
-        # Issue #914: non-borrowed year-0 free cash (RESP proceeds) invested.
-        free_cash_invested=free_cash_invested,
-        # Issue #758: retirement phase + effective retirement spending target.
-        any_retired=any_retired,
-        retirement_spending_target=retirement_spending_target,
-        income_shock_active=income_shock_active,
-        # epic #795 bite 1: inputs for the registered retirement_income rule.
-        primary_income_pre=primary_income_pre,
-        spouse_income_pre=spouse_income_pre,
-        primary_retired=primary_retired,
-        spouse_retired=spouse_retired,
-        base_primary_income=base_primary_income,
-        base_spouse_income=base_spouse_income,
-        year_brackets=year_brackets,
-        tax_indexation_rate=tax_indexation_rate,
-        # Issue #1020 (S04 Step 1): prior-year GIS-countable income for the
-        # retirement_income rule's gis_benefit call.
-        prior_gis_countable_income=prior_gis_countable_income,
-        # Issue #747: opening minimum-tax credit balances (ITA s.120.2 /
-        # TP-776.42). Empty for any household that has never paid a minimum tax.
         amt_credit_opening=tuple(_opening_canada.get('amt_credit_buckets', ())),
         qc_imr_credit_opening=tuple(_opening_canada.get('qc_imr_credit_buckets', ())),
-        # epic #795 bite 3: inputs for the registered tuition_credit rule.
-        tax_provider=tax_provider,
-        primary_tax_before=primary_tax_before,
-        spouse_tax_before=spouse_tax_before,
-        # Issue #956 bite B (sale-core): inputs for the registered
-        # property_disposition rule (the owner's taxable income the sold
-        # property's gain bands against).
-        primary_taxable_income=primary_taxable_income,
-        spouse_taxable_income=spouse_taxable_income,
     )
     # epic #795 bite 1: seed ws with the retirement OUTPUT kwargs (defaults
     # 0.0/False/None) BEFORE run_rules so direct unit-test callers that pass
