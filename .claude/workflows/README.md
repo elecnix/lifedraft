@@ -36,7 +36,10 @@ args: { issue, repo }
    │  7 CI MONITOR ←──┬───────── │ │ CI FIXER   │  any failed check → fix +
    │    pending/      │          │ │ + certify  │  re-monitor from scratch
    └──────────────────┴───────── │ └────────────┘
-                                 └── ends when state == green
+                                 └── exits the loop when state == green
+   ┌───────────────┐
+   │  8 READY      │  re-proves green on the current head, then gh pr ready
+   └───────────────┘
 ```
 
 ### How to invoke
@@ -64,4 +67,13 @@ Workflow({ name: 'implement-github-issue',
 - **Verdict is only `pass` on first-hand evidence.** The validator re-runs the
   test-plan commands, spot-checks at least one sabotage, and only then reports.
 - **CI failures loop.** A failed check spawns a fixer, then a certifier, then the
-  monitor restarts from scratch. The workflow ends when CI is green, not before.
+  monitor restarts from scratch. A certifier that cannot certify stops the run.
+- **Code-writing stages own the branch, never the PR.** The first dogfood run
+  (#247 → #263) caught the implementer opening the PR, waiting on CI and marking
+  it ready itself, so the PR reached reviewers before the validator had judged
+  it. The implementer and fixers are now told the PR is out of scope. If a PR
+  exists anyway when the PR stage runs, that stage records a
+  `stageViolations` entry in the result and puts the PR back into draft.
+- **Only the final READY stage marks the PR ready.** It checks that CI is green
+  for the exact head commit the pipeline validated, which honours "mark ready
+  once CI is green" without ever making a PR ready too early.

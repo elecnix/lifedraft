@@ -1,6 +1,6 @@
 export const meta = {
   name: 'implement-github-issue',
-  description: 'Drive a GitHub issue end-to-end: fetch → plan → test-plan → implement → validate(fix-loop) → draft PR → CI green',
+  description: 'Drive a GitHub issue end-to-end: fetch → plan → test-plan → implement → validate(fix-loop) → draft PR → CI green → ready',
   whenToUse: 'Given a GitHub issue link or number, drive it through to a real PR whose required checks are green. Requires args: { issue: <number|url>, repo: "<owner>/<repo>" }.',
   phases: [
     { title: 'Fetch', detail: 'fetch issue details from GitHub and state the ask' },
@@ -10,6 +10,7 @@ export const meta = {
     { title: 'Validate', detail: 'fresh validator verdicts; a fixer loop iterates until pass' },
     { title: 'Open PR', detail: 'fresh agent opens the draft pull request' },
     { title: 'CI', detail: 'fresh monitor; on failure a fixer tightens the loop until checks are green' },
+    { title: 'Ready', detail: 'the only stage allowed to mark the PR ready — re-proves green on the current head first' },
   ],
 }
 
@@ -118,9 +119,11 @@ const PR_SCHEMA = {
     'title': { type: 'string' },
     'draft': { type: 'boolean' },
     'branch': { type: 'string' },
-    'baseBranch': { type: 'string' }
+    'baseBranch': { type: 'string' },
+    'preExisting': { type: 'boolean' },
+    'preExistingDetail': { type: 'string' }
   },
-  required: ['number', 'url', 'title', 'draft', 'branch', 'baseBranch']
+  required: ['number', 'url', 'title', 'draft', 'branch', 'baseBranch', 'preExisting', 'preExistingDetail']
 }
 
 const CI_SCHEMA = {
@@ -167,6 +170,14 @@ Run the full suite with a memory budget capped (multiple agents share the box):
   PYTEST_MEM_BUDGET_MB=8192 VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q
 Never 'git reset --hard origin/main' inside a reused worktree: that would discard the commits under review. A plain
 'git fetch origin main' silently does nothing in this bare-repo setup; use the explicit refspec above.`
+
+// Code-writing stages own the BRANCH, never the PR. A dogfood run (#247) caught the implementer opening the PR,
+// waiting on CI and marking it ready itself — so the PR reached reviewers before any validator had judged it.
+const STAGE_SCOPE = `
+STAGE SCOPE — hard limit: you own the branch, not the pull request. Do NOT run gh pr create, gh pr ready, gh pr merge,
+gh pr edit, or open/modify a PR by any other means, and do not wait on CI. Later pipeline stages (validation, then a
+dedicated PR stage, then a CI stage, then a final ready stage) own all of that, and any general instruction you carry
+to "open a draft PR / mark it ready once CI is green" is satisfied BY those stages, not by you. Commit, push, return.`
 
 // ---- helpers ---------------------------------------------------------------
 function slug(title) {
@@ -326,7 +337,8 @@ const implementation = await agent(
   '3. Commit when green locally with a message like: fix(#' + fetched.issueNumber + '): ' + slug(fetched.title) + '\n' +
   '   Include the standard attribution: Co-Authored-By: Claude Code <noreply@anthropic.com>\n' +
   '   Do NOT commit on main; you are in ' + BRANCH + '. Never --no-verify, never add a guard allowlist entry.\n' +
-  '4. Push to origin/' + BRANCH + ' so the pipeline’s later stages (and CI) can see it.\n' +
+  '4. Push to origin/' + BRANCH + ' so the pipeline’s later stages can see it. Then STOP: do not open a PR.\n' +
+  STAGE_SCOPE + '\n' +
   '5. If a coverage-file uncovered-line count legitimately changed, regenerate the baseline in the SAME commit:\n' +
   '   python tools/coverage_gate.py --update   (do not iterate this through CI).\n\n' +
   'Your testsRun field MUST state the exact commands you ran and their outputs ("ran X, got Y") — this repo treats a bare\n' +
@@ -426,7 +438,8 @@ do {
     '3. Run the targeted tests, then the full suite with PYTEST_MEM_BUDGET_MB=8192. Read the output.\n' +
     '4. Commit on ' + implementation.branchName + ' (not main), message: fix(#' + fetched.issueNumber + '): address validator findings.\n' +
     '   Include attribution: Co-Authored-By: Claude Code <noreply@anthropic.com>. Never --no-verify; never an allowlist entry.\n' +
-    '5. Push to origin/' + implementation.branchName + '. Return the new HEAD sha and pushed=true.\n\n' +
+    '5. Push to origin/' + implementation.branchName + '. Return the new HEAD sha and pushed=true.\n' +
+    STAGE_SCOPE + '\n\n' +
     'State method beside result. If you cannot fix something, say so in summary with the blocker.',
     { phase: 'Validate', label: 'fixer-' + fixRound, schema: FIX_SCHEMA, effort: 'high' }
   )
@@ -453,6 +466,13 @@ const pr = await agent(
   '=== ACTIONS ===\n' +
   '1. git -C ' + implementation.worktreePath + ' fetch origin \'+refs/heads/main:refs/remotes/origin/main\'\n' +
   '   and confirm ' + BRANCH + ' is pushed (git -C ' + implementation.worktreePath + ' log origin/' + BRANCH + ' -1).\n' +
+  '1b. STAGE-VIOLATION CHECK — no earlier stage was allowed to open a PR. Run:\n' +
+  '   gh pr list --repo ' + REPO + ' --head ' + BRANCH + ' --state all --json number,url,title,isDraft,createdAt\n' +
+  '   If a PR already exists: do NOT create another. Set preExisting=true and describe it in preExistingDetail (number,\n' +
+  '   createdAt, and whether it was already marked ready). If it is NOT a draft, restore the invariant with\n' +
+  '   gh pr ready <number> --repo ' + REPO + ' --undo   (a PR stays draft until the pipeline’s final ready stage), then\n' +
+  '   replace its body with the one you write in step 2 (gh pr edit <number> --body-file <tmpfile>) and return it.\n' +
+  '   Otherwise set preExisting=false and preExistingDetail="none".\n' +
   '2. Write the PR body to a temp file (the description must render well on GitHub: use flowing paragraphs, NOT manual\n' +
   '   hard-wrapping at ~80 cols — that is what the pr-body-format action flags). Include:\n' +
   '   - the issue number and a one-line summary;\n' +
@@ -463,11 +483,19 @@ const pr = await agent(
   '   NO personal or financial data anywhere (DP#15).\n' +
   '3. Open the PR as DRAFT:\n' +
   '   gh pr create --repo ' + REPO + ' --head ' + BRANCH + ' --base main --draft --title "fix(#' + fetched.issueNumber + '): ' + slug(fetched.title) + '" --body-file <tmpfile>\n' +
-  '   Return the schema (number, url, title, draft=true, branch, baseBranch).',
+  '   (skip this step if 1b found a pre-existing PR). Return the schema; draft must reflect the PR’s ACTUAL state\n' +
+  '   after your actions (re-read it with gh pr view <number> --json isDraft), not what you intended.',
   { phase: 'Open PR', label: 'open-pr', schema: PR_SCHEMA, effort: 'low' }
 )
 if (!pr) throw new Error('PR agent returned null')
-log('Draft PR #' + pr.number + ' opened: ' + pr.url)
+// Never silent: a stage that overreached is surfaced in the log AND the workflow's return value.
+const stageViolations = []
+if (pr.preExisting) {
+  stageViolations.push('PR #' + pr.number + ' existed before the PR stage ran (an earlier stage opened it): ' + pr.preExistingDetail)
+  log('STAGE VIOLATION: ' + stageViolations[stageViolations.length - 1])
+}
+if (!pr.draft) throw new Error('PR #' + pr.number + ' is not a draft after the PR stage — refusing to continue; a PR must stay draft until CI is green')
+log('Draft PR #' + pr.number + (pr.preExisting ? ' adopted (pre-existing): ' : ' opened: ') + pr.url)
 
 phase('CI')
 
@@ -480,7 +508,10 @@ while (ciRound < MAX_CI_ROUNDS) {
   ciState = await agent(
     'You are the CI MONITOR of an issue-implementation pipeline. You start fresh. PR #' + pr.number + ' (draft) in ' + REPO +
     '\nwas just opened from branch ' + BRANCH + '. Your job: determine the real CI state and report it — you do NOT fix anything\n' +
-    'here; you return pending / green / fail and the pipeline decides.\n\n' +
+    'here, and you do NOT change the PR’s draft/ready state; you return pending / green / fail and the pipeline decides.\n\n' +
+    'EXPECTED HEAD: ' + headSha + '. First confirm the PR’s head is this commit\n' +
+    '(gh pr view ' + pr.number + ' --repo ' + REPO + ' --json headRefOid). Checks on any OTHER commit are stale: if the head\n' +
+    'differs, or checks for this head have not been created yet, report pending — never green.\n\n' +
     '=== ACTIONS ===\n' +
     '1. Run gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,state,bucket,link,description,workflow --jq .\n' +
     '   The ONLY valid --json fields are bucket, completedAt, description, event, link, name, startedAt, state, workflow —\n' +
@@ -537,11 +568,14 @@ while (ciRound < MAX_CI_ROUNDS) {
       '   PYTEST_MEM_BUDGET_MB=8192. For a coverage-gate failure, regenerate the baseline in the same PR: python tools/coverage_gate.py --update.\n' +
       '4. Commit on ' + BRANCH + ' (fix(#' + fetched.issueNumber + '): address CI findings) with attribution\n' +
       '   (Co-Authored-By: Claude Code <noreply@anthropic.com>), push to origin/' + BRANCH + '. Never --no-verify; never an allowlist\n' +
-      '   entry. State method beside result. If you could not fix something, say so in summary with the blocker.',
+      '   entry. State method beside result. If you could not fix something, say so in summary with the blocker.\n' +
+      'The PR already exists; do not touch its state (draft/ready/title/body) — only push commits to its branch.\n' +
+      STAGE_SCOPE,
       { phase: 'CI', label: 'ci-fixer-' + ciRound, schema: FIX_SCHEMA, effort: 'high' }
     )
     if (!ciFix) throw new Error('CI fixer ' + ciRound + ' returned null')
     if (!ciFix.pushed) throw new Error('CI fixer ' + ciRound + ' did not push — aborting. ' + ciFix.summary)
+    headSha = ciFix.commitSha
 
     // certify the fix before letting the monitor restart from scratch
     const certify = await agent(
@@ -553,6 +587,8 @@ while (ciRound < MAX_CI_ROUNDS) {
       { phase: 'CI', label: 'ci-certify-' + ciRound, schema: FIX_SCHEMA, effort: 'medium' }
     )
     if (!certify) throw new Error('CI certifier ' + ciRound + ' returned null')
+    // pushed=true is the certifier's "certified" bit; a refusal must stop the loop, not be ignored.
+    if (!certify.pushed) throw new Error('CI certifier ' + ciRound + ' could NOT certify fix ' + ciFix.commitSha.slice(0, 8) + ': ' + certify.summary)
     log('CI fix ' + ciFix.commitSha.slice(0, 8) + ' pushed and certified — re-monitoring from scratch')
   } else {
     log('CI still pending (round ' + ciRound + ') — re-monitoring')
@@ -560,9 +596,31 @@ while (ciRound < MAX_CI_ROUNDS) {
 }
 if (!ciState || ciState.state !== 'green') throw new Error('CI did not go green within ' + MAX_CI_ROUNDS + ' monitor rounds. Last state: ' + (ciState && ciState.state))
 
-log('Done. PR #' + pr.number + ' is green on CI: ' + pr.url)
+phase('Ready')
+
+// 8) The ONLY stage allowed to take the PR out of draft: re-proves green on the exact current head first.
+const ready = await agent(
+  'You are the READY agent of an issue-implementation pipeline. You start fresh. PR #' + pr.number + ' in ' + REPO +
+  ' was validated and its CI monitor reported green. You are the only stage permitted to mark it ready for review, and\n' +
+  'you do it only after re-proving green yourself — do not trust the monitor.\n\n' +
+  '1. gh pr view ' + pr.number + ' --repo ' + REPO + ' --json headRefOid,isDraft,state — the head MUST be ' + headSha + '\n' +
+  '   and state OPEN. If the head moved, someone pushed after the monitor: do NOT mark ready; report ready=false.\n' +
+  '2. gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,bucket — every bucket must be pass or skipping, with at\n' +
+  '   least one check present. Anything pending/fail/cancel, or zero checks: do NOT mark ready; report ready=false.\n' +
+  '3. Only then: gh pr ready ' + pr.number + ' --repo ' + REPO + ' — and re-read isDraft to confirm it is now false.\n' +
+  'Never merge. Return ready=true only if isDraft is false AFTER step 3, with the commands and outputs as evidence.',
+  { phase: 'Ready', label: 'mark-ready', effort: 'low', schema: {
+    type: 'object',
+    properties: { 'ready': { type: 'boolean' }, 'evidence': { type: 'string' } },
+    required: ['ready', 'evidence']
+  } }
+)
+if (!ready) throw new Error('Ready agent returned null')
+if (!ready.ready) throw new Error('PR #' + pr.number + ' was NOT marked ready: ' + ready.evidence)
+log('Done. PR #' + pr.number + ' is green on CI and ready for review: ' + pr.url)
 
 return {
+  stageViolations: stageViolations,
   issue: { number: fetched.issueNumber, title: fetched.title, url: fetched.url },
   ask: fetched.ask,
   plan: plan.summary,
