@@ -847,8 +847,10 @@ CONSUMED = {
     # down on the GLOBAL assumptions.resp.study_start_age, so a child who
     # starts at 19 (or studies six years) had their EAP/AIP schedule computed
     # against a window they never declared. DP#1/DP#28.
+    # #276 moved the start/end resolution into _resolved_study_periods(), the
+    # one spelling shared by the study window and the EAP-limit years.
     "people[].study_periods[].start_date": ("countries/canada/resp_rules.py",
-        "starts = [p['start_year'] for p in periods if p.get('start_year') is not None]"),
+        "for p in periods if p.get('start_year') is not None"),
     "people[].study_periods[].end_date": ("countries/canada/resp_rules.py",
         "p['end_year'] if p.get('end_year') is not None"),
     "decisions.resp_action[].id": ("scenario_discovery.py", "{'id': item['id']} for item in resp_action_scenarios"),

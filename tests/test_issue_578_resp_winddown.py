@@ -81,7 +81,7 @@ def test_has_aged_out_the_year_after_window():
 def test_annual_withdrawal_drains_evenly_across_remaining_years():
     """Two years remaining -> half of each bucket comes out this year."""
     draw = resp_annual_withdrawal(contributions=10_000, cesg=2_000, qesi=1_000,
-                                   earnings=7_000, years_remaining=2)
+                                   earnings=7_000, years_remaining=2, eap_limit=None)
     assert draw['contributions_withdrawn'] == pytest.approx(5_000)
     assert draw['cesg_withdrawn'] == pytest.approx(1_000)
     assert draw['qesi_withdrawn'] == pytest.approx(500)
@@ -93,7 +93,7 @@ def test_annual_withdrawal_drains_evenly_across_remaining_years():
 def test_annual_withdrawal_last_year_drains_everything():
     """One year remaining -> the entire balance comes out (full wind-down)."""
     draw = resp_annual_withdrawal(contributions=4_000, cesg=800, qesi=400,
-                                   earnings=2_800, years_remaining=1)
+                                   earnings=2_800, years_remaining=1, eap_limit=None)
     assert draw['pse'] == pytest.approx(4_000)
     assert draw['eap'] == pytest.approx(800 + 400 + 2_800)
 
@@ -331,12 +331,16 @@ def test_resp_approximations_are_declared_not_buried():
     itself. Both RESP wind-down approximations (the student's EAP tax is not
     computed; the returned contributions are assumed consumed by education)
     are stated in structured, auditable form, ready to register with the
-    model-fidelity registry when #585 lands."""
+    model-fidelity registry when #585 lands. #276 adds the two EAP-limit
+    approximations: the first-13-weeks cap applied to a whole calendar year,
+    and the part-time (specified program) cap not modelled."""
     from countries.canada.resp_rules import RESP_MODEL_APPROXIMATIONS
 
     ids = {a['id'] for a in RESP_MODEL_APPROXIMATIONS}
     assert ids == {'resp_eap_student_tax_not_computed',
-                   'resp_pse_consumed_by_education'}
+                   'resp_pse_consumed_by_education',
+                   'resp_eap_first_year_limit_is_calendar_year',
+                   'resp_eap_part_time_limit_not_modelled'}
     for a in RESP_MODEL_APPROXIMATIONS:
         # Each must say what it biases and in which direction -- a note that
         # does not name the direction of its bias is not a disclosure.

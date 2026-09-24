@@ -69,7 +69,7 @@
     "countries/canada/rate_model.py": 16,
     "countries/canada/renewal_model.py": 3,
     "countries/canada/rental_income.py": 0,
-    "countries/canada/resp_rules.py": 25,
+    "countries/canada/resp_rules.py": 24,
     "countries/canada/retirement.py": 17,
     "countries/canada/retirement_transition.py": 2,
     "countries/canada/self_employed_contributions.py": 0,
