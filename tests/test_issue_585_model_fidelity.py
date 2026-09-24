@@ -528,6 +528,18 @@ _CODE_ANCHORS = {
     # primitive and the caveat no longer describes anything real.
     'superficial_loss_annual_window': (
         'superficial_loss.py', 'def classify_window('),
+    # Issue #289: what the employee payroll seam still leaves out. The child
+    # saver taxes a child's own pay with bracket tax only (no premium); the
+    # premium pricing has no age test (contributory window); the employee and
+    # the #978 self-employed pension contributions are priced independently.
+    # Each anchor is the code whose change would close the gap.
+    'child_payroll_premiums_omitted': (
+        'simulation_state.py', 'after_tax = grown - tax_on_income(grown, brackets)'),
+    'payroll_contributory_window_not_modelled': (
+        'countries/canada/employee_contributions.py',
+        'def employee_contribution_breakdown('),
+    'pension_contributions_not_coordinated_across_earnings_kinds': (
+        'simulation.py', 'primary_contrib_stack = _self_employed_contribution_stack('),
     # unlabeled_dollar_basis is a config-shape gap, not a code path — it has
     # no anchor and is exempt below.
 }
@@ -672,6 +684,76 @@ class TestNoStaleCaveats(unittest.TestCase):
         self.assertNotIn('drawdown_bracket_fill_target_excludes_oas', ids)
         self.assertNotIn('drawdown_flat_marginal_rate', ids)
         self.assertNotIn('rrif_forced_excess_tax_rate', ids)
+
+
+
+# ── 7. Issue #289: employee payroll premiums ─────────────────────────────
+
+def _members_cfg(members, children=None, start_year=2026):
+    return {'assumptions': {'start_year': start_year},
+            'family': {'members': members, 'children': children or []}}
+
+
+class TestEmployeePayrollPremiumDisclosures(unittest.TestCase):
+    """#289 wired the employee premiums into the fold, so the caveat that
+    would have named their absence must NOT exist (a stale caveat is a false
+    disclosure); what the seam still leaves out fires only where it bites."""
+
+    def _active(self, cfg):
+        return {a.id for a in model_fidelity.active_approximations(cfg)}
+
+    def test_employee_payroll_premiums_omitted_not_registered(self):
+        ids = {a.id for a in model_fidelity.all_approximations()}
+        self.assertNotIn('employee_payroll_premiums_omitted', ids)
+        self.assertIn('child_payroll_premiums_omitted', ids)
+        self.assertIn('payroll_contributory_window_not_modelled', ids)
+        self.assertIn('pension_contributions_not_coordinated_across_earnings_kinds', ids)
+
+    def test_child_payroll_premiums_entry_applies_only_with_child_income(self):
+        adult = {'role': 'primary', 'gross_income': 80000}
+        earning = _members_cfg([adult], [{'name': 'child_a', 'gross_income': 12000}])
+        idle = _members_cfg([adult], [{'name': 'child_a', 'gross_income': 0}])
+        self.assertIn('child_payroll_premiums_omitted', self._active(earning))
+        self.assertNotIn('child_payroll_premiums_omitted', self._active(idle))
+        self.assertNotIn('child_payroll_premiums_omitted',
+                         self._active(_members_cfg([adult])))
+        entry = next(a for a in model_fidelity.all_approximations()
+                     if a.id == 'child_payroll_premiums_omitted')
+        self.assertEqual(entry.direction, model_fidelity.Direction.OVERSTATES)
+
+    def test_contributory_window_entry_applies_only_past_70(self):
+        late = _members_cfg([{'role': 'primary', 'retirement_age': 72}])
+        at_70 = _members_cfg([{'role': 'primary', 'retirement_age': 70}])
+        default = _members_cfg([{'role': 'primary'}])
+        self.assertIn('payroll_contributory_window_not_modelled', self._active(late))
+        self.assertNotIn('payroll_contributory_window_not_modelled', self._active(at_70))
+        self.assertNotIn('payroll_contributory_window_not_modelled', self._active(default))
+        entry = next(a for a in model_fidelity.all_approximations()
+                     if a.id == 'payroll_contributory_window_not_modelled')
+        self.assertEqual(entry.direction, model_fidelity.Direction.UNDERSTATES)
+
+    def test_mixed_earnings_entry_applies_only_when_both_kinds_can_coincide(self):
+        key = 'pension_contributions_not_coordinated_across_earnings_kinds'
+        se_all_horizon = {'role': 'primary', 'gross_income': 90000, 'income_segments': [
+            {'kind': 'self_employment', 'amount': 90000, 'from': '2026-01-01', 'to': None}]}
+        employee_only = {'role': 'primary', 'gross_income': 90000}
+        se_then_job = {'role': 'primary', 'gross_income': 90000, 'income_segments': [
+            {'kind': 'self_employment', 'amount': 30000, 'from': '2026-01-01', 'to': '2026-07-01'},
+            {'kind': 'employment', 'amount': 90000, 'from': '2026-07-01', 'to': None}]}
+        se_later = {'role': 'primary', 'gross_income': 90000, 'income_segments': [
+            {'kind': 'self_employment', 'amount': 30000, 'from': '2028-01-01', 'to': None}]}
+        self.assertNotIn(key, self._active(_members_cfg([se_all_horizon])))
+        self.assertNotIn(key, self._active(_members_cfg([employee_only])))
+        self.assertIn(key, self._active(_members_cfg([se_then_job])))
+        self.assertIn(key, self._active(_members_cfg([se_later])))
+        # A self-employment spell that ENDS: the base (employment) salary
+        # resumes after it.
+        se_spell = {'role': 'primary', 'gross_income': 90000, 'income_segments': [
+            {'kind': 'self_employment', 'amount': 30000, 'from': '2026-01-01', 'to': '2027-01-01'}]}
+        self.assertIn(key, self._active(_members_cfg([se_spell])))
+        # Start year not stated: cannot rule the overlap out -> disclose.
+        unknown_start = {'family': {'members': [se_all_horizon]}}
+        self.assertIn(key, self._active(unknown_start))
 
 
 if __name__ == '__main__':

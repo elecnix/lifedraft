@@ -381,6 +381,19 @@ class YearResult:
     # (household_budget.annual_living_costs absent -- DP#16, the module
     # does not run without its trigger data).
     after_tax_income: float = 0.0       # Employment income net of tax this year
+    # ── Employee payroll premiums (issue #289) ─────────────────────────
+    # The primary couple's employee CPP/QPP (base + first additional +
+    # CPP2/QPP2), EI and QPIP premiums on their EMPLOYMENT income this year,
+    # withheld before after_tax_income, and the relief they earn: the ITA
+    # s.60(e) deduction and the realised tax reduction (s.60(e) + the
+    # non-refundable s.118.7 credit). Household totals; 0.0 in every year no
+    # member earns employment income (retired, EI-only, investment-only).
+    # The run-path invariant 'payroll_relief_bounded' checks them every year.
+    payroll_pension_contributions: float = 0.0
+    payroll_ei_premiums: float = 0.0
+    payroll_qpip_premiums: float = 0.0
+    payroll_s60e_deduction: float = 0.0
+    payroll_tax_relief: float = 0.0
     living_costs: float = 0.0           # This year's declared working-phase budget
     # Issue #195: True in exactly the years apply_solvency's narrowed gate
     # ran the cash-flow identity (a declared living-costs budget OR any real

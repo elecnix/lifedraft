@@ -493,13 +493,9 @@ def _self_employment_income_for_year(base_amount: float, segments: Optional[List
     for seg in (segments or []):
         if seg.get("kind") != "self_employment":
             continue
-        seg_from = date.fromisoformat(seg["from"])
-        seg_to = date.fromisoformat(seg["to"]) if seg.get("to") else None
-        overlap_start = max(seg_from, year_start)
-        overlap_end = min(seg_to, year_end) if seg_to is not None else year_end
-        if overlap_end <= overlap_start:
+        days = _segment_days_in_year(seg, year_start, year_end)
+        if days <= 0:
             continue
-        days = (overlap_end - overlap_start).days
         fraction = days / days_in_year
         # Issue #980 (T2125): the contribution-stack base is NET business
         # income (gross fees - expenses_annual), the SAME net the tax path
@@ -511,6 +507,155 @@ def _self_employment_income_for_year(base_amount: float, segments: Optional[List
     # The base salary-grown income (the portion of the year no segment covers)
     # is employment income -- it contributes 0 to self-employment income.
     return self_emp_income
+
+
+def _segment_days_in_year(seg: Dict, year_start, year_end) -> int:
+    """Days of one dated income segment's ``[from, to)`` window (``to=None``
+    = open-ended) that fall inside ``[year_start, year_end)``; <= 0 when the
+    window misses the year. Shared by the income-slice helpers below (DP#9:
+    one spelling of the overlap arithmetic)."""
+    from datetime import date
+    seg_from = date.fromisoformat(seg["from"])
+    seg_to = date.fromisoformat(seg["to"]) if seg.get("to") else None
+    overlap_start = max(seg_from, year_start)
+    overlap_end = min(seg_to, year_end) if seg_to is not None else year_end
+    return (overlap_end - overlap_start).days
+
+
+def _employment_income_for_year(base_amount: float, segments: Optional[List[Dict]],
+                                calendar_year: int, salary_growth: float,
+                                year_index: int) -> float:
+    """Issue #289: the year's EMPLOYMENT income for ONE family member -- the
+    base the employee payroll premiums (CPP/QPP, EI, QPIP) are charged on.
+
+    Day-blended exactly like :func:`_income_components_for_year`: each dated
+    segment contributes ``amount x days / days_in_year`` when its ``kind`` is
+    payroll-insurable employment (classified by the Canada jurisdiction
+    module, lazily imported -- DP#25), and the base salary-grown income covers
+    the days no segment does (the base income IS employment, the engine's
+    pre-#674 default). So a mid-year job loss charges premiums only on the
+    days worked, an ``ei`` / ``investment`` / ``rental`` / ``other`` segment
+    owes none, and a ``self_employment`` segment pays the #978 self-employed
+    stack instead. For a member with no segments the slice equals the year's
+    total income. Segment overlap is validated by
+    ``_income_components_for_year``, which every caller runs first.
+
+    Pure function (DP#3).
+    """
+    from datetime import date
+    from countries.canada.employee_contributions import is_payroll_insurable
+
+    year_start = date(calendar_year, 1, 1)
+    year_end = date(calendar_year + 1, 1, 1)
+    days_in_year = (year_end - year_start).days
+
+    employment = 0.0
+    covered_days = 0
+    for seg in (segments or []):
+        days = _segment_days_in_year(seg, year_start, year_end)
+        if days <= 0:
+            continue
+        covered_days += days
+        if is_payroll_insurable(seg["kind"]):
+            employment += seg["amount"] * (days / days_in_year)
+
+    remaining_days = days_in_year - covered_days
+    if remaining_days > 0:
+        base_this_year = base_amount * (1 + salary_growth) ** year_index
+        employment += base_this_year * (remaining_days / days_in_year)
+    return employment
+
+
+def _payroll_by_role(province: str, employment_by_role: Dict[str, float],
+                     sim_year: int, tax_provider) -> Dict[str, object]:
+    """Issue #289: each role's employee payroll premiums and their tax relief
+    (``countries.canada.employee_contributions.EmployeeContributions``) on its
+    employment slice for the year. One call site shape for BOTH fold paths
+    (DP#9). DP#25: the jurisdiction module is imported lazily and the province
+    is passed through as data -- core never spells a province. The fold's own
+    provider is always passed (its lookups are memoized)."""
+    from countries.canada.employee_contributions import (
+        employee_contribution_breakdown,
+    )
+    return {
+        role: employee_contribution_breakdown(
+            employment, province, sim_year, tax_provider)
+        for role, employment in employment_by_role.items()
+    }
+
+
+def _payroll_result_fields(payroll_by_role: Dict[str, object],
+                           adult_tax: Dict[str, Dict]) -> Dict[str, float]:
+    """Issue #289: the household (primary + spouse) payroll totals surfaced
+    on ``YearResult`` -- the same two roles whose after-tax income forms the
+    solvency identity. ``payroll_tax_relief`` is the tax reduction actually
+    realised (tax without the relief minus tax with it, after the
+    non-refundable floor), read off the per-adult tax loop."""
+    roles = ('primary', 'spouse')
+    return {
+        'payroll_pension_contributions': sum(
+            payroll_by_role[r].pension_total for r in roles),
+        'payroll_ei_premiums': sum(payroll_by_role[r].ei_premium for r in roles),
+        'payroll_qpip_premiums': sum(payroll_by_role[r].qpip_premium for r in roles),
+        'payroll_s60e_deduction': sum(
+            payroll_by_role[r].s60e_deduction for r in roles),
+        'payroll_tax_relief': sum(adult_tax[r]['payroll_relief'] for r in roles),
+    }
+
+
+def _payroll_contributions_by_role(
+        cfg, primary_member: Dict, spouse_member: Dict,
+        primary_base: float, spouse_base: float,
+        sim_year: int, salary_growth: float, year: int,
+        p_retired: bool, s_retired: bool, tax_provider) -> Dict[str, object]:
+    """Issue #289: the primary couple's employee payroll premiums for the
+    year, one ``EmployeeContributions`` per role, computed ONCE per year by
+    BOTH fold paths (``simulate_year`` and ``_run_monthly``) through this one
+    helper so the two cannot drift (DP#9).
+
+    Each member's premiums are charged on their EMPLOYMENT slice only
+    (:func:`_employment_income_for_year`): EI benefits, investment, rental,
+    other and self-employment segments owe none, and a mid-year job loss pays
+    only on the days worked. A retired member earns no salary, so their slice
+    is 0.0 -- the same retirement stop the income and the #978 stack apply.
+    Per member, never pooled: Canada has no joint filing and every ceiling
+    (YMPE, YAMPE, EI and QPIP maximum insurable earnings) is per earner.
+    """
+    primary_employment = 0.0 if p_retired else _employment_income_for_year(
+        primary_base, primary_member.get('income_segments'),
+        sim_year, salary_growth, year)
+    spouse_employment = 0.0 if s_retired else _employment_income_for_year(
+        spouse_base, spouse_member.get('income_segments'),
+        sim_year, salary_growth, year)
+    return _payroll_by_role(
+        cfg.province,
+        {'primary': primary_employment, 'spouse': spouse_employment},
+        sim_year, tax_provider)
+
+
+def _after_tax_by_role_for(primary_income: float, spouse_income: float,
+                           rent_by_role: Dict[str, Tuple[float, float]],
+                           adult_tax: Dict[str, Dict],
+                           contrib_stack_by_role: Dict[str, float],
+                           payroll_by_role: Dict[str, object]) -> Dict[str, float]:
+    """The primary couple's after-tax CASH income for the solvency identity
+    (issue #679), one spelling for BOTH fold paths (DP#9).
+
+    Per role: income + net rental cash (operating income - deductible
+    interest, #693) - the tax actually owed (``tax_before``, already net of
+    the #289 payroll relief) - the #978 Quebec self-employed contribution
+    stack - the #289 employee payroll premiums (CPP/QPP, EI, QPIP) withheld
+    from gross pay. Each outflow is 0.0 for a member it does not apply to, so
+    a retiree / no-rental / no-premium household keeps the pre-#289 figure.
+    """
+    return {
+        role: (income + (rent_by_role[role][0] - rent_by_role[role][1])
+               - adult_tax[role]['tax_before']
+               - contrib_stack_by_role[role]
+               - payroll_by_role[role].total_premiums)
+        for role, income in (('primary', primary_income),
+                             ('spouse', spouse_income))
+    }
 
 
 def _self_employed_contribution_stack(
@@ -1088,7 +1233,33 @@ def _short_term_rental_facts(cfg) -> Tuple[float, bool]:
     return str_income, registration_required
 
 
-def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets):
+def _payroll_relieved_tax(unrelieved_taxable: float, payroll, brackets
+                          ) -> Tuple[float, float, float]:
+    """Issue #289: ``(taxable_income, tax_before, payroll_relief)`` for one
+    member whose pre-relief taxable income is ``unrelieved_taxable`` and whose
+    employee payroll premiums are ``payroll`` (an ``EmployeeContributions``).
+
+    The ITA s.60(e) deduction lowers taxable income; the s.118.7 credit comes
+    off the bracket tax, floored at zero because it is NON-refundable (the
+    statute's own floor, not a coercion). ``payroll_relief`` is the realised
+    reduction: tax without the relief minus tax with it. A member who pays no
+    premium this year gets none of either, so the pre-#289 spelling is kept
+    verbatim on that branch (retirees and zero-employment years stay
+    byte-identical). One spelling for the per-adult tax loop and the #899
+    extra-adult spec (DP#9).
+    """
+    if payroll.total_premiums <= 0:
+        return (unrelieved_taxable, tax_on_income(unrelieved_taxable, brackets),
+                0.0)
+    taxable = unrelieved_taxable - payroll.s60e_deduction
+    tax_before = max(0.0, tax_on_income(taxable, brackets)
+                     - payroll.s118_7_credit_value)
+    relief = tax_on_income(unrelieved_taxable, brackets) - tax_before
+    return taxable, tax_before, relief
+
+
+def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets,
+                         payroll_by_role):
     """Issue #701 (Step 5 of #643): tax each adult individually via a loop.
 
     Canada has no joint filing, so each adult's marginal rate and pre-credit
@@ -1104,16 +1275,36 @@ def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets):
     the prior code (``marginal_rate``/``tax_on_income`` are non-zero at $0 of
     income only for the rate, so the backfill -- not a dropped slot -- is what
     preserves behaviour). Returns ``{role: {'rate', 'taxable_income',
-    'tax_before'}}``.
+    'tax_before', 'payroll_relief'}}``.
+
+    Issue #289: ``payroll_by_role`` carries each role's employee payroll
+    premiums (``EmployeeContributions``) and their statutory relief, applied
+    HERE -- the one tax spelling both fold paths share -- so every consumer of
+    ``taxable_income`` / ``tax_before`` (the tuition_credit rule's floor,
+    property_disposition's gain banding, the drawdown/leverage deduction
+    valuations) sees the relieved figures by construction:
+
+    * the ITA s.60(e) deduction (enhanced CPP/QPP) lowers ``taxable_income``;
+    * the s.118.7 credit (base CPP/QPP + EI + QPIP) comes off ``tax_before``,
+      floored at zero because the credit is NON-refundable (and it applies
+      before the tuition credit, the s.118.61 ordering).
+
+    ``payroll_relief`` is the realised reduction (tax without the relief minus
+    tax with it). ``rate`` stays ``marginal_rate`` on the unadjusted income so
+    RRSP and strategy decisions are unchanged by the premiums. Every taxed
+    role must have a payroll entry: a missing one raises ``KeyError`` rather
+    than silently owing nothing (DP#32).
     """
     def _slot(role):
         income = income_by_role[role]
         loan_inc, loan_ded = loan_by_role[role]
-        taxable = income + loan_inc - loan_ded
+        taxable, tax_before, relief = _payroll_relieved_tax(
+            income + loan_inc - loan_ded, payroll_by_role[role], brackets)
         return {
             'rate': marginal_rate(income, brackets),
             'taxable_income': taxable,
-            'tax_before': tax_on_income(taxable, brackets),
+            'tax_before': tax_before,
+            'payroll_relief': relief,
         }
 
     result = {adult['role']: _slot(adult['role']) for adult in config.adults()}
@@ -1125,7 +1316,7 @@ def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets):
 
 
 def _extra_adult_specs(cfg, sim_year: int, salary_growth: float, year: int,
-                       year_brackets) -> list:
+                       year_brackets, tax_provider) -> list:
     """Issue #899 (part a): for each ADDITIONAL accumulating adult (the adults
     beyond the primary couple -- ``config.adults()[2:]``), the year's income,
     its earned-income component (RRSP-room base), the individually-computed tax
@@ -1139,39 +1330,55 @@ def _extra_adult_specs(cfg, sim_year: int, salary_growth: float, year: int,
     income/tax spelling for every member). These adults never retire across the
     horizon (guaranteed by input_contract's admission gate), so their income is
     always the pre-retirement grown employment figure -- no drawdown path.
+
+    Issue #289: an employed extra adult pays employee payroll premiums on
+    their employment slice too, with the same s.60(e) / s.118.7 relief the
+    per-adult tax loop applies (``'payroll'`` is handed to that loop through
+    :func:`_adult_income_maps`, so the two figures agree), and invests only
+    what is left after tax AND premiums.
     """
-    from tax_calculator import tax_on_income
     specs = []
     for adult in cfg.adults()[2:]:
         income, earned = _income_components_for_year(
             adult.get('gross_income', 0.0), adult.get('income_segments'),
             sim_year, salary_growth, year)
-        tax = tax_on_income(income, year_brackets)
+        employment = _employment_income_for_year(
+            adult.get('gross_income', 0.0), adult.get('income_segments'),
+            sim_year, salary_growth, year)
+        payroll = _payroll_by_role(
+            cfg.province, {'self': employment}, sim_year, tax_provider)['self']
+        _, tax, _ = _payroll_relieved_tax(income, payroll, year_brackets)
         specs.append({
             'id': adult.get('id', adult.get('role')),
             'role': adult.get('role'),
             'income': income,
             'earned_income': earned,
             'tax': tax,
-            'savings': (income - tax) * cfg.savings_rate,
+            'payroll': payroll,
+            'savings': (income - tax - payroll.total_premiums) * cfg.savings_rate,
         })
     return specs
 
 
 def _adult_income_maps(primary_income, spouse_income, p_loans, s_loans,
-                       extra_specs):
+                       extra_specs, primary_payroll, spouse_payroll):
     """Issue #899 (part a): the ``income_by_role`` / ``loan_by_role`` maps the
     per-adult tax loop (:func:`_income_tax_by_adult`) consumes, extended with
     the additional accumulating adults' income (no private-loan interest is
     modelled for an extra adult, so their loan entry is a hard zero). For a
     two-adult household ``extra_specs`` is empty, so these are exactly the
-    former primary/spouse-only maps -- byte-identical."""
+    former primary/spouse-only maps -- byte-identical.
+
+    Issue #289: also the ``payroll_by_role`` map (each role's
+    ``EmployeeContributions``), extended with each extra adult's own."""
     income_by_role = {'primary': primary_income, 'spouse': spouse_income}
     loan_by_role = {'primary': p_loans, 'spouse': s_loans}
+    payroll_by_role = {'primary': primary_payroll, 'spouse': spouse_payroll}
     for s in extra_specs:
         income_by_role[s['role']] = s['income']
         loan_by_role[s['role']] = (0.0, 0.0)
-    return income_by_role, loan_by_role
+        payroll_by_role[s['role']] = s['payroll']
+    return income_by_role, loan_by_role, payroll_by_role
 
 
 def _prior_gis_countable(results) -> Optional[float]:
@@ -1370,18 +1577,28 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # Issue #693: the rental operating income and its s.20(1)(c) interest
     # deduction join the SAME per-role taxable-income adjustment as the private
     # loan (income added, deduction subtracted -- one spelling, DP#9).
-    _extra_specs = _extra_adult_specs(cfg, sim_year, salary_growth, year, year_brackets)
+    # Issue #289: each working member's employee payroll premiums (CPP/QPP,
+    # EI, QPIP) on their employment slice, with the s.60(e) deduction and
+    # s.118.7 credit the per-adult tax loop below applies (one helper for
+    # both fold paths, DP#9).
+    _payroll = _payroll_contributions_by_role(
+        cfg, primary_member, spouse_member, ctx.primary_income,
+        ctx.spouse_income, sim_year, salary_growth, year, p_retired, s_retired,
+        ctx.tax_provider)
+    _extra_specs = _extra_adult_specs(cfg, sim_year, salary_growth, year,
+                                      year_brackets, ctx.tax_provider)
     # Issue #694: CCA is an additional NON-CASH deduction against rental income,
     # so it joins the interest deduction in the TAXABLE-income adjustment (income
     # added, deduction + CCA subtracted) but -- unlike the interest -- it is NOT
     # subtracted from after-tax cash below (see _after_tax_by_role): depreciation
     # lowers the tax bill without consuming cash.
-    _income_by_role, _loan_by_role = _adult_income_maps(
+    _income_by_role, _loan_by_role, _payroll_by_role_map = _adult_income_maps(
         primary_income, spouse_income,
         (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
         (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
-        _extra_specs)
-    _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
+        _extra_specs, _payroll['primary'], _payroll['spouse'])
+    _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role,
+                                      year_brackets, _payroll_by_role_map)
     primary_rate = _adult_tax['primary']['rate']
     spouse_rate = _adult_tax['spouse']['rate']
 
@@ -1390,10 +1607,11 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # each earner's own income (tax_on_income), not a flat marginal-rate
     # approximation -- each earner is taxed separately (Canada has no joint
     # filing), same per-person split the RRSP-deduction rules already use
-    # above/below. Approximation this shares with the rest of the engine's
-    # tax modeling: CPP/EI payroll premiums are not separately deducted
-    # (no employee-premium model exists anywhere else in this engine
-    # either). Epic #795 bite 3: each taxed member's OWN federal (+ QC
+    # above/below. Issue #289: each employee's CPP/QPP, EI and QPIP premiums
+    # are withheld from that cash (``_after_tax_by_role_for``) and their
+    # s.60(e)/s.118.7 relief is already inside ``tax_before`` (the payroll
+    # seam above: ``_payroll_contributions_by_role`` -> ``_income_tax_by_adult``).
+    # Epic #795 bite 3: each taxed member's OWN federal (+ QC
     # provincial) tuition credit (#764, non-refundable, #784 carry-forward,
     # #785 transfers) is no longer applied here -- it is a REGISTERED RULE
     # (``tuition_credit`` in simulation_rules.py) that runs inside
@@ -1437,16 +1655,18 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # solvency identity see the real disposable income and savings capacity.
     # $0 for a member with no self-employment income (the calculators floor at
     # 0), so an employee or the golden household is byte-for-byte unchanged.
+    # Issue #289: the employee payroll premiums are the same kind of
+    # pre-savings withholding, charged on the employment slice only.
     primary_contrib_stack = _self_employed_contribution_stack(
         primary_self_emp, cfg.province, sim_year)
     spouse_contrib_stack = _self_employed_contribution_stack(
         spouse_self_emp, cfg.province, sim_year)
-    _after_tax_by_role = {
-        'primary': primary_income + (_p_rent_op - _p_rent_ded) - primary_tax_before
-        - primary_contrib_stack,
-        'spouse': spouse_income + (_s_rent_op - _s_rent_ded) - spouse_tax_before
-        - spouse_contrib_stack,
-    }
+    _after_tax_by_role = _after_tax_by_role_for(
+        primary_income, spouse_income,
+        {'primary': (_p_rent_op, _p_rent_ded), 'spouse': (_s_rent_op, _s_rent_ded)},
+        _adult_tax,
+        {'primary': primary_contrib_stack, 'spouse': spouse_contrib_stack},
+        _payroll)
     # Issue #899 (part a): the household solvency figure is the PRIMARY couple's
     # after-tax income only. An additional accumulating adult is a separate
     # economic unit whose own after-tax income funds its OWN accounts (below,
@@ -1843,6 +2063,11 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     # no private loan is declared (the golden household, DP#32).
     result.attribution_summary = _attribution_checks_for(
         cfg, sim_year, primary_member, spouse_member)
+    # Issue #289: surface the primary couple's payroll premiums and the tax
+    # relief they earned (the run-path invariant 'payroll_relief_bounded'
+    # checks them every year).
+    for _field, _value in _payroll_result_fields(_payroll, _adult_tax).items():
+        setattr(result, _field, _value)
     return result, next_state
 
 
@@ -2683,13 +2908,21 @@ class FamilySimulation:
             # income, so it joins the interest deduction in the TAXABLE-income
             # adjustment but -- unlike the interest -- is NOT subtracted from
             # after-tax cash below (depreciation lowers tax without consuming cash).
-            _extra_specs = _extra_adult_specs(cfg, sim_year, salary_growth, year, year_brackets)
-            _income_by_role, _loan_by_role = _adult_income_maps(
+            # Issue #289: the employee payroll premiums + their relief -- the
+            # SAME helper the annual path calls (DP#9).
+            _payroll = _payroll_contributions_by_role(
+                cfg, primary_member, spouse_member, self._primary_income,
+                self._spouse_income, sim_year, salary_growth, year,
+                p_retired, s_retired, self.tax_provider)
+            _extra_specs = _extra_adult_specs(cfg, sim_year, salary_growth, year,
+                                              year_brackets, self.tax_provider)
+            _income_by_role, _loan_by_role, _payroll_by_role_map = _adult_income_maps(
                 primary_income, spouse_income,
                 (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
                 (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
-                _extra_specs)
-            _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
+                _extra_specs, _payroll['primary'], _payroll['spouse'])
+            _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role,
+                                              year_brackets, _payroll_by_role_map)
             primary_rate = _adult_tax['primary']['rate']
             spouse_rate = _adult_tax['spouse']['rate']
             primary_tax_before = _adult_tax['primary']['tax_before']
@@ -2720,16 +2953,19 @@ class FamilySimulation:
             # pre-savings cash OUTFLOW the bracket-only tax path never charged.
             # $0 for a member with no self-employment income, so an employee /
             # the golden household is byte-for-byte unchanged (DP#32).
+            # Issue #289: the employee payroll premiums are withheld from the
+            # same cash (see the annual path).
             primary_contrib_stack = _self_employed_contribution_stack(
                 primary_self_emp, cfg.province, sim_year)
             spouse_contrib_stack = _self_employed_contribution_stack(
                 spouse_self_emp, cfg.province, sim_year)
-            _after_tax_by_role = {
-                'primary': primary_income + (_p_rent_op - _p_rent_ded) - primary_tax_before
-                - primary_contrib_stack,
-                'spouse': spouse_income + (_s_rent_op - _s_rent_ded) - spouse_tax_before
-                - spouse_contrib_stack,
-            }
+            _after_tax_by_role = _after_tax_by_role_for(
+                primary_income, spouse_income,
+                {'primary': (_p_rent_op, _p_rent_ded),
+                 'spouse': (_s_rent_op, _s_rent_ded)},
+                _adult_tax,
+                {'primary': primary_contrib_stack, 'spouse': spouse_contrib_stack},
+                _payroll)
             # Issue #899 (part a): household solvency is the PRIMARY couple's
             # after-tax income only (see the annual path for the full rationale);
             # byte-identical for a two-adult household.
@@ -3034,6 +3270,9 @@ class FamilySimulation:
             # the annual path (DP#9), so monthly and yearly agree.
             result.attribution_summary = _attribution_checks_for(
                 cfg, sim_year, primary_member, spouse_member)
+            # Issue #289: the payroll premiums + relief (see the annual path).
+            for _field, _value in _payroll_result_fields(_payroll, _adult_tax).items():
+                setattr(result, _field, _value)
             results.append(result)
 
         # Update canonical state

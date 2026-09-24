@@ -63,6 +63,16 @@ def federal_all_years():
             qpp_rate=0.0,
             qpp_max_benefit_65=0,
             qpp_survivor_flat_rate=0,
+            # Issue #289: EI employee premium rate and maximum insurable
+            # earnings (2026), CRA "EI premium rates and maximums":
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/employment-insurance-ei/ei-premium-rates-maximums.html
+            ei_employee_rate=0.0163,
+            ei_max_insurable_earnings=68900,
+            # Issue #289: the first additional (enhanced) CPP employee rate --
+            # 1% of the 5.95% (base 4.95% + first additional 1%, 2023+).
+            # Deductible under ITA s.60(e); the base part is a s.118.7 credit:
+            # https://www.canada.ca/en/revenue-agency/news/2023/05/the-canada-pension-plan-enhancement--businesses-individuals-and-self-employed-what-it-means-for-you.html
+            cpp_first_additional_rate=0.01,
             source="fallback",
         ),
         TaxYearData(
@@ -99,6 +109,16 @@ def federal_all_years():
             qpp_rate=0.0,
             qpp_max_benefit_65=0,
             qpp_survivor_flat_rate=0,
+            # Issue #289: EI employee premium rate and maximum insurable
+            # earnings (2025), CRA "EI premium rates and maximums":
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/employment-insurance-ei/ei-premium-rates-maximums.html
+            ei_employee_rate=0.0164,
+            ei_max_insurable_earnings=65700,
+            # Issue #289: the first additional (enhanced) CPP employee rate --
+            # 1% of the 5.95% (base 4.95% + first additional 1%, 2023+).
+            # Deductible under ITA s.60(e); the base part is a s.118.7 credit:
+            # https://www.canada.ca/en/revenue-agency/news/2023/05/the-canada-pension-plan-enhancement--businesses-individuals-and-self-employed-what-it-means-for-you.html
+            cpp_first_additional_rate=0.01,
             source="fallback",
         ),
         TaxYearData(
@@ -141,6 +161,16 @@ def federal_all_years():
             qpp_rate=0.0,
             qpp_max_benefit_65=0,
             qpp_survivor_flat_rate=0,
+            # Issue #289: EI employee premium rate and maximum insurable
+            # earnings (2024), CRA "EI premium rates and maximums":
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/employment-insurance-ei/ei-premium-rates-maximums.html
+            ei_employee_rate=0.0166,
+            ei_max_insurable_earnings=63200,
+            # Issue #289: the first additional (enhanced) CPP employee rate --
+            # 1% of the 5.95% (base 4.95% + first additional 1%, 2023+).
+            # Deductible under ITA s.60(e); the base part is a s.118.7 credit:
+            # https://www.canada.ca/en/revenue-agency/news/2023/05/the-canada-pension-plan-enhancement--businesses-individuals-and-self-employed-what-it-means-for-you.html
+            cpp_first_additional_rate=0.01,
             source="fallback",
         ),
         TaxYearData(
@@ -183,6 +213,16 @@ def federal_all_years():
             qpp_rate=0.0,
             qpp_max_benefit_65=0,
             qpp_survivor_flat_rate=0,
+            # Issue #289: EI employee premium rate and maximum insurable
+            # earnings (2023), CRA "EI premium rates and maximums":
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/employment-insurance-ei/ei-premium-rates-maximums.html
+            ei_employee_rate=0.0163,
+            ei_max_insurable_earnings=61500,
+            # Issue #289: the first additional (enhanced) CPP employee rate --
+            # 1% of the 5.95% (base 4.95% + first additional 1%, 2023+).
+            # Deductible under ITA s.60(e); the base part is a s.118.7 credit:
+            # https://www.canada.ca/en/revenue-agency/news/2023/05/the-canada-pension-plan-enhancement--businesses-individuals-and-self-employed-what-it-means-for-you.html
+            cpp_first_additional_rate=0.01,
             source="fallback",
         ),
     ]

@@ -41,6 +41,7 @@
     "countries/canada/cpp_sharing.py": 9,
     "countries/canada/debt.py": 5,
     "countries/canada/earned_income.py": 0,
+    "countries/canada/employee_contributions.py": 0,
     "countries/canada/estate.py": 1,
     "countries/canada/federal_tax_data.py": 0,
     "countries/canada/fhsa.py": 7,

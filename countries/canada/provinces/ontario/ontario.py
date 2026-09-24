@@ -101,6 +101,14 @@ class OntarioTaxData:
             on_lift_individual_threshold=32500,
             on_lift_family_threshold=65000,
             on_lift_reduction_rate=0.05,
+            # Issue #289: Ontario grants its own non-refundable credit for
+            # base CPP contributions and EI premiums at the lowest Ontario
+            # rate (Form ON428, lines 58240 / 58300). CRA line 30800 ("claim
+            # the corresponding provincial ... credit on line 58240"):
+            # https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/about-your-tax-return/tax-return/completing-a-tax-return/deductions-credits-expenses/line-30800-cpp-qpp-contributions-through-employment.html
+            # Form ON428:
+            # https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package/ontario/5006-c.html
+            provincial_payroll_credit=True,
             source="fallback",
         )
 
@@ -117,7 +125,10 @@ class OntarioTaxData:
             ],
             provincial_abatement=cls.ABATEMENT,
             basic_personal_amount=cls.BASIC_PERSONAL_AMOUNT_2025,
-            cpp_max_pensionable=68500,
+            # Issue #289: 2025 YMPE is $71,300 (was 68,500, the 2024 figure),
+            # CRA "CPP contribution rates, maximums and exemptions":
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/canada-pension-plan-cpp/cpp-contribution-rates-maximums-exemptions.html
+            cpp_max_pensionable=71300,
             cpp_rate=0.0595,
             cpp2_max_pensionable=81200,  # DP#20: CPP2 YAMPE 2025
             cpp2_rate=0.04,
@@ -147,5 +158,13 @@ class OntarioTaxData:
             on_lift_individual_threshold=32500,
             on_lift_family_threshold=65000,
             on_lift_reduction_rate=0.05,
+            # Issue #289: Ontario grants its own non-refundable credit for
+            # base CPP contributions and EI premiums at the lowest Ontario
+            # rate (Form ON428, lines 58240 / 58300). CRA line 30800 ("claim
+            # the corresponding provincial ... credit on line 58240"):
+            # https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/about-your-tax-return/tax-return/completing-a-tax-return/deductions-credits-expenses/line-30800-cpp-qpp-contributions-through-employment.html
+            # Form ON428:
+            # https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package/ontario/5006-c.html
+            provincial_payroll_credit=True,
             source="fallback",
         )
