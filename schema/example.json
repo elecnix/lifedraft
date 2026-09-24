@@ -534,8 +534,26 @@
           "p2"
         ],
         "beneficiaries": [
-          "ca",
-          "cb"
+          {
+            "person": "ca",
+            "contributions_total": 20000,
+            "contributions_before_age_15": 20000,
+            "cesg_basic_received": 3600,
+            "cesg_additional_received": 400,
+            "qesi_received": 2000,
+            "clb_received": 0,
+            "years_with_100_before_age_15": 10
+          },
+          {
+            "person": "cb",
+            "contributions_total": 12000,
+            "contributions_before_age_15": 12000,
+            "cesg_basic_received": 2400,
+            "cesg_additional_received": 0,
+            "qesi_received": 1200,
+            "clb_received": 0,
+            "years_with_100_before_age_15": 6
+          }
         ],
         "contributions_total": 32000,
         "cesg_received": 6400,
