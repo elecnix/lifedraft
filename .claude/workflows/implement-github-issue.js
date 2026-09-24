@@ -42,6 +42,11 @@ const FETCH_SCHEMA = {
   required: ['issueNumber', 'title', 'url', 'state', 'body', 'labels', 'comments', 'ask', 'constraintsNoticed', 'repoContext']
 }
 
+// The PR title (and so the squash-merge subject on main) is `<type>(#<n>): <subject>`, with both parts from the plan
+// (#268). Declared once, shared by PLAN_SCHEMA's enum and composeCommitTitle's runtime refusal.
+const COMMIT_TYPES = ['fix', 'feat', 'docs', 'refactor', 'test', 'ci', 'chore']
+const MAX_TITLE_LEN = 72
+
 const PLAN_SCHEMA = {
   type: 'object',
   properties: {
@@ -51,9 +56,11 @@ const PLAN_SCHEMA = {
     'risks': { type: 'array', items: { type: 'string' } },
     'acceptanceCriteria': { type: 'array', items: { type: 'string' } },
     'outOfScope': { type: 'array', items: { type: 'string' } },
-    'testsToAdd': { type: 'array', items: { type: 'string' } }
+    'testsToAdd': { type: 'array', items: { type: 'string' } },
+    'commitType': { type: 'string', enum: COMMIT_TYPES },
+    'commitSubject': { type: 'string', minLength: 1 }
   },
-  required: ['summary', 'steps', 'files', 'risks', 'acceptanceCriteria', 'outOfScope', 'testsToAdd']
+  required: ['summary', 'steps', 'files', 'risks', 'acceptanceCriteria', 'outOfScope', 'testsToAdd', 'commitType', 'commitSubject']
 }
 
 const TESTPLAN_SCHEMA = {
@@ -180,8 +187,41 @@ dedicated PR stage, then a CI stage, then a final ready stage) own all of that, 
 to "open a draft PR / mark it ready once CI is green" is satisfied BY those stages, not by you. Commit, push, return.`
 
 // ---- helpers ---------------------------------------------------------------
+// Slugs name places (worktree, branch), never commits or PRs; see #268.
 function slug(title) {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'issue'
+}
+// The one place a commit/PR title is built (#268). Every bad shape THROWS: there is no default type, no fallback
+// subject, and no truncation. The title is later interpolated inside a double-quoted shell argument, so shell
+// metacharacters are refused rather than escaped.
+function composeCommitTitle(commitType, commitSubject, issueNumber) {
+  if (!(Number.isInteger(issueNumber) && issueNumber > 0)) {
+    throw new Error('Plan refused: issueNumber must be a positive integer, got ' + JSON.stringify(issueNumber))
+  }
+  if (!COMMIT_TYPES.includes(commitType)) {
+    throw new Error('Plan refused: commitType must be one of ' + COMMIT_TYPES.join(', ') + ', got ' + JSON.stringify(commitType))
+  }
+  if (typeof commitSubject !== 'string') {
+    throw new Error('Plan refused: commitSubject must be a string, got ' + JSON.stringify(commitSubject))
+  }
+  const subject = commitSubject.trim()
+  if (subject === '') {
+    throw new Error('Plan refused: commitSubject is empty or whitespace, got ' + JSON.stringify(commitSubject))
+  }
+  if (/["`$\\\u0000-\u001f\u007f]/.test(subject)) {
+    throw new Error('Plan refused: commitSubject contains a character that is unsafe in a shell-quoted title (a double quote, backtick, dollar, backslash or control character): ' + JSON.stringify(subject))
+  }
+  if (!/\s/.test(subject)) {
+    throw new Error('Plan refused: commitSubject ' + JSON.stringify(subject) + ' has no space; it must be a human sentence, never a slug')
+  }
+  if (/^[a-z]+(\([^)]*\))?!?:/i.test(subject)) {
+    throw new Error('Plan refused: commitSubject ' + JSON.stringify(subject) + ' already carries a type prefix; give the bare subject, the script adds the prefix')
+  }
+  const title = commitType + '(#' + issueNumber + '): ' + subject
+  if (title.length > MAX_TITLE_LEN) {
+    throw new Error('Plan refused: title is ' + title.length + ' characters, over the limit of ' + MAX_TITLE_LEN + ': ' + JSON.stringify(title))
+  }
+  return title
 }
 function issueText(f) {
   // rebroadcast the exact issue, verbatim, so later agents never depend on the live URL
@@ -259,12 +299,24 @@ const plan = await agent(
   '   a detector that fails if the behaviour regresses must land IN the same PR).\n' +
   '5. Decide what to change and HOW to prove it. The implementer will work in ' + WT_DIR + ' (branch ' + BRANCH + ') regardless.\n' +
   '6. risks: name the trap shapes this codebase has actually fallen into (see CLAUDE.md "Traps this codebase has actually\n' +
-  '   fallen into") that this change is vulnerable to, and the specific countermeasure.\n\n' +
+  '   fallen into") that this change is vulnerable to, and the specific countermeasure.\n' +
+  '7. commitType and commitSubject: the PR title, and so the squash-merge commit subject that lands permanently in\n' +
+  '   git log on main, is <type>(#' + fetched.issueNumber + '): <subject>, built from these two fields and nothing else.\n' +
+  '   commitType is what the change IS, one of: fix (corrects wrong behaviour, engine or tooling), feat (a new\n' +
+  '   capability), docs (documentation only), refactor (no behaviour change), test (tests only), ci (.github/workflows or\n' +
+  '   CI config), chore (maintenance not covered above).\n' +
+  '   commitSubject is a short imperative sentence written for a human reading git log (e.g. "derive PR titles from the\n' +
+  '   plan"). It is never the issue title and never a slug; it has no <type>(#<n>): prefix, and no double quote, backtick,\n' +
+  '   dollar or backslash. The whole <type>(#' + fetched.issueNumber + '): <subject> must be at most ' + MAX_TITLE_LEN + ' characters.\n' +
+  '   The script REFUSES to continue otherwise; it never falls back to a slug or a default type.\n\n' +
   'Return the plan schema. Be concrete: file paths, function names, exact invariants. No vague steps like "fix the issue".\n\n' +
   'Enforcement: plan for the loud failure. If a silent-zero shape is even plausible, the plan must call for a crash/refusal.',
   { phase: 'Plan', label: 'plan', schema: PLAN_SCHEMA, effort: 'high' }
 )
 if (!plan) throw new Error('Plan agent returned null')
+const PR_TITLE = composeCommitTitle(plan.commitType, plan.commitSubject, fetched.issueNumber)
+const COMMIT_TYPE = plan.commitType
+log('Commit/PR title: ' + PR_TITLE)
 log('Plan ready: ' + plan.steps.length + ' steps across ' + plan.files.length + ' files')
 
 phase('Test plan')
@@ -334,7 +386,7 @@ const implementation = await agent(
   '2. Implement the plan so that every acceptance criterion and invariant is met, and add every test the plan/test-plan name.\n' +
   '   If the plan calls for tests that reproduce the engine by hand instead of driving FamilySimulation.run() / the fold, STOP\n' +
   '   and write tests that drive the engine instead (DP#11/#26) — that shortcut is how this codebase shipped wrong before.\n' +
-  '3. Commit when green locally with a message like: fix(#' + fetched.issueNumber + '): ' + slug(fetched.title) + '\n' +
+  '3. Commit when green locally with this exact subject line: ' + PR_TITLE + '\n' +
   '   Include the standard attribution: Co-Authored-By: Claude Code <noreply@anthropic.com>\n' +
   '   Do NOT commit on main; you are in ' + BRANCH + '. Never --no-verify, never add a guard allowlist entry.\n' +
   '4. Push to origin/' + BRANCH + ' so the pipeline’s later stages can see it. Then STOP: do not open a PR.\n' +
@@ -436,7 +488,7 @@ do {
     '1. Fix EVERY validator failure (the finding/evidence/requiredFix triplet tells you what and why). Do not stop at the first.\n' +
     '2. Add/extend tests so each fixed item has a detector that fails if it regresses.\n' +
     '3. Run the targeted tests, then the full suite with PYTEST_MEM_BUDGET_MB=8192. Read the output.\n' +
-    '4. Commit on ' + implementation.branchName + ' (not main), message: fix(#' + fetched.issueNumber + '): address validator findings.\n' +
+    '4. Commit on ' + implementation.branchName + ' (not main), message: ' + COMMIT_TYPE + '(#' + fetched.issueNumber + '): address validator findings.\n' +
     '   Include attribution: Co-Authored-By: Claude Code <noreply@anthropic.com>. Never --no-verify; never an allowlist entry.\n' +
     '5. Push to origin/' + implementation.branchName + '. Return the new HEAD sha and pushed=true.\n' +
     STAGE_SCOPE + '\n\n' +
@@ -471,7 +523,8 @@ const pr = await agent(
   '   If a PR already exists: do NOT create another. Set preExisting=true and describe it in preExistingDetail (number,\n' +
   '   createdAt, and whether it was already marked ready). If it is NOT a draft, restore the invariant with\n' +
   '   gh pr ready <number> --repo ' + REPO + ' --undo   (a PR stays draft until the pipeline’s final ready stage), then\n' +
-  '   replace its body with the one you write in step 2 (gh pr edit <number> --body-file <tmpfile>) and return it.\n' +
+  '   replace its body with the one you write in step 2 (gh pr edit <number> --body-file <tmpfile>), retitle it to the\n' +
+  '   pipeline title with gh pr edit <number> --repo ' + REPO + ' --title "' + PR_TITLE + '", and return it.\n' +
   '   Otherwise set preExisting=false and preExistingDetail="none".\n' +
   '2. Write the PR body to a temp file (the description must render well on GitHub: use flowing paragraphs, NOT manual\n' +
   '   hard-wrapping at ~80 cols — that is what the pr-body-format action flags). Include:\n' +
@@ -482,12 +535,14 @@ const pr = await agent(
   '   - the attribution footer line: 🤖 Generated with [Claude Code](https://claude.com/claude-code)\n' +
   '   NO personal or financial data anywhere (DP#15).\n' +
   '3. Open the PR as DRAFT:\n' +
-  '   gh pr create --repo ' + REPO + ' --head ' + BRANCH + ' --base main --draft --title "fix(#' + fetched.issueNumber + '): ' + slug(fetched.title) + '" --body-file <tmpfile>\n' +
-  '   (skip this step if 1b found a pre-existing PR). Return the schema; draft must reflect the PR’s ACTUAL state\n' +
-  '   after your actions (re-read it with gh pr view <number> --json isDraft), not what you intended.',
+  '   gh pr create --repo ' + REPO + ' --head ' + BRANCH + ' --base main --draft --title "' + PR_TITLE + '" --body-file <tmpfile>\n' +
+  '   (skip this step if 1b found a pre-existing PR). Return the schema; draft and title must reflect the PR’s ACTUAL\n' +
+  '   state after your actions (re-read them with gh pr view <number> --json isDraft,title), not what you intended.\n' +
+  '   The pipeline refuses to continue unless the returned title is exactly: ' + PR_TITLE,
   { phase: 'Open PR', label: 'open-pr', schema: PR_SCHEMA, effort: 'low' }
 )
 if (!pr) throw new Error('PR agent returned null')
+if (pr.title !== PR_TITLE) throw new Error('PR #' + pr.number + ' title is ' + JSON.stringify(pr.title) + ', expected ' + JSON.stringify(PR_TITLE) + ' — refusing to continue')
 // Never silent: a stage that overreached is surfaced in the log AND the workflow's return value.
 const stageViolations = []
 if (pr.preExisting) {
@@ -566,7 +621,7 @@ while (ciRound < MAX_CI_ROUNDS) {
       '   Never guess what failed.\n' +
       '3. Fix the root cause, add/extend a detector test, run the targeted check locally, then the full suite with\n' +
       '   PYTEST_MEM_BUDGET_MB=8192. For a coverage-gate failure, regenerate the baseline in the same PR: python tools/coverage_gate.py --update.\n' +
-      '4. Commit on ' + BRANCH + ' (fix(#' + fetched.issueNumber + '): address CI findings) with attribution\n' +
+      '4. Commit on ' + BRANCH + ' (' + COMMIT_TYPE + '(#' + fetched.issueNumber + '): address CI findings) with attribution\n' +
       '   (Co-Authored-By: Claude Code <noreply@anthropic.com>), push to origin/' + BRANCH + '. Never --no-verify; never an allowlist\n' +
       '   entry. State method beside result. If you could not fix something, say so in summary with the blocker.\n' +
       'The PR already exists; do not touch its state (draft/ready/title/body) — only push commits to its branch.\n' +
