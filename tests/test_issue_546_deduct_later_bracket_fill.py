@@ -120,7 +120,10 @@ def _run_pure_years(lump, incomes, bracket_target):
             state=state,
             year=y,
             inputs=_build_year_inputs(
-                allocations={"_primary_income": income, "_spouse_income": 0},
+                allocations={"_primary_income": income, "_spouse_income": 0,
+                             # #286: the RRSP deduction's taxable base.
+                             "_primary_taxable_income": income,
+                             "_spouse_taxable_income": 0},
                 config=cfg, investment_return=0.0, deduct_later=True,
                 primary_marginal_rate=mtr, spouse_marginal_rate=0.0,
             ),

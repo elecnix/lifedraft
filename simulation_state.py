@@ -1342,6 +1342,7 @@ class SimState:
             'adult_lira': adult_lira,
             'adult_lif': adult_lif,
         })
+        canada_state['rrsp_ledger'] = _seed_undeducted_rrsp_ledger(config)
 
         # Epic #841 bite 2 / issue #812: seed each child's OWN opening
         # registered accounts + room, parallel to config.children. The fold
@@ -1612,6 +1613,53 @@ def margin_draw_for_lump_sum(lump_sum: float, margin_available: float) -> float:
     if lump_sum <= 0 or margin_available <= 0:
         return 0.0
     return min(lump_sum, margin_available)
+
+
+# Issue #286: a seeded ledger entry predates the projection -- its
+# contribution year is -1 (the 0-based projection year before year 0), so it
+# is claimed first (FIFO) and never mistaken for a year-0 contribution.
+UNDEDUCTED_SEED_YEAR = -1
+
+
+def _seed_undeducted_rrsp_ledger(config: SimulationConfig) -> list:
+    """The opening RRSP deduction ledger (issue #286): one undeducted entry
+    per adult who DECLARED ``rrsp_undeducted_contributions`` (the NOA's
+    "unused RRSP contributions available to deduct"), role ``primary`` or
+    ``spouse`` -- claimed against that person's own taxable income from
+    year 0, like any other carried-forward contribution.
+
+    Absent key = nothing declared -> no entry (the model_fidelity caveat
+    ``rrsp_undeducted_contributions_undeclared`` says so); a declared 0 is a
+    checked fact -> no entry either. An additional adult declaring it raises:
+    the ledger has no slot for them, and dropping it silently is the bug
+    class DP#32 forbids.
+    """
+    ledger = []
+    for member, role in ((config.member_by_role('primary', {}), 'primary'),
+                         (config.member_by_role('spouse', {}), 'spouse')):
+        if 'rrsp_undeducted_contributions' not in member:
+            continue
+        amount = member['rrsp_undeducted_contributions']
+        if amount < 0:
+            raise ValueError(
+                f"rrsp_undeducted_contributions for the {role} is negative "
+                f"({amount}); undeducted contributions are a non-negative "
+                f"amount (issue #286).")
+        if amount > 0:
+            ledger.append({
+                'year': UNDEDUCTED_SEED_YEAR, 'amount': amount, 'role': role,
+                'deducted': False, 'deduction_year': None,
+                'deduction_marginal_rate': None,
+            })
+    for extra in config.adults():
+        if (extra.get('role') not in ('primary', 'spouse')
+                and 'rrsp_undeducted_contributions' in extra):
+            raise ValueError(
+                f"Adult {extra.get('id', extra.get('role'))!r} declares "
+                f"rrsp_undeducted_contributions, but the RRSP deduction ledger "
+                f"has only a primary and a spouse slot; refusing rather than "
+                f"silently dropping it (issue #286, DP#32).")
+    return ledger
 
 
 def initial_state_for_run(config: SimulationConfig, lump_sum: float = 0.0) -> 'SimState':
@@ -2136,7 +2184,6 @@ def simulate_year_pure(
     mortgage_rate = inputs.mortgage_rate
     heloc_rate = inputs.heloc_rate
     use_readvanceable = inputs.use_readvanceable
-    deduct_later = inputs.deduct_later
     primary_marginal_rate = inputs.primary_marginal_rate
     spouse_marginal_rate = inputs.spouse_marginal_rate
     rrsp_annual_limit = inputs.rrsp_annual_limit
@@ -2742,7 +2789,10 @@ def simulate_year_pure(
         primary_marginal=primary_marginal_rate,
         spouse_marginal=spouse_marginal_rate,
         bracket_gap=primary_marginal_rate - spouse_marginal_rate,
-        rrsp_tax_savings=ws.rrsp_deduction_savings + ws.spouse_deduction_savings if deduct_later else (ws.p_rrsp_actual + ws.s_rrsp_actual) * primary_marginal_rate + ws.sp_rrsp_actual * spouse_marginal_rate,
+        # Issue #286: ONE source for the refund -- the ledger's capped
+        # bracket-fill claim, on both the deduct-now and deduct-later paths.
+        rrsp_tax_savings=ws.rrsp_deduction_savings + ws.spouse_deduction_savings,
+        rrsp_deduction_carried_forward=ws.rrsp_deduction_carried_forward,
         deduction_claims=ws.deduction_claims,
         deduction_advantage_vs_now=ws.deduction_advantage_vs_now,
         readvance_interest=ws.readvance_interest,

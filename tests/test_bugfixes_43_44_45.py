@@ -176,8 +176,8 @@ class TestBug45DeductLaterBracketAware(unittest.TestCase):
             'spouse_tfsa': 0,
             'non_reg': 0,
             'resp': 0,
-            '_primary_income': 120000,
-            '_spouse_income': 50000,
+            '_primary_income': 120000, '_primary_taxable_income': 120000,
+            '_spouse_income': 50000, '_spouse_taxable_income': 50000,
             '_annual_savings': 15000,
         }
         
@@ -223,8 +223,8 @@ class TestBug45DeductLaterBracketAware(unittest.TestCase):
             'spouse_tfsa': 0,
             'non_reg': 0,
             'resp': 0,
-            '_primary_income': 120000,
-            '_spouse_income': 50000,
+            '_primary_income': 120000, '_primary_taxable_income': 120000,
+            '_spouse_income': 50000, '_spouse_taxable_income': 50000,
             '_annual_savings': 15000,
         }
         

@@ -83,7 +83,7 @@ def apply_rrsp_ledger(ws: YearWorkingState, ctx: RuleContext) -> bool:
 
     # Issue #1059: the ledger entries are flat dicts of scalars (year, amount,
     #    role, deducted, deduction_year, deduction_marginal_rate) -- no nested
-    #    containers.  Downstream mutates entries in place (claim_all_deductions
+    #    containers.  Downstream mutates entries in place (claim_useful_deductions
     #    sets e['deducted']=True; claim_deferred_deduction adjusts entry['amount']),
     #    so each dict MUST be a fresh copy to avoid corrupting the prior year's
     #    state (DP#26).  But deepcopy is overkill: a shallow dict copy per entry
@@ -105,52 +105,100 @@ def apply_rrsp_ledger(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.new_ledger = new_ledger
     return fired
 
+def _deduction_brackets(ctx: RuleContext) -> list:
+    """The combined brackets the RRSP deduction is valued against: this
+    year's (``ctx.year_brackets``, DP#20 -- the same brackets the prologue
+    taxed the year's income with). A direct ``simulate_year_pure`` caller that
+    supplies none gets the start year's loaded brackets for the config's
+    province -- real data, resolved, never a zero."""
+    if ctx.year_brackets is not None:
+        return ctx.year_brackets
+    return default_tax_provider().get_combined_brackets(
+        ctx.config.start_year, province=ctx.config.province)
+
+
+def _has_undeducted(ledger, roles: tuple) -> bool:
+    return any(not e['deducted'] and e['role'] in roles for e in ledger)
+
+
 @rule('rrsp_deduction')
 def apply_rrsp_deduction(ws: YearWorkingState, ctx: RuleContext) -> bool:
     """Deduct-now or deduct-later (issue #546: bracket-fill staggering).
-    Depends on ``rrsp_ledger`` (mutates the same ledger object) and
-    ``contributions`` for the *_actual amounts.
+    Depends on ``rrsp_ledger`` (mutates the same ledger object, which already
+    holds this year's contributions as undeducted entries); it reads no
+    ``*_rrsp_actual`` amount -- the ledger is the only source of what is
+    deductible.
+
+    Issue #286: the deduction is valued with the bracket-fill valuer against
+    each contributor's OWN taxable income before the deduction -- primary and
+    spousal-RRSP contributions against the primary's
+    (``allocations['_primary_taxable_income']``), the spouse's own
+    contributions against the spouse's -- and capped at the amount that still
+    reduces tax. The excess stays undeducted in the ledger and is claimed in
+    later years (``rrsp_deduction_carried_forward``). The base is the TAXABLE
+    income the prologue taxed (employment + rental/loan income - s.20(1)(c)
+    interest - CCA), so the refund can never exceed the pre-credit tax it
+    reduces. The base is read by indexing, and only when that role has
+    something to deduct: a caller that omits it gets a ``KeyError``, never a
+    deduction silently valued at $0 (DP#32).
     """
     rrsp_deduction_savings = 0.0
     spouse_deduction_savings = 0.0
     deduction_claims = []
+    carried_forward = 0.0
     deduct_later_staggered_total = ws.opening_deduct_later_staggered_total
     deduct_later_first_claim_income = ws.opening_deduct_later_first_claim_income
     deduct_later_total_deducted = ws.opening_deduct_later_total_deducted
 
-    if not ctx.deduct_later:
-        ws.new_ledger.claim_all_deductions(year=ws.year, marginal_rate=ctx.primary_marginal_rate)
-        rrsp_deduction_savings = (ws.p_rrsp_actual + ws.s_rrsp_actual) * ctx.primary_marginal_rate
-        spouse_deduction_savings = ws.sp_rrsp_actual * ctx.spouse_marginal_rate
-    else:
-        # Issue #546: stagger the primary/spousal claim toward the bracket
-        # target, valuing each year's slice at its bracket-fill marginal rate.
-        if ws.sp_rrsp_actual > 0:
-            spouse_deduction_savings = ws.sp_rrsp_actual * ctx.spouse_marginal_rate
+    brackets = _deduction_brackets(ctx)
+    primary_roles = ('primary', 'spousal')
+    spouse_roles = ('spouse',)
 
-        brackets = default_tax_provider().get_combined_brackets(ctx.config.start_year, province=ctx.config.province)
-        primary_income_this_year = ctx.allocations.get('_primary_income', 0)
-        claim = ws.new_ledger.claim_deferred_deduction(
-            year=ws.year,
-            income=primary_income_this_year,
-            brackets=brackets,
-            bracket_target=ctx.config.deduct_later_bracket_target,
-        )
-        rrsp_deduction_savings = claim['savings']
-        deduction_claims = claim['claims']
-        if claim['amount'] > 0:
-            deduct_later_staggered_total += claim['savings']
-            if deduct_later_total_deducted == 0:
-                deduct_later_first_claim_income = primary_income_this_year
-            deduct_later_total_deducted += claim['amount']
+    # The spouse's OWN contributions are never staggered (deduct_later is the
+    # primary's election): they are claimed now, capped at what still reduces
+    # the spouse's tax, on both paths.
+    if _has_undeducted(ws.new_ledger, spouse_roles):
+        s = ws.new_ledger.claim_useful_deductions(
+            year=ws.year, income=ctx.allocations['_spouse_taxable_income'],
+            brackets=brackets, roles=spouse_roles)
+        spouse_deduction_savings = s['savings']
+        deduction_claims += s['claims']
+        carried_forward += s['carried_forward']
+
+    if _has_undeducted(ws.new_ledger, primary_roles):
+        primary_income_this_year = ctx.allocations['_primary_taxable_income']
+        if not ctx.deduct_later:
+            p = ws.new_ledger.claim_useful_deductions(
+                year=ws.year, income=primary_income_this_year,
+                brackets=brackets, roles=primary_roles)
+            rrsp_deduction_savings = p['savings']
+            deduction_claims = p['claims'] + deduction_claims
+            carried_forward += p['carried_forward']
+        else:
+            # Issue #546: stagger the primary/spousal claim toward the bracket
+            # target, valuing each year's slice at its bracket-fill marginal
+            # rate. What stays undeducted here is CHOSEN (the stagger), not a
+            # cap, so it is not reported as carried forward.
+            claim = ws.new_ledger.claim_deferred_deduction(
+                year=ws.year,
+                income=primary_income_this_year,
+                brackets=brackets,
+                bracket_target=ctx.config.deduct_later_bracket_target,
+            )
+            rrsp_deduction_savings = claim['savings']
+            deduction_claims = claim['claims'] + deduction_claims
+            if claim['amount'] > 0:
+                deduct_later_staggered_total += claim['savings']
+                if deduct_later_total_deducted == 0:
+                    deduct_later_first_claim_income = primary_income_this_year
+                deduct_later_total_deducted += claim['amount']
 
     # Issue #546: staggered bracket-fill total minus the bracket-fill value
     # of deducting the same total all in the first claim year.
     if deduct_later_total_deducted > 0:
         from tax_calculator import deduction_value
-        adv_brackets = default_tax_provider().get_combined_brackets(ctx.config.start_year, province=ctx.config.province)
         lump_now_total = deduction_value(
-            deduct_later_first_claim_income, deduct_later_total_deducted, adv_brackets)
+            deduct_later_first_claim_income, deduct_later_total_deducted, brackets)
         deduction_advantage_vs_now = deduct_later_staggered_total - lump_now_total
     else:
         deduction_advantage_vs_now = 0.0
@@ -158,6 +206,7 @@ def apply_rrsp_deduction(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.rrsp_deduction_savings = rrsp_deduction_savings
     ws.spouse_deduction_savings = spouse_deduction_savings
     ws.deduction_claims = deduction_claims
+    ws.rrsp_deduction_carried_forward = carried_forward
     ws.deduct_later_staggered_total = deduct_later_staggered_total
     ws.deduct_later_first_claim_income = deduct_later_first_claim_income
     ws.deduct_later_total_deducted = deduct_later_total_deducted
@@ -310,3 +359,64 @@ def summarize_rrsp_refusal(results) -> Dict:
         'refused_spousal_total': spousal_total,
         'refused_spouse_own_total': spouse_own_total,
     }
+
+
+def summarize_rrsp_deduction_carry_forward(results) -> Dict:
+    """Fold a trajectory's ``YearResult`` list into the RRSP carry-forward
+    facts (issue #286): whether any year's contributions exceeded the
+    deduction still useful against that year's taxable income, so the excess
+    stayed undeducted in the ledger for a later year.
+
+    Returns::
+
+        {
+          'engaged':                bool,   # some year carried an excess
+          'first_carried_year':     int | None,
+          'first_carried_amount':   float,  # carried at the end of that year
+          'max_carried_forward':    float,  # largest year-end carry
+          'carried_at_horizon_end': float,  # still undeducted after the last year
+        }
+
+    Same shape and bridge as ``summarize_rrsp_refusal`` (#170): folded once
+    from the trajectory, carried on the ranking row, and recorded onto
+    ``assumptions.rrsp_deduction_carried_forward`` for the fidelity caveat.
+    """
+    engaged = False
+    first_year = None
+    first_amount = 0.0
+    max_carried = 0.0
+    last = 0.0
+    for r in results:
+        carried = r.rrsp_deduction_carried_forward
+        if carried > 0:
+            if not engaged:
+                engaged = True
+                first_year = r.year
+                first_amount = carried
+            max_carried = max(max_carried, carried)
+        last = carried
+    return {
+        'engaged': engaged,
+        'first_carried_year': first_year,
+        'first_carried_amount': first_amount,
+        'max_carried_forward': max_carried,
+        'carried_at_horizon_end': last,
+    }
+
+
+def worst_rrsp_deduction_carry_forward(rows) -> Dict:
+    """Reduce ranked-scenario carry-forward summaries to the ONE the run-wide
+    caveat names: the scenario that carried the most (ties break to the
+    earliest first-carried year). An empty or all-clear row set returns the
+    all-clear summary (a checked result, not an absence -- DP#32)."""
+    engaged = [r for r in rows if isinstance(r, dict) and r.get('engaged')]
+    if not engaged:
+        return {'engaged': False, 'first_carried_year': None,
+                'first_carried_amount': 0.0, 'max_carried_forward': 0.0,
+                'carried_at_horizon_end': 0.0}
+    return max(
+        engaged,
+        key=lambda row: (row['max_carried_forward'],
+                         -(row['first_carried_year']
+                           if row['first_carried_year'] is not None
+                           else float('inf'))))

@@ -1192,6 +1192,158 @@ register(Approximation(
 ))
 
 
+# ── Issue #286: the RRSP deduction is capped at the tax it can reduce ──────
+#
+# A deduct-now contribution larger than the contributor's taxable income can
+# absorb is no longer refunded at contribution x top marginal rate: the ledger
+# claims only the useful slice (bracket-fill, down to the lowest taxed income)
+# and CARRIES the rest forward (ITA s.146(5), Schedule 7). The carried amount
+# is deducted in a later year against that year's taxable income -- a
+# projection, valued at a projected rate. And the deduction base is the
+# contributor's PROLOGUE taxable income (employment + rental/loan income -
+# interest - CCA); retirement drawdown income is taxed by the drawdown rule,
+# outside that base, so a deduction still carried when the contributor
+# retires is never claimed in the model. Both are runtime facts, recorded by
+# the optimize caller onto assumptions.rrsp_deduction_carried_forward.
+
+def rrsp_carry_forward_summary(cfg: dict) -> Dict:
+    """The run-recorded RRSP deduction carry-forward summary (written by the
+    optimize caller onto ``assumptions.rrsp_deduction_carried_forward``), or
+    the all-clear summary when no scenario carried a deduction forward."""
+    return _run_recorded_summary(cfg, 'rrsp_deduction_carried_forward', {
+        'engaged': False, 'first_carried_year': None,
+        'first_carried_amount': 0.0, 'max_carried_forward': 0.0,
+        'carried_at_horizon_end': 0.0,
+    })
+
+
+def _has_rrsp_carry_forward(ctx: FidelityContext) -> bool:
+    return bool(rrsp_carry_forward_summary(ctx.cfg).get('engaged'))
+
+
+def _describe_rrsp_carry_forward(ctx: FidelityContext) -> List[str]:
+    s = rrsp_carry_forward_summary(ctx.cfg)
+    if not s.get('engaged'):
+        return []
+    parts = [
+        (f"year {s['first_carried_year']}: RRSP contributions exceeded the "
+         f"deduction still useful against that year's taxable income; "
+         f"${s['first_carried_amount']:,.0f} was carried forward undeducted "
+         f"(not refunded that year)"),
+        (f"largest year-end carry-forward: ${s['max_carried_forward']:,.0f}"),
+    ]
+    if s['carried_at_horizon_end'] > 0:
+        parts.append(
+            f"${s['carried_at_horizon_end']:,.0f} was still undeducted at the "
+            f"end of the horizon -- the model never claimed it (retirement "
+            f"drawdown income is outside the deduction base)")
+    return parts
+
+
+register(Approximation(
+    id='rrsp_deduction_carried_forward',
+    summary=("An RRSP contribution exceeded the deduction that could still "
+             "reduce that year's tax, so the excess was carried forward "
+             "undeducted and is claimed in later years at a PROJECTED income "
+             "and rate -- not refunded in the contribution year"),
+    biased_figure=("rrsp_tax_savings (the RRSP refund) in the years after the "
+                   "carry, and any ranking that sums it"),
+    direction=Direction.UNKNOWN,
+    detail=("apply_rrsp_deduction claims each contributor's undeducted "
+            "contributions against their own taxable income, bracket-fill, "
+            "down to the lowest taxed income (rrsp_ledger.claim_useful_"
+            "deductions), and the ledger keeps the rest (YearResult."
+            "rrsp_deduction_carried_forward). The later claim is valued at "
+            "that later year's projected taxable income, which may be higher "
+            "or lower than the contribution year's. The deduction base is the "
+            "prologue's taxable income; retirement drawdown/CPP/OAS income is "
+            "taxed by the drawdown rule outside it, so a carry still "
+            "outstanding at retirement is never claimed (understating the "
+            "refund). Net sign UNKNOWN."),
+    issue='#286',
+    applies=_has_rrsp_carry_forward,
+    findings=_describe_rrsp_carry_forward,
+))
+
+
+def _adult_rrsp_members(cfg: dict) -> List[Dict]:
+    """The primary and the spouse member dicts (the two roles the RRSP
+    deduction ledger holds), from the internal config."""
+    if not isinstance(cfg, dict):
+        return []
+    family = cfg.get('family')
+    if not isinstance(family, dict):
+        return []
+    return [m for m in family.get('members', [])
+            if isinstance(m, dict) and m.get('role') in ('primary', 'spouse')]
+
+
+def _undeducted_undeclared_members(cfg: dict) -> List[str]:
+    return [m['role'] for m in _adult_rrsp_members(cfg)
+            if 'rrsp_room_accumulated' in m
+            and 'rrsp_undeducted_contributions' not in m]
+
+
+def _has_undeclared_undeducted(ctx: FidelityContext) -> bool:
+    return bool(_undeducted_undeclared_members(ctx.cfg))
+
+
+def _describe_undeclared_undeducted(ctx: FidelityContext) -> List[str]:
+    return [
+        (f"{role}: RRSP room is declared but undeducted contributions are "
+         f"not -- the deduction ledger started empty. Declare "
+         f"room.rrsp.undeducted_contributions (Notice of Assessment > RRSP "
+         f"deduction limit statement > unused RRSP contributions available "
+         f"to deduct); 0 is a valid answer")
+        for role in _undeducted_undeclared_members(ctx.cfg)
+    ]
+
+
+register(Approximation(
+    id='rrsp_undeducted_contributions_undeclared',
+    summary=("RRSP contributions already made but not yet deducted were not "
+             "declared, so the deduction ledger starts empty: any carried-"
+             "forward deduction on the Notice of Assessment is missing from "
+             "the projection"),
+    biased_figure="rrsp_tax_savings (the RRSP refund) in the early years",
+    direction=Direction.UNDERSTATES,
+    detail=("SimState.initial seeds the RRSP deduction ledger only from a "
+            "declared people[].room.rrsp.undeducted_contributions. When it is "
+            "absent the engine does not assume zero silently -- it starts the "
+            "ledger empty and says so here. Declaring it (even as 0) clears "
+            "this caveat."),
+    issue='#286',
+    applies=_has_undeclared_undeducted,
+    findings=_describe_undeclared_undeducted,
+))
+
+
+def _rrsp_room_declared(ctx: FidelityContext) -> bool:
+    return any(m.get('rrsp_room_accumulated', 0) > 0
+               for m in _adult_rrsp_members(ctx.cfg))
+
+
+register(Approximation(
+    id='rrsp_refund_excludes_credits',
+    summary=("The RRSP refund is the bracket tax the deduction removes from "
+             "the contributor's taxable income, before non-refundable credits "
+             "(basic personal amount, etc.): at low income, where credits "
+             "already bring the tax to zero, the modelled refund is too high"),
+    biased_figure="rrsp_tax_savings (the RRSP refund) for a low-income contributor",
+    direction=Direction.OVERSTATES,
+    detail=("rrsp_ledger.claim_useful_deductions caps the claim at the lowest "
+            "taxed income from the loaded brackets (lowest_taxed_floor) and "
+            "values it bracket-fill, so the refund never exceeds the pre-"
+            "credit tax on the contributor's taxable income. The brackets "
+            "carry no zero-rate band for the basic personal amount and the "
+            "refund ignores other credits and OAS recovery, so it is an upper "
+            "bound. Routing the deduction through the full tax computation is "
+            "the #105 follow-up."),
+    issue='#286',
+    applies=_rrsp_room_declared,
+))
+
+
 # ── Issue #141: the annualized superficial-loss window ─────────────────────
 #
 # ITA s.53(1)(c)'s superficial-loss window is 61 days wide (30 days ending on

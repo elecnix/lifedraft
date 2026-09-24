@@ -459,7 +459,7 @@ class TestSimStateJurisdictionOpaque(unittest.TestCase):
             'primary_rrsp': 5000, 'spousal_rrsp': 2000,
             'primary_tfsa': 3000, 'spouse_tfsa': 2000,
             'resp': 2500, 'non_reg': 3000,
-            '_primary_income': 120000, '_spouse_income': 50000,
+            '_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000,
             '_annual_savings': 20000,
         }
         result, new_state = simulate_year_pure(

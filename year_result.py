@@ -68,6 +68,12 @@ class YearResult:
     spouse_marginal: float = 0.0
     bracket_gap: float = 0.0
     rrsp_tax_savings: float = 0.0
+    # Issue #286: the undeducted RRSP contributions the useful-deduction cap
+    # left in the ledger at year end -- deducted in a later year (ITA
+    # s.146(5), Schedule 7), never refunded in this one and never lost. 0.0
+    # whenever every contribution fit inside the year's taxable income (and
+    # for the primary's chosen deduct-later stagger, which is not a cap).
+    rrsp_deduction_carried_forward: float = 0.0
     # Issue #546: per-year deduct-later claim slices, each
     # {'year': contribution_year, 'amount': claimed, 'rate': bracket-fill rate}.
     deduction_claims: List[Dict] = field(default_factory=list)

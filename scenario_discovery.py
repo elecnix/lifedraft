@@ -63,6 +63,9 @@ class SimulationDeps:
     AllocationStrategy: Any
     resolve_return_rate: Any
     resolve_heloc_rate: Any
+    # Issue #286: the floor of the bracket an income sits in (from the loaded
+    # brackets) -- the deduct-later discovery's current-bracket headroom test.
+    current_bracket_floor: Any
 
 
 # The module-level injection point. ``None`` until the simulation layer
@@ -143,7 +146,9 @@ def discover_anchors(cfg: dict, force_retirement_ages: bool = False,
         strategy: List[dict]        # Each with keys: id, label, + allocation pcts + flags
         resp_action: List[str]      # ['keep', 'eap', 'collapse'] when resp > 0, else ['keep']
         sm_options: List[bool]      # [True, False] if conditions hold, else [False]
-        deduct_later_options: List[bool]  # [True, False] if bracket_gap > 0, else [False]
+        deduct_later_options: List[bool]  # [True, False] on a declared-spouse bracket gap, or when
+                                     # the primary's RRSP room exceeds their current-bracket
+                                     # headroom (#286), else [False]
         child_accounts: List[dict]  # Each with keys: child_name, fhsa_room, tfsa_room, rrsp_room
         retirement_age: List[int]   # Issue #303: candidate retirement ages to enumerate
         drawdown_order: List[dict]  # Issue #618: candidate decumulation orders to enumerate.
@@ -1358,18 +1363,45 @@ def _discover_draw_fraction_options(cfg: dict) -> List[float]:
 
 
 def _discover_deduct_later_options(cfg: dict, deps: Optional[SimulationDeps] = None) -> List[bool]:
-    """Discover deduct-later options based on bracket gap."""
+    """Discover deduct-later options (issue #286).
+
+    ``deduct_later`` staggers the PRIMARY's own and spousal-RRSP deduction
+    (the spouse's own contributions are never staggered), so the question is
+    whether staggering the primary's claim can matter. Offers ``[True, False]``
+    when EITHER
+
+      (i) a spouse is actually declared and sits in a lower bracket than the
+          primary (the original spousal-gap criterion -- an ABSENT spouse is
+          no longer coerced to a 0% rate to trigger it), OR
+     (ii) the primary has income and their declared RRSP room exceeds the
+          headroom left in their current bracket (income minus the floor of
+          the bracket that income sits in, from the loaded brackets): a
+          contribution that fills the room spills across brackets, so
+          deducting it all now wastes deduction on lower-rate income. This is
+          the single-filer / same-bracket-couple case the gap test missed.
+
+    A primary with income but NO declared ``rrsp_room_accumulated`` cannot be
+    tested against (ii); it is swept (``[True, False]``) rather than treated
+    as zero room (DP#32/#33: an unknown is evaluated, not assumed away).
+    Otherwise ``[False]``.
+    """
     deps = _resolve_deps(deps)
-    # Calculate marginal rates
-    _, primary_mtr, spouse_mtr = _get_tax_brackets(cfg, deps)
-    
-    # Check bracket gap
-    bracket_gap = primary_mtr - spouse_mtr
-    
-    if bracket_gap > 0:
+    brackets, primary_mtr, spouse_mtr = _get_tax_brackets(cfg, deps)
+    members = cfg.get('family', {}).get('members', [])
+    primary = find_member_by_role(members, 'primary', {})
+    spouse = find_member_by_role(members, 'spouse', {})
+
+    if spouse and primary_mtr - spouse_mtr > 0:
         return [True, False]
-    else:
-        return [False]
+
+    primary_income = primary.get('gross_income', 0)
+    if primary_income > 0:
+        if 'rrsp_room_accumulated' not in primary:
+            return [True, False]
+        headroom = primary_income - deps.current_bracket_floor(primary_income, brackets)
+        if primary['rrsp_room_accumulated'] > headroom:
+            return [True, False]
+    return [False]
 
 
 # Issue #812: the child-allocation biases the discovery sweep compares. Each is

@@ -778,10 +778,10 @@ def apply_rrsp_refund_heloc_paydown(ws: YearWorkingState, ctx: RuleContext) -> b
     HELOC margin. Depends on ``rrsp_deduction`` (the refund amount) and
     ``margin_heloc_interest`` (the balance to pay down).
     """
-    if not ctx.deduct_later:
-        rrsp_refund = (ws.p_rrsp_actual + ws.s_rrsp_actual) * ctx.primary_marginal_rate + ws.sp_rrsp_actual * ctx.spouse_marginal_rate
-    else:
-        rrsp_refund = ws.rrsp_deduction_savings + ws.spouse_deduction_savings
+    # Issue #286: the refund is the tax the ledger's capped bracket-fill claim
+    # actually saved -- the SAME figure YearResult.rrsp_tax_savings reports,
+    # on both the deduct-now and deduct-later paths (one source, DP#9).
+    rrsp_refund = ws.rrsp_deduction_savings + ws.spouse_deduction_savings
     ws.rrsp_refund = rrsp_refund
 
     heloc_paydown = 0.0

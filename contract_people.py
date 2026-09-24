@@ -484,6 +484,14 @@ def _map_member(doc: Dict, person_id: str, role: str,
         grant = room.get(kind)
         if grant is not None:
             member[f"{kind}_room_accumulated"] = grant["contribution_room"]
+    # Issue #286: RRSP contributions already made but not yet deducted (the
+    # NOA's "unused RRSP contributions"). Mapped only when DECLARED -- absence
+    # stays absence (no key; the model_fidelity caveat names it), and a
+    # declared 0 is kept as the checked fact it is (DP#32). SimState.initial
+    # seeds the deduction ledger from it.
+    rrsp_grant = room.get("rrsp")
+    if rrsp_grant is not None and "undeducted_contributions" in rrsp_grant:
+        member["rrsp_undeducted_contributions"] = rrsp_grant["undeducted_contributions"]
 
     # #647: every rrsp/tfsa/spousal_rrsp/fhsa account this person owns --
     # computed once, for everyone, by _map_registered_balances (which
@@ -597,6 +605,18 @@ def _map_child(doc: Dict, person_id: str,
         grant = room.get(kind)
         if grant is not None:
             child[f"{kind}_room_accumulated"] = grant["contribution_room"]
+    # Issue #286: the engine keeps an RRSP deduction ledger only for the
+    # primary and the spouse -- a child's undeducted contributions would be
+    # silently dropped, so they are refused instead (DP#32).
+    child_rrsp = room.get("rrsp")
+    if child_rrsp is not None and "undeducted_contributions" in child_rrsp:
+        raise ContractAdaptationError(
+            f"Person {person_id!r} is modelled as a dependent child, but their "
+            f"room.rrsp declares undeducted_contributions. The engine keeps an "
+            f"RRSP deduction ledger only for the primary and the spouse, so "
+            f"this fact would be silently dropped (issue #286, DP#32). Remove "
+            f"it, or model the person as an adult."
+        )
     # #647 / #841 bite 1: the child's own rrsp/tfsa/fhsa opening balances.
     # _map_registered_balances now attributes a child-owned rrsp/tfsa/fhsa
     # account to that child here (children are first-class savings subjects,
@@ -745,5 +765,17 @@ def map_members(doc: Dict, primary_id: str, spouse_id: Optional[str],
     # (config.adults(), the per-adult tax loop, the per-adult account stores)
     # iterate it in declared order after the primary couple.
     for xid in extra_adult_ids:
-        members.append(_map_member(doc, xid, xid, registered_balances))
+        extra = _map_member(doc, xid, xid, registered_balances)
+        # Issue #286: the RRSP deduction ledger has a primary slot and a
+        # spouse slot only; an additional adult's undeducted contributions
+        # would be silently dropped, so they are refused (DP#32).
+        if "rrsp_undeducted_contributions" in extra:
+            raise ContractAdaptationError(
+                f"Person {xid!r} is modelled as an additional accumulating "
+                f"adult, but their room.rrsp declares undeducted_contributions. "
+                f"The engine keeps an RRSP deduction ledger only for the "
+                f"primary and the spouse, so this fact would be silently "
+                f"dropped (issue #286, DP#32)."
+            )
+        members.append(extra)
     return members

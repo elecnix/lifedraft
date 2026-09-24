@@ -306,7 +306,7 @@ class TestSimulateYearPureUsesJurisdictionState(unittest.TestCase):
         state = SimState.initial(cfg)
         allocs = {
             'primary_rrsp': 10000,
-            '_primary_income': 120000, '_spouse_income': 50000,
+            '_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000,
             '_annual_savings': 34000,
         }
         _, new_state = simulate_year_pure(
@@ -329,7 +329,7 @@ class TestSimulateYearPureUsesJurisdictionState(unittest.TestCase):
         state = SimState.initial(cfg)
         allocs = {
             'primary_tfsa': 5000, 'spouse_tfsa': 3000,
-            '_primary_income': 120000, '_spouse_income': 50000,
+            '_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000,
             '_annual_savings': 34000,
         }
         _, new_state = simulate_year_pure(

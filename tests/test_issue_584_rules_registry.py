@@ -501,6 +501,8 @@ def test_every_rule_fires_somewhere_in_representative_households():
             year=0,
             inputs=_build_year_inputs(
                 allocations={'primary_rrsp': 20_000, '_primary_income': 130000,
+                             # #286: the RRSP deduction's taxable base.
+                             '_primary_taxable_income': 130000,
                              '_annual_savings': 20_000},
                 config=heloc_config, investment_return=0.06, heloc_rate=0.06,
                 primary_marginal_rate=0.40
