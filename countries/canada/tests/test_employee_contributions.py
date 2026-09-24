@@ -114,6 +114,30 @@ def test_cpp2_above_yampe_2025(provider):
     assert between.pension_second_additional == pytest.approx(200.00, abs=0.01)
 
 
+def test_2026_ceilings_and_quebec_rate_match_published_figures(provider):
+    """2026 is the first year every real run prices, and every projected
+    year copies it, so a wrong 2026 record mis-prices the whole horizon.
+
+    * CRA 2026: YMPE $74,600, rate 5.95%, maximum employee CPP $4,230.45;
+      AYMPE $85,000, CPP2 4%, maximum $416 (pages cited in the module
+      docstring). The repo carried $81,900 as the 2026 YAMPE until #289.
+    * Retraite Quebec 2026: basic plan 5.3% + first additional plan 1%
+      (6.3%, down from 6.4%), second ceiling $85,000 at 4%; its worked
+      example charges an employee $2,930 on $50,000 of earnings.
+      https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+    """
+    on = employee_contribution_breakdown(74_600, 'ontario', 2026, provider)
+    assert on.pension_base + on.pension_first_additional == pytest.approx(4230.45, abs=0.01)
+    on_top = employee_contribution_breakdown(90_000, 'ontario', 2026, provider)
+    assert on_top.pension_second_additional == pytest.approx(416.00, abs=0.01)
+
+    qc_example = employee_contribution_breakdown(50_000, 'quebec', 2026, provider)
+    assert (qc_example.pension_base + qc_example.pension_first_additional
+            == pytest.approx(2930, abs=0.5))
+    qc_top = employee_contribution_breakdown(90_000, 'qc', 2026, provider)
+    assert qc_top.pension_second_additional == pytest.approx(416.00, abs=0.01)
+
+
 def test_credit_value_is_lowest_rates_with_quebec_abatement(provider):
     """The s.118.7 credit is worth the lowest federal rate (plus Ontario's
     lowest rate, ON428), and for a Quebec resident only (1 - abatement) of

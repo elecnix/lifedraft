@@ -1556,31 +1556,68 @@ register(Approximation(
 ))
 
 
+def _segments_mix_earnings_kinds(segs: List[Dict], start_year) -> bool:
+    """One member's effective segment schedule carries a ``self_employment``
+    segment AND can earn employment income in the same year: an
+    ``employment`` segment, or days the base (employment) salary covers
+    because a segment starts after the projection start or ends. When the
+    start year is not stated the caveat reports itself (DP#32: disclose when
+    unsure)."""
+    if not any(s.get('kind') == 'self_employment' for s in segs):
+        return False
+    if any(s.get('kind') == 'employment' for s in segs):
+        return True
+    if any(s.get('to') for s in segs):
+        return True
+    if start_year is None:
+        return True
+    earliest = min(str(s.get('from', '')) for s in segs)
+    return earliest > f"{start_year}-01-01"
+
+
+def _candidate_segment_schedules(ctx: FidelityContext) -> List[List[Dict]]:
+    """Every segment schedule a member can run under, on the BASE config.
+
+    Two shapes reach the engine. (1) ``family.members[].income_segments``,
+    which is what a hand-built or variant config carries. (2) The declared
+    ``scenarios.income[]`` (the contract's ``decisions.income[]``
+    overrides): on the real input path the base members carry only their
+    employment segments, and ``optimize._apply_income_scenario`` attaches a
+    scenario's ``primary_segments``/``spouse_segments`` to a member only on a
+    per-scenario VARIANT, which is never the config the fidelity section is
+    rendered from. So each scenario's per-role override list is read here as
+    the schedule that role runs under in that variant (it REPLACES the base
+    segments there, exactly as ``_apply_income_scenario`` does); a role the
+    scenario does not override keeps its base schedule, already covered by
+    (1)."""
+    schedules: List[List[Dict]] = []
+    for m in _family_members(ctx):
+        raw = m.get('income_segments')
+        if isinstance(raw, list):
+            schedules.append([s for s in raw if isinstance(s, dict)])
+    scenarios = ctx.cfg.get('scenarios') if isinstance(ctx.cfg, dict) else None
+    income = scenarios.get('income') if isinstance(scenarios, dict) else None
+    for sc in (income if isinstance(income, list) else []):
+        # Both producers (contract_decisions.map_income_scenarios and a
+        # hand-authored scenarios.income[]) emit dicts; anything else is a
+        # broken producer and is left to crash here, not skipped.
+        members = sc.get('members')
+        by_role: Dict[str, List[Dict]] = {}
+        for mem in (members if isinstance(members, list) else []):
+            if isinstance(mem, dict):
+                by_role.setdefault(mem.get('role'), []).append(mem)
+        schedules.extend(by_role.values())
+    return schedules
+
+
 def _mixes_employment_and_self_employment(ctx: FidelityContext) -> bool:
-    """Some member declares a ``self_employment`` income segment AND can earn
-    employment income in the same year: an ``employment`` segment, or days
-    the base (employment) salary covers because a segment starts after the
-    projection start or ends. When the start year is not stated the caveat
-    reports itself (DP#32: disclose when unsure)."""
+    """Some member, in the base run or under any declared income scenario,
+    has self-employment and employment income in the same year."""
     assumptions = ctx.cfg.get('assumptions') if isinstance(ctx.cfg, dict) else None
     start_year = (assumptions.get('start_year')
                   if isinstance(assumptions, dict) else None)
-    for m in _family_members(ctx):
-        raw = m.get('income_segments')
-        segs = ([s for s in raw if isinstance(s, dict)]
-                if isinstance(raw, list) else [])
-        if not any(s.get('kind') == 'self_employment' for s in segs):
-            continue
-        if any(s.get('kind') == 'employment' for s in segs):
-            return True
-        if any(s.get('to') for s in segs):
-            return True
-        if start_year is None:
-            return True
-        earliest = min(str(s.get('from', '')) for s in segs)
-        if earliest > f"{start_year}-01-01":
-            return True
-    return False
+    return any(_segments_mix_earnings_kinds(segs, start_year)
+               for segs in _candidate_segment_schedules(ctx))
 
 
 register(Approximation(

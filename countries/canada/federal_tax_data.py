@@ -57,7 +57,9 @@ def federal_all_years():
             capital_gains_upper_inclusion_rate=2/3,  # 66.67% for gains above $250K
             capital_gains_threshold=250000,
             # DP#20: CPP2 second earnings ceiling (YMPE2)
-            cpp2_max_pensionable=81900,    # CRA 2026: YMPE2 = $81,900
+            # CRA 2026: AYMPE (YMPE2) = $85,000, CPP2 max $416:
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/calculating-deductions/making-deductions/second-additional-cpp-contribution-rates-maximums.html
+            cpp2_max_pensionable=85000,
             cpp2_rate=0.04,                  # CPP2 contribution rate 4% (2024+)
             # DP#52: QPP-specific parameters (zero for federal — only Quebec uses QPP)
             qpp_rate=0.0,

@@ -71,7 +71,9 @@ class OntarioTaxData:
             # DP#20: Year-parameterized CPP/OAS data (federal amounts, same for all provinces)
             cpp_max_pensionable=74600,
             cpp_rate=0.0595,
-            cpp2_max_pensionable=81900,  # DP#20: CPP2 YAMPE 2026
+            # DP#20: CPP2 YAMPE 2026 = $85,000 (CRA, CPP2 max $416):
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/calculating-deductions/making-deductions/second-additional-cpp-contribution-rates-maximums.html
+            cpp2_max_pensionable=85000,
             cpp2_rate=0.04,
             cpp_max_benefit_65=18092,
             qpp_rate=0.0,  # Ontario doesn't use QPP (DP#52)

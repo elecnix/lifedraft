@@ -755,6 +755,46 @@ class TestEmployeePayrollPremiumDisclosures(unittest.TestCase):
         unknown_start = {'family': {'members': [se_all_horizon]}}
         self.assertIn(key, self._active(unknown_start))
 
+    def test_mixed_earnings_entry_fires_on_the_real_contract_path(self):
+        """On the real input path a self_employment spell reaches the engine
+        only through ``decisions.income[]`` -> ``scenarios.income[]``: the
+        base members carry no self_employment segment, and
+        ``optimize._apply_income_scenario`` attaches the override only to a
+        per-scenario variant. The fidelity section is rendered from the BASE
+        config, so the predicate must see the scenario list, or the
+        uncoordinated CPP/QPP charge prints with no caveat. Built through
+        ``input_contract.to_internal_config``, not by hand."""
+        import copy
+        import contract_schema
+        import input_contract
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from test_input_contract import _load_example, _two_generation_subset
+        key = 'pension_contributions_not_coordinated_across_earnings_kinds'
+        entry = next(a for a in model_fidelity.all_approximations() if a.id == key)
+        doc = _two_generation_subset(_load_example())
+
+        # Control: the example's own scenarios (employment / ei overrides
+        # only) must NOT fire the caveat.
+        plain = input_contract.to_internal_config(copy.deepcopy(doc))
+        self.assertNotIn(key, self._active(plain))
+        self.assertFalse(any(entry.summary in line
+                             for line in model_fidelity.render_text(plain)))
+
+        doc['decisions']['income'].append({
+            'id': 'p1_consult', 'label': 'Primary consults',
+            'overrides': [{'income_id': 'p1_employment', 'kind': 'self_employment',
+                           'amount': 30000, 'from': '2026-09-01', 'to': '2027-06-01'}]})
+        contract_schema.validate_contract(doc)
+        cfg = input_contract.to_internal_config(doc)
+        # The shape the predicate must cope with: no member carries a
+        # self_employment segment on the base config.
+        for m in cfg['family']['members']:
+            segs = m['income_segments'] if 'income_segments' in m else []
+            self.assertFalse(any(s.get('kind') == 'self_employment' for s in segs))
+        self.assertIn(key, self._active(cfg))
+        self.assertTrue(any(entry.summary in line
+                            for line in model_fidelity.render_text(cfg)))
+
 
 if __name__ == '__main__':
     unittest.main()
