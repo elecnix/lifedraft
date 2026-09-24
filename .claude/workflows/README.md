@@ -4,6 +4,12 @@ Claude Code dynamic workflows (`.js` scripts orchestrated by the Workflow tool).
 Each stage below runs a **fresh agent** that receives only the accumulated output
 of its predecessors — no shared context — and returns a schema-validated result.
 
+## CI guard
+
+`tests/architecture/test_claude_workflow_scripts.py` runs in the normal pytest suite (so `tests.yml` runs it on every PR) and checks every `*.js` in this directory. It compiles each script the way the Workflow runtime runs it: the body inside an async function, so top-level `await` and `return` are legal, with `export const meta` kept top-level. It also checks that `meta` is a pure object literal with a non-empty `name` and `description`, that the `meta.phases[].title` set equals the set of `phase('...')` arguments exactly (and every agent `phase:` option names one of them), and that no file here contains an absolute home-directory path. Use `~/...` instead. See #264.
+
+The guard needs `node` on PATH and **fails** without it; it never skips. It compiles with node's `vm.Script` and deliberately does not use `node --check`. That flag rejects the legal top-level `return`, and on node 24 it exits 0 on unparseable files that contain ESM syntax, so it would pass the exact breakage the guard exists to catch.
+
 ## `implement-github-issue`
 
 Drive a GitHub issue end-to-end to a **green draft PR**. The whole point is that
