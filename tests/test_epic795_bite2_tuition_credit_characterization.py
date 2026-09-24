@@ -115,8 +115,18 @@ def test_tuition_household_trajectory_matches_origin_main(time_step):
         f"{time_step}: projected {len(results)} years, baseline has "
         f"{len(baseline)} -- the household's projection_years changed")
     for res, base in zip(results, baseline):
+        # Issue #289: the baseline predates the employee payroll premiums.
+        # after_tax_income is now lower by exactly each year's net payroll
+        # cost (premiums - their s.60(e)/s.118.7 relief, read off the
+        # YearResult: $8,092.13 every year for this QC couple at $120k/$45k),
+        # so add it back and the origin/main figure must reappear unchanged --
+        # any other movement is still a regression.
+        net_payroll = (res.payroll_pension_contributions + res.payroll_ei_premiums
+                       + res.payroll_qpip_premiums - res.payroll_tax_relief)
+        assert net_payroll > 0, "both members are employees: premiums must be charged"
         actual = (res.year, res.primary_income, res.spouse_income,
-                  res.after_tax_income, res.total_family_income, res.total_assets)
+                  res.after_tax_income + net_payroll, res.total_family_income,
+                  res.total_assets)
         for i, (got, exp) in enumerate(zip(actual, base)):
             if isinstance(exp, float):
                 assert got == pytest.approx(exp), (

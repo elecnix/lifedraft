@@ -1480,3 +1480,164 @@ register(Approximation(
     issue='#137',
     applies=_deployment_lag_declared,
 ))
+
+
+# ── Issue #289: employee payroll premiums. The fold now charges every working
+# adult's employee CPP/QPP, EI and QPIP premiums on their employment income and
+# applies the s.60(e) / s.118.7 relief (simulation._payroll_contributions_by_role
+# -> countries/canada/employee_contributions.py), so there is NO
+# 'employee_payroll_premiums_omitted' entry: the gap it would name is closed.
+# What the seam still leaves out is disclosed below, each only for the runs it
+# bites.
+
+def _family_members(ctx: FidelityContext) -> List[Dict]:
+    family = ctx.cfg.get('family') if isinstance(ctx.cfg, dict) else None
+    members = family.get('members') if isinstance(family, dict) else None
+    return [m for m in members if isinstance(m, dict)] if isinstance(members, list) else []
+
+
+def _child_has_own_income(ctx: FidelityContext) -> bool:
+    """A child member earns their own income (``family.children[].gross_income
+    > 0``): the child-saver path funds the child's accounts from that income
+    net of bracket tax only."""
+    family = ctx.cfg.get('family') if isinstance(ctx.cfg, dict) else None
+    children = family.get('children') if isinstance(family, dict) else None
+    if not isinstance(children, list):
+        return False
+    return any(isinstance(ch, dict) and ch.get('gross_income', 0) > 0
+               for ch in children)
+
+
+register(Approximation(
+    id='child_payroll_premiums_omitted',
+    summary=("A child's own earnings fund the child's own accounts net of "
+             "income tax only: the employee CPP/QPP, EI and QPIP premiums a "
+             "working child would pay on that pay are not withheld"),
+    biased_figure=("child account balances, and every objective that folds "
+                   "them (terminal wealth, family net worth)"),
+    direction=Direction.OVERSTATES,
+    detail=("simulation_state.child_after_tax_savings_for_year taxes each "
+            "child's grown income with the bracket-only tax and invests "
+            "(gross - tax) x savings_rate. The #289 payroll seam covers the "
+            "primary couple and the #899 extra adults, not children, so a "
+            "working child's premiums (and their s.118.7 credit) are absent "
+            "and the child's savings are too high by the net premium."),
+    issue='#289',
+    applies=_child_has_own_income,
+))
+
+
+def _works_past_contributory_age(ctx: FidelityContext) -> bool:
+    """Some adult member keeps working past 70 (``retirement_age > 70``)."""
+    return any(isinstance(m.get('retirement_age'), (int, float))
+               and m.get('retirement_age') > 70
+               for m in _family_members(ctx) if m.get('role') != 'child')
+
+
+register(Approximation(
+    id='payroll_contributory_window_not_modelled',
+    summary=("Employee CPP/QPP premiums are charged on every working year "
+             "up to the declared retirement age: the end of the contributory "
+             "period at 70, the month proration in the year a worker turns "
+             "18 or 70, and the elective stop for a worker aged 65-70 who "
+             "draws a CPP pension are not modelled"),
+    biased_figure=("working-phase disposable income, savings capacity and "
+                   "runway for a member working past 70"),
+    direction=Direction.UNDERSTATES,
+    detail=("countries/canada/employee_contributions.py prices a full year of "
+            "CPP/QPP on each year's employment income with no age test. A "
+            "member whose retirement_age is above 70 is charged pension "
+            "contributions the Canada Pension Plan no longer requires of them "
+            "(no CPP contribution is payable after the month a contributor "
+            "turns 70; the QPP's own age rules differ and are not modelled "
+            "either), so their disposable income is too low in those years."),
+    issue='#289',
+    applies=_works_past_contributory_age,
+))
+
+
+def _segments_mix_earnings_kinds(segs: List[Dict], start_year) -> bool:
+    """One member's effective segment schedule carries a ``self_employment``
+    segment AND can earn employment income in the same year: an
+    ``employment`` segment, or days the base (employment) salary covers
+    because a segment starts after the projection start or ends. When the
+    start year is not stated the caveat reports itself (DP#32: disclose when
+    unsure)."""
+    if not any(s.get('kind') == 'self_employment' for s in segs):
+        return False
+    if any(s.get('kind') == 'employment' for s in segs):
+        return True
+    if any(s.get('to') for s in segs):
+        return True
+    if start_year is None:
+        return True
+    earliest = min(str(s.get('from', '')) for s in segs)
+    return earliest > f"{start_year}-01-01"
+
+
+def _candidate_segment_schedules(ctx: FidelityContext) -> List[List[Dict]]:
+    """Every segment schedule a member can run under, on the BASE config.
+
+    Two shapes reach the engine. (1) ``family.members[].income_segments``,
+    which is what a hand-built or variant config carries. (2) The declared
+    ``scenarios.income[]`` (the contract's ``decisions.income[]``
+    overrides): on the real input path the base members carry only their
+    employment segments, and ``optimize._apply_income_scenario`` attaches a
+    scenario's ``primary_segments``/``spouse_segments`` to a member only on a
+    per-scenario VARIANT, which is never the config the fidelity section is
+    rendered from. So each scenario's per-role override list is read here as
+    the schedule that role runs under in that variant (it REPLACES the base
+    segments there, exactly as ``_apply_income_scenario`` does); a role the
+    scenario does not override keeps its base schedule, already covered by
+    (1)."""
+    schedules: List[List[Dict]] = []
+    for m in _family_members(ctx):
+        raw = m.get('income_segments')
+        if isinstance(raw, list):
+            schedules.append([s for s in raw if isinstance(s, dict)])
+    scenarios = ctx.cfg.get('scenarios') if isinstance(ctx.cfg, dict) else None
+    income = scenarios.get('income') if isinstance(scenarios, dict) else None
+    for sc in (income if isinstance(income, list) else []):
+        # Both producers (contract_decisions.map_income_scenarios and a
+        # hand-authored scenarios.income[]) emit dicts; anything else is a
+        # broken producer and is left to crash here, not skipped.
+        members = sc.get('members')
+        by_role: Dict[str, List[Dict]] = {}
+        for mem in (members if isinstance(members, list) else []):
+            if isinstance(mem, dict):
+                by_role.setdefault(mem.get('role'), []).append(mem)
+        schedules.extend(by_role.values())
+    return schedules
+
+
+def _mixes_employment_and_self_employment(ctx: FidelityContext) -> bool:
+    """Some member, in the base run or under any declared income scenario,
+    has self-employment and employment income in the same year."""
+    assumptions = ctx.cfg.get('assumptions') if isinstance(ctx.cfg, dict) else None
+    start_year = (assumptions.get('start_year')
+                  if isinstance(assumptions, dict) else None)
+    return any(_segments_mix_earnings_kinds(segs, start_year)
+               for segs in _candidate_segment_schedules(ctx))
+
+
+register(Approximation(
+    id='pension_contributions_not_coordinated_across_earnings_kinds',
+    summary=("A member with both employment and self-employment earnings in "
+             "the same year has the two CPP/QPP contributions priced "
+             "independently: each applies its own basic exemption and its "
+             "own YMPE/YAMPE ceiling, where the statute pools the two "
+             "earnings under one exemption and one ceiling"),
+    biased_figure=("working-phase disposable income, savings capacity and "
+                   "runway for that member"),
+    direction=Direction.UNKNOWN,
+    detail=("The #289 employee seam charges CPP/QPP on the employment slice "
+            "and the #978 Quebec self-employed stack charges QPP (both halves) "
+            "on the self-employment slice, each from zero. Combined earnings "
+            "above the YMPE are then charged past the statutory maximum "
+            "(disposable income too low), while combined earnings below it "
+            "get the basic exemption twice (too high); in Ontario the "
+            "self-employed slice is not charged at all. The sign depends on "
+            "the mix, so it is reported as unknown."),
+    issue='#289',
+    applies=_mixes_employment_and_self_employment,
+))

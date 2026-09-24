@@ -130,6 +130,7 @@ class AccumulatorAdultAdmittedTest(unittest.TestCase):
 
     def test_third_adult_is_taxed_in_their_own_bracket(self):
         from simulation import _income_tax_by_adult
+        from countries.canada.employee_contributions import EmployeeContributions
         from tax_data import default_tax_provider
         cfg = SimulationConfig.from_dict(ic.to_internal_config(self.doc))
         brackets = default_tax_provider().get_combined_brackets(
@@ -138,7 +139,10 @@ class AccumulatorAdultAdmittedTest(unittest.TestCase):
             cfg,
             {"primary": 118000, "spouse": 90000, "ac": 60000},
             {"primary": (0.0, 0.0), "spouse": (0.0, 0.0), "ac": (0.0, 0.0)},
-            brackets)
+            brackets,
+            # Issue #289: no payroll premiums here -- this test isolates the
+            # individual bracket; the premium relief is test_issue_289's.
+            {r: EmployeeContributions.zero() for r in ("primary", "spouse", "ac")})
         # ac is taxed on their OWN $60k (no joint filing), at a lower marginal
         # rate than the $118k primary -- a real, separate return.
         self.assertGreater(tax["ac"]["tax_before"], 0)

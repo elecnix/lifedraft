@@ -15,6 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from simulation import _income_tax_by_adult  # noqa: E402
 from tax_calculator import marginal_rate, tax_on_income  # noqa: E402
+from countries.canada.employee_contributions import EmployeeContributions  # noqa: E402
+
+
+def _no_payroll(roles):
+    """Issue #289: the loop now requires each taxed role's payroll premiums;
+    these tests isolate the per-adult bracket arithmetic, so no role pays
+    any (the premium relief is covered in test_issue_289)."""
+    return {r: EmployeeContributions.zero() for r in roles}
 
 
 # A tiny stand-in for the config seam the helper depends on -- it only calls
@@ -41,7 +49,7 @@ def test_each_adult_taxed_in_their_own_bracket():
     incomes = {'primary': 120_000, 'spouse': 40_000}
     loans = {'primary': (0.0, 0.0), 'spouse': (0.0, 0.0)}
 
-    result = _income_tax_by_adult(cfg, incomes, loans, BRACKETS)
+    result = _income_tax_by_adult(cfg, incomes, loans, BRACKETS, _no_payroll(incomes))
 
     for role, income in incomes.items():
         assert result[role]['rate'] == marginal_rate(income, BRACKETS)
@@ -60,7 +68,7 @@ def test_private_loan_interest_adjusts_only_that_adults_taxable_income():
     # (-5000 deductible). Each adjusts only their own taxable income.
     loans = {'primary': (5_000.0, 0.0), 'spouse': (0.0, 5_000.0)}
 
-    result = _income_tax_by_adult(cfg, incomes, loans, BRACKETS)
+    result = _income_tax_by_adult(cfg, incomes, loans, BRACKETS, _no_payroll(incomes))
 
     assert result['primary']['taxable_income'] == 65_000
     assert result['spouse']['taxable_income'] == 55_000
@@ -74,7 +82,7 @@ def test_loop_generalizes_to_more_than_two_adults():
     incomes = {'primary': 120_000, 'spouse': 40_000, 'grandparent': 30_000}
     loans = {r: (0.0, 0.0) for r in incomes}
 
-    result = _income_tax_by_adult(cfg, incomes, loans, BRACKETS)
+    result = _income_tax_by_adult(cfg, incomes, loans, BRACKETS, _no_payroll(incomes))
 
     assert set(result) == {'primary', 'spouse', 'grandparent'}
     assert result['grandparent']['tax_before'] == tax_on_income(30_000, BRACKETS)
@@ -88,7 +96,7 @@ def test_absent_spouse_is_backfilled_for_the_two_slot_signature():
     incomes = {'primary': 90_000, 'spouse': 0.0}
     loans = {'primary': (0.0, 0.0), 'spouse': (0.0, 0.0)}
 
-    result = _income_tax_by_adult(cfg, incomes, loans, BRACKETS)
+    result = _income_tax_by_adult(cfg, incomes, loans, BRACKETS, _no_payroll(incomes))
 
     assert 'spouse' in result
     assert result['spouse']['rate'] == marginal_rate(0.0, BRACKETS)

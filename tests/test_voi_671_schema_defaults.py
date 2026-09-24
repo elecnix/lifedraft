@@ -386,17 +386,33 @@ def test_a_leaf_inert_under_one_objective_names_the_objective_that_prices_it():
     doc = _new_user_contract()
     report = voi.sweep(doc, jobs=4, cross_objective=True)
 
-    # #1034 sanity: the rollover is NO LONGER inert under max_net_benefit for
-    # this leveraged fixture -- it is RANKED (priced via the SM sleeve).
-    assert not any(f.pointer == "/estate/default_spousal_rollover" for f in report.inert), (
-        "/estate/default_spousal_rollover is still INERT under max_net_benefit -- "
-        "#1034 should have made compute_net_benefit price the SM sleeve's deemed "
-        "disposition via the estate, moving the rollover for a leveraged household"
+    # #1034 sanity, measured on the engine: compute_net_benefit prices the
+    # rollover (via the estate path) -- the max_net_benefit score of at least
+    # one strategy for this leveraged fixture moves with the election.
+    #
+    # Issue #289: whether voi RANKS the leaf depends on which strategy is BEST
+    # (voi measures the best score's spread). With the employee payroll
+    # premiums charged, this fixture's best strategy moved from
+    # 'readvance_priority + Non-registered-first' (whose net_benefit moves
+    # with the rollover) to plain 'readvance_priority' (whose net_benefit does
+    # not), so the leaf may now be reported INERT under max_net_benefit -- but
+    # never as unread, and when inert it names the objective that prices it.
+    def _scores(value):
+        d = voi._with_value(doc, "/estate/default_spousal_rollover", value)
+        return voi._strategy_scores(voi._mapped_config(d), None)
+    with_rollover, without_rollover = _scores(True), _scores(False)
+    assert max(abs(with_rollover[k] - without_rollover[k])
+               for k in with_rollover) > 1_000, (
+        "the spousal rollover moves no strategy's max_net_benefit score -- "
+        "#1034's pricing of the SM sleeve's deemed disposition via the estate "
+        "is not wired"
     )
-    assert any(f.pointer == "/estate/default_spousal_rollover" for f in report.ranked), (
-        "/estate/default_spousal_rollover is not RANKED under max_net_benefit -- "
-        "#1034's cross-objective alignment on the SM sleeve is not wired"
-    )
+    rollover = "/estate/default_spousal_rollover"
+    assert not any(f.pointer == rollover for f in report.unread)
+    inert_rollover = [f for f in report.inert if f.pointer == rollover]
+    assert inert_rollover or any(f.pointer == rollover for f in report.ranked)
+    if inert_rollover:
+        assert "max_after_tax_estate" in inert_rollover[0].moves_under
 
     # The leaf that still exhibits the #671 inert-under-one-objective pattern.
     inert_leaf = [f for f in report.inert
@@ -405,7 +421,17 @@ def test_a_leaf_inert_under_one_objective_names_the_objective_that_prices_it():
         "/assumptions/mortality/0/assumed_death_age must be reported as "
         "INERT-under-this-objective (the engine reads it), never as an unread/dead key"
     )
-    assert "max_after_tax_estate" in inert_leaf[0].moves_under
+    # Issue #289: WHICH estate objective the leaf moves is itself a measured
+    # fact about the best strategy under each objective. Before the employee
+    # payroll premiums it was max_after_tax_estate (best strategy switched
+    # from RRSP-meltdown at death age 80 to Non-registered-first at 100);
+    # with the premiums charged the best max-estate strategy is RRSP-meltdown
+    # at both ages (score unchanged), while min_after_tax_estate's best now
+    # moves. The #671 property is that the objective(s) named are estate
+    # objectives that really price the leaf -- not a particular name.
+    assert inert_leaf[0].moves_under
+    assert set(inert_leaf[0].moves_under) <= {
+        "max_after_tax_estate", "min_after_tax_estate"}, inert_leaf[0].moves_under
 
     assert not any(f.pointer == "/assumptions/mortality/0/assumed_death_age" for f in report.unread), (
         "the mortality leaf must NOT be reported as 'nothing in the engine reads this'"
@@ -413,7 +439,7 @@ def test_a_leaf_inert_under_one_objective_names_the_objective_that_prices_it():
 
     text = voi.render_report(report)
     assert "INERT UNDER THIS OBJECTIVE" in text
-    assert "--objective max_after_tax_estate" in text
+    assert f"--objective {inert_leaf[0].moves_under[0]}" in text
 
 
 def test_the_rollover_election_is_actually_priced_under_the_estate_objective():

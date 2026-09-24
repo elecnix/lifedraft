@@ -67,7 +67,7 @@ CPP_STANDARD_AGE = 65
 CPP_LATEST_START_AGE = 70
 CPP_MAX_PENSIONABLE_2026 = 74600       # YMPE 2026 (Yearly Maximum Pensionable Earnings) — DEPRECATED: use TaxDataProvider (DP#20)
 CPP_MAX_BENEFIT_65_2026 = 18092        # Maximum CPP retirement pension at 65: $1,507.65 × 12 — DEPRECATED: use TaxDataProvider (DP#20)
-CPP2_MAX_PENSIONABLE_2026 = 81900     # YMPE2 for CPP2 (2026) — DEPRECATED: use TaxDataProvider.get_cpp2_max_pensionable(year) (DP#20, DP#12)
+CPP2_MAX_PENSIONABLE_2026 = 85000     # YMPE2 for CPP2 (2026, CRA AYMPE $85,000) — DEPRECATED: use TaxDataProvider.get_cpp2_max_pensionable(year) (DP#20, DP#12)
 CPP_BASIC_EXEMPTION = 3500            # Basic exemption
 CPP_EARLY_PENALTY_PER_MONTH = 0.006   # 0.6% per month before 65
 CPP_LATE_BONUS_PER_MONTH = 0.007      # 0.7% per month after 65
@@ -838,8 +838,18 @@ def compute_cpp2_contribution(
     basic_exemption = data.cpp_exemption
     cpp2_rate = data.cpp2_rate
 
-    # QPP uses higher rate; CPP uses standard rate
-    if is_quebec and data.qpp_rate > 0:
+    # QPP uses higher rate; CPP uses standard rate.
+    # Issue #289 (DP#32): a Quebec earner whose record carries no QPP rate
+    # must fail loudly -- falling through to the CPP rate silently charged a
+    # Quebec worker the wrong plan's contribution.
+    if is_quebec:
+        if data.qpp_rate <= 0:
+            raise ValueError(
+                f"compute_cpp2_contribution: no QPP rate (qpp_rate="
+                f"{data.qpp_rate!r}) in the {data.province!r} tax record for "
+                f"{year}, province {province!r}. A Quebec contribution cannot "
+                f"be priced at the CPP rate -- add qpp_rate to the Quebec "
+                f"provider data for that year.")
         cpp1_rate = data.qpp_rate
     else:
         cpp1_rate = data.cpp_rate

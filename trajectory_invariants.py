@@ -169,6 +169,11 @@ RUN_PATH_INVARIANTS: tuple = (
     # to pay (that is a reported outcome, not a breach) -- it refuses a
     # bookkeeping that loses track of the interest dollars (DP#32).
     'heloc_interest_fully_accounted',
+    # Issue #289: the employee payroll premiums and their tax relief. A
+    # structural bound no correct year can break: the s.60(e) deduction and
+    # the non-refundable s.118.7 credit can return at most what was withheld,
+    # and a year with no employment income owes no premium at all.
+    'payroll_relief_bounded',
 )
 
 
@@ -259,6 +264,9 @@ _ALL_NUMERIC_FIELDS = _BALANCE_FIELDS + [
     # issue #170: the refused-contribution disclosures are flows too -- a NaN
     # there would poison any consumer that sums them.
     'rrsp_contribution_refused_own', 'rrsp_contribution_refused_spousal',
+    # issue #289: the employee payroll premiums and their tax relief.
+    'payroll_pension_contributions', 'payroll_ei_premiums',
+    'payroll_qpip_premiums', 'payroll_s60e_deduction', 'payroll_tax_relief',
 ]
 
 
@@ -1180,4 +1188,63 @@ def check_amt_minimum_tax_accounted(results, ctx):
                 f'surcharge was assessed this year -- a shortfall cannot '
                 f'exist without an assessment',
                 unfunded))
+    return violations
+
+
+_PAYROLL_PREMIUM_FIELDS = (
+    'payroll_pension_contributions', 'payroll_ei_premiums',
+    'payroll_qpip_premiums')
+
+
+@invariant('payroll_relief_bounded')
+def check_payroll_relief_bounded(results, ctx):
+    """Issue #289: the employee payroll premiums and their tax relief are
+    bounded, every year.
+
+    * ``0 <= payroll_tax_relief <= premiums``: the ITA s.60(e) deduction and
+      the NON-refundable s.118.7 credit can reduce tax by at most what was
+      withheld (a relief larger than the premiums would mean the credit is
+      being paid out, or counted twice);
+    * ``payroll_s60e_deduction <= payroll_pension_contributions``: only the
+      enhanced part of the CPP/QPP contribution is deductible;
+    * every premium is non-negative, and every payroll field is 0.0 in a
+      year with no employment income (``employment_income == 0``): a retiree
+      or a zero-employment household owes no premium.
+
+    Reads the ``payroll_*`` fields on ``YearResult`` (all default 0.0).
+    """
+    tol = ctx.get('tolerance', 0.01)
+    start_year = ctx.get('start_year', 0)
+    violations = []
+    for i, r in enumerate(results):
+        year = start_year + i
+        premiums = sum(getattr(r, f, 0.0) for f in _PAYROLL_PREMIUM_FIELDS)
+        relief = getattr(r, 'payroll_tax_relief', 0.0)
+        s60e = getattr(r, 'payroll_s60e_deduction', 0.0)
+        pension = getattr(r, 'payroll_pension_contributions', 0.0)
+        for f in _PAYROLL_PREMIUM_FIELDS:
+            if getattr(r, f, 0.0) < -tol:
+                violations.append(Violation(
+                    year, f'{f} is negative', getattr(r, f, 0.0)))
+        if relief < -tol or relief > premiums + tol:
+            violations.append(Violation(
+                year,
+                f'payroll_tax_relief {relief:.2f} outside [0, premiums '
+                f'{premiums:.2f}] -- the s.60(e)/s.118.7 relief cannot exceed '
+                f'what was withheld',
+                relief))
+        if s60e < -tol or s60e > pension + tol:
+            violations.append(Violation(
+                year,
+                f'payroll_s60e_deduction {s60e:.2f} outside [0, pension '
+                f'contributions {pension:.2f}]',
+                s60e))
+        if getattr(r, 'employment_income', 0.0) == 0.0:
+            charged = premiums + abs(relief) + abs(s60e)
+            if charged > tol:
+                violations.append(Violation(
+                    year,
+                    f'payroll fields are non-zero ({charged:.2f}) in a year '
+                    f'with no employment income',
+                    charged))
     return violations
