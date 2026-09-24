@@ -141,16 +141,19 @@ class TestRESPTimeLimits(unittest.TestCase):
         self.assertEqual(calc.RESP_LIFETIME_CONTRIBUTION_LIMIT, 50000)
 
     def test_resp_specified_plan_max_eap(self):
-        """Specified educational programs have a $4,000 EAP withdrawal limit."""
-        from countries.canada.resp_rules import RESPCalculator
-        calc = RESPCalculator()
-        self.assertEqual(calc.EAP_SPECIFIED_PROGRAM_MAX, 4000)
+        """Specified educational programs have a $4,000 EAP limit per trailing
+        13 weeks (ITA s.146.1(2)(g.1)(ii)(B); S.C. 2023, c. 26, s. 39). #276
+        moved the figure from a RESPCalculator constant to the year-versioned
+        EAP_LIMITS table; the literal below is the sourced figure."""
+        from countries.canada.resp_rules import eap_payment_limit
+        self.assertEqual(eap_payment_limit(2030, 'specified'), 4000.0)
 
     def test_resp_qualifying_program_max_eap(self):
-        """Qualifying educational programs have an $8,000 EAP withdrawal limit."""
-        from countries.canada.resp_rules import RESPCalculator
-        calc = RESPCalculator()
-        self.assertEqual(calc.EAP_QUALIFYING_PROGRAM_MAX, 8000)
+        """Qualifying educational programs have an $8,000 EAP limit over the
+        trailing 12 months before 13 consecutive weeks of enrolment (ITA
+        s.146.1(2)(g.1)(ii)(A)(II); S.C. 2023, c. 26, s. 39)."""
+        from countries.canada.resp_rules import eap_payment_limit
+        self.assertEqual(eap_payment_limit(2030, 'qualifying'), 8000.0)
 
     def test_resp_contribution_must_cease_by_31st_year(self):
         """RESP contributions must cease by end of 31st year after plan opening.

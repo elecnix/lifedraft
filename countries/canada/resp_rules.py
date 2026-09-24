@@ -25,7 +25,8 @@ References:
 import logging
 
 from dataclasses import dataclass, field
-from typing import Dict
+from datetime import date
+from typing import Dict, FrozenSet, List, Optional, Tuple
 
 
 # ── Year-versioned CESG income thresholds (DP#20, DP#12) ─────────────────
@@ -285,9 +286,8 @@ class RESPCalculator:
     RESP_LIFETIME_CONTRIBUTION_LIMIT: float = 50000
     RESP_EXCESS_TAX_RATE: float = 0.01  # DP#10: 1%/month penalty on excess contributions (issue #304)
 
-    # RESP EAP (Educational Assistance Payment) withdrawal limits (issue #304)
-    EAP_QUALIFYING_PROGRAM_MAX: float = 8000   # Max EAP for qualifying educational programs (first 13 weeks)
-    EAP_SPECIFIED_PROGRAM_MAX: float = 4000    # Max EAP for specified educational programs
+    # The EAP payment limits (ITA s.146.1(2)(g.1)) are year-versioned data in
+    # the module-level EAP_LIMITS table, read by eap_payment_limit() (#276).
     AIP_PENALTY_RATE: float = 0.20             # 20% additional tax on AIP (accumulated income payment)
 
     def calculate_cesg(self, contribution: float, child: RESPChild,
@@ -617,32 +617,6 @@ class RESPCalculator:
             'effective_tax_rate': student_mtr,
         }
 
-    def eap_payment_limit(self, qualifying_program: bool = True,
-                           weeks_of_program: int = 13) -> dict:
-        """Compute EAP payment limit per ITA s.146.1 (issue #304).
-
-        EAP limits apply to individual payment periods:
-        - Qualifying educational programs: max $8,000 for the first 13 weeks
-        - Specified educational programs: max $4,000 for the first 13 weeks
-        Limits are pro-rated for programs shorter than 13 weeks.
-
-        Args:
-            qualifying_program: True for qualifying programs ($8k), False for specified ($4k).
-            weeks_of_program: Number of weeks in the program term.
-
-        Returns:
-            Dict with eap_limit, qualifying_program, weeks_of_program.
-        """
-        if qualifying_program:
-            eap_limit = self.EAP_QUALIFYING_PROGRAM_MAX * (weeks_of_program / 13)
-        else:
-            eap_limit = self.EAP_SPECIFIED_PROGRAM_MAX * (weeks_of_program / 13)
-        return {
-            'eap_limit': round(eap_limit, 2),
-            'qualifying_program': qualifying_program,
-            'weeks_of_program': weeks_of_program,
-        }
-
     def cesg_contribution_max(self, year: int) -> float:
         """Delegate to module-level get_cesg_contribution_max (DP#25 bridge)."""
         return get_cesg_contribution_max(year)
@@ -693,6 +667,38 @@ RESP_MODEL_APPROXIMATIONS = [
             "money is traceable, never silently vanished."
         ),
     },
+    {
+        'id': 'resp_eap_first_year_limit_is_calendar_year',
+        'affects': 'RESP EAP timing; RESP AIP tax at collapse',
+        'direction': 'understates the EAP payable in a capped year (conservative)',
+        'description': (
+            "ITA s.146.1(2)(g.1)(ii)(A) caps a full-time student's EAPs over the "
+            "trailing 12 months only until they have been enrolled for 13 "
+            "consecutive weeks in that period (issue #276). The engine is annual "
+            "and study periods reach it as years, so the cap is applied to the "
+            "WHOLE first calendar year of the study window, and to the whole "
+            "first calendar year of any declared study period that starts in a "
+            "calendar year after every earlier period ended (a restart in the "
+            "very next calendar year is treated as a gap, too). The excess is "
+            "deferred to later study years, or, when the window has closed, is "
+            "priced through the AIP collapse. EAPs paid in the previous calendar "
+            "year are not aggregated into the trailing 12 months. Both choices "
+            "can only understate the EAP allowed in a year, never overstate it."
+        ),
+    },
+    {
+        'id': 'resp_eap_part_time_limit_not_modelled',
+        'affects': 'RESP EAP timing for a part-time student',
+        'direction': 'overstates the EAP allowed for a part-time student',
+        'description': (
+            "A student in a specified (part-time) educational program is capped "
+            "at the specified-program amount per trailing 13-week period for as "
+            "long as they study part-time (ITA s.146.1(2)(g.1)(ii)(B)). "
+            "people[].study_periods[] carries no enrolment kind, so every "
+            "declared period is treated as a qualifying (full-time) program, "
+            "capped only in its first year. Follow-up: issue #281."
+        ),
+    },
 ]
 
 RESP_DEFAULT_STUDY_START_AGE = 18
@@ -731,29 +737,38 @@ def resp_study_window_for_child(child: dict, birth_year: int,
     DP#13: a default is a fallback for absent input, never a way to overrule a
     value the household actually supplied.
     """
+    resolved = _resolved_study_periods(child, study_duration_years)
+    if not resolved:
+        return resp_study_window(birth_year, study_start_age, study_duration_years)
+    return min(start for start, _ in resolved), max(end for _, end in resolved)
+
+
+def _resolved_study_periods(child: dict, study_duration_years: int) -> List[Tuple[int, int]]:
+    """``(start_year, end_year)`` of every study period the child DECLARED,
+    sorted by start year -- the ONE spelling of how a declared period's end is
+    resolved, shared by the study window and the EAP-limit years (DP#9).
+
+    Periods without a start year declare nothing and are skipped; an empty
+    result means "nothing declared", and each caller falls back explicitly.
+
+    An open-ended period (`end_date: null` -- "ongoing/unknown end", per the
+    schema) must NOT read as "studies forever": that would keep the RESP in
+    its tax-sheltered EAP window indefinitely and the AIP collapse -- grant
+    repayment, subscriber tax, 20% penalty -- would never fire. That is a
+    silent substitution in the FAVOURABLE direction, the exact defect class
+    this codebase exists to prevent (DP#32). An unknown end is instead priced
+    at the declared start plus the declared study duration: both are inputs,
+    neither is an opinion baked into code (DP#2).
+    """
     periods = child.get('study_periods') if child else None
     if not periods:
-        return resp_study_window(birth_year, study_start_age, study_duration_years)
-
-    starts = [p['start_year'] for p in periods if p.get('start_year') is not None]
-    if not starts:
-        return resp_study_window(birth_year, study_start_age, study_duration_years)
-    first_year = min(starts)
-
-    # An open-ended period (`end_date: null` -- "ongoing/unknown end", per the
-    # schema) must NOT read as "studies forever": that would keep the RESP in
-    # its tax-sheltered EAP window indefinitely and the AIP collapse -- grant
-    # repayment, subscriber tax, 20% penalty -- would never fire. That is a
-    # silent substitution in the FAVOURABLE direction, the exact defect class
-    # this codebase exists to prevent (DP#32). An unknown end is instead priced
-    # at the declared start plus the declared study duration: both are inputs,
-    # neither is an opinion baked into code (DP#2).
-    ends = [
-        p['end_year'] if p.get('end_year') is not None
-        else p['start_year'] + max(1, study_duration_years) - 1
+        return []
+    return sorted(
+        (p['start_year'],
+         p['end_year'] if p.get('end_year') is not None
+         else p['start_year'] + max(1, study_duration_years) - 1)
         for p in periods if p.get('start_year') is not None
-    ]
-    return first_year, max(ends)
+    )
 
 
 def default_resp_composition(resp_balance: float) -> Dict[str, float]:
@@ -817,8 +832,150 @@ def _resp_balance_and_composition(base_cfg: Dict) -> tuple:
     return resp_balance, contributions, cesg, qesi, earnings
 
 
+# ── EAP payment limit (issue #276, ITA s.146.1(2)(g.1)) ──────────────────
+# The plan may not pay an educational assistance payment (EAP) unless either
+#   (ii)(A) the student is enrolled in a QUALIFYING educational program and
+#       (I) has been so enrolled throughout at least 13 consecutive weeks in
+#           the 12-month period ending at the time of the payment, or
+#       (II) the payment plus every other EAP made to them in that 12-month
+#           period does not exceed the qualifying amount below; or
+#   (ii)(B) the student is 16 or older, enrolled in a SPECIFIED (part-time)
+#       educational program, and the payment plus every other EAP made to them
+#       in the 13-week period ending at the time of the payment does not
+#       exceed the specified amount below.
+# In both cases the Minister designated under the Canada Education Savings
+# Act (ESDC) may approve a greater amount in writing. That approval is NOT
+# modelled: the engine enforces the statutory amounts.
+#
+# So the full-time cap is a FIRST-13-WEEKS rule, not an annual one, and it is
+# not pro-rated by the length of a term: the pro-rating that
+# RESPCalculator.eap_payment_limit() applied (#304) is in no version of the
+# statute and is deleted (DP#9).
+#
+# DP#12/DP#20: the amounts are year-versioned data keyed by the date the
+# statute put them in force, each row citing its primary source. The
+# figures are not indexed; a row stays in force until the next one.
+EAP_LIMITS: List[Dict] = [
+    {
+        'effective_date': date(2007, 1, 1),
+        'qualifying_12mo_before_13wk': 5000.0,
+        'specified_per_13wk': 2500.0,
+        'source': (
+            "ITA s.146.1(2)(g.1)(ii)(A)(II) and (ii)(B) as replaced by S.C. 2007, "
+            "c. 29 (Budget Implementation Act, 2007), s. 18(4); s. 18(8): applies "
+            "to the 2007 and subsequent taxation years. "
+            "https://laws-lois.justice.gc.ca/eng/AnnualStatutes/2007_29/FullText.html ; "
+            "point-in-time text "
+            "https://laws-lois.justice.gc.ca/eng/acts/I-3.3/section-146.1-20171214.html "
+            "(retrieved 2026-09-23)"
+        ),
+    },
+    {
+        'effective_date': date(2023, 3, 28),
+        'qualifying_12mo_before_13wk': 8000.0,
+        'specified_per_13wk': 4000.0,
+        'source': (
+            "ITA s.146.1(2)(g.1)(ii)(A)(II) and (ii)(B) as replaced by S.C. 2023, "
+            "c. 26 (Budget Implementation Act, 2023, No. 1), s. 39(2)-(3); "
+            "s. 39(4): deemed in force March 28, 2023. "
+            "https://laws-lois.justice.gc.ca/eng/AnnualStatutes/2023_26/FullText.html ; "
+            "current text https://laws-lois.justice.gc.ca/eng/acts/I-3.3/section-146.1.html "
+            "(retrieved 2026-09-23)"
+        ),
+    },
+]
+
+_EAP_PROGRAM_KEYS = {
+    'qualifying': 'qualifying_12mo_before_13wk',
+    'specified': 'specified_per_13wk',
+}
+
+
+def eap_payment_limit(year: int, program: str) -> float:
+    """Statutory EAP limit for a calendar year (ITA s.146.1(2)(g.1)(ii)).
+
+    ``program`` is ``'qualifying'`` -- the amount a full-time student may be
+    paid over the trailing 12 months before they have been enrolled for 13
+    consecutive weeks, clause (ii)(A)(II) -- or ``'specified'`` -- the amount a
+    part-time student may be paid per trailing 13-week period, clause (ii)(B).
+    Any other value raises: there is no default program (DP#32).
+
+    Returns the LOWEST amount in force on any day of ``year``, so the year an
+    amendment takes effect gets the conservative figure, never the favourable
+    one. A year that begins before the earliest sourced row raises, naming the
+    year and the earliest covered date: an unsourced year is never silently
+    given a neighbouring year's law (the nearest-year trap). A year after
+    the latest row gets the latest row: the amounts are not indexed, and a
+    statute stays in force until it is amended.
+
+    The Minister's written approval of a greater amount is not modelled.
+    """
+    if not isinstance(program, str) or program not in _EAP_PROGRAM_KEYS:
+        raise ValueError(
+            f"EAP program must be one of {sorted(_EAP_PROGRAM_KEYS)} "
+            f"(ITA s.146.1(2)(g.1)(ii)); got {program!r}")
+    key = _EAP_PROGRAM_KEYS[program]
+    year_start, year_end = date(year, 1, 1), date(year, 12, 31)
+    earliest = EAP_LIMITS[0]['effective_date']
+    if year_start < earliest:
+        raise ValueError(
+            f"No sourced EAP limit covers {year}: EAP_LIMITS begins "
+            f"{earliest.isoformat()}. Add the statute in force for {year} "
+            f"(ITA s.146.1(2)(g.1)) with its source; do not reuse a later year's law.")
+    in_force = [
+        row[key] for idx, row in enumerate(EAP_LIMITS)
+        if row['effective_date'] <= year_end
+        and (idx + 1 == len(EAP_LIMITS) or EAP_LIMITS[idx + 1]['effective_date'] > year_start)
+    ]
+    return min(in_force)
+
+
+def eap_limited_years(child: dict, first_year: int, study_duration_years: int) -> FrozenSet[int]:
+    """Calendar years in which a full-time student cannot be presumed to have
+    been enrolled for 13 consecutive weeks in the trailing 12 months, so the
+    qualifying-program EAP limit applies (ITA s.146.1(2)(g.1)(ii)(A)).
+
+    Always ``first_year`` (the first year of the study window), plus the start
+    year of every declared study period that begins in a calendar year after
+    every earlier period has ended -- a restart after a gap. A period starting
+    in the year an earlier one ends is contiguous and is not capped. Dates
+    reach the engine as years, so a restart in the very next calendar year is
+    treated as a gap: that can only understate the EAP allowed, never
+    overstate it (declared as ``resp_eap_first_year_limit_is_calendar_year``).
+    """
+    limited = {first_year}
+    prior_end = None
+    for start, end in _resolved_study_periods(child, study_duration_years):
+        if prior_end is not None and start > prior_end:
+            limited.add(start)
+        prior_end = end if prior_end is None else max(prior_end, end)
+    return frozenset(limited)
+
+
+class EAPLimitExceeded(ValueError):
+    """A planned EAP exceeds the statutory limit of ITA s.146.1(2)(g.1)."""
+
+
+def assert_eap_within_limit(eap: float, eap_limit: Optional[float], *,
+                             child_index: int, calendar_year: int) -> None:
+    """Refuse an EAP above the statutory limit -- never clamp it (DP#32).
+
+    ``eap_limit`` None means no statutory cap applies this year. The payout
+    path calls this on WHATEVER schedule produced the draw, so a schedule that
+    ignores the limit crashes the run instead of silently overpaying.
+    """
+    if eap_limit is not None and eap > eap_limit + 0.005:
+        raise EAPLimitExceeded(
+            f"RESP child index {child_index}: the planned EAP of ${eap:,.2f} in "
+            f"{calendar_year} exceeds the statutory limit of ${eap_limit:,.2f} "
+            f"(ITA s.146.1(2)(g.1)(ii)). A greater amount is payable only with "
+            f"the written approval of the Minister designated under the Canada "
+            f"Education Savings Act (ESDC), which this engine does not model.")
+
+
 def resp_annual_withdrawal(contributions: float, cesg: float, qesi: float,
-                            earnings: float, years_remaining: int) -> Dict[str, float]:
+                            earnings: float, years_remaining: int, *,
+                            eap_limit: Optional[float]) -> Dict[str, float]:
     """Split this year's RESP withdrawal so the plan drains to (near) zero by
     the end of the study window, instead of compounding forever (#578).
 
@@ -828,15 +985,29 @@ def resp_annual_withdrawal(contributions: float, cesg: float, qesi: float,
     taxable EAP (CESG + QESI + earnings, taxed in the *student's* hands) as
     separate totals, plus the per-bucket amounts withdrawn (DP#19: cost
     basis, not a blended balance, drives what is taxed).
+
+    ``eap_limit`` is REQUIRED (no default, so no caller can forget it): the
+    statutory EAP limit for this year (``eap_payment_limit``), or None when
+    no statutory cap applies. When the even-spread EAP exceeds it, the three
+    EAP buckets are scaled down pro rata so the EAP equals the limit (#276);
+    the unpaid EAP stays in the plan and is re-spread over the years that
+    remain -- a lawful deferral, not a loss. PSE is never capped.
     """
     years_remaining = max(1, years_remaining)
     w_contrib = contributions / years_remaining
     w_cesg = cesg / years_remaining
     w_qesi = qesi / years_remaining
     w_earnings = earnings / years_remaining
+    eap = w_cesg + w_qesi + w_earnings
+    if eap_limit is not None and eap > eap_limit:
+        scale = eap_limit / eap
+        w_cesg *= scale
+        w_qesi *= scale
+        w_earnings *= scale
+        eap = w_cesg + w_qesi + w_earnings
     return {
         'pse': w_contrib,
-        'eap': w_cesg + w_qesi + w_earnings,
+        'eap': eap,
         'contributions_withdrawn': w_contrib,
         'cesg_withdrawn': w_cesg,
         'qesi_withdrawn': w_qesi,

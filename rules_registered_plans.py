@@ -151,6 +151,8 @@ def apply_resp(ws: YearWorkingState, ctx: RuleContext) -> bool:
     from countries.canada.resp_rules import (
         resp_study_window_for_child,
         resp_annual_withdrawal, resp_collapse_aip,
+        eap_payment_limit, eap_limited_years,
+        assert_eap_within_limit,
     )
 
     resp_balances = ws.opening_resp_balances
@@ -221,7 +223,19 @@ def apply_resp(ws: YearWorkingState, ctx: RuleContext) -> bool:
 
             if ctx.config.resp_used_for_education and in_study_year:
                 years_left = last_year - ctx.calendar_year + 1
-                draw = resp_annual_withdrawal(contrib_i, cesg_i, qesi_i, earnings_i, years_left)
+                # Issue #276: ITA s.146.1(2)(g.1) caps a full-time student's
+                # EAPs until they have been enrolled for 13 consecutive weeks,
+                # i.e. in the first year of the window and of a restart after a
+                # gap. The schedule defers the excess; the guard below refuses
+                # ANY schedule that would still pay over the limit -- it runs
+                # before a single bucket is decremented, so a non-compliant
+                # draw crashes the run instead of being paid.
+                duration = ctx.config.resp_study_duration_years
+                limit = eap_payment_limit(ctx.calendar_year, 'qualifying') if ctx.calendar_year in eap_limited_years(child_cfg, first_year, duration) else None
+                draw = resp_annual_withdrawal(contrib_i, cesg_i, qesi_i, earnings_i, years_left,
+                                              eap_limit=limit)
+                assert_eap_within_limit(draw['eap'], limit, child_index=i,
+                                        calendar_year=ctx.calendar_year)
                 contrib_i -= draw['contributions_withdrawn']
                 cesg_i -= draw['cesg_withdrawn']
                 qesi_i -= draw['qesi_withdrawn']

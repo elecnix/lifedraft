@@ -15,6 +15,7 @@ Run: uv run pytest tests/test_resp_issue_304.py -v
 import unittest
 from countries.canada.resp_rules import (
     RESPCalculator, RESPChild,
+    eap_payment_limit,
     get_cesg_thresholds, get_qesi_thresholds,
 )
 
@@ -55,39 +56,39 @@ class TestCLBIncidentalExpense(unittest.TestCase):
 
 
 class TestEAPPaymentLimits(unittest.TestCase):
-    """Issue #304: EAP payment limits per ITA s.146.1."""
+    """Issue #304, corrected by #276: EAP payment limits per ITA s.146.1(2)(g.1).
 
-    def setUp(self):
-        self.calc = RESPCalculator()
+    #304 encoded a limit "pro-rated for programs shorter than 13 weeks". That
+    pro-rating is in no version of the statute and was deleted (#276). The
+    limits are year-versioned: $5,000 / $2,500 for 2007 onward (S.C. 2007,
+    c. 29, s. 18), $8,000 / $4,000 from March 28, 2023 (S.C. 2023, c. 26,
+    s. 39). The figures below are LITERALS from those sources, not values read
+    back from the table, so a wrong table figure fails here.
+    """
 
     def test_qualifying_program_limit_8000(self):
-        """Qualifying educational program: $8,000 limit for 13-week term."""
-        result = self.calc.eap_payment_limit(qualifying_program=True, weeks_of_program=13)
-        self.assertEqual(result['eap_limit'], 8000)
-        self.assertTrue(result['qualifying_program'])
+        """Qualifying (full-time) program, clause (ii)(A)(II): $8,000 in 2024+."""
+        self.assertEqual(eap_payment_limit(2024, 'qualifying'), 8000.0)
 
     def test_specified_program_limit_4000(self):
-        """Specified educational program: $4,000 limit for 13-week term."""
-        result = self.calc.eap_payment_limit(qualifying_program=False, weeks_of_program=13)
-        self.assertEqual(result['eap_limit'], 4000)
-        self.assertFalse(result['qualifying_program'])
+        """Specified (part-time) program, clause (ii)(B): $4,000 in 2024+."""
+        self.assertEqual(eap_payment_limit(2024, 'specified'), 4000.0)
 
-    def test_short_program_pro_rated(self):
-        """Shorter programs have pro-rated EAP limits."""
-        # 6-week qualifying program: $8,000 × (6/13) ≈ $3,692
-        result = self.calc.eap_payment_limit(qualifying_program=True, weeks_of_program=6)
-        self.assertAlmostEqual(result['eap_limit'], 8000 * 6 / 13, places=2)
+    def test_limit_is_not_pro_rated_by_program_length(self):
+        """The old weeks/13 pro-rating is gone: the function takes no weeks."""
+        with self.assertRaises(TypeError):
+            eap_payment_limit(2024, 'qualifying', 6)
+        self.assertFalse(hasattr(RESPCalculator, 'eap_payment_limit'))
 
-    def test_year_long_program_has_normal_limit(self):
-        """Year-long (52-week) program: EAP limit is still $8,000 per 13-week term."""
-        result = self.calc.eap_payment_limit(qualifying_program=True, weeks_of_program=13)
-        # Each 13-week term has its own $8,000 limit
-        self.assertEqual(result['eap_limit'], 8000)
+    def test_pre_2023_amendment_limits(self):
+        """Before Budget 2023 the limits were $5,000 / $2,500 (2007-2022)."""
+        self.assertEqual(eap_payment_limit(2022, 'qualifying'), 5000.0)
+        self.assertEqual(eap_payment_limit(2022, 'specified'), 2500.0)
 
-    def test_specified_short_program_pro_rated(self):
-        """6-week specified program: $4,000 × (6/13) ≈ $1,846."""
-        result = self.calc.eap_payment_limit(qualifying_program=False, weeks_of_program=6)
-        self.assertAlmostEqual(result['eap_limit'], 4000 * 6 / 13, places=2)
+    def test_amendment_year_takes_the_lower_limit(self):
+        """2023 had both regimes in force; the conservative (lower) one wins."""
+        self.assertEqual(eap_payment_limit(2023, 'qualifying'), 5000.0)
+        self.assertEqual(eap_payment_limit(2023, 'specified'), 2500.0)
 
 
 class TestAIPPenaltyRate(unittest.TestCase):
