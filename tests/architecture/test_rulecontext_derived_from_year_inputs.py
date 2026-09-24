@@ -18,6 +18,13 @@ Both allowlists are checked for stale entries (a member no longer present on the
 expected side), so neither can silently grow nor silently rot -- the same
 discipline as the DP#32 guards.
 
+Issue #277 moved ``prior_gis_countable_income`` from ``YearInputs`` (threaded by
+the caller, which the optimizer folds never did) into
+``RULE_CONTEXT_EXPLICIT_FIELDS`` (read by ``simulate_year_pure`` from the prior
+year's carried state): 48 shared fields + 4 explicit. ``from_year_inputs``
+requires it with no default, so a caller that forgets it fails loudly instead
+of silently paying no GIS.
+
 Control run before this file was written: adding a 57th ``YearInputs`` field
 that ``RuleContext`` does not carry makes ``test_rule_context_partition_matches
 _year_inputs`` fail; removing ``year`` from ``RULE_CONTEXT_EXPLICIT_FIELDS``
@@ -113,7 +120,8 @@ def test_year_inputs_only_fields_are_year_inputs_only():
 def test_projection_copies_every_shared_field_unchanged():
     inputs = _sentinel_inputs()
     ctx = RuleContext.from_year_inputs(
-        inputs, year=7, amt_credit_opening=("amt",), qc_imr_credit_opening=("qc",))
+        inputs, year=7, amt_credit_opening=("amt",), qc_imr_credit_opening=("qc",),
+        prior_gis_countable_income=1234.0)
     for name in sorted(_names(RuleContext) - RULE_CONTEXT_EXPLICIT_FIELDS):
         assert getattr(ctx, name) is getattr(inputs, name), name
 
@@ -121,17 +129,34 @@ def test_projection_copies_every_shared_field_unchanged():
 def test_explicit_fields_come_from_the_call_not_the_inputs():
     ctx = RuleContext.from_year_inputs(
         _sentinel_inputs(), year=7,
-        amt_credit_opening=("amt",), qc_imr_credit_opening=("qc",))
+        amt_credit_opening=("amt",), qc_imr_credit_opening=("qc",),
+        prior_gis_countable_income=1234.0)
     assert ctx.year == 7
     assert ctx.amt_credit_opening == ("amt",)
     assert ctx.qc_imr_credit_opening == ("qc",)
+    assert ctx.prior_gis_countable_income == 1234.0
+
+
+def test_explicit_none_prior_gis_countable_survives():
+    """None ("no prior year") is passed through, not replaced."""
+    ctx = RuleContext.from_year_inputs(
+        _sentinel_inputs(), year=0, prior_gis_countable_income=None)
+    assert ctx.prior_gis_countable_income is None
+
+
+def test_prior_gis_countable_income_is_required():
+    """Issue #277: no default. A caller that forgets the prior year's carried
+    GIS-countable income must fail, not silently pay no GIS (DP#32)."""
+    with pytest.raises(TypeError, match="prior_gis_countable_income"):
+        RuleContext.from_year_inputs(_sentinel_inputs(), year=7)
 
 
 def test_calendar_year_none_falls_back_to_the_index():
     """``YearInputs`` documents None as "use the 0-based index" (#343)."""
     values = {f.name: f"<{f.name}>" for f in dataclasses.fields(YearInputs)}
     values["calendar_year"] = None
-    ctx = RuleContext.from_year_inputs(YearInputs(**values), year=42)
+    ctx = RuleContext.from_year_inputs(YearInputs(**values), year=42,
+                                       prior_gis_countable_income=None)
     assert ctx.calendar_year == 42
 
 
@@ -141,10 +166,12 @@ def test_projection_refuses_a_missing_input_field_loudly():
               if f.name not in RULE_CONTEXT_EXPLICIT_FIELDS}
     del shared["living_costs"]
     with pytest.raises(AttributeError, match="living_costs"):
-        RuleContext.from_year_inputs(types.SimpleNamespace(**shared), year=0)
+        RuleContext.from_year_inputs(types.SimpleNamespace(**shared), year=0,
+                                     prior_gis_countable_income=None)
 
 
 def test_rule_context_stays_frozen():
-    ctx = RuleContext.from_year_inputs(_sentinel_inputs(), year=7)
+    ctx = RuleContext.from_year_inputs(_sentinel_inputs(), year=7,
+                                       prior_gis_countable_income=None)
     with pytest.raises(dataclasses.FrozenInstanceError):
         ctx.living_costs = 1.0

@@ -91,6 +91,14 @@ def _get_lif_conversion_provider():
 # the jurisdiction_state['canada'] dict. They are NOT imports from
 # countries.canada (DP#25).
 
+# Issue #277: the ``jurisdiction_state['canada']`` key that carries the CLOSING
+# year's GIS-countable income into the next year (see the entry in
+# ``_default_canada_state`` below). ``simulation_state.simulate_year_pure`` is
+# its only writer and its only reader, and both spell it through this one
+# constant, so a read/write spelling drift cannot turn it into a dead write.
+GIS_COUNTABLE_INCOME_KEY = 'gis_countable_income'
+
+
 def _default_canada_state() -> dict:
     """Return a fresh jurisdiction_state['canada'] dict with default values.
 
@@ -158,6 +166,17 @@ def _default_canada_state() -> dict:
         # golden household -- so this is inert, DP#32).
         'amt_credit_buckets': [],
         'qc_imr_credit_buckets': [],
+
+        # Issue #277: the CLOSING year's GIS-countable income (everything the
+        # household received except OAS and GIS, CRA's GIS income test), which
+        # next year's step reads as its PRIOR-year base. simulate_year_pure
+        # writes a float here on every step and reads it back at the next
+        # step's open, so the value crosses years inside SimState and every
+        # fold (run, _run_monthly, the Grid/Scipy/Monte-Carlo optimizer, DP)
+        # sees it. None on a state that has not been stepped yet: "no prior
+        # year recorded", so the retirement_income rule pays no GIS (DP#32:
+        # absence is never coerced to $0 of income, which would pay FULL GIS).
+        GIS_COUNTABLE_INCOME_KEY: None,
 
         # Issue #784: per-member unused tuition-tax-credit carry-forward. The
         # federal + Quebec tuition credits (#764/#783) are NON-REFUNDABLE;

@@ -30,6 +30,7 @@ References:
 
 import dataclasses
 import logging
+import math
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Tuple
 from copy import deepcopy
@@ -45,6 +46,7 @@ from canada_state_accessors import (
     adult_tfsa_total, convert_further_adult_locked_in, rebuild_adult_fhsa,
     rebuild_adult_lif, rebuild_adult_lira, rebuild_adult_rrsp, rebuild_adult_tfsa,
     _default_canada_state, _canada_fhsa_limits, _default_heloc_tracing,
+    GIS_COUNTABLE_INCOME_KEY,
 )
 
 
@@ -2001,12 +2003,6 @@ class YearInputs:
     base_spouse_income: float = 0.0
     year_brackets: Optional[List[Dict]] = None
     tax_indexation_rate: float = 0.0
-    # Issue #1020 (S04 Step 1): the prior year's GIS-countable income
-    # (retirement income excluding OAS), threaded from the prior YearResult by
-    # the live fold's prologue. The retirement_income rule calls gis_benefit on
-    # this. None (default) -> GIS stays at its seeded 0.0, byte-identical for
-    # every direct unit-test caller and every GIS-ineligible household (DP#32).
-    prior_gis_countable_income: Optional[float] = None
     # Epic #841 bite 2 / issue #812: the strategy's child-allocation targets
     # ({'tfsa','fhsa','rrsp','non_reg': pct}). When provided, each child's OWN
     # income funds contributions into the child's OWN accounts, which grow this
@@ -2070,6 +2066,62 @@ def _build_year_inputs(allocations: Dict[str, float],
     exactly what the old 58-parameter signature did.
     """
     return YearInputs(allocations=allocations, config=config, **kwargs)
+
+
+def _carried_gis_countable_income(opening_canada: dict, year: int) -> Optional[float]:
+    """The prior year's GIS-countable income, read from the opening canada state.
+
+    Issue #277: the value crosses years in ``SimState`` (key
+    ``GIS_COUNTABLE_INCOME_KEY``, written by ``simulate_year_pure`` at the close
+    of every step), not in a caller-threaded argument, so every fold -- run(),
+    _run_monthly, Optimizer._run_simulation, DPOptimizer -- sees it.
+
+    Returns None -- "no prior year", so GIS stays at its seeded 0.0 (DP#32:
+    absence is never coerced to $0 of income, which would pay FULL GIS) --
+    in two cases:
+
+    * ``year == 0``, whatever the state carries. The projection has no prior
+      year at index 0. The gate is structural rather than "value is None"
+      because ``_run_monthly``'s year-0 lump-sum / free-cash PRE-step (#278)
+      calls ``simulate_year_pure(year=0)`` before the real year-0 step and so
+      hands it a state that already carries the pre-step's value; that value
+      is not a prior year and must not seed year-0 GIS.
+    * the stored value is None at ``year > 0``: the state was never stepped
+      (``_default_canada_state`` seeds None). Every engine fold threads the
+      state ``simulate_year_pure`` returned, which always carries a float after
+      a step; None there is the contract for a direct single-step call at an
+      arbitrary year index on a fresh state (it gets no GIS, as before #277).
+
+    Everything else is refused loudly rather than coerced:
+
+    * the key ABSENT at ``year > 0`` raises ``KeyError``: the canada dict was
+      not built from ``_default_canada_state`` / ``SimState.initial`` / a prior
+      step, so there is no telling whether a prior year exists.
+    * a value that is not a real number (a bool counts as not a number) raises
+      ``TypeError``; a NaN or an infinity raises ``ValueError`` (it would
+      otherwise flow through ``gis_benefit`` into a plausible GIS figure).
+    """
+    if year == 0:
+        return None
+    if GIS_COUNTABLE_INCOME_KEY not in opening_canada:
+        raise KeyError(
+            f"jurisdiction_state['canada'] has no {GIS_COUNTABLE_INCOME_KEY!r} "
+            f"at year {year}: the opening state was not built by "
+            f"_default_canada_state / SimState.initial / simulate_year_pure, so "
+            f"the prior year's GIS-countable income is unknown (issue #277)")
+    value = opening_canada[GIS_COUNTABLE_INCOME_KEY]
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(
+            f"jurisdiction_state['canada'][{GIS_COUNTABLE_INCOME_KEY!r}] must be "
+            f"a number or None, got {type(value).__name__}: {value!r}")
+    if not math.isfinite(value):
+        raise ValueError(
+            f"jurisdiction_state['canada'][{GIS_COUNTABLE_INCOME_KEY!r}] must be "
+            f"finite, got {value!r}")
+    return float(value)
+
 
 def simulate_year_pure(
     state: SimState,
@@ -2201,13 +2253,16 @@ def simulate_year_pure(
     _opening_canada = state.jurisdiction_state.get('canada')
     if not isinstance(_opening_canada, dict):
         _opening_canada = {}
-    # Issue #231 slice 2: ``RuleContext`` is DERIVED from ``inputs`` -- the 49
+    # Issue #231 slice 2: ``RuleContext`` is DERIVED from ``inputs`` -- the 48
     # fields the two share are projected by name (``from_year_inputs``), so a
     # new rule no longer means editing this construction list in parallel with
-    # ``YearInputs``. Only the three fields that are not inputs are spelled
-    # out: ``year`` (the fold's index) and the two minimum-tax credit openings
-    # projected from the prior year's carried state (issue #747). ``inputs``
-    # also carries 7 fold-internal fields (deployment carries, child funding,
+    # ``YearInputs``. Only the four fields that are not inputs are spelled
+    # out: ``year`` (the fold's index), the two minimum-tax credit openings
+    # projected from the prior year's carried state (issue #747), and the
+    # prior year's GIS-countable income, likewise carried in the prior year's
+    # state (issue #277 -- it used to be a caller-threaded ``YearInputs``
+    # field, which the optimizer folds never supplied). ``inputs`` also
+    # carries 7 fold-internal fields (deployment carries, child funding,
     # extra-adult accounts) that rules never read; they stay on the body's
     # locals below, not on the context.
     ctx = RuleContext.from_year_inputs(
@@ -2215,6 +2270,7 @@ def simulate_year_pure(
         year=year,
         amt_credit_opening=tuple(_opening_canada.get('amt_credit_buckets', ())),
         qc_imr_credit_opening=tuple(_opening_canada.get('qc_imr_credit_buckets', ())),
+        prior_gis_countable_income=_carried_gis_countable_income(_opening_canada, year),
     )
     # epic #795 bite 1: seed ws with the retirement OUTPUT kwargs (defaults
     # 0.0/False/None) BEFORE run_rules so direct unit-test callers that pass
@@ -2498,6 +2554,39 @@ def simulate_year_pure(
     new_canada['amt_credit_buckets'] = list(ws.amt_credit_closing)
     new_canada['qc_imr_credit_buckets'] = list(ws.qc_imr_credit_closing)
 
+    # ── Retirement income totals (issue #294) ──
+    # epic #795 bite 1: read the government-income components off ws (the
+    # registered retirement_income rule wrote them there; or the seeded kwarg
+    # defaults for a direct unit-test caller), not off the kwargs.
+    # Issue #1020 (S04 Step 1): GIS is now part of the household's retirement
+    # income. It is non-taxable (not in the tax base) but it IS cash the
+    # household receives, so it belongs in ``retirement_income`` (the
+    # total-government-income figure) and ``total_family_income``. It is NOT
+    # in the drawdown shortfall base (``covered_net`` already folded it in,
+    # inside the retirement_income rule) and NOT in the tax-bracket stack.
+    # Issue #277: computed HERE -- after every rule and every post-rule ws
+    # write -- so the carried GIS-countable income below and this year's
+    # YearResult are built from the same locals.
+    employment_income = allocations.get('_primary_income', 0) + allocations.get('_spouse_income', 0)
+    # Issue #302: LIF mandatory withdrawal is taxable retirement income, separate
+    # from drawdown. The drawdown draws from accounts AFTER the mandatory LIF
+    # withdrawal has already been taken, so there's no double-counting.
+    retirement_income = ws.cpp_income + ws.oas_income + ws.pension_income + ws.gis_income + ws.drawdown_total + ws.lif_withdrawal
+    # total_family_income spans employment (pre-retirement) plus government
+    # benefits and drawdown (retirement). For pure pre-retirement horizons all
+    # retirement components are 0, so this equals the historical employment sum.
+    total_family_income = employment_income + ws.cpp_income + ws.oas_income + ws.pension_income + ws.gis_income + ws.drawdown_total + ws.lif_withdrawal
+
+    # ── Issue #277: carry this year's GIS-countable income into next year ──
+    # CRA's GIS income test is PRIOR-YEAR: next year's GIS is sized on this
+    # year's countable income -- everything received EXCEPT OAS and GIS (both
+    # excluded by statute; see gis_benefit's ``net_income`` contract), which
+    # includes a still-working year's salary. Written UNCONDITIONALLY on every
+    # step: new_canada is a shallow copy of last year's dict, so a skipped
+    # write would silently carry a stale value forward rather than none.
+    new_canada[GIS_COUNTABLE_INCOME_KEY] = (
+        retirement_income + employment_income - ws.oas_income - ws.gis_income)
+
     # ── Build new state ──
     # Issue #679: emergency_reserve_balance and heloc_balance are read from
     # ws.new_* AFTER the 'solvency' rule (last in RULE_ORDER) may have drawn
@@ -2585,25 +2674,8 @@ def simulate_year_pure(
     # identity and runway -- not the balance-sheet net_assets figure.
     installment_balance = sum(ws.new_installment_balances)
 
-    # ── Retirement income totals (issue #294) ──
-    # epic #795 bite 1: read the government-income components off ws (the
-    # registered retirement_income rule wrote them there; or the seeded kwarg
-    # defaults for a direct unit-test caller), not off the kwargs.
-    # Issue #1020 (S04 Step 1): GIS is now part of the household's retirement
-    # income. It is non-taxable (not in the tax base) but it IS cash the
-    # household receives, so it belongs in ``retirement_income`` (the
-    # total-government-income figure) and ``total_family_income``. It is NOT
-    # in the drawdown shortfall base (``covered_net`` already folded it in,
-    # inside the retirement_income rule) and NOT in the tax-bracket stack.
-    employment_income = allocations.get('_primary_income', 0) + allocations.get('_spouse_income', 0)
-    # Issue #302: LIF mandatory withdrawal is taxable retirement income, separate
-    # from drawdown. The drawdown draws from accounts AFTER the mandatory LIF
-    # withdrawal has already been taken, so there's no double-counting.
-    retirement_income = ws.cpp_income + ws.oas_income + ws.pension_income + ws.gis_income + ws.drawdown_total + ws.lif_withdrawal
-    # total_family_income spans employment (pre-retirement) plus government
-    # benefits and drawdown (retirement). For pure pre-retirement horizons all
-    # retirement components are 0, so this equals the historical employment sum.
-    total_family_income = employment_income + ws.cpp_income + ws.oas_income + ws.pension_income + ws.gis_income + ws.drawdown_total + ws.lif_withdrawal
+    # employment_income / retirement_income / total_family_income: computed
+    # above, next to the issue #277 GIS-countable carry, from the same ws.
 
     result = YearResult(
         year=year + 1,
