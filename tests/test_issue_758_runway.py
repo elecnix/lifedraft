@@ -32,6 +32,7 @@ from simulation_state import (
 )
 from canada_state_accessors import (
     adult_lira_slot, adult_fhsa_slot,
+    GIS_COUNTABLE_INCOME_KEY,  # #277: the carried prior-year GIS base
 )  # #700/#643/#704: per-adult LIRA/FHSA stores
 # Import the #679 fixture helpers WITHOUT the `tests.` prefix (the repo's
 # convention for sibling test imports under pytest's rootdir insertion). A
@@ -1002,7 +1003,11 @@ class TestSolvencyRetirementBranch(unittest.TestCase):
             non_reg_balance=50_000, non_reg_acb=50_000,
             jurisdiction_state={'canada': {  # #700: per-adult stores
                 'adult_tfsa': {'primary': {'balance': 30_000, 'room': 0.0}},
-                'adult_rrsp': {'primary': {'own': 40_000, 'own_room': 0.0, 'spousal_as_annuitant': 0.0}}}},
+                'adult_rrsp': {'primary': {'own': 40_000, 'own_room': 0.0, 'spousal_as_annuitant': 0.0}},
+                # #277: a single step at year > 0 on a hand-built state must
+                # say whether a prior year's GIS-countable income exists;
+                # None = "no prior year recorded" (no GIS), as before.
+                GIS_COUNTABLE_INCOME_KEY: None}},
         )
         mort = _mort_data(state.mortgage_balance, payment=RUIN_MORTGAGE_PAYMENT)
         # A retirement year: any_retired, drawdown delivers 60k net,
@@ -1047,7 +1052,8 @@ class TestSolvencyRetirementBranch(unittest.TestCase):
         state = SimState(
             emergency_reserve_balance=0, mortgage_balance=200_000,
             non_reg_balance=0, non_reg_acb=0,
-            jurisdiction_state={'canada': {}})
+            # #277: None = no prior year's GIS-countable income recorded.
+            jurisdiction_state={'canada': {GIS_COUNTABLE_INCOME_KEY: None}})
         mort = _mort_data(state.mortgage_balance, payment=RUIN_MORTGAGE_PAYMENT)
         result, _ = simulate_year_pure(
             state=state,
