@@ -120,7 +120,7 @@ RRSP dollar limits, TFSA limits, YMPE, YAMPE (updated annually by CRA):
 - **Ontario Health Premium**: https://www.ontario.ca/page/health-premium
 - **Ontario Trillium Benefit / Ontario Sales Tax Credit (OSTC)**: https://www.canada.ca/en/revenue-agency/services/child-family-benefits/provincial-territorial-programs/province-ontario.html
 - **Ontario LIFT (Low-income Individuals and Families Tax) credit**: https://www.ontario.ca/page/low-income-workers-tax-credit
-- **Used by**: countries/canada/provinces/ontario.py, countries/canada/provinces/ontario_credits.py
+- **Used by**: countries/canada/provinces/ontario/ontario.py, countries/canada/provinces/ontario/ontario_credits.py
 
 ## Bank of Canada Rates
 - **Data source**: https://www.bankofcanada.ca/rates/interest-rates/
@@ -183,7 +183,7 @@ RRSP dollar limits, TFSA limits, YMPE, YAMPE (updated annually by CRA):
 - **Quebec basic personal amount**: https://www.revenuquebec.ca/en/individuals/income-tax-rates/
 - **Ontario basic personal amount**: https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/canadian-income-tax-rates-individuals-tax-years.html
 - **Key data (2026)**: Federal $16,129; Quebec $17,383; Ontario $11,865
-- **Used by**: tax_data.py (basic_personal_amount), countries/canada/provinces/quebec.py, countries/canada/provinces/ontario.py
+- **Used by**: tax_data.py (basic_personal_amount), countries/canada/provinces/quebec/tax_data.py, countries/canada/provinces/ontario/ontario.py
 
 ## Provincial Dividend Tax Credit Rates
 - **Quebec DTC rates**: https://www.revenuquebec.ca/en/individuals/income-tax-rates/ (see Provincial Income Tax Rates and Deductions)

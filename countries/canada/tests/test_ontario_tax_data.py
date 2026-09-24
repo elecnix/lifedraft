@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for the Ontario tax-data module (issue #324).
 
-DP#11: this file tests ONE module — ``countries.canada.provinces.ontario``
+DP#11: this file tests ONE module — ``countries.canada.provinces.ontario.ontario``
 (OntarioTaxData) — in isolation: its brackets, no-abatement rule, DTC rates,
 and year-versioned parameters. The Ontario *credit* functions (surtax, health
 premium, sales tax credit / Trillium, LIFT) live in a separate module
@@ -30,7 +30,7 @@ sys.path.insert(
 import unittest
 
 from tax_data import TaxDataProvider
-from countries.canada.provinces.ontario import OntarioTaxData
+from countries.canada.provinces.ontario.ontario import OntarioTaxData
 
 
 def _provider() -> TaxDataProvider:

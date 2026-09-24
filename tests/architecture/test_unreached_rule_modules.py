@@ -149,7 +149,7 @@ KNOWN_UNREACHED: dict[str, str] = {
         "#724 — IRD / breakage penalty on discharging a fixed-rate mortgage. "
         "Priced nowhere, so every refinance in the optimizer is penalty-free."
     ),
-    "countries.canada.provinces.ontario_credits": (
+    "countries.canada.provinces.ontario.ontario_credits": (
         "#745 — NOT a dead clone: the production tax path computes no Ontario "
         "surtax, health premium, trillium, LIFT, or sales-tax credit, so an "
         "Ontario household in a real run pays none of its surtax/health premium "
@@ -235,7 +235,7 @@ KNOWN_UNREACHED: dict[str, str] = {
         "countries.canada's re-entrant import. Reached via tax_bracket_fallbacks "
         "and re-exported by countries.canada, not by the fold itself."
     ),
-    "countries.canada.provinces.ontario": (
+    "countries.canada.provinces.ontario.ontario": (
         "#746 — `OntarioTaxData` container; the provider loads Ontario brackets "
         "from the data files, not through this class."
     ),

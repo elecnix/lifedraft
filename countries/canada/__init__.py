@@ -41,8 +41,8 @@ from countries.canada.provinces.quebec import (
     quebec_interest_deduction,
     quebec_sm_portfolio_optimization,
 )
-from countries.canada.provinces.ontario import OntarioTaxData
-from countries.canada.provinces.ontario_credits import (
+from countries.canada.provinces.ontario import (
+    OntarioTaxData,
     ontario_surtax,
     ontario_health_premium,
     ontario_sales_tax_credit,
