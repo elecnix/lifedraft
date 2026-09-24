@@ -168,12 +168,15 @@ def apply_retirement_income(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # which this rule sizes -- depends on GIS). The prior year's countable
     # base is the prior year's retirement income EXCLUDING OAS (OAS is
     # excluded from the GIS test by statute -- see ``gis_benefit``'s
-    # ``net_income`` contract), threaded in from the prior ``YearResult`` by
-    # the prologue. None (no prior year -- the first retirement year's prior
-    # year is a WORKING year, or a direct unit-test caller) => GIS stays at
-    # its seeded 0.0 (DP#32: absence is a loud no-op, never a silent zero-
-    # coercion; a unit test that does not pass ``prior_gis_countable_income``
-    # is byte-identical to before).
+    # ``net_income`` contract), carried in ``SimState.jurisdiction_state
+    # ['canada']`` by the pure step (issue #277: written at the close of the
+    # prior year, read back into ``ctx`` at the open of this one, so every
+    # fold sees it). A working prior year's salary is part of that base, so
+    # the first retirement year's GIS is sized on a working year's income.
+    # None (no prior year -- projection year 0, or a direct unit-test caller
+    # on a hand-built state) => GIS stays at its seeded 0.0 (DP#32: absence is
+    # a loud no-op, never a silent zero-coercion; a unit test that does not
+    # pass ``prior_gis_countable_income`` is byte-identical to before).
     gis = 0.0
     prior_countable = ctx.prior_gis_countable_income
     if prior_countable is not None:

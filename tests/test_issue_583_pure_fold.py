@@ -105,11 +105,26 @@ class TestYearStepDoesNotReadSelf(unittest.TestCase):
         self.assertEqual(inspect.getmodule(simulate_year).__name__, 'simulation')
         # And the class-level delegator is a one-liner that just forwards.
         src = inspect.getsource(FamilySimulation._simulate_year_step)
-        # Issue #1020 (S04 Step 1): the delegator also forwards the prior-year
-        # GIS-countable income the fold threads in, but it is STILL a thin
-        # forward -- it reads nothing off `self` except `_build_context()`.
-        self.assertIn('simulate_year(state, year, self._build_context()', src)
-        self.assertIn('prior_gis_countable_income=prior_gis_countable_income', src)
+        self.assertIn('simulate_year(state, year, self._build_context())', src)
+
+    def test_no_cross_year_value_is_threaded_by_the_caller(self):
+        """Issue #277: the prior year's GIS-countable income is carried in
+        ``SimState`` by the pure step, never threaded in by a fold. Before
+        #277 ``run()`` and ``_run_monthly`` passed it and the optimizer folds
+        did not, so the optimizers paid $0 GIS. The seam is ``(state, year,
+        ctx)`` and nothing else, so no fold can forget an argument."""
+        self.assertEqual(list(inspect.signature(simulate_year).parameters),
+                         ['state', 'year', 'ctx'])
+        self.assertEqual(
+            list(inspect.signature(FamilySimulation._simulate_year_step).parameters),
+            ['self', 'state', 'year'])
+        for fn in (FamilySimulation._simulate_year_step, FamilySimulation.run,
+                   FamilySimulation._run_monthly):
+            with self.subTest(fn=fn.__qualname__):
+                self.assertNotIn('prior_gis_countable_income',
+                                 inspect.getsource(fn))
+        self.assertFalse(hasattr(simulation, '_prior_gis_countable'),
+                         "the caller-side prior-GIS helper must stay deleted")
 
 
 def _make_config(**overrides):

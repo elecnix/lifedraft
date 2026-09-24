@@ -35,10 +35,11 @@ if TYPE_CHECKING:  # the fold's input bundle; runtime import would point outward
 
 # ``RuleContext`` fields supplied from the CALL, not projected off a
 # ``YearInputs`` (issue #231 slice 2): ``year`` is the fold's 0-based index (a
-# ``simulate_year_pure`` parameter, not a per-call input) and the two
-# minimum-tax credit opening balances are projected from the prior year's
-# carried jurisdiction state, not declared this year. Every other
-# ``RuleContext`` field must exist on ``YearInputs``.
+# ``simulate_year_pure`` parameter, not a per-call input), and the two
+# minimum-tax credit opening balances and the prior year's GIS-countable income
+# (issue #277) are projected from the prior year's carried jurisdiction state,
+# not declared this year. Every other ``RuleContext`` field must exist on
+# ``YearInputs``.
 # ``tests/architecture/test_rulecontext_derived_from_year_inputs.py`` pins this
 # set so it can neither grow silently (a new explicit field needs a decision)
 # nor rot (each member must still be RuleContext-only), the same allowlist
@@ -47,6 +48,7 @@ RULE_CONTEXT_EXPLICIT_FIELDS = frozenset({
     "year",
     "amt_credit_opening",
     "qc_imr_credit_opening",
+    "prior_gis_countable_income",
 })
 
 
@@ -128,11 +130,15 @@ class RuleContext:
     # (CPP + pension + RRSP/RRIF drawdown + LIF + employment -- everything
     # taxable EXCEPT OAS, per ``gis_benefit``'s ``net_income`` contract and
     # CRA's prior-year income test). The ``retirement_income`` rule calls
-    # ``gis_benefit(prior_countable, is_coupled, sim_year)`` from this. None
-    # (the default) means "no prior year available / GIS not engaged" -- the
-    # rule leaves ``ws.gis_income`` at its seeded 0.0, preserving every
-    # direct unit-test caller and every GIS-ineligible household byte-for-byte
-    # (DP#32: absence is a loud no-op, never a silent zero-coercion).
+    # ``gis_benefit(prior_countable, is_coupled, sim_year)`` from this.
+    # Issue #277: ``simulate_year_pure`` reads it from the prior year's
+    # ``SimState.jurisdiction_state['canada']`` (where the prior step wrote it)
+    # and passes it to ``from_year_inputs`` -- no caller threads it, so every
+    # fold sees it. None means "no prior year" (year 0, or a direct unit caller
+    # on a hand-built state) -- the rule leaves ``ws.gis_income`` at its seeded
+    # 0.0 (DP#32: absence is a loud no-op, never a silent zero-coercion). The
+    # field default exists for direct ``RuleContext(...)`` constructions in
+    # tests; ``from_year_inputs`` requires the value explicitly.
     prior_gis_countable_income: Optional[float] = None
     # Issue #679: the household's own measured working-phase living-cost
     # budget and this year's after-tax employment income. Default 0.0
@@ -230,6 +236,7 @@ class RuleContext:
 
     @classmethod
     def from_year_inputs(cls, inputs: "YearInputs", *, year: int,
+                         prior_gis_countable_income: Optional[float],
                          amt_credit_opening: tuple = (),
                          qc_imr_credit_opening: tuple = ()) -> "RuleContext":
         """Derive this context from one ``YearInputs`` (issue #231 slice 2).
@@ -246,6 +253,11 @@ class RuleContext:
         0-based index" (#343), while a rule's date-computed gates need an
         absolute year. That resolution lives here, in one place, exactly as the
         hand-spelled construction resolved it (``cal_year``).
+
+        ``prior_gis_countable_income`` (issue #277) is REQUIRED, with no
+        default: it is carried in the prior year's state, and a caller that
+        forgot to pass it would otherwise pay no GIS without any error. Pass
+        None explicitly for "no prior year".
         """
         projected = {
             f.name: getattr(inputs, f.name)
@@ -258,6 +270,7 @@ class RuleContext:
             year=year,
             amt_credit_opening=amt_credit_opening,
             qc_imr_credit_opening=qc_imr_credit_opening,
+            prior_gis_countable_income=prior_gis_countable_income,
             **projected,
         )
 
@@ -638,9 +651,10 @@ class YearWorkingState:
     pension_income: float = 0.0
     # Issue #1020 (S04 Step 1): GIS paid this retirement year, written by the
     # ``retirement_income`` rule (reusing ``gis_benefit``, DP#9) from the
-    # prior year's GIS-countable income. Seeded 0.0 so direct unit-test callers
-    # that don't pass ``prior_gis_countable_income`` see byte-identical
-    # behaviour (GIS stays 0 -- the no-op every pre-retirement year and every
+    # prior year's GIS-countable income (carried in SimState since issue
+    # #277). Seeded 0.0 so a step with no prior year (year 0, or a direct
+    # unit-test caller on a hand-built state) sees byte-identical behaviour
+    # (GIS stays 0 -- the no-op every pre-retirement year and every
     # GIS-ineligible household relies on, DP#32).
     gis_income: float = 0.0
     drawdown_order: Optional[List[str]] = None
