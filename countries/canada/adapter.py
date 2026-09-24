@@ -23,7 +23,7 @@ from countries.canada.account_models import (
     RRSPAccount, TSFAccount, RESPAccount, NonRegAccount,
 )
 from countries.canada.fhsa import FHSAAccount
-from countries.canada.resp_rules import RESPCalculator, RESPChild
+from countries.canada.resp_rules import RESPCalculator, RESPChild, resp_child_from_config
 from countries.canada.debt import (
     DebtPurpose, HELOCTracing, AdvanceRecord, DispositionRecord,
 )
@@ -112,21 +112,17 @@ class CanadaAdapter:
         """Create a Canadian RESP calculator (CESG, QESI, CLB)."""
         return RESPCalculator()
     
-    def create_resp_child(self, name: str, birth_year: int,
-                          province: str = 'quebec',
-                          resp_balance: float = 0):
-        """Create a Canadian RESP child record.
-        
-        DP#16: Province is derived from config, not a boolean flag.
-        When province='quebec' is present, QESI eligibility is auto-determined.
+    def create_resp_children(self, config) -> List[RESPChild]:
+        """Build one Canadian RESP child record per ``config.children`` entry.
+
+        Issue #295 (DP#9): every child goes through
+        ``resp_rules.resp_child_from_config`` -- the one shared constructor --
+        so FamilySimulation and the optimizer seed each child's lifetime
+        CESG/QESI/contribution counters from the same declared history.
+        DP#16: province comes from the child entry or the household config.
         """
-        return RESPChild(
-            name=name,
-            birth_year=birth_year,
-            province=province,
-            is_quebec_resident=(province.lower() in ('quebec', 'qc')),
-            resp_balance=resp_balance,
-        )
+        return [resp_child_from_config(ch, config.start_year, config.province)
+                for ch in config.children]
     
     # ── HELOC tracing ──
     

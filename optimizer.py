@@ -447,19 +447,10 @@ class Optimizer:
         # RESPCalculator/RESPChild objects FamilySimulation builds --
         # through self.adapter, exactly like FamilySimulation.resp_calc/
         # resp_children (simulation.py) -- not a provider-registry lookup.
+        # Issue #295 (DP#9): the same shared constructor FamilySimulation
+        # uses, so both seed each child from its declared grant history.
         resp_calc = self.adapter.create_resp_calculator()
-        resp_children = []
-        for ch in config.children:
-            child_birth_year = ch.get(
-                'birth_year',
-                config.start_year - ch.get('age', 0) if ch.get('age', 0) > 0 else 0)
-            resp_children.append(self.adapter.create_resp_child(
-                name=ch.get('name', 'Child'),
-                birth_year=child_birth_year,
-                province=ch.get('province', config.province),
-                resp_balance=(config.resp_current_balance / len(config.children)
-                              if config.children else 0),
-            ))
+        resp_children = self.adapter.create_resp_children(config)
 
         return SimulationContext(
             config=config,

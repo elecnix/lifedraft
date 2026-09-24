@@ -514,9 +514,9 @@ class TestRESPAge17(unittest.TestCase):
 
     def test_cesg_age_cutoff(self):
         """4.1.1: CESG stops when child turns 18+. Ages 16-17 have special rules."""
-        child_young = RESPChild(birth_year=2012, name="child_a")  # Age 14 in 2026
-        child_16 = RESPChild(birth_year=2009, name="child_b")  # Age 17 in 2026
-        child_18 = RESPChild(birth_year=2008, name="child_c")  # Age 18 in 2026
+        child_young = RESPChild(grant_history=None, birth_year=2012, name="child_a")  # Age 14 in 2026
+        child_16 = RESPChild(grant_history=None, birth_year=2009, name="child_b")  # Age 17 in 2026
+        child_18 = RESPChild(grant_history=None, birth_year=2008, name="child_c")  # Age 18 in 2026
 
         # Young child: cesg_eligible returns True
         self.assertTrue(child_young.cesg_eligible(2026))
@@ -529,20 +529,26 @@ class TestRESPAge17(unittest.TestCase):
         If you missed contributions, you can catch up by contributing
         up to $5,000/year and get CESG on the full amount.
         """
+        from countries.canada.resp_rules import resp_child_from_config
         calc = RESPCalculator()
-        child = RESPChild(birth_year=2012, name="test_child")  # Age 14
-        # Contribute $5,000 with $2,500 unused room
-        result = calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=150000, unused_room=2500)
-        # Should get 20% on at least $2,500 (basic) + catch-up from unused room
-        self.assertGreater(result.get('total_cesg', result.get('cesg', 0)), 0)
+        # Issue #295: unused room is derived from the declared history. Born
+        # 2012 (age 14), $7,000 of room accrued through 2025; $6,000 of basic
+        # CESG received leaves $1,000 of grant room carried forward.
+        child = resp_child_from_config({'name': 'test_child', 'birth_year': 2012, 'resp_history': {
+            'contributions_total': 30000, 'contributions_before_age_15': 30000,
+            'years_with_100_before_age_15': 12, 'cesg_basic_received': 6000,
+            'cesg_additional_received': 0, 'qesi_received': 0, 'clb_received': 0}},
+            2026, 'quebec')
+        # Contribute $5,000: 20% on $2,500 (basic) + 20% on $2,500 of catch-up
+        result = calc.calculate_cesg(5000, child, 2026, family_income=150000)
+        self.assertEqual(result['total_cesg'], 1000)
 
     def test_cesg_lifetime_limit(self):
         """4.1.3: CESG lifetime limit is $7,200 per child."""
         calc = RESPCalculator()
         self.assertEqual(calc.CESG_LIFETIME_MAX, 7200)
         # Contributing beyond lifetime limit returns 0 CESG
-        child_max = RESPChild(birth_year=2012, name="maxed")
+        child_max = RESPChild(grant_history=None, birth_year=2012, name="maxed")
         # Simulate having already received max CESG
         child_max.total_cesg_received = 7200
         result = calc.calculate_cesg(5000, child_max, 2026, family_income=150000)
@@ -555,14 +561,14 @@ class TestRESPAge17(unittest.TestCase):
         (but only if eligible for 16-17 contributions).
         """
         calc = RESPCalculator()
-        child = RESPChild(birth_year=2009, name="child_17")  # Age 17 in 2026
+        child = RESPChild(grant_history=None, birth_year=2009, name="child_17")  # Age 17 in 2026
         # At age 16-17, eligibility requires prior contribution history
         # Test the eligibility gate (DP#28)
         result = calc.calculate_cesg(2500, child, 2026, family_income=150000)
         # Result is always a dict
         self.assertIsInstance(result, dict)
         # For a young child, $2,500 contribution gets $500 CESG
-        child_young = RESPChild(birth_year=2012, name="young")
+        child_young = RESPChild(grant_history=None, birth_year=2012, name="young")
         result_young = calc.calculate_cesg(2500, child_young, 2026, family_income=150000)
         self.assertEqual(result_young['basic_cesg'], 500)
 

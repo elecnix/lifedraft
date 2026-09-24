@@ -1480,3 +1480,177 @@ register(Approximation(
     issue='#137',
     applies=_deployment_lag_declared,
 ))
+
+
+# ── RESP beneficiary histories (issue #295) ──────────────────────────────────
+#
+# The grant engine seeds each RESP beneficiary from their declared history
+# (accounts[].resp.beneficiaries[] -> child['resp_history']). Four residual
+# approximations remain, each switched on by the config shape that triggers it.
+
+def _resp_children(ctx: FidelityContext) -> List[dict]:
+    # A config with no family block has no children, hence no RESP caveat.
+    return ctx.cfg.get('family', {}).get('children', [])
+
+
+def _resp_split_evenly_applies(ctx: FidelityContext) -> bool:
+    return len(_resp_children(ctx)) >= 2
+
+
+register(Approximation(
+    id='resp_new_contributions_split_evenly',
+    summary=("New RESP contributions are split evenly across all children, "
+             "including a child past the grant window, instead of being "
+             "routed to the child who can still earn grants"),
+    biased_figure='RESP balance, CESG/QESI paid, and terminal net worth',
+    direction=Direction.UNKNOWN,
+    detail=("simulation._resp_grants_for_year divides the year's RESP "
+            "allocation by the number of children. A share given to a child "
+            "past the end of the year they turn 17 earns no grant; a child "
+            "with unused grant room gets less catch-up than a routed "
+            "contribution would earn; a share above a child's $50,000 lifetime "
+            "limit is redirected to the non-registered account. How much to "
+            "contribute for each child is not yet a decision the optimizer "
+            "sweeps (follow-up to #295)."),
+    issue='#295',
+    applies=_resp_split_evenly_applies,
+))
+
+
+def _resp_child_label(ch: dict, index: int) -> str:
+    """How a finding names a child: its name, else its person id, else its
+    position in family.children."""
+    if 'name' in ch:
+        return ch['name']
+    if 'id' in ch:
+        return ch['id']
+    return f"child {index + 1}"
+
+
+def _resp_undeclared_children(ctx: FidelityContext) -> List[str]:
+    return [_resp_child_label(ch, i) for i, ch in enumerate(_resp_children(ctx))
+            if 'resp_history' not in ch or ch['resp_history'] is None]
+
+
+def _resp_history_not_declared_applies(ctx: FidelityContext) -> bool:
+    return bool(_resp_undeclared_children(ctx))
+
+
+def _describe_resp_history_not_declared(ctx: FidelityContext) -> List[str]:
+    return [f"{label}: no declared RESP beneficiary history"
+            for label in _resp_undeclared_children(ctx)]
+
+
+register(Approximation(
+    id='resp_grant_history_not_declared',
+    summary=("At least one child has no declared RESP beneficiary history, so "
+             "their CESG/QESI lifetime counters start at $0, no unused grant "
+             "room is carried forward, and the 16-17 test counts only "
+             "projected contributions"),
+    biased_figure='CESG/QESI paid, RESP balance, and terminal net worth',
+    direction=Direction.UNKNOWN,
+    detail=("resp_rules.resp_child_from_config seeds a child from "
+            "child['resp_history']; a child without one (an in-memory config, "
+            "or a contract child named on no RESP account) starts from zero. "
+            "Lifetime caps restarting at $0 can pay grants a real child "
+            "already received (overstates); no carry-forward room and a "
+            "16-17 test blind to past contributions can refuse grants the "
+            "child would get (understates). Declare "
+            "accounts[].resp.beneficiaries[] from the ESDC/promoter statement."),
+    issue='#295',
+    applies=_resp_history_not_declared_applies,
+    findings=_describe_resp_history_not_declared,
+))
+
+
+def _resp_over_limit_children(ctx: FidelityContext) -> List[tuple]:
+    # Lazy import: this module stays import-light (see the module docstring).
+    from countries.canada.resp_rules import RESPCalculator
+    limit = RESPCalculator.RESP_LIFETIME_CONTRIBUTION_LIMIT
+    out = []
+    for i, ch in enumerate(_resp_children(ctx)):
+        history = ch['resp_history'] if 'resp_history' in ch else None
+        if history is not None and history['contributions_total'] > limit:
+            out.append((_resp_child_label(ch, i), history['contributions_total'] - limit))
+    return out
+
+
+def _resp_over_limit_applies(ctx: FidelityContext) -> bool:
+    return bool(_resp_over_limit_children(ctx))
+
+
+def _describe_resp_over_limit(ctx: FidelityContext) -> List[str]:
+    return [f"{name}: declared RESP contributions exceed the $50,000 lifetime "
+            f"limit by ${excess:,.2f}; no further contribution is made for this child"
+            for name, excess in _resp_over_limit_children(ctx)]
+
+
+register(Approximation(
+    id='resp_declared_contributions_exceed_lifetime_limit',
+    summary=("A child's declared lifetime RESP contributions exceed the "
+             "$50,000 limit; the 1%-a-month tax on the excess is not charged"),
+    biased_figure='terminal net worth (the excess-contribution tax is omitted)',
+    direction=Direction.OVERSTATES,
+    detail=("The fold refuses every new contribution for the child (their "
+            "share is redirected to the non-registered account) but does not "
+            "charge Part X.4 tax on the declared excess, which runs until the "
+            "excess is withdrawn."),
+    issue='#295',
+    applies=_resp_over_limit_applies,
+    findings=_describe_resp_over_limit,
+))
+
+
+def _resp_family_plan_applies(ctx: FidelityContext) -> bool:
+    return any(ch['resp_history']['family_plan'] for ch in _resp_children(ctx)
+               if 'resp_history' in ch and ch['resp_history'] is not None)
+
+
+register(Approximation(
+    id='resp_family_plan_earnings_attributed_pro_rata',
+    summary=("A family-plan RESP's balance is attributed to its beneficiaries "
+             "in proportion to each one's contributions and grants"),
+    biased_figure='per-child RESP balance, EAP timing and AIP tax at collapse',
+    direction=Direction.UNKNOWN,
+    detail=("A family plan's investment earnings belong to the plan, not to "
+            "a beneficiary; contract_accounts.map_resp_beneficiary_histories "
+            "shares them pro rata to principal, which fixes when each child's "
+            "share is paid out as EAPs or collapsed. The declared histories "
+            "are also treated both as lifetime totals and as amounts still in "
+            "the plan, so an EAP or PSE paid before the projection start "
+            "cannot be represented."),
+    issue='#295',
+    applies=_resp_family_plan_applies,
+))
+
+
+def _resp_quebec_children(ctx: FidelityContext) -> List[dict]:
+    # A child's own province wins; otherwise the household's (tax.province,
+    # 'quebec' when absent -- the same resolution config_serde applies).
+    household = ctx.cfg.get('tax', {}).get('province', 'quebec')
+    return [ch for ch in _resp_children(ctx)
+            if (ch['province'] if 'province' in ch else household).lower() in ('quebec', 'qc')]
+
+
+def _resp_qesi_rules_simplified_applies(ctx: FidelityContext) -> bool:
+    return bool(_resp_quebec_children(ctx))
+
+
+register(Approximation(
+    id='resp_qesi_accumulated_rights_not_modelled',
+    summary=("QESI is paid on each year's contribution only: unused QESI "
+             "rights are not carried forward, and the 16-17 contribution "
+             "condition is not applied to QESI"),
+    biased_figure='QESI paid, RESP balance, and terminal net worth',
+    direction=Direction.UNKNOWN,
+    detail=("resp_rules.RESPCalculator.calculate_qesi caps the basic QESI at "
+            "$250 a year. Revenu Quebec accrues QESI rights from birth and pays "
+            "up to $500 of basic QESI a year when unused rights exist, so a "
+            "family catching up is under-granted; and QESI for a beneficiary "
+            "aged 16 or 17 follows the same pre-age-15 contribution condition "
+            "as CESG, which calculate_qesi does not check, so such a child can "
+            "be over-granted. Only the declared QESI lifetime total (#295) is "
+            "seeded."),
+    issue='#295',
+    applies=_resp_qesi_rules_simplified_applies,
+))

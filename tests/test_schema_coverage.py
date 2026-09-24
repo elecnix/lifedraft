@@ -343,14 +343,6 @@ DEAD_ALLOWLIST = {
         "sub-object, but to_internal_config's resp_composition aggregation (#647) reads only "
         "contributions_total/cesg_received/qesi_received -- the subscriber identities never reach a "
         "decision (the engine's RESP is a per-child balance list, not attributed to a subscriber)."),
-    "accounts[kind=resp].resp.beneficiaries": ("#603", "see accounts[kind=resp].resp.subscribers "
-        "above -- same non-consumption, same reason."),
-    "accounts[kind=resp].resp.clb_received": ("#603", "NOT folded into resp_composition's "
-        "contributions/cesg/qesi buckets (#647's aggregation sums only those three) -- a real gap: "
-        "CLB dollars land in resp_current_balance but get misclassified as investment_earnings when "
-        "the RESP later winds down (issue #578's EAP/PSE split), instead of taxed as a grant like "
-        "CESG/QESI. Narrower than #647's balance-drop (the dollar amount is still counted, only its "
-        "EAP-tax category is wrong) -- flagged here, not fixed in this PR; worth its own issue."),
     "accounts[kind=resp].owner.joint[].pct": ("#644", "was cited to _owner_shares' `return "
         "{j[\"person\"]: j[\"pct\"] ...}` -- one generic helper's keyword vouching for every kind "
         "that has a joint owner at once (#647's kind-blindness, surviving inside CONSUMED). "
@@ -550,7 +542,9 @@ CONSUMED = {
 
     # ── people[] ──
     "people[].id": ("contract_people.py", "def _people_by_id(doc: Dict) -> Dict[str, Dict]"),
-    "people[].label": ("simulation.py", "ch.get('name', 'Child')"),
+    # Issue #295: the RESP child's name now comes from the one shared
+    # constructor (resp_child_from_config), not a loop in simulation.py.
+    "people[].label": ("countries/canada/resp_rules.py", "name = child_cfg.get('name', 'Child')"),
     "people[].birth_date": ("rules_retirement_income.py", "m.get('birth_year', 0)"),
     "people[].relationships": ("contract_people.py", "for r in people[primary_id].get(\"relationships\", [])"),
     "people[].relationships[].type": ("contract_people.py", "if r[\"type\"] == \"spouse_of\""),
@@ -590,7 +584,24 @@ CONSUMED = {
     "accounts[kind=lira].lira.reference_rate": ("simulation_state.py", "'reference_rate': lira_cfg.get('reference_rate'"),
     "accounts[kind=lif].lira.reference_rate": ("simulation_state.py", "'reference_rate': lira_cfg.get('reference_rate'"),
     "accounts[kind=resp].resp.contributions_total": ("contract_accounts.py", "total_contrib = sum(a[\"resp\"][\"contributions_total\"] for a in resp_accounts)"),
-    "accounts[kind=resp].resp.cesg_received": ("contract_accounts.py", "total_cesg = sum(a[\"resp\"][\"cesg_received\"] for a in resp_accounts)"),
+    "accounts[kind=resp].resp.cesg_received": ("contract_accounts.py", "total_cesg = sum(a[\"resp\"][\"cesg_received\"] + a[\"resp\"][\"clb_received\"]"),
+    # Issue #295: CLB is a grant -- folded into resp_composition's grant bucket
+    # (priced as a taxable EAP / repaid on collapse), no longer misclassified
+    # as investment earnings. Checked against the beneficiaries at load.
+    "accounts[kind=resp].resp.clb_received": ("contract_accounts.py", "total_cesg = sum(a[\"resp\"][\"cesg_received\"] + a[\"resp\"][\"clb_received\"]"),
+    # Issue #295: each beneficiary's own history. `person` joins the history
+    # to the child (refusing a duplicate or a non-child); every figure seeds
+    # the engine's RESPChild through the one shared constructor, and CLB
+    # (a grant, not in the CESG lifetime counter) reaches the fold through
+    # the per-child opening grant bucket.
+    "accounts[kind=resp].resp.beneficiaries[].person": ("contract_accounts.py", "if pid not in admitted:"),
+    "accounts[kind=resp].resp.beneficiaries[].contributions_total": ("countries/canada/resp_rules.py", "contributions_total=history['contributions_total']"),
+    "accounts[kind=resp].resp.beneficiaries[].contributions_before_age_15": ("countries/canada/resp_rules.py", "contributions_before_age_15=history['contributions_before_age_15']"),
+    "accounts[kind=resp].resp.beneficiaries[].years_with_100_before_age_15": ("countries/canada/resp_rules.py", "years_with_100_before_age_15=history['years_with_100_before_age_15']"),
+    "accounts[kind=resp].resp.beneficiaries[].cesg_basic_received": ("countries/canada/resp_rules.py", "cesg_basic_received=history['cesg_basic_received']"),
+    "accounts[kind=resp].resp.beneficiaries[].cesg_additional_received": ("countries/canada/resp_rules.py", "cesg_additional_received=history['cesg_additional_received']"),
+    "accounts[kind=resp].resp.beneficiaries[].qesi_received": ("countries/canada/resp_rules.py", "qesi_received=history['qesi_received']"),
+    "accounts[kind=resp].resp.beneficiaries[].clb_received": ("simulation_state.py", "grants = [o['grants'] for o in openings]"),
     "accounts[kind=resp].resp.qesi_received": ("contract_accounts.py", "total_qesi = sum(a[\"resp\"][\"qesi_received\"] for a in resp_accounts)"),
     "accounts[kind=lsif].lsif.purchase_date": ("countries/canada/lsif_credit.py", "lsif.get(\"purchase_year\")"),
     "accounts[kind=lsif].lsif.purchase_province": ("countries/canada/lsif_credit.py", "is_quebec_resident=lsif.get(\"is_quebec_resident\""),

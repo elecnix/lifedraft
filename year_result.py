@@ -57,6 +57,18 @@ class YearResult:
     resp_eap_paid: float = 0.0
     resp_pse_paid: float = 0.0
     resp_aip_tax: float = 0.0
+    # Issue #295: this year's RESP flows PER CHILD, in config.children order --
+    # the contribution actually credited to each child, the CESG and QESI paid
+    # on it, and each child's lifetime contributions after this year (never
+    # above the $50,000 limit). resp_contribution_redirected is the part of
+    # the RESP allocation the lifetime limit refused; it was moved to the
+    # non-registered account (contributions['non_reg']), not dropped. Empty
+    # tuples / 0.0 for a household with no children.
+    resp_contributions_paid: tuple = ()
+    resp_cesg_paid: tuple = ()
+    resp_qesi_paid: tuple = ()
+    resp_lifetime_contributions: tuple = ()
+    resp_contribution_redirected: float = 0.0
 
     # Debt
     mortgage_balance: float = 0.0
