@@ -2,8 +2,8 @@
   "engine_entry": "input_contract.load_and_map -> SimulationConfig.from_dict -> FamilySimulation(config, adapter=CanadaAdapter(config)).run()",
   "mode": "simulate",
   "projection": {
-    "full_report_bytes": 332789,
-    "full_report_digest": "sha256:86d623b5ca7838047954cc83578ae95b9c2b1c9f96dbf5b83af4814e4422a952",
+    "full_report_bytes": 336726,
+    "full_report_digest": "sha256:2f7fbd0cdf244c1a1e17220424e5debaca3dd4ecd520b9930c4635ea18366b99",
     "function": "tools/examples.py::project_simulation",
     "series_columns": [
       "year",
@@ -1248,6 +1248,7 @@
     "rrsp_contribution_refused_own": 0,
     "rrsp_contribution_refused_spousal": 0.0,
     "rrsp_contribution_refused_spouse_own": 0,
+    "rrsp_deduction_carried_forward": 0.0,
     "rrsp_tax_savings": 0.0,
     "ruined": false,
     "sale_disposition_tax": 0.0,
