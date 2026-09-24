@@ -1199,12 +1199,13 @@ register(Approximation(
 # claims only the useful slice (bracket-fill, down to the lowest taxed income)
 # and CARRIES the rest forward (ITA s.146(5), Schedule 7). The carried amount
 # is deducted in a later year against that year's taxable income -- a
-# projection, valued at a projected rate. And the deduction base is the
-# contributor's PROLOGUE taxable income (employment + rental/loan income -
-# interest - CCA); retirement drawdown income is taxed by the drawdown rule,
-# outside that base, so a deduction still carried when the contributor
-# retires is never claimed in the model. Both are runtime facts, recorded by
-# the optimize caller onto assumptions.rrsp_deduction_carried_forward.
+# projection, valued at a projected rate. The deduction base is the
+# contributor's prologue taxable income (employment + rental/loan income -
+# interest - CCA) plus, once retired, their CPP/pension/OAS and forced RRIF
+# minimum; the DISCRETIONARY drawdown is sized later in the fold and is
+# outside it, so a carry can outlast a retiree whose only taxable income is
+# that drawdown. Both are runtime facts, recorded by the optimize caller onto
+# assumptions.rrsp_deduction_carried_forward.
 
 def rrsp_carry_forward_summary(cfg: dict) -> Dict:
     """The run-recorded RRSP deduction carry-forward summary (written by the
@@ -1235,8 +1236,9 @@ def _describe_rrsp_carry_forward(ctx: FidelityContext) -> List[str]:
     if s['carried_at_horizon_end'] > 0:
         parts.append(
             f"${s['carried_at_horizon_end']:,.0f} was still undeducted at the "
-            f"end of the horizon -- the model never claimed it (retirement "
-            f"drawdown income is outside the deduction base)")
+            f"end of the horizon -- the model never claimed it (the "
+            f"discretionary retirement drawdown is outside the deduction "
+            f"base)")
     return parts
 
 
@@ -1256,10 +1258,11 @@ register(Approximation(
             "rrsp_deduction_carried_forward). The later claim is valued at "
             "that later year's projected taxable income, which may be higher "
             "or lower than the contribution year's. The deduction base is the "
-            "prologue's taxable income; retirement drawdown/CPP/OAS income is "
-            "taxed by the drawdown rule outside it, so a carry still "
-            "outstanding at retirement is never claimed (understating the "
-            "refund). Net sign UNKNOWN."),
+            "prologue's taxable income plus, for a retired contributor, their "
+            "CPP/pension/OAS and forced RRIF minimum; the discretionary "
+            "drawdown is sized later in the fold and is outside it, so a "
+            "carry can remain unclaimed for a retiree living on that drawdown "
+            "(understating the refund). Net sign UNKNOWN."),
     issue='#286',
     applies=_has_rrsp_carry_forward,
     findings=_describe_rrsp_carry_forward,

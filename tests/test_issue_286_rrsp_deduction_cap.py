@@ -412,3 +412,132 @@ def test_refund_capped_at_taxable_income_with_interest_deduction():
     assert abs(r0.rrsp_tax_savings - tax_on_income(taxable, B)) < 1e-3
     assert r0.rrsp_tax_savings < tax_on_income(20_000, B)
     assert abs(r0.rrsp_deduction_carried_forward - (30_000 - taxable)) < 1e-3
+
+
+# ── Validator finding 2: no sub-cent phantom carry-forward ──────────────────
+
+# Two non-round amounts whose float sum does not reproduce exactly:
+# (a + b) - a < b by ~9e-13. Walking a float remainder down entry by entry
+# used to split a ~1e-12 "undeducted" stub off the last entry.
+_DRIFT_A, _DRIFT_B = 6_212.74, 7_309.79
+
+
+def test_float_drift_leaves_no_phantom_carry_forward():
+    """Engine-driven: several years of non-round primary + spousal
+    contributions, all well inside the useful deduction. Every year's
+    carried-forward figure is EXACTLY zero, no undeducted entry survives, and
+    the disclosure stays all-clear -- the ledger never splits off a sub-cent
+    stub for the caveat to report."""
+    assert (_DRIFT_A + _DRIFT_B) - _DRIFT_A < _DRIFT_B  # the premise
+    cfg = _config()
+    state = SimState.initial(cfg)
+    results = []
+    for y in range(6):
+        r, state = _step(state, y, cfg, own=_DRIFT_A, spousal=_DRIFT_B)
+        results.append(r)
+        assert r.rrsp_deduction_carried_forward == 0.0, y
+        assert state.jurisdiction_state['canada'][
+            'rrsp_deduction_carry_forward'] == 0.0, y
+    assert [e for e in _ledger(state) if not e['deducted']] == []
+    assert summarize_rrsp_deduction_carry_forward(results)['engaged'] is False
+    # Every contributed dollar was claimed -- nothing lost to the fix.
+    claimed = sum(e['amount'] for e in _ledger(state) if e['deducted'])
+    assert abs(claimed - 6 * (_DRIFT_A + _DRIFT_B)) < TOL
+
+
+def test_partial_claim_does_not_leave_a_float_stub():
+    """UNIT test of the pure ledger method: a cap that falls a float-residue
+    short of the undeducted total claims every entry whole (no micro-stub),
+    while a cap genuinely below the total still splits and carries."""
+    from rrsp_ledger import SPLIT_EPSILON
+
+    def ledger():
+        led = RRSPListLedger()
+        led.add_contribution(year=0, amount=_DRIFT_A, role='primary')
+        led.add_contribution(year=0, amount=_DRIFT_B, role='spousal')
+        return led
+
+    total = _DRIFT_A + _DRIFT_B
+    near = ledger().claim_useful_deductions(
+        0, FLOOR + total - SPLIT_EPSILON / 10, B, ('primary', 'spousal'))
+    assert near['carried_forward'] == 0.0
+
+    led = ledger()
+    real = led.claim_useful_deductions(0, FLOOR + total - 1.0, B,
+                                       ('primary', 'spousal'))
+    assert abs(real['carried_forward'] - 1.0) < TOL
+    assert abs(led.total_deducted() + led.undeducted_total() - total) < TOL
+
+    # A cap exhausted exactly at an entry boundary stops there: the later
+    # entry is carried whole, never touched by a zero-dollar claim.
+    led = ledger()
+    exact = led.claim_useful_deductions(0, FLOOR + _DRIFT_A, B,
+                                        ('primary', 'spousal'))
+    assert [c['amount'] for c in exact['claims']] == [_DRIFT_A]
+    assert exact['carried_forward'] == _DRIFT_B
+
+
+# ── Validator finding 3: a carry open at retirement is claimed later ───────
+
+@pytest.mark.parametrize('role', ['primary', 'spouse'])
+def test_carry_open_at_retirement_is_claimed_against_retirement_income(role):
+    """Engine-driven through FamilySimulation.run: the contributor earns
+    $50,000, contributes $100,000 in year 0 (the useful deduction is $50,000,
+    so $50,000 is carried), then retires in year 1 on a $60,000 pension. The
+    prologue zeroes a retiree's employment income; the carried $50,000 must
+    still be claimed -- against the pension -- in year 1, not sit undeducted
+    for the rest of the horizon."""
+    from countries.canada.adapter import CanadaAdapter
+    from simulation import FamilySimulation
+    from strategy import AllocationResult
+
+    contributor = {'birth_year': 1966, 'retirement_age': 61,
+                   'gross_income': 50_000, 'pension_income_annual': 60_000,
+                   'rrsp_room_accumulated': 100_000,
+                   'tfsa_room_accumulated': 0}
+    other = {'birth_year': 1980, 'gross_income': 0,
+             'rrsp_room_accumulated': 0, 'tfsa_room_accumulated': 0}
+    members = [{'role': 'primary', 'id': 'p1',
+                **(contributor if role == 'primary' else other)},
+               {'role': 'spouse', 'id': 'p2',
+                **(contributor if role == 'spouse' else other)}]
+    cfg = SimulationConfig(
+        projection_years=3, house_value=0, mortgage_balance=0,
+        mortgage_rate=0.0, amortization_years=25, margin_available=0,
+        savings_rate=0.0, living_costs=0, start_year=2026,
+        province='quebec', investment_return=0.0, salary_growth=0.0,
+        family_members=members, children=[])
+    lump = (AllocationResult(primary_rrsp=100_000.0) if role == 'primary'
+            else AllocationResult(spouse_rrsp=100_000.0))
+    calls = []
+
+    def allocate(*args, **kwargs):
+        calls.append(1)
+        return lump if len(calls) == 1 else AllocationResult()
+
+    with mock.patch('strategy.StrategyEngine.allocate', side_effect=allocate):
+        results = FamilySimulation(cfg, adapter=CanadaAdapter(cfg),
+                                   deduct_later=False).run()
+
+    r0, r1 = results[0], results[1]
+    assert abs(r0.rrsp_deduction_carried_forward - 50_000) < 1e-3
+    assert r0.rrsp_tax_savings > 0
+    # Year 1: retired (no employment income), the carry is claimed against
+    # the pension -- the whole $50,000 fits under $60,000 of pension income.
+    assert r1.employment_income == 0.0
+    assert r1.rrsp_tax_savings > 0
+    assert r1.rrsp_deduction_carried_forward == 0.0
+    assert summarize_rrsp_deduction_carry_forward(results)[
+        'carried_at_horizon_end'] == 0.0
+
+
+# ── Coverage of the disclosure's defensive paths ────────────────────────────
+
+def test_carry_forward_findings_empty_when_not_engaged():
+    from model_fidelity import FidelityContext, _describe_rrsp_carry_forward
+    assert _describe_rrsp_carry_forward(FidelityContext(cfg={})) == []
+    clear = {'engaged': False, 'first_carried_year': None,
+             'first_carried_amount': 0.0, 'max_carried_forward': 0.0,
+             'carried_at_horizon_end': 0.0}
+    assert _describe_rrsp_carry_forward(FidelityContext(cfg={
+        'assumptions': {'rrsp_deduction_carried_forward': clear}})) == []

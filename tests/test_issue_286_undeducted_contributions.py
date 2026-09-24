@@ -231,3 +231,62 @@ def test_seeding_moves_no_money(tmp_path):
     # would be vacuous).
     assert (sum(r.rrsp_tax_savings for r in declared)
             > sum(r.rrsp_tax_savings for r in absent))
+
+
+def test_negative_undeducted_is_refused_by_the_engine():
+    """A negative carried-forward deduction is not a fact any NOA states;
+    SimState.initial refuses it rather than seeding a negative entry."""
+    cfg = SimulationConfig(
+        projection_years=1, house_value=0, mortgage_balance=0,
+        mortgage_rate=0.0, amortization_years=25, margin_available=0,
+        savings_rate=0.0, start_year=2026, province='quebec',
+        investment_return=0.0, salary_growth=0.0, children=[],
+        family_members=[
+            {'role': 'primary', 'birth_year': 1980, 'gross_income': 100_000,
+             'rrsp_undeducted_contributions': -1_000},
+        ])
+    with pytest.raises(ValueError, match="negative"):
+        SimState.initial(cfg)
+
+
+def test_extra_adult_contract_leaf_refused():
+    """A contract whose additional accumulating adult declares
+    room.rrsp.undeducted_contributions is refused at the contract boundary
+    (map_members), never mapped and silently dropped."""
+    from test_issue_899_nadult_accumulators import _add_accumulator_adult
+
+    doc = _add_accumulator_adult(_doc())
+    for p in doc["people"]:
+        if p["id"] == "ac":
+            p["room"]["rrsp"]["undeducted_contributions"] = 2_000
+    contract_schema.validate_contract(doc)
+    with pytest.raises(ContractAdaptationError,
+                       match="additional accumulating adult"):
+        input_contract.to_internal_config(doc)
+
+
+def test_undeclared_caveat_tolerates_a_non_dict_cfg():
+    """The caveat predicate reads the internal config defensively: a cfg
+    that is not a mapping names no member (and does not crash, which would
+    make is_active fail open and report a caveat nobody triggered)."""
+    from model_fidelity import _has_undeclared_undeducted
+    assert _has_undeclared_undeducted(FidelityContext(cfg=['not', 'a', 'dict'])) is False
+    assert _has_undeclared_undeducted(FidelityContext(cfg={'family': 'x'})) is False
+
+
+def test_text_report_all_clear_vs_undeclared_rrsp_room():
+    """The TXT/console fidelity section: a config with no RRSP room renders
+    the all-clear line; the same config with a member declaring RRSP room but
+    no undeducted contributions names the #286 caveat instead. (A config that
+    used to render all-clear now names this caveat whenever RRSP room is
+    declared without the NOA's undeducted figure -- that is the disclosure.)"""
+    import model_fidelity
+    base = {'assumptions': {'dollar_basis': 'nominal'}}
+    clear = "\n".join(model_fidelity.render_text(base, 'min_shortfall'))
+    assert "No registered approximations are active" in clear
+
+    with_room = dict(base, family={'members': [
+        {'role': 'primary', 'rrsp_room_accumulated': 10_000}]})
+    text = "\n".join(model_fidelity.render_text(with_room, 'min_shortfall'))
+    assert "No registered approximations are active" not in text
+    assert "#286" in text and "room.rrsp.undeducted_contributions" in text

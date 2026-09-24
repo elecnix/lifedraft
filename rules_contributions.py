@@ -121,6 +121,37 @@ def _has_undeducted(ledger, roles: tuple) -> bool:
     return any(not e['deducted'] and e['role'] in roles for e in ledger)
 
 
+def _deduction_base(ws: YearWorkingState, ctx: RuleContext, role: str) -> float:
+    """The taxable income ``role``'s RRSP deduction is valued and capped
+    against this year (issue #286).
+
+    The prologue's taxable income (employment + rental/loan income -
+    s.20(1)(c) interest - CCA), read by indexing so a caller that omits it
+    fails with ``KeyError`` (DP#32) -- PLUS, once the member is retired, the
+    retirement income the ``retirement_income`` rule (which runs first) has
+    already determined for them: their own CPP + pension + OAS (the
+    OAS-inclusive ``drawdown_bracket_fill_base_*``) and their FORCED RRIF
+    minimum (opening RRSP balance x the age factor). The prologue zeroes a
+    retiree's employment income, so without this a deduction still carried at
+    retirement -- or a spousal-RRSP contribution made after it -- would never
+    be claimed, contradicting ITA s.146(5)'s carry-forward. The discretionary
+    drawdown is sized later in the fold and is NOT in this base, so the
+    deduction is valued against a floor of the retiree's taxable income (an
+    understatement, never an over-refund).
+    """
+    base = ctx.allocations[f'_{role}_taxable_income']
+    if ws.any_retired:
+        if role == 'primary':
+            base += (ws.drawdown_bracket_fill_base_primary
+                     + ws.opening_rrsp_balance * ws.rrif_min_rate_primary)
+        else:
+            base += (ws.drawdown_bracket_fill_base_spouse
+                     + (ws.opening_spouse_rrsp_balance
+                        + ws.opening_spousal_rrsp_balance)
+                     * ws.rrif_min_rate_spouse)
+    return base
+
+
 @rule('rrsp_deduction')
 def apply_rrsp_deduction(ws: YearWorkingState, ctx: RuleContext) -> bool:
     """Deduct-now or deduct-later (issue #546: bracket-fill staggering).
@@ -137,8 +168,11 @@ def apply_rrsp_deduction(ws: YearWorkingState, ctx: RuleContext) -> bool:
     reduces tax. The excess stays undeducted in the ledger and is claimed in
     later years (``rrsp_deduction_carried_forward``). The base is the TAXABLE
     income the prologue taxed (employment + rental/loan income - s.20(1)(c)
-    interest - CCA), so the refund can never exceed the pre-credit tax it
-    reduces. The base is read by indexing, and only when that role has
+    interest - CCA) plus, for a retired member, the CPP/pension/OAS and forced
+    RRIF minimum already known this year (``_deduction_base``), so a carry
+    still open at retirement is claimed against retirement income and the
+    refund can never exceed the pre-credit tax it reduces. The base is read
+    by indexing, and only when that role has
     something to deduct: a caller that omits it gets a ``KeyError``, never a
     deduction silently valued at $0 (DP#32).
     """
@@ -159,14 +193,14 @@ def apply_rrsp_deduction(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # the spouse's tax, on both paths.
     if _has_undeducted(ws.new_ledger, spouse_roles):
         s = ws.new_ledger.claim_useful_deductions(
-            year=ws.year, income=ctx.allocations['_spouse_taxable_income'],
+            year=ws.year, income=_deduction_base(ws, ctx, 'spouse'),
             brackets=brackets, roles=spouse_roles)
         spouse_deduction_savings = s['savings']
         deduction_claims += s['claims']
         carried_forward += s['carried_forward']
 
     if _has_undeducted(ws.new_ledger, primary_roles):
-        primary_income_this_year = ctx.allocations['_primary_taxable_income']
+        primary_income_this_year = _deduction_base(ws, ctx, 'primary')
         if not ctx.deduct_later:
             p = ws.new_ledger.claim_useful_deductions(
                 year=ws.year, income=primary_income_this_year,

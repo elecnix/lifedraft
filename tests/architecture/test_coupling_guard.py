@@ -169,14 +169,20 @@ def test_ws_field_inventory(inventory: _Inventory):
 def test_seam_inventory(inventory: _Inventory):
     """A *seam* is a (producer_rule, consumer_rule) pair where the producer
     is the LATEST writer of a field that precedes a PURE consumer (a reader
-    that does not also write the field).  52 such pairs exist today; the
+    that does not also write the field).  53 such pairs exist today; the
     count is pinned so adding or removing a seam is a deliberate, reviewed
     change rather than a silent drift.
 
     (#286 removed two: ``rrsp_deduction`` and ``rrsp_refund_heloc_paydown``
     no longer read the ``contributions`` rule's ``*_rrsp_actual`` amounts --
     the refund is the ledger's capped claim, one source, not a second
-    ``contribution x marginal rate`` product computed from those amounts.)
+    ``contribution x marginal rate`` product computed from those amounts.
+    It then added one: ``retirement_income`` -> ``rrsp_deduction``. A
+    retired contributor's deduction base includes the CPP/pension/OAS and
+    forced RRIF minimum that ``retirement_income`` (first in RULE_ORDER)
+    writes, so a deduction carried at retirement is claimed against
+    retirement income instead of sitting undeducted for the rest of the
+    horizon.)
 
     (The feasibility brief estimated "52"; the difference is methodology --
     the brief's ad-hoc prototype did not resolve two same-file helper
@@ -196,8 +202,8 @@ def test_seam_inventory(inventory: _Inventory):
             if preceding:
                 seam_pairs.add((preceding[-1], consumer))
 
-    assert len(seam_pairs) == 52, (
-        f"expected 52 producer-consumer rule pairs, got {len(seam_pairs)} -- "
+    assert len(seam_pairs) == 53, (
+        f"expected 53 producer-consumer rule pairs, got {len(seam_pairs)} -- "
         f"a rule was added/removed/reordered. Review the change."
     )
 

@@ -40,6 +40,15 @@ def current_bracket_floor(income: float, brackets: list) -> float:
     return brackets[-1]['min']
 
 
+# Issue #286: the largest remainder (in dollars) a claim treats as float
+# noise rather than money. Summing and subtracting non-round contribution
+# amounts leaves residues around 1e-13; splitting one off as an "undeducted"
+# entry would report a phantom carry-forward. A micro-dollar is far below any
+# amount a return reports (cents) and far above float residue at these
+# magnitudes.
+SPLIT_EPSILON = 1e-6
+
+
 class RRSPListLedger:
     """Plain-list RRSP ledger wrapper (jurisdiction-agnostic, DP#25).
 
@@ -128,17 +137,30 @@ class RRSPListLedger:
 
         already = self._claimed_in_year(year, roles)
         running_income = income - already
-        remaining = min(self._undeducted_for(roles),
-                        max(0.0, running_income - floor))
+        cap = max(0.0, running_income - floor)
+        # When the cap covers everything ``roles`` still has undeducted, every
+        # entry is claimed WHOLE. Walking a float ``remaining`` down entry by
+        # entry would drift below the last entry's amount (the float sum does
+        # not reproduce exactly) and split off a sub-cent undeducted stub --
+        # a phantom carry-forward the disclosure would then report.
+        claim_all = cap >= self._undeducted_for(roles)
+        remaining = cap
         amount_claimed = 0.0
         total_savings = 0.0
         claims = []
         for entry in list(self._entries):
-            if remaining <= 0:
-                break
             if entry['deducted'] or entry['role'] not in roles:
                 continue
-            claim_from = min(remaining, entry['amount'])
+            if claim_all:
+                claim_from = entry['amount']
+            else:
+                if remaining <= SPLIT_EPSILON:
+                    break
+                claim_from = min(remaining, entry['amount'])
+                # A remainder below SPLIT_EPSILON is float noise, not an
+                # undeducted contribution: claim the entry whole.
+                if entry['amount'] - claim_from <= SPLIT_EPSILON:
+                    claim_from = entry['amount']
             slice_savings = deduction_value(running_income, claim_from, brackets)
             slice_rate = slice_savings / claim_from if claim_from else 0.0
             total_savings += slice_savings
