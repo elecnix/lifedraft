@@ -47,7 +47,11 @@ Issues = "https://github.com/elecnix/lifedraft/issues"
 # CPython 3.12's `sys.monitoring` backend (COVERAGE_CORE=sysmon). That is what
 # makes the coverage gate affordable on the single self-hosted runner -- the
 # stock C tracer costs materially more. See tools/README.md.
-dev = ["pytest>=7.0", "pytest-cov>=5.0", "pytest-xdist", "pandas>=2.0", "numpy>=1.24", "jsonschema>=4.18", "scipy>=1.10"]
+# pytest-timeout (#292) bounds the tests that would hang forever if a process
+# pool's liveness bound regressed (@pytest.mark.timeout). It is not optional:
+# with filterwarnings = ["error"], a missing plugin turns every such marker into
+# a collection error -- loud -- rather than a silently unbounded test.
+dev = ["pytest>=7.0", "pytest-cov>=5.0", "pytest-xdist", "pytest-timeout>=2.1", "pandas>=2.0", "numpy>=1.24", "jsonschema>=4.18", "scipy>=1.10"]
 # scipy is a declared DEV dependency (not a runtime one -- scipy_optimizer.py
 # imports it lazily and falls back to grid search when it is absent, issue #765)
 # so CI DETERMINISTICALLY installs it: the scipy_optimizer `minimize` path
@@ -85,7 +89,7 @@ py-modules = [
     "make_retirement_input", "member_config", "model_fidelity", "module_registry",
     "money", "monte_carlo_optimizer", "net_benefit_legs", "next_action",
     "objective", "optimize",
-    "optimizer", "output_paths", "output_plugins", "property_structure",
+    "optimizer", "output_paths", "output_plugins", "process_pool", "property_structure",
     "provenance",
     "retirement_analysis", "return_model", "risk_allocation",
     "rrsp_ledger", "runway", "scenario_discovery",

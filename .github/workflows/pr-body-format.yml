@@ -75,4 +75,4 @@ jobs:
 
       # Pinned by commit SHA (repo convention) — the tag's SHA as reported by
       # `gh api repos/elecnix/gh-pr-body-action/git/ref/tags/v1`.
-      - uses: elecnix/gh-pr-body-action@c9332cad71df85f44555ff198845f94b2d2fd2fa  # v1
+      - uses: elecnix/gh-pr-body-action@08c74dc0736abe295e90d6363abd55cf7ea63ef3  # v1.2.1

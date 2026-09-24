@@ -92,10 +92,9 @@ import model_fidelity
 from datetime import date as _date
 
 import os
-import atexit
 import collections
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
+
+import process_pool
 
 
 # ── Scenario-sweep parallelism (perf) ────────────────────────────────────────
@@ -103,24 +102,34 @@ from concurrent.futures import ProcessPoolExecutor
 # (refinance option x mortgage structure x income scenario) cell -- as an
 # INDEPENDENT pure fold (DP#26: ``simulate_year_pure`` reads nothing off
 # ``self``), so the outer sweeps that loop ``run_optimization`` are
-# embarrassingly parallel. We dispatch each whole ``run_optimization`` scenario
-# to a persistent process pool and collect the results IN INPUT ORDER
-# (``pool.map`` preserves order), so the subsequent deterministic sort produces
-# byte-identical output to the serial version regardless of which worker
-# finished first. Returns are deterministic (``FixedReturn``), so every
-# scenario's fold is reproducible in any worker; parallelism never changes a
-# scenario's math. A scenario runs its own (small) strategy loop SERIALLY
-# inside its worker, so there is never a nested pool.
+# embarrassingly parallel. Each whole ``run_optimization`` scenario is
+# dispatched through ``process_pool.map_ordered`` -- the ONE pool helper, shared
+# with voi.py (#292) -- which collects the results IN INPUT ORDER, so the
+# subsequent deterministic sort produces byte-identical output to the serial
+# version regardless of which worker finished first. Returns are deterministic
+# (``FixedReturn``), so every scenario's fold is reproducible in any worker;
+# parallelism never changes a scenario's math. A scenario runs its own (small)
+# strategy loop SERIALLY inside its worker, so there is never a nested pool.
+#
+# Workers use the ``forkserver`` start method (``process_pool.START_METHOD``),
+# never an implicit ``fork``: a worker re-imports this module rather than
+# inheriting the parent's memory. Every payload carries a ``label`` naming its
+# scenario, so a task that exceeds ``OPTIMIZE_TASK_TIMEOUT`` seconds (default
+# 3600) fails loudly with ``process_pool.PoolStallError`` naming it, instead of
+# hanging the run.
 #
 # Worker count resolution (highest priority first):
 #   1. an explicit ``set_workers(n)`` call (the CLI ``--workers`` flag);
 #   2. the ``OPTIMIZE_WORKERS`` environment variable;
-#   3. a sensible default of ``(os.cpu_count() or 2) - 1`` (leave one core free).
+#   3. the CPUs THIS process may use (``process_pool.available_cpus()``: the
+#      affinity mask, not the machine) minus one; serial when undeterminable.
+# Each run sizes its own pool, with no knowledge of other runs: when several
+# optimize.py / voi.py jobs run at once, set ``OPTIMIZE_WORKERS`` / ``--workers``
+# so that runs x workers stays within the available CPUs (README).
 # A resolved count of ``1`` (or a single-scenario sweep) takes the SERIAL path
 # — no pool, no pickling — so ``--workers 1`` is provably identical to the
 # pre-parallel code path.
 _WORKERS: Optional[int] = None
-_POOL: Optional[ProcessPoolExecutor] = None
 
 # Sentinel wrapping a scenario that ``run_optimization`` REFUSED with one of the
 # two typed, EXPECTED infeasibilities (over the shared charge; a cash-out with
@@ -160,60 +169,35 @@ RISK_ENSEMBLE_PATHS = _risk_paths_from_env(os.environ.get('RISK_ENSEMBLE_PATHS')
 def _resolve_workers() -> int:
     """The effective worker count, resolved once and cached.
 
-    An explicit ``set_workers`` wins; else ``OPTIMIZE_WORKERS``; else a default
-    that leaves one core free. Always at least 1 (serial)."""
+    An explicit ``set_workers`` wins; else ``OPTIMIZE_WORKERS``; else the CPUs
+    this process may use minus one. Always at least 1 (serial)."""
     global _WORKERS
     if _WORKERS is None:
         env = os.environ.get('OPTIMIZE_WORKERS')
         if env is not None and env.strip() != '':
             _WORKERS = max(1, int(env))
         else:
-            # DP#32: os.cpu_count() may return None (undeterminable) -- an
-            # explicit None-check, never `... or 2`, which would also swallow a
-            # legitimate count. Leave one core free for the parent/OS.
-            cpus = os.cpu_count()
-            cpus = cpus if cpus is not None else 2
-            _WORKERS = max(1, cpus - 1)
+            # DP#32 (#292): the count honours the affinity mask (taskset, a
+            # container's cpuset), not the machine's core count. An
+            # undeterminable count is an explicit None-check -> serial, never
+            # `... or N`, which would invent a width nobody measured.
+            cpus = process_pool.available_cpus()
+            _WORKERS = 1 if cpus is None else max(1, cpus - 1)
     return _WORKERS
 
 
 def set_workers(n: int) -> None:
     """Override the scenario-sweep worker count (CLI ``--workers``).
 
-    ``n <= 1`` forces the serial path. Any already-running pool sized to a
-    different count is shut down so the next sweep rebuilds it at the new size."""
-    global _WORKERS, _POOL
+    ``n <= 1`` forces the serial path. Changing the count shuts the live pool
+    down, so its idle workers do not linger at the old width (the next parallel
+    sweep builds one at the new width; ``process_pool.get_pool`` never lets two
+    pools coexist either way)."""
+    global _WORKERS
     resolved = max(1, int(n))
-    if resolved != _WORKERS and _POOL is not None:
-        _POOL.shutdown()
-        _POOL = None
+    if resolved != _WORKERS:
+        process_pool.shutdown_pool()
     _WORKERS = resolved
-
-
-def _in_worker() -> bool:
-    """True when running inside a pool worker (belt-and-braces: a scenario's
-    own strategy loop must never try to open a second, nested pool)."""
-    return multiprocessing.parent_process() is not None
-
-
-def _get_pool() -> ProcessPoolExecutor:
-    """The lazily-created persistent worker pool, sized to ``_resolve_workers``.
-
-    Created on the first parallel sweep and reused across every subsequent
-    sweep, so workers (and their inherited tax_data memo, via copy-on-write on
-    fork) are paid for once, not per sweep."""
-    global _POOL
-    if _POOL is None:
-        _POOL = ProcessPoolExecutor(max_workers=_resolve_workers())
-        atexit.register(_shutdown_pool)
-    return _POOL
-
-
-def _shutdown_pool() -> None:
-    global _POOL
-    if _POOL is not None:
-        _POOL.shutdown()
-        _POOL = None
 
 
 def _run_scenario_task(payload: Dict):
@@ -239,15 +223,22 @@ def _map_scenarios(payloads: List[Dict]) -> List:
 
     Serial (no pool, no pickling) when the resolved worker count is 1, the
     sweep has a single scenario, or we are already inside a worker; otherwise
-    dispatched across the persistent pool via ``pool.map``, which preserves
-    input order. Order preservation is what lets each caller's deterministic
-    sort reproduce the serial ranking exactly (the hard requirement:
-    byte-identical ``--json`` output)."""
+    dispatched across the persistent pool via ``process_pool.map_ordered``,
+    which preserves input order. Order preservation is what lets each caller's
+    deterministic sort reproduce the serial ranking exactly (the hard
+    requirement: byte-identical ``--json`` output).
+
+    Every payload must carry a ``label`` (a KeyError otherwise, never a
+    default): it is how a stalled task is named in ``PoolStallError``."""
     if not payloads:
         return []
-    if _resolve_workers() <= 1 or len(payloads) == 1 or _in_worker():
+    if _resolve_workers() <= 1 or len(payloads) == 1 or process_pool.in_worker():
         return [_run_scenario_task(p) for p in payloads]
-    return list(_get_pool().map(_run_scenario_task, payloads))
+    return process_pool.map_ordered(
+        _run_scenario_task, payloads, [p['label'] for p in payloads],
+        width=_resolve_workers(),
+        task_timeout_s=process_pool.task_timeout_from_env(
+            os.environ.get('OPTIMIZE_TASK_TIMEOUT')))
 
 
 class ObjectiveSelectionError(ValueError):
@@ -782,6 +773,8 @@ def _sweep_ltv(cfg: Dict, input_path: str = "input.json",
         # cash-out → mortgage debt, proceeds invested, margin not inflated.
         overlay = _candidate_overlay(cfg, candidate)
         scenarios.append((candidate, overlay, {
+            # #292: names this task in a PoolStallError (distinct per sweep).
+            'label': f"ltv #{len(scenarios)} candidate {candidate['id']}",
             'kwargs': dict(cfg=cfg, input_path=input_path, objective=objective,
                            overlay=overlay),
             # Issue #891: a DECLARED candidate whose cash-out breaches the 80%
@@ -1016,9 +1009,10 @@ def _sweep_income_scenario(cfg: Dict, input_path: str = "input.json",
     for inc in income_scenarios:
         cfg_variant = _apply_income_scenario(cfg, inc)
         overlay = _scenario_overlay(cfg_variant, ltv_max, label=f"LTV {ltv_max:.0%}")
-        scenarios.append((inc, overlay, {'kwargs': dict(
-            cfg=cfg_variant, input_path=input_path, objective=objective,
-            overlay=overlay)}))
+        scenarios.append((inc, overlay, {
+            'label': f"income_scenario #{len(scenarios)} {inc['id']}",
+            'kwargs': dict(cfg=cfg_variant, input_path=input_path,
+                           objective=objective, overlay=overlay)}))
 
     all_results: List[Dict] = []
     for (inc, overlay, _payload), results in zip(
@@ -1621,9 +1615,12 @@ def _sweep_mortgage_structure(cfg: Dict, input_path: str = "input.json",
             draw_fraction_options = _discover_draw_fraction_options(cfg_structure)
         for inc in income_scenarios:
             cfg_variant = _apply_income_scenario(cfg_structure, inc)
-            scenarios.append((basis, structure, inc, {'kwargs': dict(
-                cfg=cfg_variant, input_path=input_path, objective=objective,
-                draw_fraction_options=draw_fraction_options)}))
+            scenarios.append((basis, structure, inc, {
+                'label': (f"mortgage_structure #{len(scenarios)} basis {basis['id']}"
+                          f" x structure {structure['id']} x income {inc['id']}"),
+                'kwargs': dict(cfg=cfg_variant, input_path=input_path,
+                               objective=objective,
+                               draw_fraction_options=draw_fraction_options)}))
 
     all_results: List[Dict] = []
     for (basis, structure, inc, _payload), results in zip(
@@ -1734,8 +1731,11 @@ def _sweep_property_funding(cfg: Dict, input_path: str = "input.json",
         cfg_funded = _apply_property_funding_scenario(cfg, cell['assignment'])
         for inc in income_scenarios:
             cfg_variant = _apply_income_scenario(cfg_funded, inc)
-            scenarios.append((cell, inc, {'kwargs': dict(
-                cfg=cfg_variant, input_path=input_path, objective=objective)}))
+            scenarios.append((cell, inc, {
+                'label': (f"property_funding #{len(scenarios)} {cell['id']}"
+                          f" x income {inc['id']}"),
+                'kwargs': dict(cfg=cfg_variant, input_path=input_path,
+                               objective=objective)}))
 
     all_results: List[Dict] = []
     for (cell, inc, _payload), results in zip(
@@ -1921,9 +1921,12 @@ def _sweep_borrow_to_invest(cfg: Dict, input_path: str = "input.json",
             # actually reads; DP#32: absence is the fallback).
             if cell.get('hold_draw'):
                 cfg_variant['property']['borrow_to_invest_hold_draw'] = True
-            scenarios.append((cell, inc, {'kwargs': dict(
-                cfg=cfg_variant, input_path=input_path, objective=objective,
-                draw_fraction_options=[cell['draw_fraction']])}))
+            scenarios.append((cell, inc, {
+                'label': (f"borrow_to_invest #{len(scenarios)} {cell['id']}"
+                          f" x income {inc['id']}"),
+                'kwargs': dict(cfg=cfg_variant, input_path=input_path,
+                               objective=objective,
+                               draw_fraction_options=[cell['draw_fraction']])}))
 
     all_results: List[Dict] = []
     for (cell, inc, _payload), results in zip(
@@ -2937,10 +2940,16 @@ def build_parser() -> argparse.ArgumentParser:
                              'sweep (perf). Each strategy candidate is an '
                              'independent pure fold, dispatched across cores. '
                              '1 = serial (identical to the pre-parallel path); '
-                             'omitted = OPTIMIZE_WORKERS env or '
-                             '(cpu_count - 1). Results are collected in a fixed '
-                             'order, so the ranking is deterministic regardless '
-                             'of worker count.')
+                             'omitted = OPTIMIZE_WORKERS env, else the CPUs '
+                             'this process may use (its affinity mask) minus 1. '
+                             'Workers use the forkserver start method; a task '
+                             'running longer than OPTIMIZE_TASK_TIMEOUT seconds '
+                             '(default 3600) fails with PoolStallError instead '
+                             'of hanging. When running several jobs at once, '
+                             'keep runs x workers within the available CPUs. '
+                             'Results are collected in a fixed order, so the '
+                             'ranking is deterministic regardless of worker '
+                             'count.')
     return parser
 
 
@@ -3040,6 +3049,9 @@ def main():
     # the serial path (provably identical to the pre-parallel version).
     if args.workers is not None:
         set_workers(args.workers)
+    # #292: refuse a malformed OPTIMIZE_TASK_TIMEOUT up front, even on a run
+    # that ends up serial, so a typo is reported rather than silently ignored.
+    process_pool.task_timeout_from_env(os.environ.get('OPTIMIZE_TASK_TIMEOUT'))
 
     # Issue #862 (DP#22): the objective menu -- no input document needed, since
     # the objectives are a static registry, not derived from the household.
