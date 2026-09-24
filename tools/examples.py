@@ -5,20 +5,51 @@ Issue #300. Each example lives in ``examples/<source>/<slug>/`` and holds
 exactly five files::
 
     input.json   a contract document (validates + maps through input_contract)
-    report.json  a compact projection of ``optimize.py --json`` (this module)
-    report.md    the engine's own ``optimize.py --md`` output (trimmed only if large)
+    report.json  a compact projection of the engine's output (this module)
+    report.md    optimize mode: the engine's own ``optimize.py --md`` output
+                 (trimmed only if large); simulate mode: a deterministic render
+                 of report.json (``render_simulation_markdown``)
     README.md    source, publication claim, encoding, comparison, verdict
-    meta.json    source URL, publication id, retrieval date, verdict, linked issues
+    meta.json    source URL, publication id, retrieval date, verdict, linked
+                 issues, and the example's ``mode``
 
-``python tools/examples.py regen [<path>...]`` rewrites report.json / report.md
-by running the REAL ``optimize.py`` in a subprocess (DP#11: this module never
-simulates, ranks, scores or renders anything itself). The CI guard
-``tests/test_examples_guard.py`` calls the very same ``regenerate()`` and
-compares the result byte for byte against what is committed, so a report
-cannot be hand-edited and cannot drift from what the engine now produces.
+Modes (issue #319)
+------------------
+``meta.json`` must declare ``"mode"``: ``"simulate"`` or ``"optimize"``. There
+is no default (DP#32): a missing or unknown mode fails the static contract,
+and ``read_mode`` / ``regenerate`` raise before any engine runs.
 
-The projection contract (``project_report``, PROJECTION_VERSION = 1)
---------------------------------------------------------------------
+* ``optimize``: the #300 behaviour, unchanged. ``regen`` runs the REAL
+  ``optimize.py --json/--md`` in a subprocess and projects it with
+  ``project_report``. For examples whose claim is a strategy ranking (~30-70 s).
+* ``simulate``: ``regen`` runs this module's own ``simulate-once`` subcommand
+  in a subprocess, which drives exactly ONE real engine fold,
+  ``input_contract.load_and_map -> SimulationConfig.from_dict ->
+  FamilySimulation(config, adapter=CanadaAdapter(config)).run()``, with no
+  strategy, rate-path or readvance override (the engine's DP#16 auto-detection
+  decides, and the report's ``run`` block records what it chose). The result
+  is projected by ``project_simulation`` (see below). For examples whose claim
+  is one household, one computed outcome (~1 s).
+
+  A single run cannot honour a declared sweep: the contract maps
+  ``candidate_ages[0]`` and ignores every other candidate, and FamilySimulation
+  never reads ``decisions.contribution_strategy`` / ``income`` / mortgage
+  options. So ``simulate_input_problems`` refuses (in the static check AND
+  before regen spawns anything) any input that declares more than one point,
+  per the classification table ``SIMULATE_DECISIONS`` (DP#33; the "parsed,
+  mapped, then never passed" trap).
+
+``python tools/examples.py regen [<path>...]`` rewrites report.json / report.md.
+This module never simulates, ranks or scores in the guard's or regen's own
+process (DP#11): the engine runs in a child process (``optimize.py`` or
+``simulate-once``), and this module only projects and renders what the child
+wrote. The CI guard ``tests/test_examples_guard.py`` calls the very same
+``regenerate()`` and compares the result byte for byte against what is
+committed, so a report cannot be hand-edited and cannot drift from what the
+engine now produces.
+
+The optimize projection contract (``project_report``, PROJECTION_VERSION = 1)
+-----------------------------------------------------------------------------
 The full ``--json`` report is ~13 MB; it is not committable per example.
 ``project_report`` reduces it to <= 200 KB, deterministically:
 
@@ -61,13 +92,45 @@ boundary that fits and appends a visible marker naming how much was kept.
 Reports are canonical under ONE Python minor version (CANONICAL_PYTHON, the
 version CI's PR leg runs): report.json floats differ by one unit in the last
 place under 3.10/3.11 (measured; see the constant's comment). ``regen``
-refuses to write under another version; the guard byte-compares under the
-canonical version and uses ``compare_reports_near`` on the nightly legs.
+refuses to write under another version (``simulate-once`` does not: the
+nightly guard legs spawn it); the guard byte-compares under the canonical
+version and uses ``compare_reports_near`` on the nightly legs, in both modes.
+
+The simulate projection contract (``project_simulation``, SIMULATE_PROJECTION_VERSION = 1)
+--------------------------------------------------------------------------------------
+``simulate-once`` writes one canonical JSON document (sorted keys, no
+whitespace, NaN refused) with exactly the top-level keys ``engine_entry`` (the
+chain above, as text), ``run`` (read from the engine objects: the strategy and
+rate-path names FamilySimulation chose, ``use_readvanceable``,
+``deduct_later``, ``start_year``, ``projection_years`` and each adult's mapped
+``retirement_age``) and ``year_by_year`` (``dataclasses.asdict`` of every
+``YearResult``). ``project_simulation`` reduces it, deterministically:
+
+* The top-level key set must equal ``SIM_TOP_VERBATIM | SIM_TOP_PROJECTED``
+  exactly; an unknown or missing key raises ExamplesError (classify it and
+  bump SIMULATE_PROJECTION_VERSION). ``engine_entry`` and ``run`` are copied
+  verbatim.
+* ``series``: every row, in the ENGINE's order, restricted to
+  ``SIMULATE_SERIES_COLUMNS`` by strict key (a missing column raises).
+  ``year`` is the engine's 1-indexed offset from ``run.start_year``.
+* ``terminal``: every scalar field of the LAST row, copied unrounded.
+* ``years``: the row count; an empty series raises.
+* ``projection``: version, function, source, and the byte length and typed
+  digest (``full_report_digest`` = ``"sha256:<64 hex>"``) of the child's full
+  document, so byte-identity of report.json pins every byte of it. The key
+  names match the optimize projection's so ``compare_reports_near`` serves
+  both modes.
+
+report.md is ``render_simulation_markdown(report)``: a pure function of the
+projected report (floats to 2 decimals). It is byte-compared on every leg, so a
+last-place float drift on a nightly 3.10/3.11 leg that crosses a rounding
+boundary would fail that leg loudly; that is accepted, never tolerated away.
 
 Loud failure (DP#32): discovery raises on a missing or empty ``examples/``
-tree; ``run_optimize`` refuses a non-zero exit AND an exit 0 that wrote no
-output (``optimize.main()`` prints "Error: ..." and returns 0 on an objective
-selection error); static checks return every problem, never a silent pass.
+tree; ``run_optimize`` and ``run_simulation`` refuse a non-zero exit AND an
+exit 0 that wrote no output (``optimize.main()`` prints "Error: ..." and
+returns 0 on an objective selection error); static checks return every
+problem, never a silent pass.
 """
 from __future__ import annotations
 
@@ -87,6 +150,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_ROOT = REPO_ROOT / "examples"
 OPTIMIZE_PY = REPO_ROOT / "optimize.py"
+EXAMPLES_PY = Path(__file__).resolve()
 
 PROJECTION_VERSION = 1
 PROJECTION_FUNCTION = "tools/examples.py::project_report"
@@ -154,6 +218,7 @@ VERDICT_RE = re.compile(
     r"^(AGREES|DIFFERS \(explained\)|DIFFERS \(engine issue #([1-9][0-9]*)\))$"
 )
 META_KEYS = frozenset({
+    "mode",
     "source",
     "source_url",
     "publication_id",
@@ -164,6 +229,89 @@ META_KEYS = frozenset({
     "verdict",
     "linked_issues",
 })
+
+# Issue #319: every example declares how it is regenerated. No default
+# (DP#32, DP#9): a missing or unknown mode is refused, never guessed.
+EXAMPLE_MODES = ("simulate", "optimize")
+
+# ------------------------------------------------ simulate mode: input contract
+# Every property of schema/defs/decisions.json $defs.decisions, classified for
+# a single FamilySimulation.run(). tests/test_examples_tool.py fails when the
+# schema grows a property this table does not classify, so a new decisions
+# key can never slip through a single run unexamined.
+#
+#   consumed          the single run reads it (proved by
+#                     test_simulate_consumed_decisions_reach_engine)
+#   single_candidate  a list of {person, candidate_ages}; each entry must hold
+#                     exactly ONE age, because contract_people maps
+#                     candidate_ages[0] and silently drops the rest
+#   empty_list        a sweep the single run never reads: must be [] (or
+#                     absent where the schema allows)
+#   empty_options     an object whose option lists (MORTGAGE_OPTION_KEYS) must
+#                     all be []
+#   absent            not consumed by a single run: must not be declared
+#
+# "Never reads" is measured, not assumed (#319): on the single-run example,
+# declaring ONE candidate of the seed's contribution_strategy, income,
+# resp_action, estate_elections, or of each mortgage option list left every
+# field of every YearResult identical, and
+# test_simulate_empty_list_decisions_are_not_read_by_single_run keeps that
+# measurement live. deposit_products and borrow_to_invest are read only by the
+# optimizer layer (scenario_discovery / explore), per simulation_config.py.
+SIMULATE_DECISIONS = {
+    "horizon": "consumed",
+    "retirement_age": "single_candidate",
+    "contribution_strategy": "empty_list",
+    "income": "empty_list",
+    "resp_action": "empty_list",
+    "estate_elections": "empty_list",
+    "deposit_products": "empty_list",
+    "borrow_to_invest": "empty_list",
+    "mortgage": "empty_options",
+    "objective": "absent",
+    "superficial_loss": "absent",
+}
+# Every property of schema/defs/decisions.json $defs.mortgage_decisions (a
+# test enforces the equality).
+MORTGAGE_OPTION_KEYS = ("refinance_options", "renewal_options", "structure_options")
+# Root-required ``sensitivity`` is an optimizer sweep (sweep.py) and overlay
+# presets (--overlay); a single run reads neither. Measured for #319 on the
+# single-run example: the seed's full presets+sweeps vs {} gave the identical
+# terminal total_assets (7149906.735427627 both). Both must be {} so a
+# document cannot look like it sweeps something it does not.
+SIMULATE_SENSITIVITY_KEYS = ("presets", "sweeps")
+# Sweeps declared OUTSIDE decisions: a property purchase's funding_options
+# (#1011, schema/defs/properties.json) is ranked by the optimizer.
+SIMULATE_REFUSED_ANYWHERE = ("funding_options",)
+_SWEEP_HINT = (
+    "simulate mode runs one FamilySimulation.run(); this declares a sweep the "
+    "single run would silently collapse; use mode optimize or declare one point"
+)
+
+SIMULATE_PROJECTION_VERSION = 1
+SIMULATE_PROJECTION_FUNCTION = "tools/examples.py::project_simulation"
+SIMULATE_PROJECTION_SOURCE = "FamilySimulation.run()"
+SIMULATE_ENGINE_ENTRY = (
+    "input_contract.load_and_map -> SimulationConfig.from_dict -> "
+    "FamilySimulation(config, adapter=CanadaAdapter(config)).run()"
+)
+SIM_TOP_VERBATIM = frozenset({"engine_entry", "run"})
+SIM_TOP_PROJECTED = frozenset({"year_by_year"})
+# KEY_YEAR_COLUMNS minus ``net_benefit``, plus the retirement-income columns.
+# ``YearResult.net_benefit`` is a field default (0.0) that FamilySimulation.run()
+# never writes: net benefit is an optimizer comparison against a baseline
+# (optimize.py), not a per-year engine output. Measured for #319: it is 0.0 in
+# every row of the single run AND of the optimize seed's winner rows. A series
+# column that is always zero would invite a README to cite a number no
+# computation produced, so it is left out here (``terminal`` still copies it
+# verbatim, like every scalar of the last row).
+SIMULATE_SERIES_COLUMNS = tuple(c for c in KEY_YEAR_COLUMNS if c != "net_benefit") + (
+    "cpp_income",
+    "oas_income",
+    "gis_income",
+    "lif_balance",
+    "lira_balance",
+)
 
 HOME_PATH_RE = re.compile(r"(/home/|/Users/|/root/|[A-Za-z]:\\Users\\|~/)")
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -262,6 +410,39 @@ def _tail(text: str) -> str:
     return "\n".join(text.splitlines()[-OUTPUT_TAIL_LINES:])
 
 
+def _run_hermetic(
+    cmd: list[str], workdir: Path, outputs: tuple[Path, ...], program: str
+) -> None:
+    """Run one engine child process hermetically and refuse any doubtful end.
+
+    Hermetic: HOME is an empty directory inside ``workdir``, because
+    tax_data.TaxDataProvider reads ~/.cache/lifedraft/tax/*.json for years it
+    has no registered fallback for; a contributor's stale cache must not leak
+    into a committed report. cwd is ``workdir``, so nothing lands next to the
+    example.
+
+    Refuses a non-zero exit AND an exit 0 that left any of ``outputs`` missing
+    or empty (the CLI's silent-success path)."""
+    home = workdir / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home)}
+    proc = subprocess.run(
+        cmd, cwd=workdir, capture_output=True, text=True, env=env, check=False
+    )
+    detail = (
+        f"command: {' '.join(cmd)}\n--- stdout (tail) ---\n{_tail(proc.stdout)}\n"
+        f"--- stderr (tail) ---\n{_tail(proc.stderr)}"
+    )
+    if proc.returncode != 0:
+        raise ExamplesError(f"{program} exited {proc.returncode}\n{detail}")
+    for out in outputs:
+        if not out.is_file() or out.stat().st_size == 0:
+            raise ExamplesError(
+                f"{program} exited 0 but wrote no {out.name} (silent-success CLI "
+                f"path; read its stdout)\n{detail}"
+            )
+
+
 def run_optimize(
     input_path: Path,
     workdir: Path,
@@ -269,18 +450,8 @@ def run_optimize(
     workers: int | None,
     optimize_py: Path = OPTIMIZE_PY,
 ) -> tuple[Path, Path]:
-    """Run the real optimize.py on ``input_path`` and return (full.json, full.md).
-
-    Hermetic: HOME is an empty directory inside ``workdir``, because
-    tax_data.TaxDataProvider reads ~/.cache/lifedraft/tax/*.json for years it
-    has no registered fallback for; a contributor's stale cache must not leak
-    into a committed report. cwd is ``workdir``, so nothing lands next to the
-    example. ``--save-session`` is never passed.
-
-    Refuses a non-zero exit AND an exit 0 without both outputs (the CLI's
-    silent-success path)."""
-    home = workdir / "home"
-    home.mkdir()
+    """Run the real optimize.py on ``input_path`` and return (full.json, full.md),
+    hermetically (see ``_run_hermetic``). ``--save-session`` is never passed."""
     full_json = workdir / "full.json"
     full_md = workdir / "full.md"
     cmd = [
@@ -295,23 +466,29 @@ def run_optimize(
     ]
     if workers is not None:
         cmd += ["--workers", str(workers)]
-    env = {**os.environ, "HOME": str(home)}
-    proc = subprocess.run(
-        cmd, cwd=workdir, capture_output=True, text=True, env=env, check=False
-    )
-    detail = (
-        f"command: {' '.join(cmd)}\n--- stdout (tail) ---\n{_tail(proc.stdout)}\n"
-        f"--- stderr (tail) ---\n{_tail(proc.stderr)}"
-    )
-    if proc.returncode != 0:
-        raise ExamplesError(f"optimize.py exited {proc.returncode}\n{detail}")
-    for out in (full_json, full_md):
-        if not out.is_file() or out.stat().st_size == 0:
-            raise ExamplesError(
-                f"optimize.py exited 0 but wrote no {out.name} (silent-success CLI "
-                f"path; read its stdout)\n{detail}"
-            )
+    _run_hermetic(cmd, workdir, (full_json, full_md), "optimize.py")
     return full_json, full_md
+
+
+def run_simulation(
+    input_path: Path, workdir: Path, *, examples_py: Path = EXAMPLES_PY
+) -> Path:
+    """Run ``examples_py simulate-once`` (one real FamilySimulation.run(), see
+    ``simulate_once``) on ``input_path`` in a child process and return the
+    path of the full document it wrote, hermetically (see ``_run_hermetic``).
+    ``examples_py`` is injectable so a stub script can stand in for tests."""
+    full_json = workdir / "full.json"
+    cmd = [
+        sys.executable,
+        str(examples_py),
+        "simulate-once",
+        "--input",
+        str(input_path.resolve()),
+        "--out",
+        str(full_json),
+    ]
+    _run_hermetic(cmd, workdir, (full_json,), "tools/examples.py simulate-once")
+    return full_json
 
 
 # --------------------------------------------------------------- projection
@@ -458,24 +635,345 @@ def project_markdown(md: str) -> str:
     return data[:cut].decode("utf-8") + _trim_marker(cut, total)
 
 
+# --------------------------------------------------------------- mode
+def read_mode(example_dir: Path) -> str:
+    """The example's declared ``meta.json`` mode, one of EXAMPLE_MODES.
+
+    Raises ExamplesError on a missing or unreadable meta.json, a non-object,
+    an absent ``mode`` key, or any value outside EXAMPLE_MODES (case-sensitive).
+    There is no default (DP#32): guessing a mode would run the wrong engine
+    path and commit its output as the truth."""
+    label = f"{example_id(example_dir)}/meta.json"
+    path = example_dir / "meta.json"
+    if not path.is_file():
+        raise ExamplesError(
+            f"{label} is missing; it must declare mode simulate | optimize "
+            f"(there is no default, DP#32)"
+        )
+    meta, err = _load_json(path)
+    if err is not None:
+        raise ExamplesError(f"{example_id(example_dir)}: {err}")
+    if not isinstance(meta, dict):
+        raise ExamplesError(f"{label} is not a JSON object")
+    if "mode" not in meta:
+        raise ExamplesError(
+            f"{label} has no 'mode'; declare simulate | optimize (there is no "
+            f"default, DP#32)"
+        )
+    mode = meta["mode"]
+    if not (isinstance(mode, str) and mode in EXAMPLE_MODES):
+        raise ExamplesError(
+            f"{label}: mode {mode!r} is not one of simulate | optimize (declare "
+            f"it; there is no default, DP#32)"
+        )
+    return mode
+
+
+def _refused_anywhere(obj, path: str, out: list[str]) -> None:
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in SIMULATE_REFUSED_ANYWHERE:
+                out.append(f"{path}/{key}")
+            _refused_anywhere(value, f"{path}/{key}", out)
+    elif isinstance(obj, list):
+        for index, value in enumerate(obj):
+            _refused_anywhere(value, f"{path}/{index}", out)
+
+
+def simulate_input_problems(doc: object) -> list[str]:
+    """Why a single FamilySimulation.run() cannot honour ``doc`` (empty list =
+    it can). One message per violation, and one per decisions / mortgage /
+    sensitivity key that is not classified (see SIMULATE_DECISIONS)."""
+    if not isinstance(doc, dict):
+        return ["input.json is not a JSON object"]
+    problems: list[str] = []
+    if "decisions" not in doc or not isinstance(doc["decisions"], dict):
+        problems.append("decisions must be an object (schema-required)")
+    else:
+        decisions = doc["decisions"]
+        for key in sorted(decisions):
+            value = decisions[key]
+            where = f"decisions.{key}"
+            if key not in SIMULATE_DECISIONS:
+                problems.append(
+                    f"{where} is not classified for simulate mode (add it to "
+                    f"SIMULATE_DECISIONS in tools/examples.py); {_SWEEP_HINT}"
+                )
+                continue
+            rule = SIMULATE_DECISIONS[key]
+            if rule == "consumed":
+                continue
+            if rule == "absent":
+                problems.append(
+                    f"{where} is declared, but a single run does not consume it "
+                    f"(it steers the optimizer); {_SWEEP_HINT}"
+                )
+            elif rule == "empty_list":
+                if value != []:
+                    problems.append(
+                        f"{where} must be [] in simulate mode (FamilySimulation "
+                        f"never reads it); {_SWEEP_HINT}"
+                    )
+            elif rule == "single_candidate":
+                if not isinstance(value, list):
+                    problems.append(f"{where} must be a list")
+                    continue
+                for index, entry in enumerate(value):
+                    ages = entry["candidate_ages"] if (
+                        isinstance(entry, dict) and "candidate_ages" in entry) else None
+                    if not (isinstance(ages, list) and len(ages) == 1):
+                        problems.append(
+                            f"{where}[{index}].candidate_ages must hold exactly one "
+                            f"age in simulate mode (got {ages!r}; the contract maps "
+                            f"candidate_ages[0] and drops the rest); {_SWEEP_HINT}"
+                        )
+            elif rule == "empty_options":
+                if not isinstance(value, dict):
+                    problems.append(f"{where} must be an object")
+                    continue
+                for sub in sorted(value):
+                    if sub not in MORTGAGE_OPTION_KEYS:
+                        problems.append(
+                            f"{where}.{sub} is not classified for simulate mode "
+                            f"(add it to MORTGAGE_OPTION_KEYS); {_SWEEP_HINT}"
+                        )
+                    elif value[sub] != []:
+                        problems.append(
+                            f"{where}.{sub} must be [] in simulate mode; {_SWEEP_HINT}"
+                        )
+            else:
+                raise ExamplesError(f"SIMULATE_DECISIONS[{key!r}] has unknown rule {rule!r}")
+    if "sensitivity" not in doc or not isinstance(doc["sensitivity"], dict):
+        problems.append("sensitivity must be an object (schema-required)")
+    else:
+        sensitivity = doc["sensitivity"]
+        for key in sorted(sensitivity):
+            if key not in SIMULATE_SENSITIVITY_KEYS:
+                problems.append(
+                    f"sensitivity.{key} is not classified for simulate mode; "
+                    f"{_SWEEP_HINT}"
+                )
+            elif sensitivity[key] != {}:
+                problems.append(
+                    f"sensitivity.{key} must be {{}} in simulate mode (a single run "
+                    f"reads no sweep or overlay preset); {_SWEEP_HINT}"
+                )
+    refused: list[str] = []
+    _refused_anywhere({k: v for k, v in doc.items() if k != "decisions"}, "", refused)
+    for where in refused:
+        problems.append(
+            f"{where} is an optimizer-ranked alternative; {_SWEEP_HINT}"
+        )
+    return problems
+
+
+# --------------------------------------------------------------- simulate child
+def _canonical_json_bytes(obj: dict) -> bytes:
+    try:
+        text = json.dumps(
+            obj, sort_keys=True, indent=None, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        )
+    except ValueError as err:
+        raise ExamplesError(f"the single run produced a non-finite float: {err}")
+    return text.encode("utf-8")
+
+
+def simulate_once(input_path: Path) -> bytes:
+    """Drive exactly ONE real engine fold on ``input_path`` and return the
+    canonical JSON bytes of ``{engine_entry, run, year_by_year}`` (see the
+    module docstring). Runs in the ``simulate-once`` child process; the parent
+    (``run_simulation``) isolates HOME. Engine exceptions propagate."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    import dataclasses
+
+    import input_contract
+    from countries.canada.adapter import CanadaAdapter
+    from simulation import FamilySimulation, SimulationConfig
+
+    doc, err = _load_json(input_path)
+    if err is not None:
+        raise ExamplesError(err)
+    problems = simulate_input_problems(doc)
+    if problems:
+        raise ExamplesError(
+            f"{input_path.name} cannot be run in simulate mode:\n- "
+            + "\n- ".join(problems)
+        )
+    cfg = input_contract.load_and_map(str(input_path))
+    config = SimulationConfig.from_dict(cfg)
+    sim = FamilySimulation(config, adapter=CanadaAdapter(config))
+    results = sim.run()
+    run = {
+        "strategy": sim.strategy.name,
+        "rate_path": sim.rate_path.name,
+        "use_readvanceable": sim.use_readvanceable,
+        "deduct_later": sim.deduct_later,
+        "start_year": config.start_year,
+        "projection_years": config.projection_years,
+        "retirement_ages": [
+            {"id": m["id"], "role": m["role"], "retirement_age": m["retirement_age"]}
+            for m in config.adults()
+        ],
+    }
+    return _canonical_json_bytes({
+        "engine_entry": SIMULATE_ENGINE_ENTRY,
+        "run": run,
+        "year_by_year": [dataclasses.asdict(r) for r in results],
+    })
+
+
+# --------------------------------------------------------------- simulate projection
+def project_simulation(full: dict, *, full_bytes: bytes) -> dict:
+    """Project the ``simulate-once`` document (see the module docstring for the
+    contract). Pure; raises ExamplesError on any shape it was not written for."""
+    if not isinstance(full, dict):
+        raise ExamplesError("simulate-once output is not a JSON object")
+    expected = SIM_TOP_VERBATIM | SIM_TOP_PROJECTED
+    actual = set(full)
+    if actual != expected:
+        raise ExamplesError(
+            f"simulate-once output top-level keys changed: unknown "
+            f"{sorted(actual - expected)}, missing {sorted(expected - actual)}; "
+            f"classify it in project_simulation and bump SIMULATE_PROJECTION_VERSION"
+        )
+    rows = full["year_by_year"]
+    if not isinstance(rows, list) or not rows:
+        raise ExamplesError("simulate-once output has an empty 'year_by_year' series")
+    series = []
+    for index, row in enumerate(rows):
+        projected = {}
+        for column in SIMULATE_SERIES_COLUMNS:
+            if column not in row:
+                raise ExamplesError(
+                    f"simulate year_by_year row {index} has no column {column!r}; "
+                    f"update SIMULATE_SERIES_COLUMNS and bump SIMULATE_PROJECTION_VERSION"
+                )
+            projected[column] = row[column]
+        series.append(projected)
+    report = {
+        "projection": {
+            "version": SIMULATE_PROJECTION_VERSION,
+            "function": SIMULATE_PROJECTION_FUNCTION,
+            "source": SIMULATE_PROJECTION_SOURCE,
+            "full_report_bytes": len(full_bytes),
+            "full_report_digest": DIGEST_PREFIX + hashlib.sha256(full_bytes).hexdigest(),
+            "series_columns": list(SIMULATE_SERIES_COLUMNS),
+        },
+        "mode": "simulate",
+        "years": len(rows),
+        "series": series,
+        "terminal": _scalars(rows[-1]),
+    }
+    for key in sorted(SIM_TOP_VERBATIM):
+        report[key] = full[key]
+    return report
+
+
+def _md_cell(value) -> str:
+    if isinstance(value, bool) or value is None:
+        text = json.dumps(value)
+    elif isinstance(value, float):
+        text = f"{value:,.2f}"
+    elif isinstance(value, (int, str)):
+        text = str(value)
+    else:
+        text = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    return text.replace("|", "\\|")
+
+
+def render_simulation_markdown(report: dict) -> str:
+    """report.md for simulate mode: a pure, deterministic render of the
+    PROJECTED report (no timestamp, no path). Floats print to 2 decimals;
+    report.json keeps them unrounded."""
+    columns = report["projection"]["series_columns"]
+    lines = [
+        "# Single-run simulation report",
+        "",
+        f"Rendered by `tools/examples.py::render_simulation_markdown` from "
+        f"report.json (simulate projection v{report['projection']['version']}). "
+        f"Engine: `{report['engine_entry']}`. Floats are rounded to cents here "
+        f"and unrounded in report.json.",
+        "",
+        "## Run",
+        "",
+        "| field | value |",
+        "|---|---|",
+    ]
+    run = report["run"]
+    for key in sorted(run):
+        lines.append(f"| {_md_cell(key)} | {_md_cell(run[key])} |")
+    lines += [
+        "",
+        "## Terminal year",
+        "",
+        f"Year {_md_cell(report['terminal']['year'])} of {report['years']} "
+        f"(`year` is a 1-indexed offset from run.start_year).",
+        "",
+        "| column | value |",
+        "|---|---|",
+    ]
+    for column in columns:
+        lines.append(f"| {column} | {_md_cell(report['terminal'][column])} |")
+    lines += [
+        "",
+        "## Year by year",
+        "",
+        "| " + " | ".join(columns) + " |",
+        "|" + "---|" * len(columns),
+    ]
+    for row in report["series"]:
+        lines.append("| " + " | ".join(_md_cell(row[c]) for c in columns) + " |")
+    return "\n".join(lines) + "\n"
+
+
 # --------------------------------------------------------------- regenerate
 def regenerate(
-    example_dir: Path, *, workers: int | None, optimize_py: Path = OPTIMIZE_PY
+    example_dir: Path,
+    *,
+    workers: int | None,
+    optimize_py: Path = OPTIMIZE_PY,
+    examples_py: Path = EXAMPLES_PY,
 ) -> tuple[str, str]:
-    """Run the engine on ``example_dir/input.json`` and return the
-    (report.json, report.md) texts it projects to. Writes nothing."""
+    """Run the engine on ``example_dir/input.json`` in the example's declared
+    mode and return the (report.json, report.md) texts it projects to. Writes
+    nothing.
+
+    The mode is read FIRST (``read_mode`` raises on a missing or unknown one),
+    so no engine runs for an example that has not said how it is run.
+    ``workers`` applies to optimize mode only: the single run is serial by
+    construction."""
+    mode = read_mode(example_dir)
     input_path = example_dir / "input.json"
     if not input_path.is_file():
         raise ExamplesError(f"{example_dir} has no input.json to regenerate from")
-    with tempfile.TemporaryDirectory(prefix="lifedraft-example-") as tmp:
-        full_json, full_md = run_optimize(
-            input_path, Path(tmp), workers=workers, optimize_py=optimize_py
-        )
-        full_bytes = full_json.read_bytes()
-        md_text = full_md.read_text(encoding="utf-8")
-    full = json.loads(full_bytes)
-    json_text = dump_report_json(project_report(full, full_bytes=full_bytes))
-    return json_text, project_markdown(md_text)
+    if mode == "optimize":
+        with tempfile.TemporaryDirectory(prefix="lifedraft-example-") as tmp:
+            full_json, full_md = run_optimize(
+                input_path, Path(tmp), workers=workers, optimize_py=optimize_py
+            )
+            full_bytes = full_json.read_bytes()
+            md_text = full_md.read_text(encoding="utf-8")
+        full = json.loads(full_bytes)
+        json_text = dump_report_json(project_report(full, full_bytes=full_bytes))
+        return json_text, project_markdown(md_text)
+    if mode == "simulate":
+        doc, err = _load_json(input_path)
+        if err is not None:
+            raise ExamplesError(f"{example_id(example_dir)}: {err}")
+        problems = simulate_input_problems(doc)
+        if problems:
+            raise ExamplesError(
+                f"{example_id(example_dir)}/input.json cannot be run in simulate "
+                f"mode:\n- " + "\n- ".join(problems)
+            )
+        with tempfile.TemporaryDirectory(prefix="lifedraft-example-") as tmp:
+            full_json = run_simulation(input_path, Path(tmp), examples_py=examples_py)
+            full_bytes = full_json.read_bytes()
+        report = project_simulation(json.loads(full_bytes), full_bytes=full_bytes)
+        return dump_report_json(report), project_markdown(render_simulation_markdown(report))
+    raise ExamplesError(f"read_mode returned unknown mode {mode!r}")
 
 
 def write_reports(example_dir: Path, json_text: str, md_text: str) -> None:
@@ -707,6 +1205,16 @@ def check_meta(example_dir: Path, meta: object) -> list[str]:
             f"{label}: keys must be exactly {sorted(META_KEYS)}; unknown "
             f"{sorted(keys - META_KEYS)}, missing {sorted(META_KEYS - keys)}"
         )
+    if "mode" not in meta:
+        problems.append(
+            f"{label}: 'mode' is required: declare simulate | optimize (there is "
+            f"no default, DP#32)"
+        )
+    elif not (isinstance(meta["mode"], str) and meta["mode"] in EXAMPLE_MODES):
+        problems.append(
+            f"{label}: mode {meta['mode']!r} is not one of simulate | optimize "
+            f"(declare it; there is no default, DP#32)"
+        )
 
     def _nonempty_str(key: str) -> bool:
         return isinstance(meta[key], str) and meta[key].strip() != ""
@@ -914,11 +1422,14 @@ def check_no_bare_hex(example_dir: Path) -> list[str]:
 
 
 def static_problems(example_dir: Path) -> list[str]:
-    """Every static contract problem of one example (empty list = clean)."""
+    """Every static contract problem of one example (empty list = clean),
+    including, for a ``simulate``-mode example, every sweep a single run would
+    collapse (``simulate_input_problems``)."""
     problems = check_files(example_dir)
     input_doc, input_problems = check_input(example_dir)
     problems += input_problems
     meta = None
+    loaded = None
     meta_path = example_dir / "meta.json"
     if meta_path.is_file():
         loaded, err = _load_json(meta_path)
@@ -928,6 +1439,16 @@ def static_problems(example_dir: Path) -> list[str]:
             meta_problems = check_meta(example_dir, loaded)
             problems += meta_problems
             meta = loaded if not meta_problems else None
+    if (
+        input_doc is not None
+        and isinstance(loaded, dict)
+        and "mode" in loaded
+        and loaded["mode"] == "simulate"
+    ):
+        problems += [
+            f"{example_id(example_dir)}/input.json: {p}"
+            for p in simulate_input_problems(input_doc)
+        ]
     problems += check_readme(example_dir, meta, input_doc)
     problems += check_no_personal_paths(example_dir)
     problems += check_no_bare_hex(example_dir)
@@ -952,17 +1473,29 @@ def _resolve_targets(paths: list[str], root: Path) -> list[Path]:
     return targets
 
 
+def _simulate_once_cli(input_path: Path, out_path: Path) -> int:
+    try:
+        data = simulate_once(input_path)
+    except ExamplesError as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 1
+    out_path.write_bytes(data)
+    return 0
+
+
 def main(
     argv: list[str] | None = None,
     *,
     root: Path = EXAMPLES_ROOT,
     optimize_py: Path = OPTIMIZE_PY,
+    examples_py: Path = EXAMPLES_PY,
     python_version: tuple[int, int] = sys.version_info[:2],
 ) -> int:
     parser = argparse.ArgumentParser(
         prog="tools/examples.py",
         description="Regenerate examples/<source>/<slug>/report.{json,md} "
-        "through the real optimize.py (issue #300).",
+        "through the real engine, in each example's declared mode (issues "
+        "#300, #319).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     regen = sub.add_parser("regen", help="rewrite report.json and report.md")
@@ -971,9 +1504,22 @@ def main(
         "--workers",
         type=int,
         default=None,
-        help="passed to optimize.py --workers (default: optimize.py's own)",
+        help="optimize mode only: passed to optimize.py --workers "
+        "(default: optimize.py's own)",
     )
+    once = sub.add_parser(
+        "simulate-once",
+        help="run ONE FamilySimulation.run() on a contract document and write "
+        "the full canonical JSON (the simulate-mode child; regen spawns it)",
+    )
+    once.add_argument("--input", required=True, type=Path)
+    once.add_argument("--out", required=True, type=Path)
     args = parser.parse_args(argv)
+
+    if args.command == "simulate-once":
+        # Not version-gated: the nightly 3.10/3.11 guard legs spawn this child
+        # and near-compare its projection; only `regen` WRITES reports.
+        return _simulate_once_cli(args.input, args.out)
 
     if not is_canonical_python(python_version):
         print(
@@ -989,12 +1535,16 @@ def main(
         targets = _resolve_targets(args.paths, root)
         for example_dir in targets:
             json_text, md_text = regenerate(
-                example_dir, workers=args.workers, optimize_py=optimize_py
+                example_dir,
+                workers=args.workers,
+                optimize_py=optimize_py,
+                examples_py=examples_py,
             )
             write_reports(example_dir, json_text, md_text)
             digest = json.loads(json_text)["projection"]["full_report_digest"]
             print(
-                f"regenerated {example_id(example_dir)}: report.json "
+                f"regenerated {example_id(example_dir)} ({read_mode(example_dir)} "
+                f"mode): report.json "
                 f"{len(json_text.encode('utf-8'))} B, report.md "
                 f"{len(md_text.encode('utf-8'))} B, full report "
                 f"{digest[:len(DIGEST_PREFIX) + 12]}"
