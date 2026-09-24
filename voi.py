@@ -112,7 +112,10 @@ is that leaf's value of information. Ranked descending.
 
 This distinction is the whole point of #661's enforcement, and getting it wrong
 is a silent zero inside the tool built to catch silent zeros (DP#32). Measured
-on the example household, ``/estate/default_spousal_rollover`` is:
+on the example household (#661, before #1034 and #290 routed the SM sleeve and
+the registered balances of ``max_net_benefit`` through the estate path, so the
+first figure predates them and no longer holds),
+``/estate/default_spousal_rollover`` was:
 
   - **$0 under ``max_net_benefit``** (the default objective), and yet
   - **$84,998 under ``max_after_tax_estate``**.

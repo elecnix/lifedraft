@@ -34,7 +34,7 @@ from simulation_state import (
     SimState, simulate_year_pure,
 )
 from return_model import ReturnModel, FixedReturn
-from objective import ObjectiveFunction, MAX_NET_BENEFIT
+from objective import ObjectiveFunction, MAX_NET_BENEFIT, objective_cfg
 from strategy import AllocationStrategy, StrategyEngine
 from strategy import list_strategies
 _STRATEGIES = list_strategies()
@@ -151,7 +151,9 @@ class ScipyOptimizer(Optimizer):
                     use_readvanceable=use_readvanceable, deduct_later=deduct_later,
                     lump_sum=lump_sum,
                 )
-                score = objective.evaluate(results)
+                # Issue #290: score with the cfg of the config this candidate
+                # simulated, never an empty dict.
+                score = objective.evaluate(results, objective_cfg(config))
             except Exception:
                 score = float('-inf')
 

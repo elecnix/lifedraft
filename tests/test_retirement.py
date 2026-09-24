@@ -179,6 +179,22 @@ class TestDrawdownOptimizer(unittest.TestCase):
             self.assertIn('total_tax', result)
 
 
+    def test_tax_first_spends_tfsa_second_when_non_reg_runs_out(self):
+        """Tax-first order is non-reg -> TFSA -> RRIF: a need larger than the
+        non-reg balance draws the TFSA for the rest before the RRIF (beyond
+        its minimum). Issue #290 removed the net_benefit leg that used to
+        exercise this branch incidentally; it is pinned directly here."""
+        state = RetirementState(
+            age=70, rrif_balance=500000, tfsa_balance=100000,
+            non_reg_balance=10000, non_reg_acb=10000, annual_expenses=50000,
+            year=2026,
+        )
+        optimizer = DrawdownOptimizer(investment_return=0.05)
+        result = optimizer._tax_first_strategy(state, 30000)
+        self.assertEqual(result['withdrawals']['non_reg'], 10000)
+        self.assertEqual(result['withdrawals']['tfsa'], 20000)
+
+
 class TestProjectRetirement(unittest.TestCase):
     """Test multi-year retirement projection."""
 

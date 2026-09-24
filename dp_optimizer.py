@@ -50,7 +50,7 @@ from simulation_state import (
     SimState, initial_state_for_run,
 )
 from return_model import ReturnModel, FixedReturn
-from objective import ObjectiveFunction, MAX_NET_BENEFIT
+from objective import ObjectiveFunction, MAX_NET_BENEFIT, objective_cfg
 from strategy import AllocationStrategy
 from optimizer import Optimizer, RankedScenario, RiskMeasures
 from jurisdiction_providers import get_provider
@@ -314,7 +314,8 @@ class DPOptimizer(Optimizer):
             ctx = self._build_context(config, strategy, use_readvanceable, True,
                                        0.0, state)
             result, new_state = simulate_year(state, year, ctx)
-            score = objective.evaluate([result]) if result else 0
+            # Issue #290: the household's own objective cfg, never empty.
+            score = objective.evaluate([result], objective_cfg(config)) if result else 0
             return DecisionStep(
                 year=year,
                 action_name="baseline",
@@ -404,7 +405,8 @@ class DPOptimizer(Optimizer):
                 else:
                     # Greedy: use this year's result
                     all_results = [result] if result else []
-                    score = objective.evaluate(all_results) if all_results else 0
+                    score = (objective.evaluate(all_results, objective_cfg(test_config))
+                             if all_results else 0)
 
             except Exception:
                 score = float('-inf')
@@ -454,7 +456,7 @@ class DPOptimizer(Optimizer):
             result, current_state = simulate_year(current_state, yr, ctx)
             if result:
                 all_results = [result]
-                total_score += objective.evaluate(all_results)
+                total_score += objective.evaluate(all_results, objective_cfg(config))
 
         return total_score
 

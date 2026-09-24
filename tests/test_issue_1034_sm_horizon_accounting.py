@@ -206,17 +206,23 @@ class TestComputeNetBenefitPricesSmSleeve:
         assert nb_with_acb < 1_500_000.0, (
             f"net_benefit {nb_with_acb:.0f} == total_assets -- the SM deemed-"
             f"disposition tax was not subtracted (a silent zero)")
-        # And a sleeve-LESS + None-ACB YearResult (the #765 no-birth_year branch
-        # fixture) still does not raise -- no sleeve -> the estate path is not
-        # invoked, so a None non_reg_acb is harmless.
-        minimal = _yr(total_assets=500_000, total_debt=200_000,
-                      total_rrsp=300_000, non_reg_acb=None)
+        # Issue #290: a sleeve-LESS YearResult WITH a registered balance now
+        # goes through the same estate path (the registered deemed
+        # disposition), so a None non_reg_acb refuses there too ...
         minimal_cfg = {
             'family': {'members': [
                 {'role': 'primary', 'cpp_monthly_estimated': 1000,
                  'pension_income_annual': 20_000}]},
             'assumptions': {'oas_annual': 8_500},
+            'tax': {'province': 'quebec', 'start_year': 2026},
         }
+        registered = _yr(total_assets=500_000, total_debt=200_000,
+                         primary_rrsp=300_000, total_rrsp=300_000, non_reg_acb=None)
+        with pytest.raises(ValueError, match="non_reg_acb"):
+            compute_net_benefit([registered], minimal_cfg)
+        # ... while one with NO registered balance and no sleeve never invokes
+        # the estate path, so a None non_reg_acb is harmless there.
+        minimal = _yr(total_assets=500_000, total_debt=200_000, non_reg_acb=None)
         nb2 = compute_net_benefit([minimal], minimal_cfg)
         assert isinstance(nb2, float)
 

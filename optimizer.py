@@ -49,7 +49,7 @@ from simulation_state import SimState, initial_state_for_run
 # the one simulate.py uses. See Optimizer._build_context().
 from simulation import SimulationContext, simulate_year
 from return_model import ReturnModel, FixedReturn, build_return_model
-from objective import ObjectiveFunction, MAX_NET_BENEFIT
+from objective import ObjectiveFunction, MAX_NET_BENEFIT, objective_cfg
 from strategy import AllocationStrategy
 from jurisdiction_providers import get_provider
 from strategy import list_strategies as _list_strategies
@@ -758,7 +758,10 @@ class GridOptimizer(Optimizer):
                                         use_readvanceable=use_readvanceable, deduct_later=deduct_later,
                                         lump_sum=config.margin_available * draw_fraction + config.cash_out,
                                     )
-                                    score = objective.evaluate(results)
+                                    # Issue #290: the SAME objective cfg run_optimization
+                                    # builds -- members, province, start year, estate
+                                    # elections -- never an empty dict.
+                                    score = objective.evaluate(results, objective_cfg(config))
                                     # DP#29: Compute risk measures from deterministic path
                                     risk_measures = self.compute_deterministic_risk(results, score)
                                 except (ChargeLimitExceededError, MissingRefinanceAmortizationError,

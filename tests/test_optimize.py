@@ -425,36 +425,38 @@ class TestEvaluateStrategyWithSimulation(unittest.TestCase):
 # ── compute_net_benefit integration ───────────────────────────────────────
 
 class TestComputeNetBenefitIntegration(unittest.TestCase):
-    """Test compute_net_benefit auto-includes retirement when birth_year present."""
+    """Issue #290: compute_net_benefit prices the terminal RRSP as the horizon
+    deemed disposition on each owner's return (the estate path), whether or
+    not a birth_year is declared -- the birth-year-gated re-projection that
+    used to live here priced it at $0."""
 
-    def test_with_birth_year_uses_retirement(self):
-        """When birth_year is in cfg, retirement module is used for withdrawal tax."""
-        cfg_no_age = {
-            'family': {'members': [{'role': 'primary'}]},
-            'assumptions': {'capital_gains_inclusion': 0.50,
-                           'resp_eap_taxable_portion': 0.60,
-                           'resp_eap_tax_rate': 0.15},
-        }
-        cfg_with_age = {
-            'family': {'members': [{'role': 'primary', 'birth_year': 1990}]},
-            'assumptions': {'capital_gains_inclusion': 0.50,
-                           'resp_eap_taxable_portion': 0.60,
-                           'resp_eap_tax_rate': 0.15},
-        }
-        # Create dummy results
-        r1 = YearResult(total_rrsp=200000, total_tfsa=50000,
-                         total_assets=250000, total_debt=10000,
-                         non_reg_balance=0, resp_balance=0, heloc_balance=0)
+    def test_registered_tax_does_not_depend_on_birth_year(self):
+        tax = {'province': 'quebec', 'start_year': 2026}
+        base = {'assumptions': {'capital_gains_inclusion': 0.50,
+                                'resp_eap_taxable_portion': 0.60,
+                                'resp_eap_tax_rate': 0.15},
+                'tax': tax}
+        cfg_no_age = {**base, 'family': {'members': [{'role': 'primary'}]}}
+        cfg_with_age = {**base,
+                        'family': {'members': [{'role': 'primary', 'birth_year': 1990}]}}
+        r1 = YearResult(primary_rrsp=200000, total_rrsp=200000, total_tfsa=50000,
+                        total_assets=250000, total_debt=10000,
+                        non_reg_balance=0, resp_balance=0, heloc_balance=0)
         r1.rrsp_tax_savings = 50000
         r1.readvance_tax_savings = 0
         r1.contributions = {}
 
         net_no_age = compute_net_benefit([r1], cfg_no_age)
         net_with_age = compute_net_benefit([r1], cfg_with_age)
-        # With age, retirement drawdown computes more precise withdrawal tax
-        # Both should be positive, but may differ
-        self.assertIsInstance(net_no_age, float)
-        self.assertIsInstance(net_with_age, float)
+        self.assertEqual(net_no_age, net_with_age)
+        # and the RRSP is taxed: the same dollars in the TFSA score higher
+        r_tfsa = YearResult(total_tfsa=250000,
+                            total_assets=250000, total_debt=10000,
+                            non_reg_balance=0, resp_balance=0, heloc_balance=0)
+        r_tfsa.rrsp_tax_savings = 50000
+        r_tfsa.readvance_tax_savings = 0
+        r_tfsa.contributions = {}
+        self.assertGreater(compute_net_benefit([r_tfsa], cfg_with_age), net_with_age)
 
 
 class TestSimulatedDeductTiming(unittest.TestCase):

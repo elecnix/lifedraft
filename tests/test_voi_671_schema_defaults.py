@@ -363,57 +363,45 @@ def test_behaviourally_inert_but_statically_consumed_leaves_are_justified(_defau
 # 5. The inert-under-this-objective finding is MEASURED, never guessed
 # ═══════════════════════════════════════════════════════════════════════════
 
-def test_a_leaf_inert_under_one_objective_names_the_objective_that_prices_it():
-    """A leaf that is $0 under the default objective (max_net_benefit) but priced
-    under max_after_tax_estate. Reporting it as 'nothing reads this' would be a
-    false statement about the engine (#671). The objectives named must come from
-    actually RUNNING them.
+def test_estate_and_mortality_leaves_are_priced_under_the_default_objective():
+    """The #671 inert-under-one-objective example leaves, re-measured after
+    #290.
 
-    #1034 retired ``/estate/default_spousal_rollover`` as the example leaf:
-    compute_net_benefit now prices the SM sleeve's terminal deemed disposition
-    via the SAME estate code path compute_after_tax_estate uses (DP#9), so the
-    spousal-rollover election -- which the SM sleeve mirrors, via the non-reg
-    pot's rollover -- now MOVES net_benefit for this leveraged fixture (it is
-    RANKED, no longer INERT). The leaf that still exhibits the #671 pattern --
-    $0 under max_net_benefit, priced under the estate objectives -- is the
-    mortality ``assumed_death_age``: the estate is a point-in-time valuation at
-    the projection's terminal year, so when a member dies does not move the SM
-    sleeve's deemed disposition (or any other estate-priced pot) under
-    max_net_benefit, but it DOES move the estate objectives. The disclosure
-    mechanism this test guards -- voi names the objective that prices an inert
-    leaf -- is unchanged; only the example leaf moved, because #1034 closed the
-    rollover's inertness under the default objective."""
+    #1034 retired ``/estate/default_spousal_rollover`` as the example of a leaf
+    $0 under max_net_benefit but priced under the estate objectives (the SM
+    sleeve started pricing the rollover); the mortality ``assumed_death_age``
+    then carried the example. Issue #290 routed net_benefit's terminal
+    REGISTERED tax through the same estate path, and WHO DIES FIRST decides on
+    which terminal return each registered balance is included -- so the
+    mortality leaves are now priced by the default objective too (RANKED, a
+    real spread), and on this fixture no leaf remains inert-under-net_benefit-
+    but-priced-elsewhere. The disclosure mechanism itself (voi names the
+    objective that prices an inert leaf) is guarded engine-driven in
+    ``tests/test_issue_672_estate_objective_disclosure.py``, which sweeps the
+    estate levers under the pre-tax ``max_terminal_wealth`` objective where
+    they ARE inert."""
     doc = _new_user_contract()
     report = voi.sweep(doc, jobs=4, cross_objective=True)
 
-    # #1034 sanity: the rollover is NO LONGER inert under max_net_benefit for
-    # this leveraged fixture -- it is RANKED (priced via the SM sleeve).
-    assert not any(f.pointer == "/estate/default_spousal_rollover" for f in report.inert), (
-        "/estate/default_spousal_rollover is still INERT under max_net_benefit -- "
-        "#1034 should have made compute_net_benefit price the SM sleeve's deemed "
-        "disposition via the estate, moving the rollover for a leveraged household"
-    )
-    assert any(f.pointer == "/estate/default_spousal_rollover" for f in report.ranked), (
-        "/estate/default_spousal_rollover is not RANKED under max_net_benefit -- "
-        "#1034's cross-objective alignment on the SM sleeve is not wired"
-    )
+    ranked = {f.pointer: f for f in report.ranked}
+    for pointer in ("/estate/default_spousal_rollover",
+                    "/assumptions/mortality/0/assumed_death_age"):
+        assert pointer in ranked, (
+            f"{pointer} is not RANKED under max_net_benefit -- the registered "
+            "(#290) / SM-sleeve (#1034) deemed disposition is no longer priced "
+            "through the estate path by the default objective")
+        assert ranked[pointer].spread > 0.0
+        assert not any(f.pointer == pointer for f in report.unread), (
+            f"{pointer} must NOT be reported as 'nothing in the engine reads this'")
 
-    # The leaf that still exhibits the #671 inert-under-one-objective pattern.
-    inert_leaf = [f for f in report.inert
-                  if f.pointer == "/assumptions/mortality/0/assumed_death_age"]
-    assert inert_leaf, (
-        "/assumptions/mortality/0/assumed_death_age must be reported as "
-        "INERT-under-this-objective (the engine reads it), never as an unread/dead key"
-    )
-    assert "max_after_tax_estate" in inert_leaf[0].moves_under
-
-    assert not any(f.pointer == "/assumptions/mortality/0/assumed_death_age" for f in report.unread), (
-        "the mortality leaf must NOT be reported as 'nothing in the engine reads this'"
-    )
-
+    # The leaves that ARE inert under the default objective and priced by no
+    # other objective must say so in the text -- "every one was checked, by
+    # running it" -- never a bare $0.
     text = voi.render_report(report)
     assert "INERT UNDER THIS OBJECTIVE" in text
-    assert "--objective max_after_tax_estate" in text
+    unpriced_inert = [f for f in report.inert if not f.moves_under]
+    assert unpriced_inert, "fixture: expected an inert leaf no objective prices"
+    assert "no built-in objective prices its optimum" in text
 
 
 def test_the_rollover_election_is_actually_priced_under_the_estate_objective():

@@ -10,9 +10,13 @@ calculation.
 Tests cover:
 1. retirement_income is computed from CPP + OAS + pension + LIF (not zero)
 2. Capital gains tax uses actual retirement income for marginal rate
-3. RRSP withdrawal tax uses actual retirement income
-4. Zero CPP/OAS still works (backward compatible)
-5. RetirementState receives cpp_annual from config
+3. Zero CPP/OAS still works (backward compatible)
+4. RetirementState accepts cpp_annual (the retirement module's own API)
+
+Issue #290: the RRSP leg no longer uses retirement income at all -- it is the
+horizon deemed disposition through the estate path -- so the fixtures carry the
+per-owner RRSP split (``primary_rrsp``) and the tax context (``tax``) that leg
+needs, and nothing here claims the RRSP tax depends on CPP/OAS.
 """
 
 import pytest
@@ -32,6 +36,7 @@ class TestRetirementIncomeFromConfig:
             year=2036,
             total_assets=500000,
             total_debt=200000,
+            primary_rrsp=300000,
             total_rrsp=300000,
             total_tfsa=100000,
             non_reg_balance=100000,
@@ -58,6 +63,7 @@ class TestRetirementIncomeFromConfig:
                 'oas_annual': 8500,
                 'capital_gains_inclusion': 0.50,
             },
+            'tax': {'province': 'quebec', 'start_year': 2026},
         }
 
         net = compute_net_benefit(results, cfg)
@@ -73,6 +79,7 @@ class TestRetirementIncomeFromConfig:
             year=2036,
             total_assets=500000,
             total_debt=200000,
+            primary_rrsp=300000,
             total_rrsp=300000,
             total_tfsa=100000,
             non_reg_balance=100000,
@@ -96,6 +103,7 @@ class TestRetirementIncomeFromConfig:
                 'oas_annual': 8500,
                 'capital_gains_inclusion': 0.50,
             },
+            'tax': {'province': 'quebec', 'start_year': 2026},
         }
 
         net = compute_net_benefit(results, cfg)
@@ -110,6 +118,7 @@ class TestRetirementIncomeFromConfig:
             year=2036,
             total_assets=500000,
             total_debt=200000,
+            primary_rrsp=300000,
             total_rrsp=300000,
             total_tfsa=100000,
             non_reg_balance=100000,
@@ -133,6 +142,7 @@ class TestRetirementIncomeFromConfig:
                 'oas_annual': 8500,
                 'capital_gains_inclusion': 0.50,
             },
+            'tax': {'province': 'quebec', 'start_year': 2026},
         }
 
         net = compute_net_benefit(results, cfg)
@@ -148,6 +158,7 @@ class TestRetirementIncomeFromConfig:
             year=2036,
             total_assets=500000,
             total_debt=200000,
+            primary_rrsp=300000,
             total_rrsp=300000,
             total_tfsa=100000,
             non_reg_balance=100000,
@@ -161,6 +172,7 @@ class TestRetirementIncomeFromConfig:
             year=2036,
             total_assets=450000,
             total_debt=200000,
+            primary_rrsp=300000,
             total_rrsp=300000,
             total_tfsa=100000,
             non_reg_balance=50000,
@@ -183,6 +195,7 @@ class TestRetirementIncomeFromConfig:
                 'oas_annual': 8500,
                 'capital_gains_inclusion': 0.50,
             },
+            'tax': {'province': 'quebec', 'start_year': 2026},
         }
 
         net_with = compute_net_benefit([final_with_lif], cfg)

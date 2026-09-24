@@ -12,6 +12,18 @@ election is has asked to be scored on it (DP#22: the optimizer ranks, it
 doesn't choose -- the *user* picks; but the tool must not hide that the
 default pick is blind to a lever worth six figures).
 
+## Issue #290: the registered rollover now reaches max_net_benefit
+
+#290 routed net_benefit's terminal REGISTERED tax through the same estate path
+(``compute_estate``) max_after_tax_estate uses, so the registered-rollover
+levers (``default_spousal_rollover`` and the ``p1_rrsp`` override) are now
+PRICED under max_net_benefit (measured on this fixture: $76,796 and $7,163 of
+VOI). The claims below were retargeted accordingly: the "$0 under
+max_net_benefit" signal is gone for the registered levers -- which was the
+fix -- and the inert-leaf disclosure text is now exercised under
+``max_terminal_wealth`` (a pre-tax objective that prices no estate election at
+all), where it is still true.
+
 ## What this file asserts (three, non-overlapping claims)
 
 1. **``voi.py`` measures the claim directly** (not re-derived/guessed here):
@@ -136,6 +148,20 @@ ESTATE_LEAF_POINTERS = (
 #: mutation), and ``voi.render_report`` is pure. Module-scoped so the single
 #: sweep is shared across the whole file.
 @pytest.fixture(scope="module")
+def _estate_terminal_wealth_report():
+    """The same scoped sweep under ``max_terminal_wealth`` -- a PRE-TAX
+    objective that prices no estate election -- so the estate leaves are live
+    in the engine but inert under the swept objective, and the report must name
+    the objective that DOES price them (the #672 disclosure path)."""
+    doc = _estate_live_contract()
+    schema = _estate_scoped_schema()
+    return voi.sweep(
+        doc, objective=OBJECTIVES["max_terminal_wealth"], jobs=4,
+        cross_objective=True, schema=schema,
+    )
+
+
+@pytest.fixture(scope="module")
 def _estate_net_benefit_report():
     doc = _estate_live_contract()
     schema = _estate_scoped_schema()
@@ -209,65 +235,84 @@ def test_some_live_estate_leaf_is_priced_by_some_objective(_estate_net_benefit_r
     )
 
 
-def test_p1_rrsp_override_reproduces_the_measured_672_numbers(_estate_net_benefit_report):
-    """The exact case #672's issue text and voi.py's own module docstring
-    cite: $0 under max_net_benefit, priced under max_after_tax_estate.
+def test_p1_rrsp_override_is_priced_under_max_net_benefit(_estate_net_benefit_report):
+    """Issue #290 RETARGETED the #672 measurement (was: "$0 under
+    max_net_benefit, priced under max_after_tax_estate").
 
-    #751 RETARGETED this assertion from ``/estate/default_spousal_rollover``
-    to the ``p1_rrsp`` override leaf. This is a correction, not a rubber stamp:
-    after #751 made allocate() honour the declared tfsa_pct/non_reg_pct, the
-    GLOBAL default is optimum-neutral (its dominant account, ``p1_rrsp``, is
-    pinned by this fixture's override -- see
-    ``test_some_live_estate_leaf_is_priced_by_some_objective``), so it no
-    longer moves the argmax. The leaf that now genuinely exhibits the #672
-    pattern -- $0 under max_net_benefit, and the argmax moved ~$84,998 by
-    max_after_tax_estate -- is the per-account override on ``p1_rrsp`` itself
-    (the primary dies first; its RRSP rolling to the survivor vs. deemed
-    disposition at first death IS the estate lever). We assert the leaf that
-    actually carries the signal, measured, not the one that used to."""
+    The ``p1_rrsp`` override is THE registered-rollover lever of this fixture
+    (the primary dies first; its RRSP rolling to the survivor vs. a deemed
+    disposition at first death). Pre-#290 net_benefit re-projected the RRSP on
+    hidden constants and priced it at $0, so this leaf was INERT under the
+    default objective. Since #290 net_benefit's registered tax IS the estate
+    path's, so the leaf is RANKED -- a strictly positive spread -- under
+    max_net_benefit itself. This is the engine-driven VOI proof that the
+    default objective now prices the registered rollover."""
     report = _estate_net_benefit_report
 
+    ranked_by_pointer = {f.pointer: f for f in report.ranked}
+    inert_pointers = {f.pointer for f in report.inert}
+    pointer = "/estate/rollover_overrides/0/spousal_rollover"
+    assert pointer not in inert_pointers, (
+        "the p1_rrsp rollover override is INERT under max_net_benefit again -- "
+        "net_benefit no longer prices the registered deemed disposition (#290)")
+    assert pointer in ranked_by_pointer
+    assert ranked_by_pointer[pointer].spread > 0.0
+
+
+def test_registered_rollover_default_is_priced_under_max_net_benefit(_estate_net_benefit_report):
+    """The global registered-rollover default is priced by the default
+    objective too, and the report TEXT carries both leaves in the ranked
+    section (a disclosure the reader sees, not a Python attribute)."""
+    report = _estate_net_benefit_report
+    ranked = {f.pointer: f for f in report.ranked}
+    assert "/estate/default_spousal_rollover" in ranked
+    assert ranked["/estate/default_spousal_rollover"].spread > 0.0
+    text = voi.render_report(report)
+    ranked_section = text.split("IRREDUCIBLE")[0]
+    for pointer in ESTATE_LEAF_POINTERS:
+        assert pointer in ranked_section
+
+
+def test_p1_rrsp_override_is_inert_under_pretax_objective_and_names_the_estate(
+        _estate_terminal_wealth_report):
+    """Under a pre-tax objective the estate levers are inert at the optimum,
+    and exactly the estate-inclusive objectives price them. Epic #841 bite 4:
+    max_family_after_tax_networth EMBEDS the household after-tax estate;
+    issue #1009's min_after_tax_estate is its mirror; issue #290 makes
+    max_net_benefit price the registered rollover -- so all four move this
+    leaf, and no other objective does."""
+    report = _estate_terminal_wealth_report
     inert_by_pointer = {f.pointer: f for f in report.inert}
     finding = inert_by_pointer["/estate/rollover_overrides/0/spousal_rollover"]
-    assert finding.spread == 0.0, "must be EXACTLY $0 under max_net_benefit, not merely small"
-    # Epic #841 bite 4: max_family_after_tax_networth EMBEDS the household
-    # after-tax estate (family = estate + each child's own after-tax net
-    # worth), so an estate lever that moves max_after_tax_estate moves the
-    # family objective by exactly the same dollar too. Issue #1009 adds
-    # min_after_tax_estate -- the mirror of max_after_tax_estate (the negated
-    # estate) -- which prices the SAME estate leaf by the SAME deemed-
-    # disposition math, so it joins the estate-inclusive set. All three
-    # estate-pricing objectives now price this leaf, and none of the non-
-    # estate objectives does. That is a true consequence of the new
-    # objective, not a regression: the disclosure "this is priced under an
-    # estate objective" is stronger, not weaker. We still assert
-    # max_after_tax_estate is the CANONICAL one #672 names, and that ONLY the
-    # estate-inclusive objectives move it.
+    assert finding.spread == 0.0, "must be EXACTLY $0 under max_terminal_wealth"
     assert "max_after_tax_estate" in finding.moves_under, (
         "max_after_tax_estate must price this estate leaf (#672); got "
         f"{finding.moves_under!r}"
     )
     assert set(finding.moves_under) == {
         "max_after_tax_estate", "min_after_tax_estate",
-        "max_family_after_tax_networth"
+        "max_family_after_tax_networth", "max_net_benefit",
     }, (
-        "exactly the three estate-inclusive objectives must price this leaf "
-        "-- no non-estate objective should, and the family + min/max estate "
-        "objectives should (the family embeds the estate; min/max are its "
-        f"mirrors); got {finding.moves_under!r}"
+        "exactly the estate-inclusive objectives (and, since #290, "
+        "max_net_benefit) must price this leaf; got "
+        f"{finding.moves_under!r}"
     )
 
 
-def test_report_text_names_the_pricing_objective_not_just_the_python_attribute(_estate_net_benefit_report):
+def test_report_text_names_the_pricing_objective_not_just_the_python_attribute(
+        _estate_terminal_wealth_report):
     """DP#32: a fact that lives only in an unread Python attribute is not a
     disclosure. voi.render_report's TEXT must name max_after_tax_estate for
-    the reader, whenever the active (net_benefit) sweep finds $0."""
-    report = _estate_net_benefit_report
+    the reader whenever the active sweep finds $0 on an estate lever."""
+    report = _estate_terminal_wealth_report
     text = voi.render_report(report)
+    finding = {f.pointer: f for f in report.inert}["/estate/default_spousal_rollover"]
+    assert finding.moves_under
 
     assert "/estate/default_spousal_rollover" in text
-    assert "but it IS priced under: max_after_tax_estate" in text
-    assert "re-run with --objective max_after_tax_estate" in text
+    priced_lines = [ln for ln in text.splitlines() if "but it IS priced under:" in ln]
+    assert priced_lines and all("max_after_tax_estate" in ln for ln in priced_lines)
+    assert f"re-run with --objective {finding.moves_under[0]}" in text
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -325,23 +370,33 @@ def test_run_optimization_reports_after_tax_estate_alongside_net_benefit():
         assert "after_tax_estate" in r
 
 
-def test_spousal_rollover_moves_after_tax_estate_more_than_net_benefit():
+def test_spousal_rollover_moves_both_reported_figures_differently():
     """The concrete, engine-level proof behind everything above: toggle ONE
     estate election on a real simulated household and watch the two reported
-    figures diverge exactly the way the VOI sweep says they must.
+    figures respond -- differently.
 
-    #1034 closed the largest piece of #672's blindness: compute_net_benefit
-    now prices the SM sleeve's terminal deemed disposition via the SAME estate
-    code path compute_after_tax_estate uses (DP#9), so the spousal-rollover
-    election -- which the SM sleeve mirrors, via the non-reg pot's rollover --
-    now MOVES net_benefit for a leveraged household (pre-#1034 it moved it by
-    exactly $0). But max_after_tax_estate still moves by MORE, because it
-    prices the FULL estate's rollover (the non-reg pot's deemed disposition +
-    the registered pots' rollover + the SM sleeve + the property), while
-    net_benefit prices only the SM sleeve via the estate and still prices the
-    non-reg pot with its own marginal_rate. The two objectives still DIVERGE on
-    the rollover -- the side-by-side table this PR added still carries a real,
-    non-degenerate signal, not two copies of one number."""
+    #1034 routed the SM sleeve's deemed disposition, and #290 the registered
+    balances', through the SAME estate code path compute_after_tax_estate uses
+    (DP#9), so the spousal-rollover election MOVES net_benefit. But the two
+    figures still differ in what they price: max_after_tax_estate prices the
+    FULL estate (the registered pots, the non-reg pot's deemed disposition
+    stacked on the same terminal return, the SM sleeve, the property), while
+    net_benefit takes only the estate's registered + SM components and prices
+    the non-reg pot with its own marginal_rate.
+
+    Pre-#290 this test asserted after_tax_estate moved by MORE than
+    net_benefit for every strategy. That is no longer structural: the estate
+    attributes a return's tax to the registered income FIRST (it runs the
+    brackets from $0; the gains stack on top), so a rollover that shifts
+    registered income between the two terminal returns can move the
+    registered component while the estate's TOTAL tax does not move at all.
+    Measured on this fixture after #290: the ``balanced`` strategy's
+    after_tax_estate moved $0 while its net_benefit moved ~$2,041. That
+    cross-pot basis mismatch is disclosed by model_fidelity
+    (``net_benefit_registered_tax_at_horizon`` and
+    ``net_benefit_sm_sleeve_cheaper_than_non_reg``). What remains a real,
+    non-degenerate signal -- two figures, not two copies of one number -- is
+    asserted below."""
     doc = _estate_live_contract()
     doc_roll = copy.deepcopy(doc)
     doc_roll["estate"]["default_spousal_rollover"] = True
@@ -357,34 +412,21 @@ def test_spousal_rollover_moves_after_tax_estate_more_than_net_benefit():
     common = set(results_roll) & set(results_no_roll)
     assert common, "the two runs discovered no common strategy -- fixture problem, not a #672 finding"
 
-    estate_diffs = [
-        abs(results_roll[name]["after_tax_estate"] - results_no_roll[name]["after_tax_estate"])
-        for name in common
-    ]
-    assert max(estate_diffs) > 0, (
+    estate_diffs = {}
+    nb_diffs = {}
+    for name in common:
+        estate_diffs[name] = results_roll[name]["after_tax_estate"] - results_no_roll[name]["after_tax_estate"]
+        nb_diffs[name] = results_roll[name]["net_benefit"] - results_no_roll[name]["net_benefit"]
+    assert max(abs(d) for d in estate_diffs.values()) > 0, (
         "after_tax_estate did not move for ANY strategy when the spousal-rollover "
         "election was toggled -- the side-by-side figure this PR adds would be dead weight"
     )
-    # #1034: net_benefit now moves too (via the SM sleeve's estate-priced deemed
-    # disposition), but by LESS than after_tax_estate, which prices the whole
-    # estate's rollover. The two objectives still diverge on the rollover -- the
-    # disclosure's signal survives #1034's cross-objective alignment.
-    nb_diffs = []
-    for name in common:
-        nb_diff = abs(results_roll[name]["net_benefit"] - results_no_roll[name]["net_benefit"])
-        estate_diff = abs(results_roll[name]["after_tax_estate"] - results_no_roll[name]["after_tax_estate"])
-        nb_diffs.append(nb_diff)
-        assert estate_diff >= nb_diff, (
-            f"after_tax_estate moved by {estate_diff:.0f} but net_benefit moved by "
-            f"{nb_diff:.0f} for {name!r} -- net_benefit should move by LESS (it prices "
-            f"only the SM sleeve via the estate, not the full estate's rollover)")
-    # D7: the rollover must MOVE net_benefit for at least one leveraged strategy
-    # (the cross-objective alignment #1034 wires). Without this assertion the
-    # estate_diff >= nb_diff check above passes on a full revert of fix (a)
-    # (every nb_diff becomes 0.0 and estate_diff >= 0 still holds), so the test
-    # would not catch the regression it exists to guard.
-    assert max(nb_diffs) > 0.0, (
+    # #1034/#290: the rollover must MOVE net_benefit for at least one strategy
+    # (a full revert of the registered/SM estate pricing makes every nb diff 0).
+    assert max(abs(d) for d in nb_diffs.values()) > 0.0, (
         "the spousal-rollover election did not move net_benefit for ANY "
-        "strategy -- #1034's cross-objective alignment (compute_net_benefit "
-        "prices the SM sleeve via the estate) is not wired; reverting fix (a) "
-        "would leave this test green")
+        "strategy -- the registered/SM legs are no longer priced via the estate")
+    # Two figures, not one: for some strategy the two responses differ.
+    assert any(abs(estate_diffs[n] - nb_diffs[n]) > 1.0 for n in common), (
+        "net_benefit and after_tax_estate responded identically to the rollover "
+        "for every strategy -- the side-by-side table carries one number twice")

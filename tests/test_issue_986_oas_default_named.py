@@ -24,10 +24,10 @@ class TestOASDefaultIsNamed:
 
     def test_no_inline_numeric_oas_default_at_call_sites(self):
         # A numeric literal may not appear inline at a .get('oas_annual', ...)
-        # call -- the default must come from the named seam. The call sites
-        # now span net_benefit_legs (the RRSP-withdrawal-tax leg, 2 sites) and
-        # objective.py (the capital-gains leg, 1 site) since #232 moved the
-        # jurisdiction legs out of the objective module.
+        # call -- the default must come from the named seam. Since #290
+        # deleted net_benefit_legs' RRSP re-projection (2 sites), the only
+        # call site is objective.py's capital-gains leg; net_benefit_legs is
+        # still scanned so a re-introduced site there is caught too.
         import net_benefit_legs
         import objective
         bad = []
@@ -45,10 +45,11 @@ class TestOASDefaultIsNamed:
                     bad.append((name, line_no, stripped))
         assert not bad, f"inline numeric OAS default remains at: {bad}"
 
-    def test_all_three_call_sites_reference_the_seam(self):
+    def test_every_call_site_references_the_seam(self):
         # Every assumptions.oas_annual fallback reads _default_oas_annual as
-        # the ELSE arm of a membership test -- across the two modules the #232
-        # split created (2 in the RRSP-tax leg, 1 in the capital-gains leg).
+        # the ELSE arm of a membership test. Since #290 there is ONE site (the
+        # capital-gains leg in objective.py); the two in net_benefit_legs'
+        # deleted RRSP re-projection are gone.
         # Membership, not dict.get: a dict.get default is evaluated EAGERLY,
         # so the fallback ran even when a value WAS supplied (#248). The
         # membership arm (not ``or`` -- there is one membership test per call
@@ -69,8 +70,8 @@ class TestOASDefaultIsNamed:
                 if stripped.rstrip(",") == "_default_oas_annual":
                     continue  # a bare imported name (continuation line)
                 seam_sites.append((_mod.__name__, line_no, stripped))
-        assert len(seam_sites) == 3, (
-            f"expected 3 oas_annual fallback sites, got {len(seam_sites)}: "
+        assert len(seam_sites) == 1, (
+            f"expected 1 oas_annual fallback site, got {len(seam_sites)}: "
             f"{seam_sites}")
         for _mod_name, _line_no, ln in seam_sites:
             assert "else" in ln, (
@@ -121,8 +122,16 @@ class TestExplicitOASZeroHonoured:
         # table (#1029) for the simulation start year (2026 here).
         import net_benefit_legs
         from countries.canada.retirement import get_oas_annual_max
-        cfg = {"assumptions": {}}
+        cfg = {"assumptions": {}, "tax": {"start_year": 2026}}
         assumptions = cfg.get("assumptions", {})
         assert (assumptions["oas_annual"] if "oas_annual" in assumptions
                 else net_benefit_legs._default_oas_annual(cfg)) \
             == get_oas_annual_max(2026)
+
+    def test_absent_oas_and_absent_start_year_refuses(self):
+        # Issue #290: the fallback needs the household's year; without it the
+        # seam refuses loudly instead of assuming 2026 (DP#13/DP#32).
+        import pytest
+        import net_benefit_legs
+        with pytest.raises(ValueError, match="start_year"):
+            net_benefit_legs._default_oas_annual({"assumptions": {}})
