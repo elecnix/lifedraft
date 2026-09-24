@@ -40,9 +40,16 @@ The full ``--json`` report is ~13 MB; it is not committable per example.
   ``KEY_YEAR_COLUMNS``, read by strict key (a missing column raises). The full
   report's top-level ``year_by_year`` must equal ``scenarios[0].year_by_year``
   (the winner-identity contract) or projection refuses.
-* ``projection``: the version, this function's name, and the sha256 and byte
-  length of the FULL report. Because the hash is committed, byte-identity of
-  report.json also pins every byte of the unprojected 13 MB output.
+* ``projection``: the version, this function's name, and the byte length and
+  typed digest (``full_report_digest`` = ``"sha256:<64 hex>"``) of the FULL
+  report. Because the digest is committed, byte-identity of report.json also
+  pins every byte of the unprojected 13 MB output. The digest is TYPED, never
+  a bare hex string: CI's secret scan (detect-secrets HexHighEntropyString)
+  flags any quoted string made only of hex digits, and the digest changes on
+  every legitimate regen, so a bare hash would need a fresh .secrets.baseline
+  entry in every engine PR that moves an example. ``dump_report_json`` refuses
+  any bare hex string of BARE_HEX_MIN_LEN or more characters anywhere in the
+  report, so that shape fails locally at regen time, not in CI.
 
 Any change to the rules above bumps PROJECTION_VERSION and regenerates every
 example in the same PR.
@@ -179,8 +186,16 @@ DIFF_LINE_LIMIT = 80
 # on the nightly 3.10/3.11 legs.
 CANONICAL_PYTHON = (3, 12)
 CROSS_VERSION_REL_TOL = 1e-9
-_CROSS_VERSION_UNPINNED = ("full_report_bytes", "full_report_sha256")
+_CROSS_VERSION_UNPINNED = ("full_report_bytes", "full_report_digest")
 OUTPUT_TAIL_LINES = 40
+
+# A JSON string made only of hex digits, this long or longer, is what CI's
+# detect-secrets HexHighEntropyString plugin (limit 3.0, see .secrets.baseline)
+# reports as a secret. Measured with detect-secrets 1.5.0: the bare 64-hex
+# sha256 was flagged, the same digest written "sha256:<hex>" was not.
+BARE_HEX_MIN_LEN = 16
+BARE_HEX_RE = re.compile(r"[0-9a-fA-F]+")
+DIGEST_PREFIX = "sha256:"
 
 
 class ExamplesError(Exception):
@@ -352,7 +367,8 @@ def project_report(full: dict, *, full_bytes: bytes) -> dict:
             "function": PROJECTION_FUNCTION,
             "source": PROJECTION_SOURCE,
             "full_report_bytes": len(full_bytes),
-            "full_report_sha256": hashlib.sha256(full_bytes).hexdigest(),
+            "full_report_digest": DIGEST_PREFIX
+            + hashlib.sha256(full_bytes).hexdigest(),
             "key_year_columns": list(KEY_YEAR_COLUMNS),
         }
     }
@@ -367,9 +383,40 @@ def project_report(full: dict, *, full_bytes: bytes) -> dict:
     return report
 
 
+def bare_hex_strings(obj, path: str = "") -> list[str]:
+    """JSON-pointer-ish paths of every string value (or key) in ``obj`` that is
+    made only of hex digits and is at least BARE_HEX_MIN_LEN long: the shape
+    CI's secret scan reports as a "Hex High Entropy String"."""
+    found = []
+    if isinstance(obj, str):
+        if len(obj) >= BARE_HEX_MIN_LEN and BARE_HEX_RE.fullmatch(obj):
+            found.append(path if path else "/")
+    elif isinstance(obj, dict):
+        for key, value in obj.items():
+            found += bare_hex_strings(key, f"{path}/{key} (key)")
+            found += bare_hex_strings(value, f"{path}/{key}")
+    elif isinstance(obj, list):
+        for index, value in enumerate(obj):
+            found += bare_hex_strings(value, f"{path}/{index}")
+    return found
+
+
+def _bare_hex_message(where: str, paths: list[str]) -> str:
+    return (
+        f"{where} holds bare hex string(s) at {paths}; CI's secret scan "
+        f"(detect-secrets HexHighEntropyString) fails on that shape. Write a "
+        f"digest typed, as {DIGEST_PREFIX!r} + hex, never as a bare hash, and "
+        f"never add it to .secrets.baseline"
+    )
+
+
 def dump_report_json(obj: dict) -> str:
     """Canonical serialisation: sorted keys, 2-space indent, trailing newline.
-    A NaN or infinity is refused, never written as a non-JSON token."""
+    A NaN or infinity is refused, never written as a non-JSON token, and so is a
+    bare hex string (see BARE_HEX_MIN_LEN)."""
+    hex_paths = bare_hex_strings(obj)
+    if hex_paths:
+        raise ExamplesError(_bare_hex_message("report.json", hex_paths))
     try:
         text = json.dumps(
             obj, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False
@@ -842,6 +889,30 @@ def check_no_personal_paths(example_dir: Path) -> list[str]:
     return problems
 
 
+def check_no_bare_hex(example_dir: Path) -> list[str]:
+    """No JSON file of the example may carry a bare hex string: CI's secret
+    scan would fail the PR on it (see BARE_HEX_MIN_LEN)."""
+    problems = []
+    for name in ("input.json", "report.json", "meta.json"):
+        path = example_dir / name
+        if not path.is_file():
+            continue
+        doc, err = _load_json(path)
+        if err is not None:
+            if name == "report.json":
+                # input.json and meta.json parse errors are already reported
+                # by check_input / static_problems; report.json has no other
+                # static reader.
+                problems.append(err)
+            continue
+        hex_paths = bare_hex_strings(doc)
+        if hex_paths:
+            problems.append(
+                _bare_hex_message(f"{example_id(example_dir)}/{name}", hex_paths)
+            )
+    return problems
+
+
 def static_problems(example_dir: Path) -> list[str]:
     """Every static contract problem of one example (empty list = clean)."""
     problems = check_files(example_dir)
@@ -859,6 +930,7 @@ def static_problems(example_dir: Path) -> list[str]:
             meta = loaded if not meta_problems else None
     problems += check_readme(example_dir, meta, input_doc)
     problems += check_no_personal_paths(example_dir)
+    problems += check_no_bare_hex(example_dir)
     return problems
 
 
@@ -920,11 +992,12 @@ def main(
                 example_dir, workers=args.workers, optimize_py=optimize_py
             )
             write_reports(example_dir, json_text, md_text)
-            digest = json.loads(json_text)["projection"]["full_report_sha256"]
+            digest = json.loads(json_text)["projection"]["full_report_digest"]
             print(
                 f"regenerated {example_id(example_dir)}: report.json "
                 f"{len(json_text.encode('utf-8'))} B, report.md "
-                f"{len(md_text.encode('utf-8'))} B, full report sha256 {digest[:12]}"
+                f"{len(md_text.encode('utf-8'))} B, full report "
+                f"{digest[:len(DIGEST_PREFIX) + 12]}"
             )
     except ExamplesError as err:
         print(f"error: {err}", file=sys.stderr)

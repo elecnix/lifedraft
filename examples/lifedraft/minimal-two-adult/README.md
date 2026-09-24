@@ -85,7 +85,7 @@ on the next legitimate regeneration:
   ranked scenarios in engine order with `net_benefit` and `future_value`
   (terminal assets).
 - `winner_year_by_year` is the winner's per-year series for the key columns.
-- `projection.full_report_sha256` pins the full 13 MB `--json` output.
+- `projection.full_report_digest` (`sha256:<hex>`) pins the full 13 MB `--json` output.
 
 The "publication" claims only that this run is reproducible, and the guard's
 byte comparison is what establishes it.

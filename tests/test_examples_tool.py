@@ -244,7 +244,7 @@ def test_project_report_keeps_engine_order_scalars_and_hash():
         "function": "tools/examples.py::project_report",
         "source": "optimize.py --json",
         "full_report_bytes": len(raw),
-        "full_report_sha256": hashlib.sha256(raw).hexdigest(),
+        "full_report_digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
         "key_year_columns": list(ex.KEY_YEAR_COLUMNS),
     }
     for key in ex.TOP_VERBATIM:
@@ -314,6 +314,60 @@ def test_dump_report_json_is_deterministic_and_refuses_nan():
     report["scenarios"][0]["net_benefit"] = float("nan")
     with pytest.raises(ex.ExamplesError, match="non-finite"):
         ex.dump_report_json(report)
+
+
+# ------------------------------------------------------------------ secret-scan shape
+# PR #318's first CI run failed secret-scan: detect-secrets 1.5.0 flagged the
+# bare 64-hex sha256 in the seed's report.json as a "Hex High Entropy String".
+# The digest changes on every legitimate regen, so a .secrets.baseline entry
+# would have to be re-added in every engine PR; the digest is typed instead.
+def test_projection_digest_is_typed_not_bare_hex():
+    full = _full_report()
+    raw = _bytes(full)
+    digest = ex.project_report(full, full_bytes=raw)["projection"]["full_report_digest"]
+    assert digest == "sha256:" + hashlib.sha256(raw).hexdigest()
+    assert ex.bare_hex_strings({"digest": digest}) == []
+
+
+def test_bare_hex_strings_finds_values_and_keys_at_any_depth():
+    bare = "0123456789abcdef" * 4
+    doc = {"a": [{"b": bare}], bare: 1, "short": "abcdef", "digest": "sha256:" + bare,
+           "word": "strategy_a", "n": 1234567890123456}
+    assert ex.bare_hex_strings(doc) == ["/a/0/b", f"/{bare} (key)"]
+    assert ex.bare_hex_strings("DEADBEEF" * 2) == ["/"]
+    assert ex.bare_hex_strings("DEADBEEF" * 2 + "g") == []
+    assert ex.bare_hex_strings("f" * (ex.BARE_HEX_MIN_LEN - 1)) == []
+
+
+def test_dump_report_json_refuses_bare_hex_string():
+    full = _full_report()
+    report = ex.project_report(full, full_bytes=_bytes(full))
+    report["projection"]["full_report_digest"] = hashlib.sha256(b"x").hexdigest()
+    with pytest.raises(ex.ExamplesError,
+                       match=r"bare hex string\(s\) at \['/projection/full_report_digest'\]"):
+        ex.dump_report_json(report)
+
+
+def test_committed_bare_hex_fails_static_contract(tmp_path):
+    _git_init(tmp_path)
+    example = _write_example(tmp_path)
+    assert ex.check_no_bare_hex(example) == []
+    report = json.loads((example / "report.json").read_text())
+    report["projection"]["full_report_digest"] = hashlib.sha256(b"x").hexdigest()
+    (example / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    problems = "\n".join(ex.static_problems(example))
+    assert "report.json holds bare hex string(s) at ['/projection/full_report_digest']" in problems
+    assert "secret scan" in problems
+    (example / "report.json").write_text("{")
+    assert "report.json is not readable JSON" in "\n".join(ex.check_no_bare_hex(example))
+    meta = json.loads((example / "meta.json").read_text())
+    meta["publication_id"] = "0123456789abcdef0123"
+    (example / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    assert any("meta.json holds bare hex" in p for p in ex.check_no_bare_hex(example))
+
+
+def test_seed_report_has_no_bare_hex_string():
+    assert ex.bare_hex_strings(json.loads((SEED / "report.json").read_text())) == []
 
 
 def test_dump_report_json_refuses_oversize(monkeypatch):

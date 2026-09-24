@@ -142,9 +142,14 @@ refuses an exit code other than 0, and also an exit 0 that wrote no output.
 its cap. `report.json` is `project_report(full)` of the ~13 MB `--json` output,
 and its contract is documented in the `tools/examples.py` docstring:
 
-- `projection`: version, function, source, and the **sha256 and byte size of
-  the full report**. Byte-identity of `report.json` therefore also pins every
-  byte of the unprojected output.
+- `projection`: version, function, source, and the **byte size and typed
+  digest of the full report** (`full_report_digest`, written `sha256:<hex>`).
+  Byte-identity of `report.json` therefore also pins every byte of the
+  unprojected output. The digest is typed, never a bare hex string, because
+  CI's secret scan (detect-secrets) flags any quoted all-hex string as a
+  "Hex High Entropy String", and the digest changes on every regen. The
+  static check refuses a bare hex string of 16+ characters in any example
+  JSON file; fix the shape, never add it to `.secrets.baseline`.
 - `title`, `situation`, `model_fidelity`, `optimal_refi_level`,
   `resp_cashout`, `equity_grants`, `runway`, `runway_sweep`,
   `asset_location`, `total_scenarios`: copied verbatim.

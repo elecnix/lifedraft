@@ -62,7 +62,7 @@ def test_example_regenerates_byte_identical(example_dir):
     # workers=1: serial inside each xdist worker, so no nested process pool.
     json_text, md_text = ex.regenerate(example_dir, workers=1)
     if ex.is_canonical_python():
-        # CI's PR leg: exact bytes, which also pins the full report's sha256.
+        # CI's PR leg: exact bytes, which also pins the full report's digest.
         mismatches = ex.compare_reports(example_dir, json_text, md_text)
     else:
         # Nightly 3.10/3.11 legs: floats drift by one ulp across minor
