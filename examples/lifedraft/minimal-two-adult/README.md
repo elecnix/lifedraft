@@ -90,6 +90,16 @@ on the next legitimate regeneration:
 The "publication" claims only that this run is reproducible, and the guard's
 byte comparison is what establishes it.
 
+This example's `meta.json` declares `"mode": "optimize"` (issue #319), because
+its claim is about the optimizer run and its `decisions` declare a sweep: three
+candidate retirement ages per adult, two contribution strategies, three income
+scenarios, and the mortgage refinance, renewal and structure options. One
+`FamilySimulation.run()` would silently collapse that sweep to
+`candidate_ages[0]` and the adapter's default strategy, so `simulate` mode
+refuses this input (`tools/examples.py simulate_input_problems`). Its
+single-point twin, `lifedraft/single-run-two-adult`, is the `simulate`-mode
+example.
+
 One engine-report gap is visible in `report.md` and recorded here rather than
 fixed: the year-by-year heading reads `#1 Scenario: ?`, because scenario entries
 carry their label in `strategy` and have no `label` key (only `category_bests`

@@ -1,12 +1,12 @@
 {
-  "mode": "optimize",
+  "mode": "simulate",
   "source": "lifedraft",
   "source_url": "https://github.com/elecnix/lifedraft/blob/594b6f8/schema/example.json",
-  "publication_id": "lifedraft-schema-example-two-generation",
-  "title": "lifedraft synthetic example household (two-generation trim)",
+  "publication_id": "lifedraft-schema-example-two-generation-single-run",
+  "title": "lifedraft synthetic example household (two-generation trim, one decision point)",
   "authors": ["lifedraft contributors"],
   "year": 2026,
   "retrieval_date": "2026-09-24",
   "verdict": "AGREES",
-  "linked_issues": [300]
+  "linked_issues": [319]
 }
