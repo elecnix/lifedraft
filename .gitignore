@@ -50,6 +50,16 @@ progress.md
 # every one). The blanket `*.json` above would swallow them, and a fragment
 # that never reaches git is a contract block that silently vanishes (DP#32).
 !schema/defs/*.json
+# Issue #300: the runnable research-backed examples (examples/<source>/<slug>/)
+# are committed, synthetic data (DP#15: fabricated round numbers, role-based
+# names). Without these negations the blanket `input.json` and `*.json` rules
+# above would make `git add examples/` silently skip three of each example's
+# five files, and the regen guard would pass locally against files CI never
+# sees. Narrow on purpose: only these three names, only at example depth.
+# tests/test_examples_guard.py re-checks this with `git check-ignore`.
+!examples/*/*/input.json
+!examples/*/*/report.json
+!examples/*/*/meta.json
 inputs/
 
 # Implementation output artifacts (ephemeral, not version-controlled)
