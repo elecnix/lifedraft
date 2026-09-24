@@ -19,8 +19,8 @@
 
 As of 2026 | CAD | nominal dollars
 Known approximations affecting this run's headline figures:
-- net_benefit does deduct a future withdrawal tax, but an ESTIMATED one: it prices the terminal RRSP against a single assumed retirement scenario, and falls back to a flat 30% withdrawal tax whenever the member has no birth_year — neither is the deemed disposition that actually occurs -> net_benefit ranking figure (the default objective, and the console headline) [unknown] (#580)
-- net_benefit prices the SM sleeve's terminal deemed disposition via the estate code path (issue #1034), so the spousal-rollover election MOVES it for a leveraged household; but it still prices the non-reg pot with its own marginal_rate (not the estate's progressive stacking + rollover), and it does not price TFSA / principal-residence / life-insurance at death at all -- so those estate elections remain inert; rank on max_after_tax_estate to see the FULL estate priced -> net_benefit ranking figure (the default objective, and the console headline) -- its partial blindness to the /estate election levers specifically [unknown] (#672)
+- net_benefit prices the RRSP / RRIF / spousal RRSP / LIF / LIRA balances as a deemed disposition AT THE PROJECTION HORIZON, via the same estate path as max_after_tax_estate: it treats the horizon as the date of death, so it does not model a pre-death drawdown that would spread that income over lower-bracket years -> net_benefit ranking figure (the default objective, and the console headline) [unknown] (#290)
+- net_benefit prices the registered balances (issue #290) and the SM sleeve (issue #1034) via the estate code path, so the spousal-rollover election MOVES it; but it still prices the non-reg pot with its own marginal_rate (not the estate's progressive stacking + rollover), and it does not price TFSA / principal-residence / life-insurance at death at all -- so those estate elections remain inert; rank on max_after_tax_estate to see the FULL estate priced -> net_benefit ranking figure (the default objective, and the console headline) -- its partial blindness to the /estate election levers specifically [unknown] (#672)
 - #1034 closed the SM sleeve's UNTAXED terminal gain but left a residual pro-leverage bias: net_benefit prices the SM sleeve's deemed disposition via the estate path (split across two terminal returns, progressive terminal-YEAR indexed brackets) but the non-reg pot via its own flat marginal_rate on ONE household return against START-year brackets -- so an IDENTICAL dollar of accrued gain is worth roughly 5% more inside the SM sleeve than outside it (measured: a $700k/$500k pot scores ~$674k as the sleeve vs ~$664k as non-reg, a ~$10k gap on a $200k gain). The two pots use different bases, not one; the inconsistency is not conservatively biased -- it favours leverage -> net_benefit ranking figure (the default objective) -- the residual cross-pot basis inconsistency that still tilts it toward leverage [unknown] (#1034)
 - Declared RRSP contributions exceeded the contributor's room and the engine REFUSED the excess: the money booked $0 -- it entered no account, spilled nowhere, and stayed in no cash line. The output shows a plan whose contributions were not all made -> any plan or ranking that assumes the declared RRSP contributions were made; the household's real-world contribution would either sit unsheltered or trigger the CRA's 1%-per-month excess-contribution tax (T1-OVP) [unknown] (#170)
   - first refused contribution in year 1
@@ -33,35 +33,35 @@ Known approximations affecting this run's headline figures:
 
 | Category | Net Benefit |
 | --- | --- |
-| Fill Registered Room Yes (Readvanceable) Yes (Stagger Years) | $8,325,995 |
-| Fill Registered Room No No | $5,070,757 |
+| Fill Registered Room Yes (Readvanceable) Yes (Stagger Years) | $7,542,056 |
+| Fill Registered Room No No | $4,150,334 |
 
 ## Optimal Refinance Level
 
 | Readvanceable Mortgage | Staggered Deduction | No Refinance | Fill Registered Room | Maximum Refinance (80%) | Best |
 | --- | --- | --- | --- | --- | --- |
-| Yes (Readvanceable) | Yes (Stagger Years) | $0 | $8,325,995 | $0 | Fill Registered Room |
-| No | No | $0 | $5,070,757 | $0 | Fill Registered Room |
+| Yes (Readvanceable) | Yes (Stagger Years) | $0 | $7,542,056 | $0 | Fill Registered Room |
+| No | No | $0 | $4,150,334 | $0 | Fill Registered Room |
 
 ## Top 15 Scenarios
 
 | # | Scenario | Loan-to-Value | Net Benefit | Liquid NW | Assets | Debt | Decumulation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | ? | 80.0% | $8,325,995 | $9,390,178 | $10,136,741 | $746,563 |  |
-| 2 | ? | 80.0% | $8,001,942 | $9,639,445 | $10,386,008 | $746,563 |  |
-| 3 | ? | 80.0% | $8,001,942 | $9,639,445 | $10,386,008 | $746,563 |  |
-| 4 | ? | 80.0% | $7,885,768 | $9,368,286 | $10,114,849 | $746,563 |  |
-| 5 | ? | 80.0% | $7,817,529 | $9,315,051 | $10,061,614 | $746,563 |  |
-| 6 | ? | 80.0% | $7,724,397 | $8,747,737 | $9,510,309 | $762,572 |  |
-| 7 | ? | 80.0% | $7,625,312 | $9,021,705 | $9,768,268 | $746,563 |  |
-| 8 | ? | 80.0% | $7,499,996 | $8,569,924 | $9,316,488 | $746,563 |  |
-| 9 | ? | 80.0% | $7,487,045 | $8,999,111 | $9,761,683 | $762,572 |  |
-| 10 | ? | 80.0% | $7,487,045 | $8,999,111 | $9,761,683 | $762,572 |  |
-| 11 | ? | 80.0% | $7,363,152 | $8,746,247 | $9,508,820 | $762,572 |  |
-| 12 | ? | 80.0% | $7,289,804 | $8,655,180 | $9,417,752 | $762,572 |  |
-| 13 | ? | 80.0% | $7,281,313 | $8,814,526 | $9,561,089 | $746,563 |  |
-| 14 | ? | 80.0% | $7,281,313 | $8,814,526 | $9,561,089 | $746,563 |  |
-| 15 | ? | 80.0% | $7,140,800 | $8,581,713 | $9,328,277 | $746,563 |  |
+| 1 | ? | 80.0% | $7,542,056 | $9,390,178 | $10,136,741 | $746,563 |  |
+| 2 | ? | 80.0% | $7,536,592 | $9,315,051 | $10,061,614 | $746,563 |  |
+| 3 | ? | 80.0% | $7,298,500 | $9,021,705 | $9,768,268 | $746,563 |  |
+| 4 | ? | 80.0% | $7,142,374 | $9,639,445 | $10,386,008 | $746,563 |  |
+| 5 | ? | 80.0% | $7,142,374 | $9,639,445 | $10,386,008 | $746,563 |  |
+| 6 | ? | 80.0% | $7,027,342 | $8,655,180 | $9,417,752 | $762,572 |  |
+| 7 | ? | 80.0% | $7,005,123 | $8,747,737 | $9,510,309 | $762,572 |  |
+| 8 | ? | 80.0% | $6,979,149 | $9,368,286 | $10,114,849 | $746,563 |  |
+| 9 | ? | 80.0% | $6,817,078 | $8,453,828 | $9,200,391 | $746,563 |  |
+| 10 | ? | 80.0% | $6,798,609 | $8,569,924 | $9,316,488 | $746,563 |  |
+| 11 | ? | 80.0% | $6,797,912 | $8,366,151 | $9,128,723 | $762,572 |  |
+| 12 | ? | 80.0% | $6,651,344 | $8,999,111 | $9,761,683 | $762,572 |  |
+| 13 | ? | 80.0% | $6,651,344 | $8,999,111 | $9,761,683 | $762,572 |  |
+| 14 | ? | 80.0% | $6,594,550 | $8,164,607 | $8,911,170 | $746,563 |  |
+| 15 | ? | 80.0% | $6,493,548 | $8,746,247 | $9,508,820 | $762,572 |  |
 
 ## Year-by-Year Breakdown — #1 Scenario: ?
 
