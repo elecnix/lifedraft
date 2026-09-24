@@ -840,6 +840,50 @@ def _property_equity_for_year(prop: Dict, cal_year: int, start_year: int) -> flo
     return appreciated_value - prop['secured_share']
 
 
+def _declared_resp_opening(config, has_history: List[bool], composition: Dict) -> tuple:
+    """Per-child opening RESP state from each child's declared history
+    (issue #295): ``(balances, contributions, grants, qesi)``, one entry per
+    child in ``config.children`` order. ``grants`` is CESG plus CLB (both are
+    federal grants paid out as taxable EAPs and repaid on collapse).
+
+    Refuses (ValueError), never repairs: a config where only SOME children
+    carry a history (the missing ones would silently fall back to a share of
+    an even split); per-child balances that do not add up to
+    ``resp_current_balance``; per-child buckets that do not add up to a
+    ``resp_composition`` that is present. Any of these means the per-child
+    figures and the household totals were built from different facts --
+    e.g. an overlay that changed one and not the other (DP#18).
+    """
+    if not all(has_history):
+        missing = [ch.get('name', f'child {i}') for i, (ch, h)
+                   in enumerate(zip(config.children, has_history)) if not h]
+        raise ValueError(
+            f"Only some children carry a declared RESP history (issue #295); "
+            f"missing for {missing}. Either every child's history comes from the "
+            f"input contract or none does -- a mix would split the undeclared "
+            f"children's share of the plan evenly and silently.")
+    openings = [ch['resp_opening'] for ch in config.children]
+    balances = [o['balance'] for o in openings]
+    contributions = [o['contributions'] for o in openings]
+    grants = [o['grants'] for o in openings]
+    qesi = [o['qesi'] for o in openings]
+    tolerance = 0.01
+    if abs(sum(balances) - config.resp_current_balance) > tolerance:
+        raise ValueError(
+            f"The children's opening RESP balances sum to {sum(balances):,.2f}, but "
+            f"accounts.resp_current_balance is {config.resp_current_balance:,.2f}. "
+            f"The per-child figures and the household balance disagree.")
+    if composition:
+        for label, bucket, key in (('contributions', contributions, 'total_contributions'),
+                                   ('grants (CESG + CLB)', grants, 'total_cesg_received'),
+                                   ('QESI', qesi, 'total_qesi_received')):
+            if abs(sum(bucket) - composition[key]) > tolerance:
+                raise ValueError(
+                    f"The children's opening RESP {label} sum to {sum(bucket):,.2f}, "
+                    f"but accounts.resp_composition.{key} is {composition[key]:,.2f}.")
+    return balances, contributions, grants, qesi
+
+
 @dataclass
 class SimState:
     """Explicit simulation state — DP#26: the data object returned by simulate_year.
@@ -1145,6 +1189,15 @@ class SimState:
         resp_contributions = [_resp_contrib_total / max(1, n_children)] * n_children
         resp_cesg = [_resp_cesg_total / max(1, n_children)] * n_children
         resp_qesi = [_resp_qesi_total / max(1, n_children)] * n_children
+        # Issue #295: a contract-mapped household carries each child's
+        # declared RESP history, and what is in the plan for each child at the
+        # start; those per-child figures REPLACE the even split above. An
+        # in-memory config that declares no history keeps the even split
+        # (disclosed by model_fidelity's resp_grant_history_not_declared).
+        _has_history = [('resp_history' in ch) for ch in config.children]
+        if any(_has_history):
+            (resp_balances, resp_contributions, resp_cesg,
+             resp_qesi) = _declared_resp_opening(config, _has_history, _resp_comp)
 
         # Issue #577: margin_available is undrawn room, not a balance owed.
         # See the docstring above — booking it here unconditionally is the
@@ -2605,6 +2658,8 @@ def simulate_year_pure(
     # retirement components are 0, so this equals the historical employment sum.
     total_family_income = employment_income + ws.cpp_income + ws.oas_income + ws.pension_income + ws.gis_income + ws.drawdown_total + ws.lif_withdrawal
 
+    # Issue #295: None when the household has no RESP children.
+    _resp_rows = inputs.resp_data if inputs.resp_data is not None else ()
     result = YearResult(
         year=year + 1,
         mortgage_rate=mortgage_rate,
@@ -2629,6 +2684,12 @@ def simulate_year_pure(
         spouse_tfsa=ws.new_tfsa_sp_bal,
         total_tfsa=total_tfsa,
         resp_balance=resp_total,
+        # Issue #295: per-child RESP flows, straight from the fold's resp_data.
+        resp_contributions_paid=tuple(rd['contribution'] for rd in _resp_rows),
+        resp_cesg_paid=tuple(rd['cesg'] for rd in _resp_rows),
+        resp_qesi_paid=tuple(rd['qesi'] for rd in _resp_rows),
+        resp_lifetime_contributions=tuple(rd['lifetime_contributions'] for rd in _resp_rows),
+        resp_contribution_redirected=sum((rd['redirected'] for rd in _resp_rows), 0.0),
         resp_eap_paid=ws.resp_eap_paid,
         resp_pse_paid=ws.resp_pse_paid,
         resp_aip_tax=ws.resp_aip_tax,

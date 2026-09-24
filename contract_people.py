@@ -580,7 +580,8 @@ def _tuition_transfer_to(p: Dict) -> Optional[str]:
 
 
 def _map_child(doc: Dict, person_id: str,
-              registered_balances: Dict[str, Dict[str, float]]) -> Dict:
+              registered_balances: Dict[str, Dict[str, float]],
+              resp_histories: Dict[str, Dict]) -> Dict:
     p = _people_by_id(doc)[person_id]
     child: Dict[str, Any] = {
         "role": "child",
@@ -604,6 +605,20 @@ def _map_child(doc: Dict, person_id: str,
     # household). A spousal_rrsp owned by a child is still refused loudly
     # there, and an account owned by no declared person is refused too (DP#32).
     child.update(registered_balances.get(person_id, {}))
+    # Issue #295: the child's declared RESP beneficiary history (lifetime
+    # CESG/QESI/CLB and contributions, the 16-17 test facts) and what is in
+    # the plan for them at the start -- per child, never averaged
+    # (contract_accounts.map_resp_beneficiary_histories). A child named on no
+    # RESP has no history (None: the engine derives no carry-forward room for
+    # them, disclosed by model_fidelity) and nothing in any plan.
+    resp = resp_histories.get(person_id)
+    if resp is None:
+        child["resp_history"] = None
+        child["resp_opening"] = {"balance": 0.0, "contributions": 0.0,
+                                 "grants": 0.0, "qesi": 0.0}
+    else:
+        child["resp_history"] = resp["history"]
+        child["resp_opening"] = resp["opening"]
     sp = p.get("study_periods")
     if sp:
         child["study_periods"] = [

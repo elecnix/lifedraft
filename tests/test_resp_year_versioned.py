@@ -26,7 +26,10 @@ from countries.canada.resp_rules import (
     CESG_ANNUAL_ROOM_CHANGE_YEAR, CESG_CONTRIBUTION_MAX_CHANGE_YEAR,
     get_cesg_thresholds, get_qesi_thresholds, get_clb_thresholds,
     get_cesg_annual_room, get_cesg_contribution_max,
+    cesg_carry_forward_room,
 )
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_resp_rules_full import _declared_child  # noqa: E402  (issue #295 helper)
 
 
 class TestCESGYearVersionedThresholds(unittest.TestCase):
@@ -60,7 +63,7 @@ class TestCESGYearVersionedThresholds(unittest.TestCase):
     def test_cesg_calculation_uses_year_2024_thresholds(self):
         """calculate_cesg must use 2024 thresholds when year=2024."""
         calc = RESPCalculator()
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t2024 = get_cesg_thresholds(2024)
         # Income exactly at 2024 first threshold should qualify for additional CESG
         result = calc.calculate_cesg(2500, child, 2024, family_income=t2024['first_threshold'])
@@ -69,7 +72,7 @@ class TestCESGYearVersionedThresholds(unittest.TestCase):
     def test_cesg_calculation_uses_year_2026_thresholds(self):
         """calculate_cesg must use 2026 thresholds when year=2026."""
         calc = RESPCalculator()
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t2026 = get_cesg_thresholds(2026)
         # Income exactly at 2026 first threshold should qualify for additional CESG
         result = calc.calculate_cesg(2500, child, 2026, family_income=t2026['first_threshold'])
@@ -106,7 +109,7 @@ class TestQESISpecificThresholds(unittest.TestCase):
     def test_qesi_calculation_uses_qesi_thresholds(self):
         """calculate_qesi must use QESI-specific thresholds, not CESG thresholds."""
         calc = RESPCalculator()
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=True)
         qesi_t = get_qesi_thresholds(2024)
         # Income at QESI first threshold → low income supplementary rate
         result = calc.calculate_qesi(2500, child, 2024, family_income=qesi_t['first_threshold'])
@@ -115,7 +118,7 @@ class TestQESISpecificThresholds(unittest.TestCase):
     def test_qesi_income_between_qesi_and_cesg_thresholds(self):
         """Income between QESI and CESG first thresholds: no QESI supplementary, but CESG additional exists."""
         calc = RESPCalculator()
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=True)
         qesi_t = get_qesi_thresholds(2024)
         cesg_t = get_cesg_thresholds(2024)
         # Income above QESI first threshold but below CESG first threshold
@@ -192,21 +195,21 @@ class TestCESGPre2005Calculation(unittest.TestCase):
 
     def test_cesg_2004_basic_on_2000(self):
         """2004: 20% on first $2,000 = $400 basic CESG."""
-        child = RESPChild(name="test", birth_year=1998)
+        child = RESPChild(grant_history=None, name="test", birth_year=1998)
         result = self.calc.calculate_cesg(2000, child, 2004, family_income=150000)
         self.assertEqual(result['basic_cesg'], 400)
         self.assertEqual(result['total_cesg'], 400)
 
     def test_cesg_2004_contribution_over_max(self):
         """2004: Contributing $3,000 still only gets CESG on first $2,000."""
-        child = RESPChild(name="test", birth_year=1998)
+        child = RESPChild(grant_history=None, name="test", birth_year=1998)
         result = self.calc.calculate_cesg(3000, child, 2004, family_income=150000)
         self.assertEqual(result['basic_cesg'], 400)
         self.assertEqual(result['total_cesg'], 400)
 
     def test_cesg_2004_low_income(self):
         """2004: Low income gets additional CESG on first $500."""
-        child = RESPChild(name="test", birth_year=1998)
+        child = RESPChild(grant_history=None, name="test", birth_year=1998)
         t = get_cesg_thresholds(2004)
         result = self.calc.calculate_cesg(2000, child, 2004, family_income=t['first_threshold'])
         self.assertEqual(result['basic_cesg'], 400)
@@ -215,7 +218,7 @@ class TestCESGPre2005Calculation(unittest.TestCase):
 
     def test_cesg_2004_mid_income(self):
         """2004: Mid income gets 10% additional on first $500."""
-        child = RESPChild(name="test", birth_year=1998)
+        child = RESPChild(grant_history=None, name="test", birth_year=1998)
         t = get_cesg_thresholds(2004)
         result = self.calc.calculate_cesg(2000, child, 2004, family_income=t['first_threshold'] + 1)
         self.assertEqual(result['basic_cesg'], 400)
@@ -224,23 +227,28 @@ class TestCESGPre2005Calculation(unittest.TestCase):
 
     def test_cesg_2005_transition(self):
         """2005: contribution max is $2,500 but annual room still $400 (room changes in 2007)."""
-        child = RESPChild(name="test", birth_year=1998)
+        child = RESPChild(grant_history=None, name="test", birth_year=1998)
         result = self.calc.calculate_cesg(2500, child, 2005, family_income=150000)
         # Contribution max is $2,500 but annual room is still $400
         # so total CESG for high income is $400 (capped by annual room)
-        self.assertEqual(result['basic_cesg'], 500)  # 20% × $2,500
+        # Issue #295: basic/additional are reported AFTER the caps (so they
+        # sum to total_cesg): 20% × $2,500 = $500, capped by the $400 room.
+        self.assertEqual(result['basic_cesg'], 400)
         self.assertEqual(result['total_cesg'], 400)  # capped by annual room
 
     def test_cesg_catchup_2004_contribution_max(self):
-        """2004 catch-up: contribution max is $2,000, catchup max is $4,000."""
-        child = RESPChild(name="test", birth_year=1998)
-        result = self.calc.calculate_cesg_with_catchup(
-            4000, child, 2004, family_income=150000, unused_room=2000)
-        # Current year: 20% × $2,000 = $400
-        self.assertEqual(result['current_year_cesg'], 400)
-        # Catch-up: 20% × min($4,000 - $2,000, $2,000, $2,000) = 20% × $2,000 = $400
-        self.assertEqual(result['catchup_cesg'], 400)
-        # Total: $800 (capped at annual_room × 2 = $800 for high income)
+        """2004 catch-up: contribution max is $2,000, catchup max is $4,000.
+
+        Issue #295: carry-forward room is derived from the history. Born 1998,
+        the child accrued 6 × $400 = $2,400 through 2003; $2,000 of basic CESG
+        received leaves $400 of grant carried into 2004 (the old
+        unused_room=2000 contribution dollars)."""
+        child = _declared_child(1998, basic=2000, start_year=2004)
+        self.assertEqual(cesg_carry_forward_room(child, 2004), 400)
+        result = self.calc.calculate_cesg(4000, child, 2004, family_income=150000)
+        # 20% × $2,000 this year + 20% × $2,000 catch-up = $800
+        # (capped at annual_room × 2 = $800)
+        self.assertEqual(result['basic_cesg'], 800)
         self.assertEqual(result['total_cesg'], 800)
 
 
@@ -273,7 +281,7 @@ class TestCLBYearVersionedThresholds(unittest.TestCase):
     def test_clb_calculation_uses_year_thresholds(self):
         """calculate_clb must use year-versioned thresholds."""
         calc = RESPCalculator()
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t2024 = get_clb_thresholds(2024)
         # Income at threshold should be eligible
         result = calc.calculate_clb(child, 2024, family_income=t2024[1], num_children=1)
@@ -288,165 +296,148 @@ class TestCESGBoundaryConditions(unittest.TestCase):
 
     def test_income_exactly_at_cesg_first_threshold(self):
         """Income exactly at CESG first threshold → qualifies for low additional rate."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t = get_cesg_thresholds(2026)
         result = self.calc.calculate_cesg(2500, child, 2026, family_income=t['first_threshold'])
         self.assertEqual(result['additional_cesg'], 100)  # Low rate (20% × $500)
 
     def test_income_one_dollar_above_cesg_first_threshold(self):
         """$1 above first threshold → mid additional rate."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t = get_cesg_thresholds(2026)
         result = self.calc.calculate_cesg(2500, child, 2026, family_income=t['first_threshold'] + 1)
         self.assertEqual(result['additional_cesg'], 50)  # Mid rate (10% × $500)
 
     def test_income_exactly_at_cesg_second_threshold(self):
         """Income exactly at CESG second threshold → mid additional rate."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t = get_cesg_thresholds(2026)
         result = self.calc.calculate_cesg(2500, child, 2026, family_income=t['second_threshold'])
         self.assertEqual(result['additional_cesg'], 50)  # Mid rate (10% × $500)
 
     def test_income_one_dollar_above_cesg_second_threshold(self):
         """$1 above second threshold → no additional CESG."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t = get_cesg_thresholds(2026)
         result = self.calc.calculate_cesg(2500, child, 2026, family_income=t['second_threshold'] + 1)
         self.assertEqual(result['additional_cesg'], 0)
 
     def test_income_exactly_at_qesi_first_threshold(self):
         """Income exactly at QESI first threshold → low supplementary rate."""
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=True)
         t = get_qesi_thresholds(2024)
         result = self.calc.calculate_qesi(2500, child, 2024, family_income=t['first_threshold'])
         self.assertEqual(result['supplementary_qesi'], 50)  # 10% × $500
 
     def test_income_one_dollar_above_qesi_first_threshold(self):
         """$1 above QESI first threshold → mid supplementary rate."""
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=True)
         t = get_qesi_thresholds(2024)
         result = self.calc.calculate_qesi(2500, child, 2024, family_income=t['first_threshold'] + 1)
         self.assertEqual(result['supplementary_qesi'], 25)  # 5% × $500
 
     def test_income_exactly_at_qesi_second_threshold(self):
         """Income exactly at QESI second threshold → mid supplementary rate."""
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=True)
         t = get_qesi_thresholds(2024)
         result = self.calc.calculate_qesi(2500, child, 2024, family_income=t['second_threshold'])
         self.assertEqual(result['supplementary_qesi'], 25)  # 5% × $500
 
     def test_income_one_dollar_above_qesi_second_threshold(self):
         """$1 above QESI second threshold → no supplementary QESI."""
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=True)
         t = get_qesi_thresholds(2024)
         result = self.calc.calculate_qesi(2500, child, 2024, family_income=t['second_threshold'] + 1)
         self.assertEqual(result['supplementary_qesi'], 0)
 
 
 class TestCESGLifetimeCapWithCatchup(unittest.TestCase):
-    """Test CESG lifetime cap interaction with carry-forward (issue edge case)."""
+    """Test CESG lifetime cap interaction with carry-forward (issue edge case).
+
+    Issue #295: the carry-forward room is derived from the declared history
+    (birth year 2012 → $7,000 of room accrued through 2025)."""
 
     def setUp(self):
         self.calc = RESPCalculator()
 
     def test_catchup_capped_by_remaining_lifetime(self):
         """Catch-up CESG must be capped by remaining lifetime room, not just annual max."""
-        child = RESPChild(name="test", birth_year=2012)
-        child.total_cesg_received = 6700  # Only $500 remaining lifetime
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=150000, unused_room=2500)
-        # Total CESG should be capped at $500 remaining, not $1,000
-        self.assertLessEqual(result['total_cesg'], 500)
+        child = _declared_child(2012, basic=6700)  # Only $500 remaining lifetime
+        result = self.calc.calculate_cesg(5000, child, 2026, family_income=150000)
+        # $800 of basic room this year, but only $500 left lifetime
+        self.assertEqual(result['total_cesg'], 500)
 
     def test_catchup_low_income_capped_by_lifetime(self):
         """Low income catch-up: lifetime cap takes priority over annual max."""
-        child = RESPChild(name="test", birth_year=2012)
-        child.total_cesg_received = 6600  # Only $600 remaining lifetime
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=40000, unused_room=2500)
-        # Annual max for low income is $600, but lifetime remaining is also $600
-        self.assertLessEqual(result['total_cesg'], 600)
+        child = _declared_child(2012, basic=6600)  # Only $600 remaining lifetime
+        result = self.calc.calculate_cesg(5000, child, 2026, family_income=40000)
+        self.assertEqual(result['total_cesg'], 600)
 
     def test_large_catchup_near_lifetime_cap(self):
         """Contribute $5,000 in one year with $200 lifetime remaining."""
-        child = RESPChild(name="test", birth_year=2012)
-        child.total_cesg_received = 7000  # Only $200 remaining
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=150000, unused_room=10000)
-        self.assertLessEqual(result['total_cesg'], 200)
+        child = _declared_child(2012, basic=6800, additional=200)  # Only $200 remaining
+        result = self.calc.calculate_cesg(5000, child, 2026, family_income=150000)
+        self.assertEqual(result['total_cesg'], 200)
 
 
 class TestCESGCatchupWithYearVersionedRoom(unittest.TestCase):
-    """Test that catch-up uses year-versioned CESG annual room."""
+    """Test that catch-up uses year-versioned CESG annual room.
+
+    Issue #295: a child born 2018 accrued 8 × $500 = $4,000 of basic room
+    through 2025; declaring $3,500 received leaves $500 of grant carried
+    forward (the old unused_room=2500 contribution dollars)."""
 
     def setUp(self):
         self.calc = RESPCalculator()
 
     def test_cesg_with_catchup_uses_year_2024(self):
         """CESG catch-up in 2024 should use 2024 thresholds."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = _declared_child(2012, basic=4000, start_year=2024)
         t2024 = get_cesg_thresholds(2024)
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2024, family_income=t2024['first_threshold'], unused_room=2500)
+        result = self.calc.calculate_cesg(5000, child, 2024, family_income=t2024['first_threshold'])
         self.assertGreater(result['total_cesg'], 0)
         self.assertGreater(result['additional_cesg'], 0)
 
     def test_catchup_high_income_total_cesg_reflects_catchup(self):
-        """High income catchup: total_cesg should be ~$500 + catchup, not capped at $500."""
-        child = RESPChild(name="test", birth_year=2012)
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=150000, unused_room=2500)
-        # current_year_cesg = 20% × $2,500 = $500
-        # catchup_cesg = 20% × $2,500 = $500
-        # total should be $1,000, NOT capped at $500
-        self.assertEqual(result['current_year_cesg'], 500)
-        self.assertEqual(result['catchup_cesg'], 500)
+        """High income catchup: total_cesg should be $500 + $500 catch-up, not capped at $500."""
+        child = _declared_child(2018, basic=3500)
+        result = self.calc.calculate_cesg(5000, child, 2026, family_income=150000)
+        self.assertEqual(result['basic_cesg'], 1000)
         self.assertEqual(result['total_cesg'], 1000)
 
     def test_catchup_low_income_total_cesg_reflects_catchup(self):
         """Low income catchup: total_cesg should reflect catchup + additional."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = _declared_child(2018, basic=3500)
         t = get_cesg_thresholds(2026)
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=t['first_threshold'], unused_room=2500)
-        # current = $500, catchup = $500, additional = $100
-        # total = $1,100 (capped at 2× $600 = $1,200)
+        result = self.calc.calculate_cesg(5000, child, 2026, family_income=t['first_threshold'])
+        # basic $500 + $500 catch-up, additional $100 (not carried forward)
         self.assertGreater(result['total_cesg'], 500)  # Must exceed normal annual max
-        self.assertEqual(result['current_year_cesg'], 500)
-        self.assertEqual(result['catchup_cesg'], 500)
+        self.assertEqual(result['basic_cesg'], 1000)
         self.assertEqual(result['additional_cesg'], 100)
         self.assertEqual(result['total_cesg'], 1100)
 
     def test_no_unused_room_no_catchup_cap(self):
         """No unused room → normal annual max applies, not doubled."""
-        child = RESPChild(name="test", birth_year=2012)
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=150000, unused_room=0)
+        child = _declared_child(2018, basic=4000)
+        result = self.calc.calculate_cesg(5000, child, 2026, family_income=150000)
         # Without catchup, max is $500 even though contributing $5,000
         self.assertEqual(result['total_cesg'], 500)
 
     def test_catchup_mid_income_total_cesg_reflects_catchup(self):
         """Mid income catchup: additional CESG doesn't double, only basic does."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = _declared_child(2018, basic=3500)
         t = get_cesg_thresholds(2026)
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=t['second_threshold'], unused_room=2500)
-        # current = $500, catchup = $500, additional = $50
-        # catchup_annual_max = 500*2 + (550-500) = 1050
-        # total = min(500+500+50, 1050) = 1050
-        self.assertEqual(result['current_year_cesg'], 500)
-        self.assertEqual(result['catchup_cesg'], 500)
+        result = self.calc.calculate_cesg(5000, child, 2026, family_income=t['second_threshold'])
+        # basic $1,000, additional 10% × $500 = $50
+        self.assertEqual(result['basic_cesg'], 1000)
         self.assertEqual(result['additional_cesg'], 50)
         self.assertEqual(result['total_cesg'], 1050)
 
     def test_partial_unused_room_catchup(self):
-        """Partial unused_room (< contribution_max) limits catchup grant."""
-        child = RESPChild(name="test", birth_year=2012)
-        result = self.calc.calculate_cesg_with_catchup(
-            5000, child, 2026, family_income=150000, unused_room=1000)
-        # current = $500, catchup = 20% × min($2500, $2500, $1000) = $200
-        self.assertEqual(result['current_year_cesg'], 500)
-        self.assertEqual(result['catchup_cesg'], 200)
+        """Partial carry-forward ($200 of grant) limits the catch-up grant."""
+        child = _declared_child(2018, basic=3800)
+        result = self.calc.calculate_cesg(5000, child, 2026, family_income=150000)
+        # $500 this year + $200 catch-up
         self.assertEqual(result['total_cesg'], 700)
 
 
@@ -458,7 +449,7 @@ class TestQESILifetimeCap(unittest.TestCase):
 
     def test_qesi_near_lifetime_cap(self):
         """QESI near lifetime cap: grant capped at remaining lifetime."""
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=True)
         child.total_qesi_received = 3500  # Only $100 remaining
         result = self.calc.calculate_qesi(2500, child, 2026, family_income=30000)
         # basic = $250, supplementary = $50, total would be $300 but capped at $100
@@ -467,7 +458,7 @@ class TestQESILifetimeCap(unittest.TestCase):
 
     def test_qesi_at_lifetime_cap(self):
         """QESI at lifetime cap: no more grant."""
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=True)
         child.total_qesi_received = 3600
         result = self.calc.calculate_qesi(2500, child, 2026, family_income=30000)
         self.assertEqual(result['total_qesi'], 0)
@@ -482,14 +473,14 @@ class TestQESINonQuebec(unittest.TestCase):
 
     def test_non_quebec_zero_all_income_levels(self):
         """Non-Quebec resident gets $0 QESI at all income levels."""
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=False)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=False)
         for income in [20000, 50000, 100000, 200000]:
             result = self.calc.calculate_qesi(2500, child, 2026, family_income=income)
             self.assertEqual(result['total_qesi'], 0, f"QESI should be 0 at income {income}")
 
     def test_non_quebec_returns_reason(self):
         """Non-Quebec QESI result includes reason string."""
-        child = RESPChild(name="test", birth_year=2012, is_quebec_resident=False)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012, is_quebec_resident=False)
         result = self.calc.calculate_qesi(2500, child, 2026, family_income=150000)
         self.assertEqual(result.get('reason'), 'Not a Quebec resident')
 
@@ -509,7 +500,7 @@ class TestCLBGranularThresholds(unittest.TestCase):
 
     def test_clb_2_children_uses_tier_1(self):
         """2 children maps to tier key 1 in calculate_clb."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t = get_clb_thresholds(2026)
         result = self.calc.calculate_clb(child, 2026, family_income=t[1], num_children=2)
         self.assertTrue(result['eligible'])
@@ -519,7 +510,7 @@ class TestCLBGranularThresholds(unittest.TestCase):
 
     def test_clb_3_children_uses_tier_1(self):
         """3 children maps to tier key 1 in calculate_clb."""
-        child = RESPChild(name="test", birth_year=2012)
+        child = RESPChild(grant_history=None, name="test", birth_year=2012)
         t = get_clb_thresholds(2026)
         result = self.calc.calculate_clb(child, 2026, family_income=t[1], num_children=3)
         self.assertTrue(result['eligible'])
@@ -709,14 +700,14 @@ class TestCLBAgeLimit(unittest.TestCase):
 
     def test_clb_age_15_eligible(self):
         """Age 15 → still eligible."""
-        child = RESPChild(name="test", birth_year=2011)  # Age 15 in 2026
+        child = RESPChild(grant_history=None, name="test", birth_year=2011)  # Age 15 in 2026
         result = self.calc.calculate_clb(child, 2026, family_income=40000, num_children=1)
         self.assertTrue(result['eligible'])
         self.assertGreater(result['clb_amount'], 0)
 
     def test_clb_age_16_not_eligible(self):
         """Age 16 → not eligible (CLB ends at year turning 15)."""
-        child = RESPChild(name="test", birth_year=2010)  # Age 16 in 2026
+        child = RESPChild(grant_history=None, name="test", birth_year=2010)  # Age 16 in 2026
         result = self.calc.calculate_clb(child, 2026, family_income=40000, num_children=1)
         self.assertFalse(result['eligible'])
         self.assertEqual(result['clb_amount'], 0)

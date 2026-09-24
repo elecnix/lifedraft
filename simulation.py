@@ -1207,6 +1207,66 @@ def _prior_gis_countable(results) -> Optional[float]:
             - getattr(prior, 'gis_income', 0.0))
 
 
+def _resp_grants_for_year(children: list, resp_calc, resp_total: float,
+                          sim_year: int, family_income: float) -> Tuple[List[Dict], float]:
+    """This year's per-child RESP contributions and grants -- the ONE fold
+    step shared by the annual and the monthly path (issue #295, DP#9).
+
+    ``resp_total`` is split evenly across every child (declared as the
+    model_fidelity approximation ``resp_new_contributions_split_evenly``).
+    Each child's share is checked against the $50,000 lifetime contribution
+    limit: only the part that fits is contributed and earns CESG/QESI, and
+    the rest is returned as ``redirected`` for the caller to move to the
+    non-registered account -- the excess is disclosed and conserved, never
+    silently clipped (DP#18/DP#32). Each child's lifetime counters then
+    advance, so the CESG/QESI caps and the 16-17 test bind (#1046).
+
+    Returns ``(resp_data, redirected)``: one dict per child with the
+    ``contribution`` actually credited, the ``cesg``/``qesi`` paid, the
+    ``redirected`` excess and the child's ``lifetime_contributions`` after
+    this year -- the per-child output YearResult reports.
+    """
+    resp_data = []
+    redirected = 0.0
+    for ch in children:
+        share = resp_total / max(1, len(children))
+        check = resp_calc.resp_contribution_check(share, ch)
+        ch_contrib = check['contribution_allowed']
+        excess = check['excess']
+        redirected += excess
+        rd = {'contribution': ch_contrib, 'cesg': 0.0, 'qesi': 0.0,
+              'redirected': excess}
+        if ch.cesg_eligible(sim_year):
+            cesg_result = resp_calc.calculate_cesg(
+                ch_contrib, ch, sim_year, family_income)
+            qesi_result = resp_calc.calculate_qesi(
+                ch_contrib, ch, sim_year, family_income)
+            rd['cesg'] = cesg_result['total_cesg']
+            rd['qesi'] = qesi_result['total_qesi']
+            # #1046: advance lifetime state so CESG/QESI caps bind. #295: the
+            # additional-CESG part is tracked on its own, so the basic part --
+            # the one that uses grant room -- is known.
+            ch.total_cesg_received += cesg_result['total_cesg']
+            ch.total_additional_cesg_received += cesg_result['additional_cesg']
+            ch.total_qesi_received += qesi_result['total_qesi']
+        ch.total_contributions += ch_contrib
+        if sim_year - ch.birth_year <= 15:
+            ch.total_before_age_15 += ch_contrib
+        ch.contribution_years.append((sim_year, ch_contrib))
+        rd['lifetime_contributions'] = ch.total_contributions
+        resp_data.append(rd)
+    return resp_data, redirected
+
+
+def _redirect_resp_excess(allocations: Dict, redirected: float) -> None:
+    """Move RESP contributions refused by the lifetime limit to the
+    non-registered account (issue #295, DP#18: the money moves, it does not
+    vanish). A no-op when nothing was refused."""
+    if redirected > 0:
+        allocations['resp'] -= redirected
+        allocations['non_reg'] += redirected
+
+
 def simulate_year(state, year: int, ctx: SimulationContext,
                   prior_gis_countable_income=None) -> Tuple[YearResult, 'object']:
     """Pure annual step (DP#26/#583): ``(state, year, ctx) -> (YearResult, next_state)``.
@@ -1515,7 +1575,8 @@ def simulate_year(state, year: int, ctx: SimulationContext,
         fhsa_room=adult_fhsa_total_room(_canada),
         fhsa_lifetime_remaining=adult_fhsa_total_lifetime_remaining(_canada) if ctx.has_fhsa else 0,
         resp_eligible_children=sum(1 for c in ctx.resp_children if c.cesg_eligible(sim_year)),
-        resp_annual_match_cap=ctx.resp_calc.cesg_contribution_max(sim_year),  # #1046: was 0, zeroed the min-term
+        # #1046 wired the cap; #295 makes it room-aware (carry-forward catch-up).
+        resp_grant_matched_cap=ctx.resp_calc.household_grant_matched_cap(ctx.resp_children, sim_year),
         annual_savings=adult_annual_savings,
         bracket_gap=primary_rate - spouse_rate,
     )
@@ -1649,34 +1710,9 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     }
 
     # ── Compute RESP CESG/QESI grants (pre-computed, passed as data) ──
-    resp_data = []
-    if ctx.resp_children:
-        for ch in ctx.resp_children:
-            ch_contrib = alloc.resp / max(1, len(ctx.resp_children))
-            rd = {'contribution': ch_contrib, 'cesg': 0.0, 'qesi': 0.0}
-            if ch.cesg_eligible(sim_year):
-                cesg_result = ctx.resp_calc.calculate_cesg(
-                    ch_contrib, ch, sim_year, total_income)
-                qesi_result = ctx.resp_calc.calculate_qesi(
-                    ch_contrib, ch, sim_year, total_income)
-                rd['cesg'] = cesg_result['total_cesg']
-                rd['qesi'] = qesi_result['total_qesi']
-                # #1046: advance lifetime state so CESG/QESI caps bind
-                ch.total_cesg_received += cesg_result['total_cesg']
-                ch.total_qesi_received += qesi_result['total_qesi']
-                ch.total_contributions += ch_contrib
-                age = sim_year - ch.birth_year
-                if age <= 15:
-                    ch.total_before_age_15 += ch_contrib
-                ch.contribution_years.append((sim_year, ch_contrib))
-            else:
-                # Child not CESG-eligible this year; still track contribution
-                ch.total_contributions += ch_contrib
-                age = sim_year - ch.birth_year
-                if age <= 15:
-                    ch.total_before_age_15 += ch_contrib
-                ch.contribution_years.append((sim_year, ch_contrib))
-            resp_data.append(rd)
+    resp_data, resp_redirected = _resp_grants_for_year(
+        ctx.resp_children, ctx.resp_calc, alloc.resp, sim_year, total_income)
+    _redirect_resp_excess(allocations, resp_redirected)
 
     # ── Rates for this year ──
     mortgage_rate = ctx.rate_path.get_rate(year)
@@ -2207,20 +2243,24 @@ class FamilySimulation:
     
     @property
     def resp_children(self):
-        """RESP child models — lazily created from adapter."""
-        if not hasattr(self, '_lazy_resp_children'):
-            children = []
-            for ch in self.config.children:
-                child_birth_year = ch.get('birth_year', self.config.start_year - ch.get('age', 0) if ch.get('age', 0) > 0 else 0)
-                child = self.adapter.create_resp_child(
-                    name=ch.get('name', 'Child'),
-                    birth_year=child_birth_year,
-                    province=ch.get('province', self.config.province),  # DP#8/#16: from config, not hardcoded
-                    resp_balance=self.config.resp_current_balance / len(self.config.children) if self.config.children else 0,
-                )
-                children.append(child)
-            self._lazy_resp_children = children
-        return self._lazy_resp_children
+        """RESP child models for the current (or next) run.
+
+        Issue #295: the fold advances each child's lifetime counters (#1046),
+        and each child is seeded from its declared history, so a list cached
+        across runs would start a second ``run()`` from the first run's end
+        state. ``run()`` and ``_run_monthly()`` therefore rebuild the list
+        through ``_reset_resp_children`` at the start of every run; this
+        property only builds it on first access before any run, and after a
+        run it exposes that run's advanced counters for inspection.
+        """
+        if not hasattr(self, '_resp_children'):
+            self._reset_resp_children()
+        return self._resp_children
+
+    def _reset_resp_children(self) -> None:
+        """Build a fresh RESP child list, seeded from each child's declared
+        history, through the adapter's one shared constructor (DP#9)."""
+        self._resp_children = self.adapter.create_resp_children(self.config)
     
     # ── Derived from config (no mutable state) ──
     
@@ -2348,6 +2388,9 @@ class FamilySimulation:
         if self.config.time_step == 'monthly':
             return self._run_monthly()
 
+        # Issue #295: every run starts from freshly seeded RESP children.
+        self._reset_resp_children()
+
         from functools import reduce
 
         def step(acc, year):
@@ -2407,6 +2450,8 @@ class FamilySimulation:
         results = []
         state = self._state
         salary_growth = cfg.salary_growth
+        # Issue #295: every run starts from freshly seeded RESP children.
+        self._reset_resp_children()
         # Issue #674: looked up once, reused by both the year-0 lump-sum
         # block and the per-year loop below.
         primary_member = next((m for m in cfg.family_members if m.get('role') == 'primary'), {})
@@ -2777,6 +2822,12 @@ class FamilySimulation:
                 cfg.children, getattr(cfg, 'gifts', []), child_savings_after_tax,
                 state.jurisdiction_state.get('canada', {}).get('child_accounts', []))
 
+            # Issue #295: this year's room-aware household RESP cap, computed
+            # once from the children's lifetime state at the start of the year
+            # and applied to every monthly allocation, as before.
+            resp_grant_matched_cap = self.resp_calc.household_grant_matched_cap(
+                self.resp_children, sim_year)
+
             # FHSA is an annual contribution — allocate it first from annual savings
             fhsa_contrib = 0.0
             if self.has_fhsa:
@@ -2793,7 +2844,7 @@ class FamilySimulation:
                     fhsa_room=adult_fhsa_total_room(canada),  # #893: total household room
                     fhsa_lifetime_remaining=adult_fhsa_total_lifetime_remaining(canada),
                     resp_eligible_children=sum(1 for c in self.resp_children if c.cesg_eligible(sim_year)),
-                    resp_annual_match_cap=self.resp_calc.cesg_contribution_max(sim_year),  # #1046
+                    resp_grant_matched_cap=resp_grant_matched_cap,  # #1046, #295
                     annual_savings=adult_annual_savings,
                     bracket_gap=primary_rate - spouse_rate,
                 )
@@ -2825,7 +2876,7 @@ class FamilySimulation:
                     fhsa_room=0,  # FHSA already allocated annually
                     fhsa_lifetime_remaining=0,
                     resp_eligible_children=sum(1 for c in self.resp_children if c.cesg_eligible(sim_year)),
-                    resp_annual_match_cap=self.resp_calc.cesg_contribution_max(sim_year),  # #1046
+                    resp_grant_matched_cap=resp_grant_matched_cap,  # #1046, #295
                     annual_savings=monthly_savings,
                     bracket_gap=primary_rate - spouse_rate,
                 )
@@ -2858,33 +2909,9 @@ class FamilySimulation:
             }
             
             # ── Compute RESP CESG/QESI grants ──
-            resp_data = []
-            if self.resp_children:
-                for ch in self.resp_children:
-                    ch_contrib = accum['resp'] / max(1, len(self.resp_children))
-                    rd = {'contribution': ch_contrib, 'cesg': 0.0, 'qesi': 0.0}
-                    if ch.cesg_eligible(sim_year):
-                        cesg_result = self.resp_calc.calculate_cesg(
-                            ch_contrib, ch, sim_year, total_income)
-                        qesi_result = self.resp_calc.calculate_qesi(
-                            ch_contrib, ch, sim_year, total_income)
-                        rd['cesg'] = cesg_result['total_cesg']
-                        rd['qesi'] = qesi_result['total_qesi']
-                        # #1046: advance lifetime state so CESG/QESI caps bind
-                        ch.total_cesg_received += cesg_result['total_cesg']
-                        ch.total_qesi_received += qesi_result['total_qesi']
-                        ch.total_contributions += ch_contrib
-                        age = sim_year - ch.birth_year
-                        if age <= 15:
-                            ch.total_before_age_15 += ch_contrib
-                        ch.contribution_years.append((sim_year, ch_contrib))
-                    else:
-                        ch.total_contributions += ch_contrib
-                        age = sim_year - ch.birth_year
-                        if age <= 15:
-                            ch.total_before_age_15 += ch_contrib
-                        ch.contribution_years.append((sim_year, ch_contrib))
-                    resp_data.append(rd)
+            resp_data, resp_redirected = _resp_grants_for_year(
+                self.resp_children, self.resp_calc, accum['resp'], sim_year, total_income)
+            _redirect_resp_excess(allocations, resp_redirected)
             
             # ── Rates and mortgage data ──
             mortgage_rate = self.rate_path.get_rate(year)

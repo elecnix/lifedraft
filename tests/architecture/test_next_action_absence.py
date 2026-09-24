@@ -118,7 +118,13 @@ ABSENCE_FIXTURES = {
     "cesg_eligibility_actions": _contract(
         accounts=[_account(
             "acc_resp", "resp",
-            resp={"subscribers": [], "beneficiaries": ["unknown_person"],
+            resp={"subscribers": [],
+                  # Issue #295: each beneficiary carries its own history.
+                  "beneficiaries": [{
+                      "person": "unknown_person", "contributions_total": 0,
+                      "contributions_before_age_15": 0, "cesg_basic_received": 0,
+                      "cesg_additional_received": 0, "qesi_received": 0,
+                      "clb_received": 0, "years_with_100_before_age_15": 0}],
                   "contributions_total": 0, "cesg_received": 0,
                   "qesi_received": 0, "clb_received": 0},
         )],

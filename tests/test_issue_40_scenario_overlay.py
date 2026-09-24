@@ -56,18 +56,27 @@ class TestBuildFamilyStateNoHardcodedDefaults(unittest.TestCase):
         """DP#18/5: RESP match cap defaults to 0.0, not hardcoded 750."""
         cfg = {'family': {'members': [{'role': 'primary', 'gross_income': 100000}]}}
         state = _build_family_state(cfg)
-        self.assertEqual(state.resp_annual_match_cap, 0.0,
+        self.assertEqual(state.resp_grant_matched_cap, 0.0,
                          "RESP match cap should default to 0, not 750")
 
     def test_resp_match_cap_from_config(self):
         """When RESP match cap is in config, it's used."""
         cfg = {
             'family': {'members': [{'role': 'primary', 'gross_income': 100000}]},
-            'accounts': {'resp_annual_match_cap': 750.0},
+            'accounts': {'resp_grant_matched_cap_per_child': 750.0},
         }
+        # Issue #295: FamilyState carries one HOUSEHOLD cap -- the per-child
+        # figure times the eligible children (none here, then two).
         state = _build_family_state(cfg)
-        self.assertAlmostEqual(state.resp_annual_match_cap, 750.0,
+        self.assertEqual(state.resp_grant_matched_cap, 0.0)
+        cfg['family']['children'] = [{'birth_year': 2015}, {'birth_year': 2018}]
+        state = _build_family_state(cfg)
+        self.assertAlmostEqual(state.resp_grant_matched_cap, 1500.0,
                                msg="RESP match cap should use config value")
+        # A configured CESG-matched contribution below the per-child cap binds.
+        cfg['accounts']['resp_annual_room_per_child'] = 500.0
+        state = _build_family_state(cfg)
+        self.assertAlmostEqual(state.resp_grant_matched_cap, 1000.0)
 
     def test_fhsa_room_defaults_to_zero(self):
         """DP#18/5: FHSA room defaults to 0, not hardcoded 8000."""

@@ -1254,10 +1254,18 @@ def _build_family_state(cfg: dict, deps: Optional[SimulationDeps] = None) -> Fam
 
     # DP#18/5: RESP match cap from config, not hardcoded household value
     accounts = cfg.get('accounts', {})
-    resp_match_cap = accounts.get('resp_annual_match_cap', 0.0)
+    resp_match_cap_per_child = accounts.get('resp_grant_matched_cap_per_child', 0.0)
     # DP#8/DP#10 (#241): CESG-matched contribution per child from config;
     # 0 falls back to the Canada package figure in the allocation engine.
     resp_contribution_match_max = accounts.get('resp_annual_room_per_child', 0.0)
+    # Issue #295: FamilyState carries ONE household cap. This rough discovery
+    # state has no per-child grant history, so the cap is the configured
+    # per-child figure (bounded by a configured CESG-matched contribution,
+    # when one is given) times the eligible children.
+    _per_child_cap = resp_match_cap_per_child
+    if resp_contribution_match_max > 0:
+        _per_child_cap = min(_per_child_cap, resp_contribution_match_max)
+    resp_grant_matched_cap = _per_child_cap * resp_eligible_children
 
     return deps.FamilyState(
         primary_income=primary_income,
@@ -1271,7 +1279,7 @@ def _build_family_state(cfg: dict, deps: Optional[SimulationDeps] = None) -> Fam
         fhsa_room=fhsa_room,
         fhsa_lifetime_remaining=fhsa_lifetime,
         resp_eligible_children=resp_eligible_children,
-        resp_annual_match_cap=resp_match_cap,
+        resp_grant_matched_cap=resp_grant_matched_cap,
         resp_contribution_match_max=resp_contribution_match_max,
         annual_savings=annual_savings,
         bracket_gap=primary_mtr - spouse_mtr

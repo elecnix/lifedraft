@@ -321,7 +321,12 @@ class FamilyState:
 
     # RESP
     resp_eligible_children: int = 1  # Number of children still eligible for CESG/QESI
-    resp_annual_match_cap: float = 0.0  # DP#13: set from resp_rules; 2026 Quebec: $750
+    # Issue #295: the household's RESP allocation cap for the year -- the sum,
+    # over CESG-eligible children, of the contribution that attracts the most
+    # basic CESG (resp_rules RESPCalculator.household_grant_matched_cap). It
+    # includes each child's unused grant room carried forward, so catch-up is
+    # reachable. 0.0 means no RESP contribution (DP#13: set by the caller).
+    resp_grant_matched_cap: float = 0.0
     # DP#8/DP#10 (#241): max annual contribution per child on which CESG matches.
     # This is a Canadian CESG Act figure owned by countries.canada.resp_rules
     # (get_cesg_contribution_max). 0 means "use the Canada package value" — the
@@ -385,11 +390,15 @@ class StrategyEngine:
         remaining = savings
         
         # Step 1: RESP (only for eligible children)
+        # Issue #295: ONE room-aware cap. resp_grant_matched_cap already sums
+        # each eligible child's grant-maximising contribution (the CESG
+        # contribution max, plus carry-forward catch-up), so a separate
+        # contribution-max x eligible-children term would silently cut
+        # catch-up back to $2,500 a child.
         resp_amount = min(
             s.resp_pct * savings,
             s.resp_pct * state.annual_savings,  # Cap at strategy %
-            state.resp_annual_match_cap * state.resp_eligible_children,
-            _resp_match_max(state) * state.resp_eligible_children,  # CESG-matched contribution per child
+            state.resp_grant_matched_cap,
         )
         resp_amount = max(0, min(resp_amount, remaining))
         result.resp = resp_amount
@@ -727,7 +736,7 @@ class StrategyEngine:
             primary_tfsa_room=state.primary_tfsa_room,
             spouse_tfsa_room=state.spouse_tfsa_room,
             resp_eligible_children=state.resp_eligible_children,
-            resp_annual_match_cap=state.resp_annual_match_cap,
+            resp_grant_matched_cap=state.resp_grant_matched_cap,
             resp_contribution_match_max=state.resp_contribution_match_max,
             annual_savings=state.annual_savings,
             bracket_gap=state.bracket_gap,

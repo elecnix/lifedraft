@@ -83,7 +83,7 @@ class TestStrategyEngine(unittest.TestCase):
             annual_savings=savings,
             primary_rrsp_room=200000, spouse_rrsp_room=200000,
             primary_tfsa_room=200000, spouse_tfsa_room=200000,
-            resp_eligible_children=1, resp_annual_match_cap=50000,
+            resp_eligible_children=1, resp_grant_matched_cap=50000,
             resp_contribution_match_max=50000,
             primary_marginal_rate=0.4571, spouse_marginal_rate=0.2569,
             bracket_gap=0.2002,

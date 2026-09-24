@@ -162,13 +162,32 @@
           "required": ["subscribers", "beneficiaries", "contributions_total", "cesg_received", "qesi_received", "clb_received"],
           "properties": {
             "subscribers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/person_id" } },
-            "beneficiaries": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/person_id" } },
-            "contributions_total": { "$ref": "#/$defs/money" },
-            "cesg_received": { "$ref": "#/$defs/money" },
-            "qesi_received": { "$ref": "#/$defs/money" },
-            "clb_received": { "$ref": "#/$defs/money" }
+            "beneficiaries": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["person", "contributions_total", "contributions_before_age_15", "cesg_basic_received", "cesg_additional_received", "qesi_received", "clb_received", "years_with_100_before_age_15"],
+                "properties": {
+                  "person": { "$ref": "#/$defs/person_id", "description": "The beneficiary. Must be a child admitted by the loader, with a birth_date; each person appears at most once per account." },
+                  "contributions_total": { "$ref": "#/$defs/money", "description": "Lifetime contributions made to this account for this beneficiary, as at the account's balance.as_of, from the ESDC or promoter beneficiary statement." },
+                  "contributions_before_age_15": { "$ref": "#/$defs/money", "description": "The part of contributions_total contributed by the end of the calendar year the beneficiary turned 15 (the first prong of the CESG 16-17 test: $2,000). From the promoter beneficiary statement." },
+                  "cesg_basic_received": { "$ref": "#/$defs/money", "description": "Lifetime basic CESG paid into this account for this beneficiary, as at balance.as_of (ESDC beneficiary statement). Checked at load against the grant room accrued from the birth date." },
+                  "cesg_additional_received": { "$ref": "#/$defs/money", "description": "Lifetime additional (income-tested) CESG paid into this account for this beneficiary, as at balance.as_of (ESDC beneficiary statement)." },
+                  "qesi_received": { "$ref": "#/$defs/money", "description": "Lifetime QESI (Quebec) paid into this account for this beneficiary, as at balance.as_of (Revenu Quebec / promoter statement)." },
+                  "clb_received": { "$ref": "#/$defs/money", "description": "Lifetime Canada Learning Bond paid into this account for this beneficiary, as at balance.as_of (ESDC beneficiary statement)." },
+                  "years_with_100_before_age_15": { "type": "integer", "minimum": 0, "description": "The number of COMPLETED calendar years before the as_of year, up to the year the beneficiary turned 15, in which at least $100 was contributed for this beneficiary (the second prong of the CESG 16-17 test: four such years). Projection years are counted by the engine, so the as_of year is never counted here." }
+                }
+              },
+              "description": "One entry per beneficiary, carrying that beneficiary's own grant history (issue #295): the CESG ($7,200) and QESI ($3,600) lifetime maxima, the unused grant room and the $50,000 contribution limit are per beneficiary, not per plan. Every figure is required, with no default."
+            },
+            "contributions_total": { "$ref": "#/$defs/money", "description": "Must equal the sum of beneficiaries[].contributions_total; a mismatch above $0.01 is refused at load." },
+            "cesg_received": { "$ref": "#/$defs/money", "description": "Must equal the sum of beneficiaries[].cesg_basic_received + cesg_additional_received; a mismatch above $0.01 is refused at load." },
+            "qesi_received": { "$ref": "#/$defs/money", "description": "Must equal the sum of beneficiaries[].qesi_received; a mismatch above $0.01 is refused at load." },
+            "clb_received": { "$ref": "#/$defs/money", "description": "Must equal the sum of beneficiaries[].clb_received; a mismatch above $0.01 is refused at load." }
           },
-          "description": "Present only when kind=resp. owner is the primary subscriber; subscribers lists all (joint RESPs are common for couples). Grant PROGRAM RATES (CESG %, lifetime maxima) are never config — they are code tables (resp_rules.py) and do not appear anywhere in this schema (#593)."
+          "description": "Present only when kind=resp. owner is the primary subscriber; subscribers lists all (joint RESPs are common for couples). Grant PROGRAM RATES (CESG %, lifetime maxima) are never config — they are code tables (resp_rules.py) and do not appear anywhere in this schema (#593). Unused CESG grant room is derived in code from each beneficiary's birth date and basic CESG received, never input."
         }
       },
       "allOf": [

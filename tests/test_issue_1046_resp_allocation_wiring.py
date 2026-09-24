@@ -248,7 +248,7 @@ class TestFixBCesg1617Eligibility:
     def test_child_with_early_contributions_gets_cesg_at_16_17(self):
         """A child with $2,000+ contributed before age 16 should be eligible
         for CESG at ages 16-17 (cesg_16_17_eligible returns True)."""
-        child = RESPChild(name="child_a", birth_year=2010)
+        child = RESPChild(grant_history=None, name="child_a", birth_year=2010)
         for year in range(2011, 2021):
             child.total_contributions += 500
             child.total_before_age_15 += 500
@@ -262,14 +262,14 @@ class TestFixBCesg1617Eligibility:
     def test_child_without_early_contributions_not_eligible_at_16_17(self):
         """A child with zero contributions before age 16 should NOT be
         eligible for CESG at 16-17. DP#17: the other side of the threshold."""
-        child = RESPChild(name="child_b", birth_year=2010)
+        child = RESPChild(grant_history=None, name="child_b", birth_year=2010)
         assert not child.cesg_16_17_eligible(2026), (
             "Child with no contributions should not be CESG-eligible at 16-17"
         )
 
     def test_child_with_4_years_100_dollars_eligible_at_16_17(self):
         """DP#17: 4+ years of $100+ contributions before age 16 qualifies."""
-        child = RESPChild(name="child_c", birth_year=2010)
+        child = RESPChild(grant_history=None, name="child_c", birth_year=2010)
         for year in range(2015, 2019):
             child.contribution_years.append((year, 100))
             child.total_contributions += 100

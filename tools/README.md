@@ -252,11 +252,12 @@ Each mutation:
 |---|---|---|---|
 | COMPOUNDING | Double `investment_return` in `apply_resp` compounding | loud | #1046 fixed — `test_resp_balance_grows_and_cesg_cap_binds` catches it |
 | GRANT_WIRING | Force `calculate_cesg` to return `total_cesg=0` | loud | #1046 fixed — unit tests + `test_cesg_lifetime_cap_7200_per_child` (fold) catch it |
-| ALLOC_RESP | Remove `resp_annual_match_cap` from `allocate` min-term | loud | #1046 fixed — `test_resp_allocation_nonzero_when_children_present` catches it |
+| ALLOC_RESP | Zero `resp_grant_matched_cap` in the `allocate` min-term | loud | #1046 fixed — `test_resp_allocation_nonzero_when_children_present` catches it (#295 unified the per-child cap into this household cap) |
 | STATE_ADVANCE | Zero `opening_resp_cesg` in `apply_resp` prologue (breaks CESG lifetime cap) | loud | #1046 fixed — `test_lifetime_state_advances_across_years` + `test_cesg_lifetime_cap_7200_per_child` catch it |
 
 All four mutations are `expected_loud`: #1046 wired the RESP annual allocation's
-per-child contribution cap (`resp_annual_match_cap`) and advances each
+per-child contribution cap (then `resp_annual_match_cap`; since #295 the
+room-aware household cap `resp_grant_matched_cap`) and advances each
 `RESPChild`'s lifetime state after each year's CESG/QESI computation, and the
 integration tests in `tests/test_issue_1046_resp_allocation_wiring.py` now drive
 `FamilySimulation.run()` and assert on engine output, so each mutation is caught.

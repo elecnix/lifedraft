@@ -528,6 +528,22 @@ _CODE_ANCHORS = {
     # primitive and the caveat no longer describes anything real.
     'superficial_loss_annual_window': (
         'superficial_loss.py', 'def classify_window('),
+    # Issue #295: the four RESP beneficiary-history caveats. Each is anchored
+    # to the code that makes it true: the even split of the year's RESP
+    # allocation, the undeclared-history branch of the shared constructor,
+    # the fold's refusal of every contribution past the lifetime limit, and
+    # the pro-rata attribution of a family plan's balance.
+    'resp_new_contributions_split_evenly': (
+        'simulation.py', 'share = resp_total / max(1, len(children))'),
+    'resp_grant_history_not_declared': (
+        'countries/canada/resp_rules.py', 'if history is None:\n        return child'),
+    'resp_declared_contributions_exceed_lifetime_limit': (
+        'countries/canada/resp_rules.py',
+        'room = max(0.0, self.RESP_LIFETIME_CONTRIBUTION_LIMIT - child.total_contributions)'),
+    'resp_family_plan_earnings_attributed_pro_rata': (
+        'contract_accounts.py', 'opening["balance"] += (balance * principal / total_principal'),
+    'resp_qesi_accumulated_rights_not_modelled': (
+        'countries/canada/resp_rules.py', 'basic_qesi = min(basic_qesi, 250)'),
     # unlabeled_dollar_basis is a config-shape gap, not a code path — it has
     # no anchor and is exempt below.
 }
