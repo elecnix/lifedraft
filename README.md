@@ -156,6 +156,35 @@ python provenance.py  --input my_household.json                     # where did 
 `docs/TUTORIAL.md` builds a household step by step — four small additions, re-running
 each time — if you learn better by doing than by reading schemas.
 
+### Running several jobs at once
+
+`optimize.py` spreads its scenario sweep over a pool of worker processes, and so does
+`voi.py --jobs N`. Each run sizes its own pool and knows nothing about other runs, so
+several runs started together use roughly **runs × workers** processes (plus one parent
+each), and as much memory.
+
+- **Default width:** the CPUs this process may actually use, minus one. That is the
+  affinity mask (`taskset`, a container's cpuset), not the machine's core count. When the
+  count cannot be determined, the run is serial.
+- **Set it yourself when you run jobs in parallel:** `--workers N` or `OPTIMIZE_WORKERS=N`
+  for `optimize.py`, `--jobs N` for `voi.py`. Keep runs × workers within the CPUs you
+  have: four concurrent runs on 8 CPUs should each use `--workers 2`. `--workers 1` is
+  fully serial and produces the same `--json`, byte for byte.
+- **Workers use the `forkserver` start method**, never an implicit `fork`, and a process
+  holds at most one pool at a time.
+- **A stall fails loudly instead of hanging.** Each pool task has a liveness bound,
+  `OPTIMIZE_TASK_TIMEOUT` seconds (default 3600). A task still running that long raises
+  `PoolStallError` naming the scenario, after writing the Python stacks of the parent and
+  of every worker to stderr and killing the workers. The bound is counted from the moment
+  the previous result arrived, and tasks start in order, so it trips only when that one
+  task has itself been running for about that long. If your scenarios are legitimately
+  slower (a very large contract on a busy machine), raise the value rather than read the
+  error as a bug. A value that is not a finite number above zero is refused at startup.
+- **Diagnosing a hang:** `python tools/concurrent_optimize_repro.py --runs 7
+  --wall-clock 1200 --out-dir /tmp/repro` starts that many runs at once on the synthetic
+  example and, for any run still alive at the deadline, records each process's kernel
+  wait channel and dumps its Python stacks. See `tools/README.md`.
+
 Run the test suite (thousands of tests, including a 46-year golden trajectory checked
 year by year):
 
