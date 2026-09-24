@@ -268,12 +268,38 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
     )
 
 
+def _refuse_margin_without_facility(config: 'SimulationConfig') -> None:
+    """Refuse the contradictory ``has_heloc=False`` + non-zero
+    ``margin_available`` state before it is exported (issue #99, DP#32).
+
+    ``config_to_dict`` emits ``property.margin_available`` iff ``has_heloc``
+    (that key's presence IS the facility declaration ``from_dict`` reads
+    back), so exporting this state would silently drop the supplied room.
+    ``from_dict`` never produces it -- no facility maps to 0 -- only a direct
+    construction, attribute assignment or ``dataclasses.replace`` can.
+    """
+    if not config.has_heloc and config.margin_available != 0:
+        raise ValueError(
+            f"SimulationConfig has has_heloc=False (no readvanceable HELOC "
+            f"facility) but margin_available={config.margin_available!r}. "
+            f"to_dict() writes property.margin_available only when has_heloc "
+            f"is True (#99), so exporting this would silently drop the "
+            f"supplied margin_available (DP#32). Set has_heloc=True to declare "
+            f"the facility, or margin_available=0 if there is none."
+        )
+
+
 def config_to_dict(config: 'SimulationConfig') -> Dict:
     """Export ``config`` as a dict matching the input.json schema.
 
     The write half of DP#24's round trip, and the body of
     ``SimulationConfig.to_dict``.
+
+    Raises:
+        ValueError: ``has_heloc`` is False but ``margin_available`` is not 0
+            (see ``_refuse_margin_without_facility``).
     """
+    _refuse_margin_without_facility(config)
     return {
         'assumptions': {
             # DP#24: re-emit the horizon rule (when set) alongside the span it
@@ -332,7 +358,16 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
                if config.deductible_mortgage_interest else {}),
             'ltv_max': config.ltv_max,
             'amortization_years': config.amortization_years,
-            'margin_available': config.margin_available,
+            # Issue #99 (DP#24/DP#32, #663): the PRESENCE of this key is the
+            # has_heloc declaration -- from_dict() reads it back through
+            # has_readvanceable_facility(), a key-presence predicate. So it
+            # is written iff a facility exists: a no-HELOC config must not
+            # export 'margin_available: 0' (which would reload as a
+            # fabricated zero-room facility), while a DECLARED facility with
+            # 0 room still writes 0 -- zero is a value, not absence. Gate on
+            # has_heloc, never on margin_available's truthiness.
+            **({'margin_available': config.margin_available}
+               if config.has_heloc else {}),
             # Issue #730 (DP#24/DP#18): re-emit a booked refinance
             # cash_out so a load->modify->save cycle does not silently
             # drop the invested-capital source it recorded. Emitted only

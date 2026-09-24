@@ -228,9 +228,13 @@ class TestSerdeParity(unittest.TestCase):
     DERIVED_NO_WRITE: Set[str] = {
         # #663: from_dict computes has_heloc as
         # 'margin_available' in cfg['property'] (has_readvanceable_facility)
-        # -- the PRESENCE of the key, never a value read off it. to_dict
-        # always writes property.margin_available, so the derivation restores
-        # itself on reload. A write entry here could never be read back.
+        # -- the PRESENCE of the key, never a value read off it. to_dict does
+        # not write has_heloc as a field; it GATES the emission of
+        # property.margin_available on it (#99: emitted iff has_heloc), so
+        # the key's presence carries the derived value across the round
+        # trip. A separate has_heloc key would be a DP#18 dead write: nothing
+        # reads it back. Behaviour locked by
+        # tests/test_issue_99_has_heloc_roundtrip.py.
         'has_heloc',
     }
 

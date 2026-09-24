@@ -119,17 +119,20 @@ class SimulationConfig:
     # "assume a HELOC exists" behaviour unchanged. from_dict() is the one
     # place that computes the real answer from contract-mapped data.
     #
-    # NOTE: to_dict() does not conditionally re-emit margin_available from
-    # this flag -- it always writes the field, same as every other release
-    # of this dataclass, so existing "mutate a field, then export/reload"
-    # callers (see tests/test_new_features.py's round-trip suite) keep
-    # working. The dict-level crash/misreporting this issue actually fixes
-    # lives entirely upstream of here, in apply_overlay() and the raw-dict
-    # cfg passed around optimize.py/simulate.py -- those never fabricate
-    # margin_available, so a contract with no facility stays that way
-    # through every overlay. has_heloc exists for callers that hold a
-    # SimulationConfig built straight from a real contract (from_dict) and
-    # need the true answer without re-deriving it from margin_available.
+    # NOTE (issue #99, DP#24): to_dict() writes property.margin_available iff
+    # has_heloc is True, because that key's PRESENCE is how from_dict() reads
+    # has_heloc back. A no-HELOC config therefore round-trips as no-HELOC
+    # (no fabricated 'margin_available: 0' for --export-config,
+    # sensitivity.py's to_dict()->apply_overlay, or overlay_diff to mistake
+    # for a facility), and a declared facility with zero room round-trips
+    # with margin_available=0 -- zero is a value, not absence (DP#32).
+    # Directly constructed configs keep the default has_heloc=True and so
+    # still always write margin_available, which keeps the direct-
+    # construction tests and tests/test_new_features.py's "mutate a field,
+    # then export/reload" suite unchanged. has_heloc=False with a non-zero
+    # margin_available is contradictory and is refused loudly at to_dict()
+    # rather than silently dropped. Locked by
+    # tests/test_issue_99_has_heloc_roundtrip.py.
     has_heloc: bool = True
     # issue #654: the household's OWN declared HELOC rate --
     # liabilities[kind=heloc].rate, mapped by from_dict() off

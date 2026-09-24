@@ -890,7 +890,13 @@ class TestSimulationConfigRoundTrip(unittest.TestCase):
         config.ltv_max = 0.30
         config.mortgage_balance = 150000  # After refinance
         config.margin_available = 50000   # Cash-out added to margin
-        
+        # #99: cfg declares no HELOC (no property.margin_available), so
+        # from_dict() set has_heloc=False. Adding margin means adding a
+        # facility, and that must be declared explicitly: to_dict() emits
+        # margin_available iff has_heloc, and refuses the contradictory
+        # has_heloc=False + non-zero margin rather than silently dropping it.
+        config.has_heloc = True
+
         exported = config.to_dict()
         reloaded = SimulationConfig.from_dict(exported)
         self.assertAlmostEqual(reloaded.ltv_max, 0.30)
