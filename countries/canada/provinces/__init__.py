@@ -2,7 +2,7 @@
 """Provinces package — auto-discovers province modules."""
 
 # Province code → module class mapping
-# Adding a new province = adding a .py file or package here + adding to this dict
+# Adding a new province = adding a package provinces/<province>/ (DP#10) + adding to this dict
 from countries.canada.provinces.quebec import (
     QuebecTaxData,
     QuebecDeductionTracker,
@@ -10,8 +10,8 @@ from countries.canada.provinces.quebec import (
     quebec_interest_deduction,
     quebec_sm_portfolio_optimization,
 )
-from countries.canada.provinces.ontario import OntarioTaxData
-from countries.canada.provinces.ontario_credits import (
+from countries.canada.provinces.ontario import (
+    OntarioTaxData,
     ontario_surtax,
     ontario_health_premium,
     ontario_sales_tax_credit,

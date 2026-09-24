@@ -41,7 +41,7 @@ importable whenever the builder runs). See ``tax_data.py``'s
 Sources (canonical, the single source of truth):
   - countries.canada.federal_all_years (Federal brackets + federal limits)
   - countries.canada.provinces.quebec.tax_data.QuebecTaxData (Quebec brackets)
-  - countries/canada.provinces.ontario.OntarioTaxData (Ontario brackets)
+  - countries.canada.provinces.ontario.ontario.OntarioTaxData (Ontario brackets)
 
 References:
     countries/canada/docs/GOVERNMENT_REFERENCES.md

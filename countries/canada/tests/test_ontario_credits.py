@@ -2,7 +2,7 @@
 """Unit tests for Ontario Tax Credits & Surtax (issue #375).
 
 Per DP#17: tests exercise every rule path, not just every module. The
-ontario_credits.py module has zero test coverage despite production code.
+ontario/ontario_credits.py module has zero test coverage despite production code.
 This file tests:
 - ontario_surtax: two-tier surtax with threshold boundary tests
 - ontario_health_premium: five-tier progressive levy
@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))))))
 
 from tax_data import TaxDataProvider
-from countries.canada.provinces.ontario_credits import (
+from countries.canada.provinces.ontario.ontario_credits import (
     ontario_surtax,
     ontario_health_premium,
     ontario_sales_tax_credit,

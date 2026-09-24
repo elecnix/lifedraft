@@ -46,10 +46,19 @@ def test_provinces_package_reexports_resolve():
         "compute_sm_qc_benefit",
         "quebec_interest_deduction",
         "quebec_sm_portfolio_optimization",
+        "OntarioTaxData",
+        "ontario_surtax",
+        "ontario_health_premium",
+        "ontario_sales_tax_credit",
+        "ontario_trillium_benefit",
+        "ontario_lift_credit",
     ):
         assert hasattr(prov, name), f"provinces package does not re-export {name}"
 
 
-@pytest.mark.parametrize("dotted", ["countries", "countries.canada", "countries.canada.provinces"])
+@pytest.mark.parametrize(
+    "dotted",
+    ["countries", "countries.canada", "countries.canada.provinces", "countries.canada.provinces.ontario"],
+)
 def test_country_packages_import_cleanly(dotted):
     assert importlib.import_module(dotted) is not None
