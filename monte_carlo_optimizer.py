@@ -38,7 +38,7 @@ from simulation_state import (
     SimState, simulate_year_pure,
 )
 from return_model import ReturnModel, StochasticReturn, FixedReturn, build_return_model
-from objective import ObjectiveFunction, MAX_NET_BENEFIT
+from objective import ObjectiveFunction, MAX_NET_BENEFIT, objective_cfg
 from strategy import AllocationStrategy
 from jurisdiction_providers import get_provider
 
@@ -145,7 +145,8 @@ class MonteCarloOptimizer(Optimizer):
                                 self.rate_path = saved_rate_path
                                 self._precompute_amortization(self.base_config)
                             
-                            score = objective.evaluate(results)
+                            # Issue #290: the household's own objective cfg.
+                            score = objective.evaluate(results, objective_cfg(self.base_config))
                             scores.append(score)
                             all_results.append(results)
                         

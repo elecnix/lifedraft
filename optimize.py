@@ -78,6 +78,7 @@ from countries.canada.estate import compute_estate
 from objective import (
     ObjectiveFunction, MAX_NET_BENEFIT,
     compute_net_benefit,
+    objective_cfg,
     estate_is_declared, _estate_call_args,
     OBJECTIVES, get_objective,
 )
@@ -401,30 +402,9 @@ def evaluate_strategy_with_simulation(
     )
     results = sim.run()
 
-    # Build config dict for net benefit calculation
-    cfg_dict = {
-        'assumptions': {
-            'capital_gains_inclusion': config.capital_gains_inclusion,
-            'resp_eap_taxable_portion': config.resp_eap_taxable_portion,
-            'resp_eap_tax_rate': config.resp_eap_tax_rate,
-        },
-        'family': {'members': config.family_members},
-        # Issue #580: max_after_tax_estate needs house FMV and jurisdiction
-        # (year-versioned brackets, DP#20) to price the deemed disposition.
-        # 'start_year' (not the terminal calendar year -- YearResult.year is a
-        # 1-indexed relative offset, not a calendar year) lets the objective
-        # derive the terminal year as start_year + len(results) - 1.
-        # Additive keys only -- existing objectives ignore what they don't read.
-        'property': {'house_value': config.house_value},
-        'tax': {'province': config.province, 'start_year': config.start_year},
-        # epic #603 Track C Phase 2c (#600): the DECLARED estate elections.
-        # Without this the objective falls back to
-        # objective._UNDECLARED_ESTATE_DEFAULTS and the
-        # `estate_elections_not_declared` caveat fires -- i.e. an empty estate
-        # block here would silently re-create the exact five assumptions this
-        # phase exists to eliminate, and the fidelity output would say so.
-        'estate': config.estate_data,
-    }
+    # Build config dict for the objective (issue #290, DP#9): ONE spelling,
+    # objective.objective_cfg, shared with the optimizer framework modes.
+    cfg_dict = objective_cfg(config)
 
     # D11 (#1072): compute the estate ONCE per strategy and reuse it for the
     # objective's SM deemed-disposition tax (compute_net_benefit reads it), the
@@ -464,11 +444,14 @@ def evaluate_strategy_with_simulation(
     # Also compute net_benefit for backward-compatible reporting
     net_benefit = compute_net_benefit(results, cfg_dict)
 
-    # Issue #672: net_benefit's withdrawal-tax estimate never models death --
-    # #661's VOI sweep measured that the estate election levers (spousal
-    # rollover, TFSA successor holder, principal-residence designation,
-    # rollover_overrides, life insurance) move max_after_tax_estate by
-    # $84,998 on a reference household and move net_benefit by exactly $0.
+    # Issue #672: #661's VOI sweep measured that the estate election levers
+    # (spousal rollover, TFSA successor holder, principal-residence
+    # designation, rollover_overrides, life insurance) move
+    # max_after_tax_estate by $84,998 on a reference household and moved
+    # net_benefit by exactly $0 -- a measurement that predates #1034 and #290,
+    # which now price net_benefit's SM sleeve and registered balances through
+    # the estate path (the non-reg pot, TFSA, residence and insurance levers
+    # remain outside net_benefit).
     # Computed UNCONDITIONALLY here -- not gated on which `objective` argument
     # was passed -- so a household that declared its estate elections can see
     # the figure net_benefit is blind to without a separate CLI invocation.
@@ -883,19 +866,19 @@ def _print_estate_ranking(results_sorted: List[Dict], results: List[Dict]) -> No
     ranks, it doesn't choose; the two objectives answer different questions
     and the user picks which one matters to them).
 
-    ``net_benefit`` deducts an ESTIMATED pre-death withdrawal tax and has
-    EXACTLY ZERO sensitivity to the estate election levers (spousal
-    rollover, TFSA successor holder, principal-residence designation,
-    rollover_overrides, life insurance) -- measured by #661's VOI sweep at
-    $84,998 on a reference household, $0 on this one. Called only when
+    ``net_benefit`` prices the registered balances and the SM sleeve through
+    the estate path (#290/#1034), so the registered rollover elections move
+    it; it still prices the non-reg pot with its own marginal_rate and does
+    not price the TFSA successor holder, principal-residence designation or
+    life insurance at all. Called only when
     ``objective.estate_is_declared(cfg)`` (a contract-sourced run always
     declares ``estate`` -- it is a required schema key).
     """
     print(f"\n{'=' * 120}")
     print(f"  🏛️  AFTER-TAX ESTATE — same strategies, ranked by what reaches your heirs (issue #672)")
     print(f"{'=' * 120}")
-    print(f"  net_benefit above deducts an ESTIMATED pre-death withdrawal tax and does NOT price the")
-    print(f"  estate elections you declared (spousal rollover, successor holder, PR designation, ...).")
+    print(f"  net_benefit above prices your registered plans' rollover, but NOT every estate election")
+    print(f"  you declared (the non-reg pot's rollover, successor holder, PR designation, insurance).")
     print(f"  This ranks the SAME strategies by max_after_tax_estate: the ITA s.70(5)/s.146(8.8) deemed")
     print(f"  disposition applied to the terminal balance sheet, given those elections.")
 

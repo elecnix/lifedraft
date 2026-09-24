@@ -89,6 +89,25 @@ ENTRY_MODULES: Tuple[str, ...] = (
 
 MODULE_BODY = "<module>"
 
+# Provider-registry dispatch the AST cannot see. A jurisdiction package
+# registers a provider OBJECT into an inward-pointing accessor at import time
+# (DP#25), and the fold then calls it through an unresolvable receiver
+# (``provider.make_locked_in_account(...)``) -- no call edge. Each row is a
+# claim made on purpose, like ENTRY_MODULES: when the GETTER is reached, the
+# registered provider CLASS counts as instantiated (every method reached).
+# ``tests/architecture/test_registry_dispatch_is_true.py`` checks every row
+# against the LIVE registry, so a row cannot outlive the registration it names.
+#
+# Issue #290: the LIF row became necessary when the net_benefit RRSP leg (whose
+# retirement re-projection built a LIFFund) was deleted -- that dead-by-proxy
+# chain had been the only edge the graph saw into locked_in_account, while the
+# fold's real LIRA->LIF conversion (rules_registered_plans) reaches it through
+# this getter.
+REGISTRY_DISPATCH: Dict[Tuple[str, str], Tuple[str, str]] = {
+    ("canada_state_accessors", "_get_lif_conversion_provider"):
+        ("countries.canada.locked_in_account", "CanadaLIFConversionProvider"),
+}
+
 Node = Tuple[str, str]  # (module, qualname)
 
 
@@ -263,21 +282,24 @@ class CallGraph:
             f = self.facts.get(mod)
             if f is None:
                 continue
-            for callee, receiver in f.calls.get(qual, ()):
-                for target in self._targets(mod, callee, receiver):
-                    if target in seen or target[0] not in self.facts:
-                        continue
-                    seen.add(target)
-                    queue.append(target)
-                    # Instantiating a class reaches every method on it: we do not
-                    # try to prove which ones the holder of the instance calls.
-                    tf = self.facts[target[0]]
-                    if tf.definitions.get(target[1]) == "class":
-                        for meth in tf.methods.get(target[1], ()):
-                            node = (target[0], f"{target[1]}.{meth}")
-                            if node not in seen:
-                                seen.add(node)
-                                queue.append(node)
+            targets = [t for callee, receiver in f.calls.get(qual, ())
+                       for t in self._targets(mod, callee, receiver)]
+            if (mod, qual) in REGISTRY_DISPATCH:
+                targets.append(REGISTRY_DISPATCH[(mod, qual)])
+            for target in targets:
+                if target in seen or target[0] not in self.facts:
+                    continue
+                seen.add(target)
+                queue.append(target)
+                # Instantiating a class reaches every method on it: we do not
+                # try to prove which ones the holder of the instance calls.
+                tf = self.facts[target[0]]
+                if tf.definitions.get(target[1]) == "class":
+                    for meth in tf.methods.get(target[1], ()):
+                        node = (target[0], f"{target[1]}.{meth}")
+                        if node not in seen:
+                            seen.add(node)
+                            queue.append(node)
         return seen
 
     # -- queries ---------------------------------------------------------

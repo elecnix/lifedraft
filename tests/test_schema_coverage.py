@@ -569,11 +569,14 @@ CONSUMED = {
     # treats them as containers), so only their scalar children are cited.
     "people[].incomes[].employment.non_compete.months": ("contract_decisions.py", 'return nc["months"]'),
     "people[].incomes[].employment.notice_days": ("contract_decisions.py", 'return emp.get("notice_days", 0)'),
-    "people[].benefits.cpp.start_date": ("net_benefit_legs.py", "cpp_start_age = primary.get('cpp_start_age'"),
-    "people[].benefits.cpp.monthly_amount": ("net_benefit_legs.py", "cpp_monthly_estimated = primary.get('cpp_monthly_estimated'"),
-    "people[].benefits.oas.start_date": ("net_benefit_legs.py", "oas_start_age = primary.get('oas_start_age'"),
-    "people[].benefits.oas.defer_months": ("net_benefit_legs.py", "oas_defer_months = primary.get('oas_defer_months'"),
-    "people[].benefits.employer_pension.annual_amount": ("net_benefit_legs.py", "pension_income_annual = primary.get('pension_income_annual'"),
+    # Issue #290: re-cited from net_benefit_legs.py's deleted retirement
+    # re-projection to their real consumer, the fold's per-member retirement
+    # income (countries/canada/retirement_transition.py).
+    "people[].benefits.cpp.start_date": ("countries/canada/retirement_transition.py", "member.get('cpp_start_age')"),
+    "people[].benefits.cpp.monthly_amount": ("countries/canada/retirement_transition.py", "member.get('cpp_monthly_estimated', 0)"),
+    "people[].benefits.oas.start_date": ("countries/canada/retirement_transition.py", "member.get('oas_start_age')"),
+    "people[].benefits.oas.defer_months": ("countries/canada/retirement_transition.py", "member.get('oas_defer_months', 0)"),
+    "people[].benefits.employer_pension.annual_amount": ("countries/canada/retirement_transition.py", "member.get('pension_income_annual', 0)"),
     # #700/#643 (Steps 2/3): room now seeds the per-adult RRSP/TFSA stores.
     "people[].room.rrsp": ("simulation_state.py", "'own_room': primary.get('rrsp_room_accumulated'"),
     "people[].room.rrsp.contribution_room": ("simulation_state.py", "'own_room': primary.get('rrsp_room_accumulated'"),
@@ -689,7 +692,7 @@ CONSUMED = {
     "assumptions.salary_growth": ("simulation.py", "cfg.salary_growth"),
     "assumptions.savings_rate": ("simulation.py", "annual_savings = total_income * cfg.savings_rate"),
     "assumptions.time_step": ("simulation.py", "self.config.time_step =="),
-    "assumptions.tax_law_overrides.capital_gains_inclusion": ("optimize.py", "config.capital_gains_inclusion"),
+    "assumptions.tax_law_overrides.capital_gains_inclusion": ("objective.py", "config.capital_gains_inclusion"),
     "assumptions.tax_law_overrides.frozen_brackets": ("simulation.py", "self.config.frozen_brackets"),
     "assumptions.tax_law_overrides.oas.disabled": ("contract_assumptions.py", "retirement_out[\"oas_annual_max\"] = 0"),
     "assumptions.tax_law_overrides.oas.annual_max_override": ("contract_assumptions.py", "retirement_out[\"oas_annual_max\"] = oas_override[\"annual_max_override\"]"),
