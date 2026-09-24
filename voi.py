@@ -166,14 +166,18 @@ possibly produce a different answer for this document (DP#3/DP#26: the step is
 a pure, deterministic fold over that config), so the leaf is reported as having
 no effect on the engine's input and the expensive run is skipped entirely. Only
 leaves that survive the screen pay for a simulation. ``--jobs`` parallelises
-those (independent pure evaluations, no shared state).
+those (independent pure evaluations, no shared state) through
+``process_pool.map_ordered`` -- the same single pool helper optimize.py uses
+(#292): forkserver workers, never a second pool forked next to a live one, a
+per-task liveness bound (``OPTIMIZE_TASK_TIMEOUT``), and the pool shut down when
+the sweep returns.
 """
 from __future__ import annotations
 
 import argparse
 import copy
 import json
-from concurrent.futures import ProcessPoolExecutor
+import os
 from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -182,6 +186,7 @@ from objective import OBJECTIVES, ObjectiveFunction
 from optimize import run_optimization
 import contract_errors
 import contract_schema
+import process_pool
 
 
 OAT_LIMITATION = (
@@ -602,15 +607,23 @@ def _strategy_sensitivity(per_config: List[Dict[str, float]]) -> Tuple[float, in
 
 
 def _worker(args: Tuple[Dict, Optional[ObjectiveFunction]]) -> Dict[str, float]:
+    """Pool task: module-level so a forkserver worker can import it by name."""
     cfg, objective = args
     return _strategy_scores(cfg, objective)
 
 
-def _run_all(cfgs: List[Dict], objective: Optional[ObjectiveFunction], jobs: int) -> List[Dict[str, float]]:
-    """One strategy-score mapping per config (see ``_strategy_scores``)."""
+def _run_all(cfgs: List[Dict], objective: Optional[ObjectiveFunction], jobs: int,
+             labels: List[str]) -> List[Dict[str, float]]:
+    """One strategy-score mapping per config (see ``_strategy_scores``), in
+    input order. ``labels[i]`` names ``cfgs[i]`` if it stalls (#292).
+
+    Parallel runs go through the ONE persistent pool (``process_pool``), resized
+    to ``jobs`` -- never a second pool forked while optimize.py's is alive."""
     if jobs > 1 and len(cfgs) > 1:
-        with ProcessPoolExecutor(max_workers=jobs) as pool:
-            return list(pool.map(_worker, [(c, objective) for c in cfgs]))
+        return process_pool.map_ordered(
+            _worker, [(c, objective) for c in cfgs], labels, width=jobs,
+            task_timeout_s=process_pool.task_timeout_from_env(
+                os.environ.get('OPTIMIZE_TASK_TIMEOUT')))
     return [_strategy_scores(c, objective) for c in cfgs]
 
 
@@ -721,7 +734,8 @@ def _finding(cand: Candidate, spread: float, low: Any, high: Any) -> Finding:
     )
 
 
-def _objectives_that_move(mapped: List[Dict], swept_objective: str, jobs: int) -> Tuple[str, ...]:
+def _objectives_that_move(mapped: List[Dict], swept_objective: str, jobs: int,
+                          pointer: str) -> Tuple[str, ...]:
     """Which OTHER built-in objectives actually respond to this leaf. Measured,
     not inferred: every name returned was produced by really running that
     objective on the same sampled configs (#671 -- "do not guess")."""
@@ -729,7 +743,9 @@ def _objectives_that_move(mapped: List[Dict], swept_objective: str, jobs: int) -
     for name, obj in OBJECTIVES.items():
         if name == swept_objective:
             continue
-        best = [_best(s) for s in _run_all(mapped, obj, jobs)]
+        labels = [f"{pointer} sample {k + 1}/{len(mapped)} under {name}"
+                  for k in range(len(mapped))]
+        best = [_best(s) for s in _run_all(mapped, obj, jobs, labels)]
         if max(best) - min(best) != 0.0:
             movers.append(name)
     return tuple(movers)
@@ -749,7 +765,26 @@ def sweep(
 ) -> VOIReport:
     """Run the OAT value-of-information sweep. Pure function of its arguments
     (DP#3): no file I/O, no globals. The CLI is the only thing that touches disk.
+
+    With ``jobs > 1`` the runs share the one persistent process pool, which is
+    shut down when the sweep returns or raises (#292), so its workers never
+    outlive the sweep.
     """
+    try:
+        return _sweep(doc, objective, max_leaves, jobs, cross_objective, schema)
+    finally:
+        if jobs > 1:
+            process_pool.shutdown_pool()
+
+
+def _sweep(
+    doc: Dict,
+    objective: Optional[ObjectiveFunction],
+    max_leaves: Optional[int],
+    jobs: int,
+    cross_objective: bool,
+    schema: Optional[Dict],
+) -> VOIReport:
     objective_name = objective.name if objective is not None else DEFAULT_OBJECTIVE_NAME
 
     candidates, unranked, structural = collect_candidates(doc, schema=schema)
@@ -792,11 +827,13 @@ def sweep(
     if live:
         flat: List[Dict] = []
         owner: List[int] = []
-        for i, (_, _, mapped) in enumerate(live):
-            for cfg in mapped:
+        labels: List[str] = []
+        for i, (cand, _, mapped) in enumerate(live):
+            for k, cfg in enumerate(mapped):
                 flat.append(cfg)
                 owner.append(i)
-        scores = _run_all(flat, objective, jobs)
+                labels.append(f"{cand.pointer} sample {k + 1}/{len(mapped)}")
+        scores = _run_all(flat, objective, jobs, labels)
 
         grouped: Dict[int, List[Dict[str, float]]] = {i: [] for i in range(len(live))}
         for i, s in zip(owner, scores):
@@ -821,7 +858,8 @@ def sweep(
                 # DO move the optimum -- by running them, never guessing (#671).
                 movers: Tuple[str, ...] = ()
                 if cross_objective:
-                    movers = _objectives_that_move(mapped, objective_name, jobs)
+                    movers = _objectives_that_move(mapped, objective_name, jobs,
+                                                   cand.pointer)
                 inert.append(replace(
                     finding, moves_under=movers,
                     strategy_spread=strat_spread, strategies_moved=strat_moved,
@@ -991,11 +1029,17 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                         help=f"Objective to sweep (default: {DEFAULT_OBJECTIVE_NAME}).")
     parser.add_argument("--max-leaves", type=int, default=None,
                         help="Cap the candidates swept. Whatever is dropped is printed, never silently.")
-    parser.add_argument("--jobs", type=int, default=1, help="Parallel workers for the simulation runs.")
+    parser.add_argument("--jobs", type=int, default=1,
+                        help="Parallel workers for the simulation runs (forkserver pool, "
+                             "shut down when the sweep ends). When running several jobs "
+                             "at once, keep runs x jobs within the available CPUs.")
     parser.add_argument("--no-cross-objective", action="store_true",
                         help="Skip the check of which OTHER objectives price a leaf that is inert under "
                              "the swept one. The report then says so, rather than implying $0.")
     args = parser.parse_args(argv)
+    # #292: refuse a malformed OPTIMIZE_TASK_TIMEOUT up front, even for a serial
+    # run, so a typo is reported rather than silently ignored.
+    process_pool.task_timeout_from_env(os.environ.get('OPTIMIZE_TASK_TIMEOUT'))
 
     with open(args.input) as fh:
         doc = json.load(fh)
