@@ -54,6 +54,16 @@ def pytest_configure(config):
     pytester's in-process re-invocations in the test suite)."""
     config._perf_timings = {}
     config._perf_session_start = time.monotonic()
+    # #292: under pytest-xdist every worker is already one of N parallel
+    # processes, and each one that reaches optimize.main()/explore() with no
+    # explicit width would build its own (available CPUs - 1)-wide pool on top
+    # -- measured on the #292 comment: 15 pool workers under a 2-CPU mask, 2.2x
+    # the PSS of a serial run. Default the width to serial there. `setdefault`,
+    # so an OPTIMIZE_WORKERS the caller set wins, and a test's explicit
+    # optimize.set_workers(n) still wins over both (the parity tests stay
+    # genuinely parallel -- they assert the pool engaged).
+    if "PYTEST_XDIST_WORKER" in os.environ:
+        os.environ.setdefault("OPTIMIZE_WORKERS", "1")
 
 
 def _is_worker(config) -> bool:

@@ -16,7 +16,7 @@ never by a test:
   ``phase('<title>')`` call to a ``meta.phases[].title``, exact string. A phase
   added on one side only degrades silently.
 
-For every ``.claude/workflows/*.js`` this module checks five things:
+For every ``.claude/workflows/*.js`` this module checks six things:
 
 1. **It compiles the way the Workflow runtime runs it.** The runtime executes
    the script body inside an async function, so top-level ``await`` and
@@ -43,12 +43,26 @@ For every ``.claude/workflows/*.js`` this module checks five things:
    type literal such as ``<type>(#``; and every string fragment that opens with
    ``(#`` must be preceded by ``COMMIT_TYPE +`` or ``commitType +``, so a split
    literal like ``'fix' + '(#'`` cannot launder a hardcoded type either.
+6. **CI is never polled through GraphQL, nor faster than once a minute**
+   (#274). ``gh pr checks`` is GraphQL-backed; two pipeline runs watching it
+   exhausted the account's shared GraphQL quota and broke every ``gh`` command
+   of every session. A file that contains ``gh pr checks`` and ``--watch``
+   ANYWHERE (file-scoped, so a command split across fragments, lines or
+   comments still fails) fails, and so does any literal ``sleep N`` or
+   ``--interval N`` / ``--interval=N`` below 60 s.
 
 For ``implement-github-issue.js`` specifically, the real ``composeCommitTitle``,
 ``COMMIT_TYPES``, ``MAX_TITLE_LEN`` and ``PLAN_SCHEMA`` are *extracted from the
 live script* and run in node against a fixed case table (never reimplemented
 here), and the wiring of the resulting ``PR_TITLE`` into the refusal point, the
-commit hints and the PR stage is checked statically (#268).
+commit hints and the PR stage is checked statically (#268). Likewise (#274) the
+real ``parseIssueNumber`` is extracted and run against a case table, and the
+wiring is checked statically: ``ISSUE_N`` is derived once before any agent
+runs and interpolated literally into the FETCH commands, the line right after
+``if (!fetched) throw`` refuses a fetched issue number that differs from it,
+and the CI MONITOR, CI FIXER and READY stages read check-runs and commit
+statuses over REST pinned to ``headSha`` (paginated), carry the shared
+rate-limit rule, and never use ``gh pr checks``.
 
 ## Why ``node --check`` is deliberately NOT used
 
@@ -654,6 +668,42 @@ def commit_title_findings(name: str, source: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# check (6): CI is never polled through GraphQL, nor faster than once a minute (#274)
+# --------------------------------------------------------------------------
+
+MIN_POLL_S = 60
+_PR_CHECKS_RE = re.compile(r"gh\s+pr\s+checks")
+_WATCH_RE = re.compile(r"--watch\b")
+_POLL_LITERAL_RE = re.compile(r"(?:--interval(?:=|\s+)|(?<![\w-])sleep\s+)(\d+)")
+
+
+def polling_findings(name: str, source: str) -> list[str]:
+    """Check (6). ``gh pr checks`` is GraphQL-backed; with ``--watch`` it polls
+    GraphQL for the whole CI wait, and two such runs exhausted the account's
+    shared quota for every session (#274). The rule is FILE-scoped: the two
+    tokens anywhere in the same file fail it, so splitting the command across
+    string fragments, lines or comments cannot launder it. Any literal
+    ``sleep N`` or ``--interval N`` / ``--interval=N`` below 60 s fails too.
+    No allowlist, no skip: prose that names the command trips it by design."""
+    findings = []
+    lines = source.split("\n")
+    if _PR_CHECKS_RE.search(source) and _WATCH_RE.search(source):
+        for lineno, line in enumerate(lines, start=1):
+            if _WATCH_RE.search(line):
+                findings.append(
+                    f"{name}:{lineno}: GraphQL-backed PR-checks watch (gh pr checks with --watch "
+                    "in the same file, #274): poll the REST check-runs and status of the head SHA "
+                    "instead")
+    for lineno, line in enumerate(lines, start=1):
+        for m in _POLL_LITERAL_RE.finditer(line):
+            if int(m.group(1)) < MIN_POLL_S:
+                findings.append(
+                    f"{name}:{lineno}: poll interval {m.group(1)}s ({m.group(0)!r}) is below "
+                    f"{MIN_POLL_S} s (#274)")
+    return findings
+
+
+# --------------------------------------------------------------------------
 # check (1) + the node side of check (2)
 # --------------------------------------------------------------------------
 
@@ -700,7 +750,7 @@ def _one_line(text: str) -> str:
 
 
 def check_workflow_script(path: Path) -> list[str]:
-    """Run checks 1-5 on one script; return EVERY failure, prefixed with the
+    """Run checks 1-6 on one script; return EVERY failure, prefixed with the
     file name (never just the first)."""
     require_node()  # before anything else: missing node is a failure, always
     name = path.name
@@ -768,6 +818,7 @@ def check_workflow_script(path: Path) -> list[str]:
 
     errors.extend(home_paths(name, source))
     errors.extend(commit_title_findings(name, source))
+    errors.extend(polling_findings(name, source))
     return errors
 
 
@@ -1372,30 +1423,41 @@ def compose_cases() -> list[tuple[str, list, str, str]]:
     return cases
 
 
+def _run_node_json(program: str, payload: dict, sentinel: str, what: str) -> dict:
+    """The trust boundary of every behavioural harness. Sends ``payload`` plus a
+    fresh nonce to ``program`` on stdin and returns its result object only if
+    node printed exactly ONE ``sentinel`` line, exited 0, and echoed this call's
+    nonce. Anything else raises WorkflowScriptError; missing node FAILS."""
+    node = require_node()
+    nonce = secrets.token_hex(16)
+    request = json.dumps(dict(payload, nonce=nonce))
+    try:
+        proc = subprocess.run([node, "-e", program], input=request, capture_output=True,
+                              text=True, encoding="utf-8", timeout=NODE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise WorkflowScriptError(f"{what} timed out after {NODE_TIMEOUT_S}s")
+    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith(sentinel + " ")]
+    if len(lines) != 1 or proc.returncode != 0:
+        raise WorkflowScriptError(
+            f"{what} printed {len(lines)} {sentinel} lines (rc={proc.returncode}); "
+            f"refusing to trust it. stderr={proc.stderr[-800:]!r}")
+    out = json.loads(lines[0][len(sentinel) + 1:])
+    if not isinstance(out, dict) or out.get("nonce") != nonce:
+        raise WorkflowScriptError(f"{what} result does not echo this call's nonce")
+    return out
+
+
 def commit_title_behaviour_errors(source: str, node_program: str = _COMPOSE_NODE) -> list[str]:
     """Run the REAL composeCommitTitle / COMMIT_TYPES / MAX_TITLE_LEN /
     PLAN_SCHEMA, extracted from ``source``, in an empty node vm context against
     the case table. Returns human-readable mismatches; [] means pass. Raises
     WorkflowScriptError when node's answer cannot be trusted."""
     code = "\n".join(_extract_top_level(source, a) for a in _COMPOSE_ANCHORS)
-    node = require_node()
     cases = compose_cases()
-    nonce = secrets.token_hex(16)
-    request = json.dumps({"nonce": nonce, "code": code, "undefined_marker": _JS_UNDEFINED,
-                          "cases": [{"id": c[0], "args": c[1]} for c in cases]})
-    try:
-        proc = subprocess.run([node, "-e", node_program], input=request, capture_output=True,
-                              text=True, encoding="utf-8", timeout=NODE_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        raise WorkflowScriptError(f"compose harness timed out after {NODE_TIMEOUT_S}s")
-    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith(COMPOSE_SENTINEL + " ")]
-    if len(lines) != 1 or proc.returncode != 0:
-        raise WorkflowScriptError(
-            f"compose harness printed {len(lines)} {COMPOSE_SENTINEL} lines (rc={proc.returncode}); "
-            f"refusing to trust it. stderr={proc.stderr[-800:]!r}")
-    out = json.loads(lines[0][len(COMPOSE_SENTINEL) + 1:])
-    if not isinstance(out, dict) or out.get("nonce") != nonce:
-        raise WorkflowScriptError("compose harness result does not echo this call's nonce")
+    out = _run_node_json(node_program,
+                         {"code": code, "undefined_marker": _JS_UNDEFINED,
+                          "cases": [{"id": c[0], "args": c[1]} for c in cases]},
+                         COMPOSE_SENTINEL, "compose harness")
     if out["load_error"] is not None:
         return [f"the extracted helper/schema did not load in node: {out['load_error']}"]
 
@@ -1747,3 +1809,585 @@ def test_sabotage_title_wiring(sabotage):
         needle = "before phase('Test plan')"
     errors = pipeline_title_wiring_errors(mutated)
     assert any(needle in e for e in errors), errors
+
+
+# ==========================================================================
+# #274: CI is read over REST on the head SHA, and the issue fetched is the
+# issue requested.
+# ==========================================================================
+
+# ---- check (6) on the live script and on fixtures -------------------------
+
+_CI_MONITOR_ACTIONS = "    '=== ACTIONS ===\\n' +\n    '1. Confirm the PR head over REST"
+
+
+def test_sabotage_pr_checks_watch_reintroduced(tmp_path):
+    """S4: the pre-#274 watch line restored in the CI monitor trips check 6,
+    at the injected line, through the real entry point."""
+    source = _pipeline_source()
+    injected = ("    '   timeout 540 gh pr checks ' + pr.number + ' --repo ' + REPO + "
+                "' --watch --interval 30 || true\\n' +\n")
+    line = _line_of(source, source.index(_CI_MONITOR_ACTIONS))
+    mutated = _mutate(source, _CI_MONITOR_ACTIONS, injected + _CI_MONITOR_ACTIONS)
+    errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, mutated))
+    watch = _only(errors, "GraphQL-backed PR-checks watch")
+    assert watch.startswith(f"{PIPELINE_SCRIPT.name}:{line}: "), watch
+    interval = _only(errors, "poll interval 30s")
+    assert interval.startswith(f"{PIPELINE_SCRIPT.name}:{line}: "), interval
+    # the same command at a legal 60 s cadence is STILL a GraphQL poller
+    mutated = _mutate(source, _CI_MONITOR_ACTIONS,
+                      injected.replace("--interval 30", "--interval 60") + _CI_MONITOR_ACTIONS)
+    errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, mutated))
+    assert _only(errors, "GraphQL-backed PR-checks watch").startswith(
+        f"{PIPELINE_SCRIPT.name}:{line}: ")
+    assert not [e for e in errors if "poll interval" in e], errors
+
+
+@pytest.mark.parametrize("kind,injected,watch_offset", [
+    pytest.param("split-fragments",
+                 "    'gh pr checks ' + pr.number + '\\n' +\n    '  --watch' +\n", 1,
+                 id="split-fragments"),
+    pytest.param("whitespace-tab", "    'gh  pr\tchecks ' + pr.number + ' --watch' +\n", 0,
+                 id="whitespace-tab"),
+    pytest.param("comments", "    // gh pr checks 1\n    // --watch\n", 1, id="comments"),
+])
+def test_sabotage_pr_checks_watch_split_across_lines(tmp_path, kind, injected, watch_offset):
+    """The rule is file-scoped: splitting the command across fragments, lines
+    or comments, or respelling its whitespace, cannot launder it."""
+    source = _pipeline_source()
+    line = _line_of(source, source.index(_CI_MONITOR_ACTIONS)) + watch_offset
+    mutated = _mutate(source, _CI_MONITOR_ACTIONS, injected + _CI_MONITOR_ACTIONS)
+    errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, mutated))
+    assert _only(errors, "GraphQL-backed PR-checks watch").startswith(
+        f"{PIPELINE_SCRIPT.name}:{line}: "), (kind, errors)
+
+
+@pytest.mark.parametrize("text,value", [
+    ("--interval 30", "30"), ("--interval=30", "30"), ("--interval  5", "5"),
+    ("sleep 30", "30"), ("sleep 59", "59"), ("sleep 5", "5"), ("sleep 0.5", "0"),
+    ("sleep 60", None), ("sleep 120", None), ("--interval 60", None), ("--interval=90", None),
+])
+def test_sabotage_poll_interval_below_60(tmp_path, text, value):
+    """Every literal poll below 60 s fails; 60 s itself is legal (the floor is
+    inclusive, not an over-broad ban on waiting)."""
+    source = _pipeline_source()
+    mutated, line = _inject_after_template_opening(source, f"then {text} between polls\n")
+    errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, mutated))
+    if value is None:
+        assert errors == [], errors
+    else:
+        err = _only(errors, f"poll interval {value}s")
+        assert err.startswith(f"{PIPELINE_SCRIPT.name}:{line}: "), err
+
+
+def test_pr_checks_without_watch_is_not_flagged(tmp_path):
+    """Negative control: check 6 is the CONJUNCTION the issue asked for. Either
+    token alone raises no check-6 finding (the pipeline-specific check below
+    bans `gh pr checks` outright in implement-github-issue.js)."""
+    for i, line in enumerate(["gh pr checks 1 --json name,bucket", "npm test --watch"]):
+        text = MINIMAL_SCRIPT.replace("Do the fabricated thing.", "Do the fabricated thing. " + line)
+        assert text != MINIMAL_SCRIPT
+        assert check_workflow_script(_write(tmp_path, text, f"alone{i}.js")) == []
+
+
+def test_polling_check_fires_on_every_script_in_the_dir(tmp_path):
+    d = tmp_path / "wf"
+    d.mkdir()
+    _write(d, MINIMAL_SCRIPT, "a-ok.js")
+    bad = MINIMAL_SCRIPT.replace("Do the fabricated thing.",
+                                 "Do the fabricated thing.\ngh pr checks 1 --watch --interval=30")
+    assert bad != MINIMAL_SCRIPT
+    _write(d, bad, "b-watch.js")
+    errors, checked = check_workflow_dir(d)
+    assert checked == 2
+    assert _only(errors, "GraphQL-backed PR-checks watch").startswith("b-watch.js:12: "), errors
+    assert _only(errors, "poll interval 30s").startswith("b-watch.js:12: "), errors
+    assert not any(e.startswith("a-ok.js") for e in errors), errors
+
+
+# ---- parseIssueNumber: the REAL function, extracted and run in node --------
+
+ISSUE_SENTINEL = "PARSE_ISSUE_RESULT"
+_JS_NAN = "__JS_NAN__"
+_ISSUE_ANCHOR = re.compile(r"^function parseIssueNumber\(issue, repo\) \{$", re.M)
+_ISSUE_REPO = "elecnix/lifedraft"
+
+_ISSUE_NODE = r"""
+'use strict';
+const vm = require('vm');
+const chunks = [];
+const emit = (o) => process.stdout.write('__SENTINEL__ ' + JSON.stringify(o) + '\n');
+process.stdin.on('data', (c) => chunks.push(c));
+process.stdin.on('end', () => {
+  const req = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const out = { nonce: req.nonce, load_error: null, results: [] };
+  const decode = (v) => (v === req.undefined_marker ? undefined : (v === req.nan_marker ? NaN : v));
+  let f = null;
+  try {
+    f = vm.runInNewContext(req.code + '\n;parseIssueNumber', Object.create(null), { timeout: 1000 });
+  } catch (e) {
+    out.load_error = String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ');
+  }
+  if (f !== null) {
+    for (const c of req.cases) {
+      try {
+        const v = f(decode(c.issue), c.repo);
+        out.results.push({ id: c.id, kind: 'return', value_type: typeof v, value: v === undefined ? null : v });
+      } catch (e) {
+        out.results.push({ id: c.id, kind: 'throw',
+                           err_name: (e && e.constructor && e.constructor.name) || typeof e,
+                           message: (e && e.message !== undefined) ? String(e.message) : String(e) });
+      }
+    }
+  }
+  emit(out);
+});
+""".replace("__SENTINEL__", ISSUE_SENTINEL)
+
+
+def issue_number_cases() -> list[tuple[str, object, str, str, object]]:
+    """(id, args.issue, args.repo, 'return'|'throw', the number | message needle).
+    Repo coordinates are this public repo or fabricated ones (DP#15)."""
+    url = "https://github.com/" + _ISSUE_REPO + "/issues/"
+    max_safe = 2 ** 53 - 1
+    not_issue = "is not a positive issue number"
+    cases: list[tuple[str, object, str, str, object]] = [
+        ("num-274", 274, _ISSUE_REPO, "return", 274),
+        ("num-one", 1, _ISSUE_REPO, "return", 1),
+        ("num-max-safe", max_safe, _ISSUE_REPO, "return", max_safe),
+        ("str-274", "274", _ISSUE_REPO, "return", 274),
+        ("str-max-safe", str(max_safe), _ISSUE_REPO, "return", max_safe),
+        ("url-274", url + "274", _ISSUE_REPO, "return", 274),
+        ("url-case-variant", "https://github.com/Elecnix/LifeDraft/issues/274", _ISSUE_REPO,
+         "return", 274),
+        ("url-fabricated-repo", "https://github.com/other-owner/other-repo/issues/12",
+         "other-owner/other-repo", "return", 12),
+    ]
+    refused = {
+        "num-zero": 0, "num-negative": -1, "num-fraction": 1.5, "num-2^53": 2 ** 53,
+        "num-nan": _JS_NAN, "undefined": _JS_UNDEFINED, "null": None, "bool-true": True,
+        "array-274": [274], "object": {"number": 274},
+        "str-empty": "", "str-N": "N", "str-leading-zero": "0274", "str-trailing-garbage": "274abc",
+        "str-hash": "#274", "str-leading-space": " 274", "str-trailing-space": "274 ",
+        "str-plus": "+274", "str-decimal": "274.0", "str-exponent": "1e3", "str-hex": "0x112",
+        "str-unsafe": "99999999999999999999",
+        "url-pull": "https://github.com/" + _ISSUE_REPO + "/pull/274",
+        "url-trailing-slash": url + "274/",
+        "url-fragment": url + "274#issuecomment-1",
+        "url-query": url + "274?x=1",
+        "url-http": "http://github.com/" + _ISSUE_REPO + "/issues/274",
+        "url-leading-zero": url + "0274",
+        "url-unsafe": url + "99999999999999999999",
+    }
+    cases += [(k, v, _ISSUE_REPO, "throw", not_issue) for k, v in refused.items()]
+    cases.append(("url-other-repo", "https://github.com/other-owner/other-repo/issues/274",
+                  _ISSUE_REPO, "throw", "names repo other-owner/other-repo"))
+    return cases
+
+
+def issue_number_behaviour_errors(source: str, node_program: str = _ISSUE_NODE) -> list[str]:
+    """Run the REAL parseIssueNumber, extracted from ``source``, in an empty
+    node vm context against the case table. [] means pass. A return must be the
+    NUMBER itself (a string '274' would fail the strict `!== ISSUE_N` check at
+    runtime); a refusal must be an Error starting 'Issue refused'."""
+    code = _extract_top_level(source, _ISSUE_ANCHOR)
+    cases = issue_number_cases()
+    out = _run_node_json(node_program,
+                         {"code": code, "undefined_marker": _JS_UNDEFINED, "nan_marker": _JS_NAN,
+                          "cases": [{"id": c[0], "issue": c[1], "repo": c[2]} for c in cases]},
+                         ISSUE_SENTINEL, "issue harness")
+    if out["load_error"] is not None:
+        return [f"the extracted parseIssueNumber did not load in node: {out['load_error']}"]
+    results = {}
+    for r in out["results"]:
+        if r["id"] in results:
+            raise WorkflowScriptError(f"issue harness reported case {r['id']!r} twice")
+        results[r["id"]] = r
+    errors: list[str] = []
+    for case_id, issue, repo, expect, want in cases:
+        r = results.get(case_id)
+        shown = f"case {case_id!r} {issue!r} (repo {repo!r})"
+        if r is None:
+            errors.append(f"{shown}: node returned no result")
+        elif expect == "return":
+            if r["kind"] != "return" or r["value_type"] != "number" \
+                    or type(r["value"]) is not int or r["value"] != want:
+                errors.append(f"{shown}: expected to return the number {want!r}, got {r!r}")
+        elif r["kind"] != "throw":
+            errors.append(f"{shown}: expected an 'Issue refused' throw, but it returned "
+                          f"{r['value']!r} ({r['value_type']})")
+        elif r["err_name"] != "Error" or not r["message"].startswith("Issue refused") \
+                or want not in r["message"]:
+            errors.append(f"{shown}: expected Error 'Issue refused: ...{want}...', got "
+                          f"{r['err_name']}: {r['message']!r}")
+    return errors
+
+
+def test_parse_issue_number_behaviour():
+    """The live parser returns the issue NUMBER for a number, its decimal
+    string or this repo's issue URL, and refuses everything else (#274)."""
+    assert issue_number_behaviour_errors(_pipeline_source()) == []
+
+
+_PARSE_SABOTAGES = [
+    ("parseint-prefix", "else if (/^[1-9][0-9]*$/.test(issue)) digits = issue",
+     "else if (!Number.isNaN(parseInt(issue, 10))) digits = String(parseInt(issue, 10))",
+     ["case 'str-trailing-garbage'", "case 'str-leading-zero'", "case 'str-leading-space'"]),
+    ("repo-check-dropped",
+     "if (url !== null && url[1].toLowerCase() !== repo.toLowerCase()) {", "if (false) {",
+     ["case 'url-other-repo'"]),
+    ("repo-case-sensitive", "url[1].toLowerCase() !== repo.toLowerCase()", "url[1] !== repo",
+     ["case 'url-case-variant'"]),
+    ("silent-zero",
+     "  throw new Error('Issue refused: ' + shown + ' is not a positive issue number",
+     "  return 0\n  throw new Error('Issue refused: ' + shown + ' is not a positive issue number",
+     ["case 'undefined'", "case 'null'", "case 'str-N'"]),
+    ("returns-string",
+     "if (digits !== null && Number.isSafeInteger(Number(digits))) return Number(digits)",
+     "if (digits !== null && Number.isSafeInteger(Number(digits))) return digits",
+     ["case 'str-274'", "case 'url-274'"]),
+    ("unsafe-accepted", "if (Number.isSafeInteger(issue) && issue > 0) return issue",
+     "if (Number.isInteger(issue) && issue > 0) return issue", ["case 'num-2^53'"]),
+    ("zero-accepted", "if (Number.isSafeInteger(issue) && issue > 0) return issue",
+     "if (Number.isSafeInteger(issue) && issue >= 0) return issue", ["case 'num-zero'"]),
+    ("http-accepted", r"/^https:\/\/github", r"/^https?:\/\/github", ["case 'url-http'"]),
+    ("trailing-slash-accepted", r"\/issues\/([1-9][0-9]*)$/", r"\/issues\/([1-9][0-9]*)\/?$/",
+     ["case 'url-trailing-slash'"]),
+]
+
+
+@pytest.mark.parametrize("sabotage", _PARSE_SABOTAGES, ids=[s[0] for s in _PARSE_SABOTAGES])
+def test_sabotage_parse_issue_number_weakened(sabotage):
+    _, old, new, needles = sabotage
+    errors = issue_number_behaviour_errors(_mutate(_pipeline_source(), old, new))
+    joined = "\n".join(errors)
+    for needle in needles:
+        assert needle in joined, f"harness missed the sabotage ({needle!r} not in):\n{joined}"
+
+
+def test_issue_harness_fails_when_parser_missing():
+    source = _pipeline_source()
+    mutated = source.replace("function parseIssueNumber(", "function parseIssueNumberX(")
+    assert mutated != source
+    with pytest.raises(pytest.fail.Exception, match="extraction anchor missing"):
+        issue_number_behaviour_errors(mutated)
+
+
+@pytest.mark.parametrize("kind,old,new,needle", [
+    pytest.param("sentinel-twice", "  emit(out);\n", "  emit(out);\n  emit(out);\n", "printed 2",
+                 id="sentinel-twice"),
+    pytest.param("forged-nonce", "nonce: req.nonce,", "nonce: 'forged',",
+                 "does not echo this call's nonce", id="forged-nonce"),
+    pytest.param("nonzero-exit", "  emit(out);\n", "  emit(out);\n  process.exitCode = 1;\n",
+                 "rc=1", id="nonzero-exit"),
+])
+def test_issue_harness_refuses_untrustworthy_node_output(kind, old, new, needle):
+    assert _ISSUE_NODE.count(old) == 1, kind
+    program = _ISSUE_NODE.replace(old, new)
+    with pytest.raises(WorkflowScriptError, match=re.escape(needle)):
+        issue_number_behaviour_errors(_pipeline_source(), node_program=program)
+
+
+def test_issue_harness_fails_without_node(tmp_path, monkeypatch):
+    empty_bin = tmp_path / "emptybin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+    with pytest.raises(pytest.fail.Exception, match="node is not on PATH"):
+        issue_number_behaviour_errors(_pipeline_source())
+
+
+def test_parse_issue_number_has_no_fallback_shape():
+    """No prefix parsing, no `||`/`??` default, no default parameter, no
+    try/catch and no silent zero inside the parser."""
+    fn = _extract_top_level(_pipeline_source(), _ISSUE_ANCHOR)
+    header = fn.split("\n", 1)[0]
+    assert "=" not in header[header.index("("):header.index(")")], header
+    for token in ("parseInt", "parseFloat", "||", "??", "catch", "return 0"):
+        assert token not in fn, f"parseIssueNumber contains {token!r}"
+    assert not re.search(r"\btry\b", fn), "parseIssueNumber contains try"
+
+
+# ---- the pipeline's issue identity and CI wiring ---------------------------
+
+_ISSUE_N_DECL_RE = r"^const ISSUE_N = parseIssueNumber\(args\.issue, REPO\)$"
+_EQUALITY_PREFIX = "if (fetched.issueNumber !== ISSUE_N) throw new Error("
+_ISSUE_PLACEHOLDER_RE = re.compile(r"/issues/(?:N|n|NUMBER|<n>|\{n\}|<number>|<issue>)(?![\w])")
+# `ISSUE` used as an identifier (declared, negated, concatenated, called with).
+# Prose such as '=== THE ISSUE, VERBATIM ===' or 'ISSUE #' is not code.
+_BARE_ISSUE_RE = re.compile(r"(?<![\w$])(?:const|let|var)\s+ISSUE(?![\w$])"
+                            r"|[+(=,!{\[:?&|]\s*ISSUE(?![\w$])"
+                            r"|(?<![\w$])ISSUE\s*[+)\]}.;?]")
+_RATE_RULE_NEEDLES = ("gh api rate_limit", ".reset", "date +%s", "rateLimitWaits",
+                      "A rate-limit error is never reported as pending or fail")
+_CI_READERS = (
+    # (name, start anchor, end anchor, required fragments)
+    ("CI MONITOR", "ciState = await agent(", "label: 'ci-monitor-'", (
+        "gh api repos/' + REPO + '/pulls/' + pr.number + ' --jq .head.sha",
+        "report pending, never green",
+        "/commits/' + headSha + '/check-runs?per_page=100\" --paginate",
+        "/commits/' + headSha + '/status --jq",
+        "Zero check-runs is pending, never green",
+        "total_count 0 means there are none",
+        "RATE_LIMIT_RULE +",
+    )),
+    ("CI FIXER", "const ciFix = await agent(", "label: 'ci-fixer-'", (
+        "/commits/' + headSha + '/check-runs?per_page=100\" --paginate",
+        "RATE_LIMIT_RULE +",
+    )),
+    ("READY", "const ready = await agent(", "label: 'mark-ready'", (
+        "gh api repos/' + REPO + '/pulls/' + pr.number + ' --jq \"{sha: .head.sha",
+        "/commits/' + headSha + '/check-runs?per_page=100\" --paginate",
+        "/commits/' + headSha + '/status --jq",
+        "Require at least one check-run",
+        "RATE_LIMIT_RULE +",
+        "A rate limit is never a reason for ready=false",
+        "gh pr ready ' + pr.number",
+    )),
+)
+
+
+def _between(source: str, start: str, end: str, what: str, errors: list[str]) -> str | None:
+    if source.count(start) != 1:
+        errors.append(f"expected exactly one {what} agent call ({start!r}), found "
+                      f"{source.count(start)}")
+        return None
+    i = source.index(start)
+    j = source.find(end, i)
+    if j == -1:
+        errors.append(f"the {what} agent call has no {end!r} option after it")
+        return None
+    return source[i:j]
+
+
+def pipeline_issue_and_ci_wiring_errors(source: str) -> list[str]:
+    """Static facts about implement-github-issue.js (#274): the issue number is
+    parsed once and interpolated literally, a wrong FETCH stops the run before
+    PLAN, and every CI read is REST, pinned to headSha, and waits out rate
+    limits instead of reporting them as CI state."""
+    lines = source.split("\n")
+    errors: list[str] = []
+
+    def find(pattern: str) -> list[int]:
+        rx = re.compile(pattern)
+        return [i for i, ln in enumerate(lines) if rx.search(ln)]
+
+    def one(pattern: str, what: str) -> int | None:
+        hits = find(pattern)
+        if len(hits) != 1:
+            errors.append(f"expected exactly one {what}, found {len(hits)}")
+            return None
+        return hits[0]
+
+    # -- the issue number: parsed once, before anything runs --
+    decl = one(_ISSUE_N_DECL_RE, "`const ISSUE_N = parseIssueNumber(args.issue, REPO)` line")
+    one(r"^function parseIssueNumber\(issue, repo\) \{$", "top-level parseIssueNumber")
+    fetch_phase = one(r"^phase\('Fetch'\)$", "phase('Fetch') line")
+    agents = find(r"await agent\(")
+    if decl is not None and fetch_phase is not None and not decl < fetch_phase:
+        errors.append("ISSUE_N must be derived before phase('Fetch')")
+    if decl is not None and agents and not decl < agents[0]:
+        errors.append("ISSUE_N must be derived before the first agent runs")
+    readers = [i for i in find(r"args\.issue") if not lines[i].lstrip().startswith("//")]
+    if readers != ([decl] if decl is not None else []):
+        errors.append(f"args.issue is read outside the ISSUE_N line, lines {[r + 1 for r in readers]}")
+    bare = [i + 1 for i, ln in enumerate(lines)
+            if not ln.lstrip().startswith("//") and _BARE_ISSUE_RE.search(ln)]
+    if bare:
+        errors.append(f"a bare ISSUE identifier is used (lines {bare}); use ISSUE_N")
+
+    # -- a wrong FETCH stops the run before PLAN --
+    no_fetched = one(r"^if \(!fetched\) throw ", "`if (!fetched) throw` line")
+    eq = one(r"^" + re.escape(_EQUALITY_PREFIX), f"`{_EQUALITY_PREFIX}...` line")
+    if no_fetched is not None and not (no_fetched + 1 < len(lines)
+                                       and lines[no_fetched + 1].startswith(_EQUALITY_PREFIX)):
+        errors.append(f"`{_EQUALITY_PREFIX}...)` must directly follow `if (!fetched) throw`")
+    if eq is not None:
+        message = lines[eq][len(_EQUALITY_PREFIX):]
+        if "fetched.issueNumber" not in message or "ISSUE_N" not in message:
+            errors.append("the wrong-issue refusal must name both the fetched and the requested number")
+        for pattern, what in ((r"^log\('Issue #", "the `log('Issue #...` line"),
+                              (r"^const WT_DIR = ", "`const WT_DIR`"),
+                              (r"^phase\('Plan'\)$", "phase('Plan')")):
+            later = find(pattern)
+            if len(later) != 1 or not eq < later[0]:
+                errors.append(f"the wrong-issue refusal must sit before {what}")
+        if fetch_phase is not None and sum(1 for a in agents if fetch_phase < a < eq) != 1:
+            errors.append("exactly one agent (FETCH) may run before the wrong-issue refusal")
+
+    # -- FETCH reads the requested number, literally, over REST --
+    fetch = _between(source, "const fetched = await agent(", "label: 'fetch-issue'", "FETCH", errors)
+    if fetch is not None:
+        for need in ("gh api repos/' + REPO + '/issues/' + ISSUE_N + ' --jq .",
+                     "gh api repos/' + REPO + '/issues/' + ISSUE_N + '/comments --paginate"):
+            if need not in fetch:
+                errors.append(f"FETCH must read the issue over REST with ISSUE_N interpolated: {need!r}")
+        if _ISSUE_PLACEHOLDER_RE.search(fetch):
+            errors.append(f"FETCH carries an issue-number placeholder "
+                          f"{_ISSUE_PLACEHOLDER_RE.search(fetch).group(0)!r} for the agent to resolve")
+        if "args.issue" in fetch or "pass its number" in fetch:
+            errors.append("FETCH must not hand the agent the raw args.issue to normalize")
+        if "gh issue view" in fetch:
+            errors.append("FETCH must read the issue over REST, not gh issue view (GraphQL)")
+        if "pull_request" not in fetch:
+            errors.append("FETCH must tell the agent to flag a number that names a pull request")
+
+    # -- CI: REST only, pinned to headSha, rate limits waited out --
+    if _PR_CHECKS_RE.search(source):
+        errors.append("the pipeline must not use gh pr checks at all (GraphQL-backed, #274)")
+    rule_decl = one(r"^const RATE_LIMIT_RULE = `$", "`const RATE_LIMIT_RULE = `` template")
+    if len(find(r"(?<![\w$.])RATE_LIMIT_RULE\s*=(?!=)")) != 1:
+        errors.append("RATE_LIMIT_RULE must be assigned exactly once")
+    if rule_decl is not None:
+        start = source.index("const RATE_LIMIT_RULE = `") + len("const RATE_LIMIT_RULE = `")
+        rule = source[start:source.find("`", start)]
+        for need in _RATE_RULE_NEEDLES:
+            if need not in rule:
+                errors.append(f"RATE_LIMIT_RULE lacks {need!r}")
+    for name, start, end, needs in _CI_READERS:
+        text = _between(source, start, end, name, errors)
+        if text is None:
+            continue
+        for need in needs:
+            if need not in text:
+                errors.append(f"{name} must carry {need!r}")
+        unpinned = [text[m.start():m.start() + 40] for m in re.finditer(r"/commits/", text)
+                    if not text.startswith("/commits/' + headSha + '/", m.start())]
+        if unpinned:
+            errors.append(f"{name}: every /commits/ read must be pinned to headSha, found {unpinned}")
+        one_page = [text[m.start():m.start() + 40] for m in re.finditer(r"/check-runs", text)
+                    if not text.startswith("/check-runs?per_page=100\" --paginate", m.start())]
+        if one_page:
+            errors.append(f"{name}: every check-runs read must page with per_page=100 and "
+                          f"--paginate (a failing run on page 2 would be dropped), found {one_page}")
+
+    ci_schema = _between(source, "const CI_SCHEMA = {", "\n}\n", "CI_SCHEMA", errors)
+    if ci_schema is not None:
+        for need in ("'state': { type: 'string', enum: ['green', 'fail', 'pending'] }",
+                     "'rateLimitWaits': { type: 'array', items: { type: 'string' } }"):
+            if need not in ci_schema:
+                errors.append(f"CI_SCHEMA must carry {need!r}")
+        required = [ln for ln in ci_schema.split("\n") if ln.startswith("  required:")]
+        if len(required) != 1 or "'rateLimitWaits'" not in required[0]:
+            errors.append("CI_SCHEMA.required must list 'rateLimitWaits'")
+    if not find(r"^  if \(!Array\.isArray\(ciState\.rateLimitWaits\)\) throw "):
+        errors.append("the script must refuse a CI monitor result without a rateLimitWaits array")
+    if not find(r"^  log\('CI monitor ' .*ciState\.rateLimitWaits\.length"):
+        errors.append("every CI monitor round must log ciState.rateLimitWaits")
+    one(r"^const MAX_CI_ROUNDS = 9$", "`const MAX_CI_ROUNDS = 9`")
+    return errors
+
+
+def test_pipeline_issue_and_ci_wiring():
+    assert pipeline_issue_and_ci_wiring_errors(_pipeline_source()) == []
+
+
+def _mutate_nth(source: str, old: str, new: str, index: int, count: int) -> str:
+    """Replace the ``index``-th of exactly ``count`` occurrences of ``old``."""
+    starts = [m.start() for m in re.finditer(re.escape(old), source)]
+    if len(starts) != count:
+        pytest.fail(f"sabotage anchor missing: {old!r} occurs {len(starts)} times in the live "
+                    f"script, expected {count}; update the sabotage")
+    i = starts[index]
+    return source[:i] + new + source[i + len(old):]
+
+
+_CHECK_RUNS = "/commits/' + headSha + '/check-runs"
+_STATUS = "/commits/' + headSha + '/status"
+_EQ_LINE_START = "if (fetched.issueNumber !== ISSUE_N) throw "
+
+_ISSUE_SABOTAGES = [
+    # (id, old, new, needle, (index, count) for a repeated anchor or None)
+    ("drop-equality", _EQ_LINE_START, "// " + _EQ_LINE_START, "must directly follow", None),
+    ("loose-equality", "!== ISSUE_N) throw ", "!= ISSUE_N) throw ", "must directly follow", None),
+    ("neutered-equality", _EQ_LINE_START, "if (false && fetched.issueNumber !== ISSUE_N) throw ",
+     "must directly follow", None),
+    ("equality-logs-instead", "if (fetched.issueNumber !== ISSUE_N) throw new Error(",
+     "if (fetched.issueNumber !== ISSUE_N) log(", "must directly follow", None),
+    ("parser-bypassed", "const ISSUE_N = parseIssueNumber(args.issue, REPO)",
+     "const ISSUE_N = Number(args.issue)", "parseIssueNumber(args.issue, REPO)` line", None),
+    ("fetch-placeholder", "/issues/' + ISSUE_N + ' --jq .", "/issues/N --jq .", "placeholder", None),
+    ("fetch-raw-arg", "/issues/' + ISSUE_N + ' --jq .", "/issues/' + args.issue + ' --jq .",
+     "args.issue is read outside", None),
+    ("fetch-comments-hardcoded", "/issues/' + ISSUE_N + '/comments", "/issues/276/comments",
+     "/comments --paginate", None),
+    ("fetch-over-graphql", "gh api repos/' + REPO + '/issues/' + ISSUE_N + ' --jq .",
+     "gh issue view ' + ISSUE_N + ' --repo ' + REPO + ' --json number --jq .", "not gh issue view",
+     None),
+    ("monitor-on-main", _CHECK_RUNS, "/commits/main/check-runs", "CI MONITOR: every /commits/",
+     (0, 4)),
+    ("monitor-poll-on-main", _CHECK_RUNS, "/commits/main/check-runs", "CI MONITOR: every /commits/",
+     (1, 4)),
+    ("fixer-on-main", _CHECK_RUNS, "/commits/main/check-runs", "CI FIXER", (2, 4)),
+    ("ready-on-main", _CHECK_RUNS, "/commits/main/check-runs", "READY", (3, 4)),
+    ("monitor-no-status", _STATUS, _STATUS.replace("status", "statuz"), "CI MONITOR must carry",
+     (0, 2)),
+    ("ready-no-status", _STATUS, _STATUS.replace("status", "statuz"), "READY must carry", (1, 2)),
+    ("monitor-first-page-only", "/check-runs?per_page=100\" --paginate", "/check-runs\"",
+     "CI MONITOR: every check-runs read must page", (0, 4)),
+    ("monitor-poll-first-page-only", "/check-runs?per_page=100\" --paginate", "/check-runs\"",
+     "CI MONITOR: every check-runs read must page", (1, 4)),
+    ("ready-first-page-only", "/check-runs?per_page=100\" --paginate", "/check-runs\"",
+     "READY: every check-runs read must page", (3, 4)),
+    ("monitor-head-over-graphql", "gh api repos/' + REPO + '/pulls/' + pr.number + ' --jq .head.sha",
+     "gh pr view ' + pr.number + ' --json headRefOid", "CI MONITOR must carry", None),
+    ("monitor-zero-is-green", "Zero check-runs is pending, never green", "Zero check-runs is green",
+     "CI MONITOR must carry", None),
+    ("monitor-empty-statuses-running", "total_count 0 means there are none",
+     "total_count 0 means pending", "CI MONITOR must carry", None),
+    ("monitor-loses-rate-rule", "    RATE_LIMIT_RULE + '\\n\\n' +\n", "", "CI MONITOR must carry",
+     None),
+    ("fixer-loses-rate-rule", "      RATE_LIMIT_RULE + '\\n' +\n", "", "CI FIXER must carry", None),
+    ("ready-loses-rate-rule", "  RATE_LIMIT_RULE + '\\n' +\n  'A rate limit is never",
+     "  'A rate limit is never", "READY must carry", None),
+    ("ready-rate-limit-is-false", "A rate limit is never a reason for ready=false",
+     "A rate limit is a reason for ready=false", "READY must carry", None),
+    ("rule-loses-quota-read", "gh api rate_limit", "gh api user", "lacks 'gh api rate_limit'", None),
+    ("rule-rate-limit-is-pending", "A rate-limit error is never reported as pending or fail",
+     "A rate-limit error is reported as pending", "lacks 'A rate-limit error is never", None),
+    ("pr-checks-in-fixer", "'   use REST only, pinned to that commit:\\n' +",
+     "'   gh pr checks ' + pr.number + ' --json name,link\\n' +", "must not use gh pr checks", None),
+    ("schema-no-waits", "'rateLimitWaits': {", "'rateLimitWaitz': {", "CI_SCHEMA must carry", None),
+    ("schema-waits-optional", "'botComments', 'rateLimitWaits', 'notes']", "'botComments', 'notes']",
+     "CI_SCHEMA.required", None),
+    ("schema-enum-widened", "enum: ['green', 'fail', 'pending'] }",
+     "enum: ['green', 'fail', 'pending', 'rate_limited'] }", "CI_SCHEMA must carry", None),
+    ("waits-not-logged", "' (rate-limit waits: ' + ciState.rateLimitWaits.length + ')' + ", "",
+     "must log ciState.rateLimitWaits", None),
+    ("waits-not-refused", "  if (!Array.isArray(ciState.rateLimitWaits)) throw ",
+     "  if (false) throw ", "without a rateLimitWaits array", None),
+    ("max-ci-rounds", "const MAX_CI_ROUNDS = 9\n", "const MAX_CI_ROUNDS = 90\n",
+     "MAX_CI_ROUNDS = 9", None),
+    ("bare-issue-identifier", "read GitHub issue #' + ISSUE_N + '", "read GitHub issue #' + ISSUE + '",
+     "bare ISSUE identifier", None),
+]
+
+
+@pytest.mark.parametrize("sabotage", _ISSUE_SABOTAGES, ids=[s[0] for s in _ISSUE_SABOTAGES])
+def test_sabotage_issue_and_ci_wiring(sabotage):
+    _, old, new, needle, nth = sabotage
+    source = _pipeline_source()
+    mutated = _mutate(source, old, new) if nth is None else _mutate_nth(source, old, new, *nth)
+    assert mutated != source
+    errors = pipeline_issue_and_ci_wiring_errors(mutated)
+    assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize("anchor,needle", [
+    pytest.param("phase('Plan')\n", "before phase('Plan')", id="refusal-after-plan"),
+    pytest.param("phase('Implement')\n", "before `const WT_DIR`", id="refusal-after-worktree"),
+])
+def test_sabotage_wrong_issue_refusal_moved_late(anchor, needle):
+    source = _pipeline_source()
+    line = next(ln for ln in source.split("\n") if ln.startswith(_EQUALITY_PREFIX)) + "\n"
+    mutated = _mutate(_mutate(source, line, ""), anchor, anchor + line)
+    errors = pipeline_issue_and_ci_wiring_errors(mutated)
+    assert any("must directly follow" in e for e in errors), errors
+    assert any(needle in e for e in errors), errors
+
+
+def test_sabotage_issue_n_derived_after_fetch_starts():
+    source = _pipeline_source()
+    decl = "const ISSUE_N = parseIssueNumber(args.issue, REPO)\n"
+    mutated = _mutate(_mutate(source, decl, ""), "phase('Fetch')\n", "phase('Fetch')\n" + decl)
+    errors = pipeline_issue_and_ci_wiring_errors(mutated)
+    assert any("before phase('Fetch')" in e for e in errors), errors
