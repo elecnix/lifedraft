@@ -451,7 +451,11 @@ class YearWorkingState:
     new_tracing: dict = None
 
     # ── non_reg_growth rule ──
-    non_reg_growth_rate: float = 0.0
+    # DP#27 shared taxable after-tax rate. The non_reg account's own declared
+    # mer/expected_return are NOT in it (#291): the non_reg pot grows at this
+    # plus its declared shift; the SM sleeve (sm_investment_growth) grows at
+    # exactly this. Written by non_reg_growth on every path.
+    taxable_after_tax_rate: float = 0.0
 
     # ── lira_lif rule ──
     lif_withdrawal: float = 0.0

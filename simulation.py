@@ -229,6 +229,22 @@ def _non_reg_after_tax_return_for(year: int, primary_marginal_rate: float,
     taxed only when realized, via the FMV-vs-ACB gain fraction already
     computed in ``plan_drawdown_net``.
 
+    Declared per-account ``mer`` / ``expected_return`` (#291): this function
+    returns the after-tax rate at the GLOBAL gross. The non_reg account's
+    declared ``expected_return`` blend and ``mer`` are applied in
+    ``rules_growth.apply_non_reg_growth`` as the exact linear shift
+    ``atr + (blended_gross - gross) - mer_rate``, which equals evaluating this
+    function at the fee-net, override-blended gross (``after_tax_yield`` does
+    not depend on ``gross_return``). The convention: the MER is taken from the
+    fund's total return BEFORE distributions; the declared yield is the net
+    distribution actually paid; so the fee reduces the deferred
+    capital-appreciation term at its full rate, and ACB is unaffected (DP#19).
+    The shift lives in the rule, not here, because the override blend is
+    balance-weighted on the LIVE pot and this function must never read a
+    balance (#575, #583). The Smith-Manoeuvre sleeve grows at the unshifted
+    rate returned here: it is not a declared account and never inherits the
+    non_reg account's fee or override.
+
     Args:
         year: Simulation year (0-based). Composition is static input data
             today, so this is currently unused; kept for a future
@@ -2265,7 +2281,8 @@ class FamilySimulation:
 
         Thin delegator (DP#26/#583) over the pure
         ``_non_reg_after_tax_return_for`` -- see that function's docstring
-        for the full rationale.
+        for the full rationale. The non_reg account's declared mer /
+        expected_return are applied downstream in ``apply_non_reg_growth`` (#291).
         """
         return _non_reg_after_tax_return_for(
             year, primary_marginal_rate, gross_return,
