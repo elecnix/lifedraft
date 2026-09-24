@@ -6,7 +6,7 @@ of its predecessors — no shared context — and returns a schema-validated res
 
 ## CI guard
 
-`tests/architecture/test_claude_workflow_scripts.py` runs in the normal pytest suite (so `tests.yml` runs it on every PR) and checks every `*.js` in this directory. It compiles each script the way the Workflow runtime runs it: the body inside an async function, so top-level `await` and `return` are legal, with `export const meta` kept top-level. It also checks that `meta` is a pure object literal with a non-empty `name` and `description`, that the `meta.phases[].title` set equals the set of `phase('...')` arguments exactly (and every agent `phase:` option names one of them), and that no file here contains an absolute home-directory path. Use `~/...` instead. See #264.
+`tests/architecture/test_claude_workflow_scripts.py` runs in the normal pytest suite (so `tests.yml` runs it on every PR) and checks every `*.js` in this directory. It compiles each script the way the Workflow runtime runs it: the body inside an async function, so top-level `await` and `return` are legal, with `export const meta` kept top-level. It also checks that `meta` is a pure object literal with a non-empty `name` and `description`, that the `meta.phases[].title` set equals the set of `phase('...')` arguments exactly (and every agent `phase:` option names one of them), and that no file here contains an absolute home-directory path. Use `~/...` instead. See #264. Check 5 (#268) keeps commit and PR titles out of slugs: a `slug(` call may appear only on the `const WT_DIR =` or `const BRANCH =` line, no string may hardcode a conventional-commit type literal such as `<type>(#`, and every `(#` title fragment must be preceded by `COMMIT_TYPE +` or `commitType +`. For `implement-github-issue.js` the guard also extracts the real `composeCommitTitle`, `COMMIT_TYPES`, `MAX_TITLE_LEN` and `PLAN_SCHEMA` from the script and runs them in node against a fixed case table, and it checks statically that `PR_TITLE` reaches the refusal point, the commit hints and the PR stage.
 
 The guard needs `node` on PATH and **fails** without it; it never skips. It compiles with node's `vm.Script` and deliberately does not use `node --check`. That flag rejects the legal top-level `return`, and on node 24 it exits 0 on unparseable files that contain ESM syntax, so it would pass the exact breakage the guard exists to catch.
 
@@ -23,7 +23,8 @@ args: { issue, repo }
    │  1 FETCH      │  (the "what is asked, what is done")
    └──────┬────────┘
    ┌──────▼────────┐  goal + verbatim issue text (+ comments)
-   │  2 PLAN       │  → implementation plan (steps/files/risks/AC/tests)
+   │  2 PLAN       │  → implementation plan (steps/files/risks/AC/tests
+   │               │    + commitType/commitSubject)
    └──────┬────────┘
    ┌──────▼────────┐  ask + plan
    │  3 TEST-PLAN  │  → invariants + sabotage checks + exact commands
@@ -80,6 +81,7 @@ Workflow({ name: 'implement-github-issue',
   it. The implementer and fixers are now told the PR is out of scope. If a PR
   exists anyway when the PR stage runs, that stage records a
   `stageViolations` entry in the result and puts the PR back into draft.
+- **Titles come from the plan, never from a slug.** The PR title and every commit subject the pipeline suggests is `<type>(#n): <subject>`, where the plan supplies both parts (#268). The type is one of `fix`, `feat`, `docs`, `refactor`, `test`, `ci` or `chore`, enforced by a schema `enum`. The subject is a short imperative sentence written for a human, and the whole title is at most 72 characters, because a squash-merge makes the PR title the commit subject on `main`. Right after the PLAN stage, `composeCommitTitle` refuses (throws, before the TEST-PLAN stage runs) a type outside the set, an empty or whitespace subject, a slug-shaped subject with no space, a subject that already carries a `type:` prefix, a subject containing a double quote, backtick, dollar, backslash or control character (the title goes inside a double-quoted shell argument), or a title over 72 characters. It never falls back to the slug or to a default type. A legitimate subject such as `README: ...` is also refused by the prefix rule; reword it. The fixers commit as `<type>(#n): address validator findings` / `address CI findings` with the plan's type. The slug names only the worktree and the branch (`fix/<n>-<slug>`). A PR that an earlier stage already opened is retitled to the plan's title, and the run stops if the PR's actual title differs.
 - **Only the final READY stage marks the PR ready.** It checks that CI is green
   for the exact head commit the pipeline validated, which honours "mark ready
   once CI is green" without ever making a PR ready too early.

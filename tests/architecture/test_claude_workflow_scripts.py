@@ -16,7 +16,7 @@ never by a test:
   ``phase('<title>')`` call to a ``meta.phases[].title``, exact string. A phase
   added on one side only degrades silently.
 
-For every ``.claude/workflows/*.js`` this module checks four things:
+For every ``.claude/workflows/*.js`` this module checks five things:
 
 1. **It compiles the way the Workflow runtime runs it.** The runtime executes
    the script body inside an async function, so top-level ``await`` and
@@ -37,6 +37,18 @@ For every ``.claude/workflows/*.js`` this module checks four things:
 4. **No absolute home-directory path** (``/home/<user>``, ``/Users/<user>``,
    ``C:\\Users\\<user>``) in any file under ``.claude/workflows/``. The portable
    ``~/...`` form is allowed.
+5. **Commit and PR titles come from the plan, never from a slug** (#268). A
+   ``slug(`` call may appear only on a ``const WT_DIR =`` or ``const BRANCH =``
+   line (one call, one statement); no string may hardcode a conventional-commit
+   type literal such as ``<type>(#``; and every string fragment that opens with
+   ``(#`` must be preceded by ``COMMIT_TYPE +`` or ``commitType +``, so a split
+   literal like ``'fix' + '(#'`` cannot launder a hardcoded type either.
+
+For ``implement-github-issue.js`` specifically, the real ``composeCommitTitle``,
+``COMMIT_TYPES``, ``MAX_TITLE_LEN`` and ``PLAN_SCHEMA`` are *extracted from the
+live script* and run in node against a fixed case table (never reimplemented
+here), and the wiring of the resulting ``PR_TITLE`` into the refusal point, the
+commit hints and the PR stage is checked statically (#268).
 
 ## Why ``node --check`` is deliberately NOT used
 
@@ -598,6 +610,50 @@ def home_paths(label: str, text: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# check (5): commit/PR titles come from the plan, never from a slug (#268)
+# --------------------------------------------------------------------------
+
+COMMIT_TYPES = ("fix", "feat", "docs", "refactor", "test", "ci", "chore")
+MAX_TITLE_LEN = 72
+_SLUG_CALL_RE = re.compile(r"(?<![\w$.])slug\s*\(")
+_SLUG_DEF_RE = re.compile(r"^\s*function\s+slug\s*\(")
+# one statement only: `const BRANCH = ... slug(x); const T = slug(x)` is not allowed
+_SLUG_ALLOWED_LINE_RE = re.compile(r"^const\s+(?:WT_DIR|BRANCH)\s*=[^;]*$")
+_HARDCODED_TYPE_RE = re.compile(r"(?<![\w$])(?:" + "|".join(COMMIT_TYPES) + r")\(#")
+_TITLE_FRAGMENT_RE = re.compile(r"""(['"`])\(#""")
+_PLAN_TYPED_PREFIX_RE = re.compile(r"(?<![\w$.])(?:COMMIT_TYPE|commitType)\s*\+\s*\Z")
+
+
+def commit_title_findings(name: str, source: str) -> list[str]:
+    """Check (5). Line-based over the whole source; no allowlist, no skip."""
+    findings = []
+    for lineno, line in enumerate(source.split("\n"), start=1):
+        calls = list(_SLUG_CALL_RE.finditer(line))
+        if calls and _SLUG_DEF_RE.match(line):
+            calls = calls[1:]  # the definition itself is not a call
+        allowed = 1 if _SLUG_ALLOWED_LINE_RE.match(line) else 0
+        for _ in calls[allowed:]:
+            findings.append(
+                f"{name}:{lineno}: slug() may only name the worktree/branch "
+                "(const WT_DIR / const BRANCH); a PR title or commit hint built "
+                "from a slug is #268")
+        for m in _HARDCODED_TYPE_RE.finditer(line):
+            findings.append(
+                f"{name}:{lineno}: hardcoded conventional-commit type {m.group(0)!r}; "
+                "the type must come from the plan (#268)")
+    for m in _TITLE_FRAGMENT_RE.finditer(source):
+        if _PLAN_TYPED_PREFIX_RE.search(source[max(0, m.start() - 200):m.start()]):
+            continue
+        lineno = _line_of(source, m.start())
+        snippet = source[m.start():source.find("\n", m.start())].strip()[:60]
+        findings.append(
+            f"{name}:{lineno}: title fragment {snippet!r} is not preceded by "
+            "`COMMIT_TYPE +` or `commitType +`; the conventional-commit type must "
+            "come from the plan (#268)")
+    return findings
+
+
+# --------------------------------------------------------------------------
 # check (1) + the node side of check (2)
 # --------------------------------------------------------------------------
 
@@ -644,7 +700,7 @@ def _one_line(text: str) -> str:
 
 
 def check_workflow_script(path: Path) -> list[str]:
-    """Run checks 1-4 on one script; return EVERY failure, prefixed with the
+    """Run checks 1-5 on one script; return EVERY failure, prefixed with the
     file name (never just the first)."""
     require_node()  # before anything else: missing node is a failure, always
     name = path.name
@@ -711,6 +767,7 @@ def check_workflow_script(path: Path) -> list[str]:
                               "not a meta.phases title")
 
     errors.extend(home_paths(name, source))
+    errors.extend(commit_title_findings(name, source))
     return errors
 
 
@@ -1182,3 +1239,511 @@ def test_module_has_no_skip_path():
             hits.extend(f"line {node.lineno}: from pytest import {a.name}"
                         for a in node.names if a.name in forbidden)
     assert not hits, f"skip/xfail path in the #264 guard: {hits}"
+
+
+# ==========================================================================
+# #268: titles from the plan. The REAL helper and schema, extracted and run.
+# ==========================================================================
+
+PIPELINE_SCRIPT = WORKFLOWS_DIR / "implement-github-issue.js"
+COMPOSE_SENTINEL = "COMPOSE_TITLE_RESULT"
+_JS_UNDEFINED = "__JS_UNDEFINED__"
+_ORIGINAL_PLAN_REQUIRED = ("summary", "steps", "files", "risks", "acceptanceCriteria",
+                           "outOfScope", "testsToAdd")
+
+_COMPOSE_ANCHORS = (
+    re.compile(r"^const COMMIT_TYPES = ", re.M),
+    re.compile(r"^const MAX_TITLE_LEN = ", re.M),
+    re.compile(r"^function composeCommitTitle\(", re.M),
+    re.compile(r"^const PLAN_SCHEMA = \{", re.M),
+)
+
+# Reads one JSON request on stdin: the extracted source text and the case table.
+# Inputs travel as JSON, never spliced into JS source. Prints ONE sentinel line
+# carrying the request nonce.
+_COMPOSE_NODE = r"""
+'use strict';
+const vm = require('vm');
+const chunks = [];
+const emit = (o) => process.stdout.write('__SENTINEL__ ' + JSON.stringify(o) + '\n');
+process.stdin.on('data', (c) => chunks.push(c));
+process.stdin.on('end', () => {
+  const req = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const out = { nonce: req.nonce, load_error: null, schema: null, types: null, max_len: null, results: [] };
+  const decode = (v) => (v === req.undefined_marker ? undefined : v);
+  let api = null;
+  try {
+    api = vm.runInNewContext(req.code + '\n;({ f: composeCommitTitle, S: PLAN_SCHEMA, T: COMMIT_TYPES, L: MAX_TITLE_LEN })',
+                             Object.create(null), { timeout: 1000 });
+  } catch (e) {
+    out.load_error = String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ');
+  }
+  if (api !== null) {
+    out.schema = JSON.parse(JSON.stringify(api.S));
+    out.types = JSON.parse(JSON.stringify(api.T));
+    out.max_len = api.L;
+    for (const c of req.cases) {
+      try {
+        const v = api.f(...c.args.map(decode));
+        out.results.push({ id: c.id, kind: 'return', value_type: typeof v, value: v === undefined ? null : v });
+      } catch (e) {
+        out.results.push({ id: c.id, kind: 'throw',
+                           err_name: (e && e.constructor && e.constructor.name) || typeof e,
+                           message: (e && e.message !== undefined) ? String(e.message) : String(e) });
+      }
+    }
+  }
+  emit(out);
+});
+""".replace("__SENTINEL__", COMPOSE_SENTINEL)
+
+
+def _extract_top_level(source: str, header_re: re.Pattern) -> str:
+    """The top-level declaration whose first line matches ``header_re`` at
+    column 0: through the first following line that is exactly ``}`` when the
+    header opens a block, else the single line. A missing or ambiguous anchor
+    FAILS; this never returns ''."""
+    matches = list(header_re.finditer(source))
+    if len(matches) != 1:
+        pytest.fail(f"extraction anchor missing or ambiguous: {header_re.pattern!r} matched "
+                    f"{len(matches)} times in the workflow script (#268); refusing to run the "
+                    "behavioural harness on nothing")
+    start = matches[0].start()
+    eol = source.find("\n", start)
+    first = source[start:eol if eol != -1 else len(source)]
+    if not first.rstrip().endswith("{"):
+        return first
+    lines = source[start:].split("\n")
+    for i, line in enumerate(lines[1:], start=1):
+        if line == "}":
+            return "\n".join(lines[:i + 1])
+    pytest.fail(f"extraction anchor {header_re.pattern!r}: no closing '}}' at column 0 (#268)")
+
+
+def _boundary_subject(total: int) -> tuple[str, str]:
+    """A subject whose composed ``refactor(#9999): `` title is exactly
+    ``total`` characters. Padded with a NON-space so trim() cannot shorten it."""
+    prefix = "refactor(#9999): "
+    subject = "x y".ljust(total - len(prefix), "z")
+    if len(prefix + subject.strip()) != total:
+        pytest.fail(f"boundary case for {total} chars is built wrong: the trimmed title is "
+                    f"{len(prefix + subject.strip())} chars")
+    return subject, prefix + subject
+
+
+def compose_cases() -> list[tuple[str, list, str, str]]:
+    """(id, args, 'return'|'throw', exact value | message needle)."""
+    s72, t72 = _boundary_subject(72)
+    s73, _ = _boundary_subject(73)
+    ok_subject = "derive titles from the plan"
+    cases: list[tuple[str, list, str, str]] = [
+        ("trimmed-good", ["docs", "  add usage notes for the fetch stage  ", 268], "return",
+         "docs(#268): add usage notes for the fetch stage"),
+        ("len-72", ["refactor", s72, 9999], "return", t72),
+        ("len-73", ["refactor", s73, 9999], "throw", "title is 73 characters"),
+    ]
+    cases += [(f"type-ok-{t}", [t, ok_subject, 7], "return", f"{t}(#7): {ok_subject}")
+              for t in COMMIT_TYPES]
+    bad_types = {"bugfix": "bugfix", "FIX": "FIX", "Fix": "Fix", "empty": "",
+                 "undefined": _JS_UNDEFINED, "null": None, "number": 5, "padded": " fix"}
+    cases += [(f"type-{k}", [v, ok_subject, 7], "throw", "commitType must be one of")
+              for k, v in bad_types.items()]
+    cases += [
+        ("subject-undefined", ["fix", _JS_UNDEFINED, 7], "throw", "commitSubject must be a string"),
+        ("subject-null", ["fix", None, 7], "throw", "commitSubject must be a string"),
+        ("subject-number", ["fix", 42, 7], "throw", "commitSubject must be a string"),
+        ("subject-empty", ["fix", "", 7], "throw", "empty or whitespace"),
+        ("subject-spaces", ["fix", "   ", 7], "throw", "empty or whitespace"),
+        ("subject-tab-newline", ["fix", "\t\n", 7], "throw", "empty or whitespace"),
+        ("subject-slug", ["fix", "tooling-claude-workflows-scripts-have-no", 7], "throw",
+         "never a slug"),
+        ("subject-prefixed", ["fix", "fix(#5): do x", 7], "throw", "already carries a type prefix"),
+        ("subject-bare-prefix", ["fix", "docs: do x", 7], "throw", "already carries a type prefix"),
+        ("subject-dquote", ["fix", 'say "hi" now', 7], "throw", "unsafe in a shell-quoted title"),
+        ("subject-backtick", ["fix", "run `x` now", 7], "throw", "unsafe in a shell-quoted title"),
+        ("subject-dollar", ["fix", "cost $5 now", 7], "throw", "unsafe in a shell-quoted title"),
+        ("subject-backslash", ["fix", "a\\b c", 7], "throw", "unsafe in a shell-quoted title"),
+        ("subject-newline", ["fix", "a\nb c", 7], "throw", "unsafe in a shell-quoted title"),
+        ("subject-nul", ["fix", "a\u0000b c", 7], "throw", "unsafe in a shell-quoted title"),
+    ]
+    cases += [(f"issue-{k}", ["fix", ok_subject, v], "throw", "must be a positive integer")
+              for k, v in {"zero": 0, "negative": -1, "fraction": 1.5, "string": "12",
+                           "undefined": _JS_UNDEFINED}.items()]
+    return cases
+
+
+def commit_title_behaviour_errors(source: str, node_program: str = _COMPOSE_NODE) -> list[str]:
+    """Run the REAL composeCommitTitle / COMMIT_TYPES / MAX_TITLE_LEN /
+    PLAN_SCHEMA, extracted from ``source``, in an empty node vm context against
+    the case table. Returns human-readable mismatches; [] means pass. Raises
+    WorkflowScriptError when node's answer cannot be trusted."""
+    code = "\n".join(_extract_top_level(source, a) for a in _COMPOSE_ANCHORS)
+    node = require_node()
+    cases = compose_cases()
+    nonce = secrets.token_hex(16)
+    request = json.dumps({"nonce": nonce, "code": code, "undefined_marker": _JS_UNDEFINED,
+                          "cases": [{"id": c[0], "args": c[1]} for c in cases]})
+    try:
+        proc = subprocess.run([node, "-e", node_program], input=request, capture_output=True,
+                              text=True, encoding="utf-8", timeout=NODE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise WorkflowScriptError(f"compose harness timed out after {NODE_TIMEOUT_S}s")
+    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith(COMPOSE_SENTINEL + " ")]
+    if len(lines) != 1 or proc.returncode != 0:
+        raise WorkflowScriptError(
+            f"compose harness printed {len(lines)} {COMPOSE_SENTINEL} lines (rc={proc.returncode}); "
+            f"refusing to trust it. stderr={proc.stderr[-800:]!r}")
+    out = json.loads(lines[0][len(COMPOSE_SENTINEL) + 1:])
+    if not isinstance(out, dict) or out.get("nonce") != nonce:
+        raise WorkflowScriptError("compose harness result does not echo this call's nonce")
+    if out["load_error"] is not None:
+        return [f"the extracted helper/schema did not load in node: {out['load_error']}"]
+
+    errors: list[str] = []
+    types = out["types"]
+    if not isinstance(types, list) or sorted(types) != sorted(COMMIT_TYPES):
+        errors.append(f"COMMIT_TYPES is {types!r}, expected exactly {list(COMMIT_TYPES)}")
+    if out["max_len"] != MAX_TITLE_LEN:
+        errors.append(f"MAX_TITLE_LEN is {out['max_len']!r}, expected {MAX_TITLE_LEN}")
+    schema = out["schema"]
+    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    ctype = props.get("commitType", {})
+    enum = ctype.get("enum")
+    if ctype.get("type") != "string" or not isinstance(enum, list) or \
+            len(enum) != len(COMMIT_TYPES) or set(enum) != set(COMMIT_TYPES):
+        errors.append(f"PLAN_SCHEMA.properties.commitType enum/type is {ctype!r}, expected "
+                      f"type 'string' and enum exactly {list(COMMIT_TYPES)}")
+    csubj = props.get("commitSubject", {})
+    if csubj.get("type") != "string" or csubj.get("minLength") != 1:
+        errors.append(f"PLAN_SCHEMA.properties.commitSubject is {csubj!r}, expected "
+                      "type 'string' with minLength 1")
+    required = schema.get("required", []) if isinstance(schema, dict) else []
+    for key in _ORIGINAL_PLAN_REQUIRED + ("commitType", "commitSubject"):
+        if key not in required:
+            errors.append(f"PLAN_SCHEMA.required is missing {key!r}")
+        if key not in props:
+            errors.append(f"PLAN_SCHEMA.properties is missing {key!r}")
+
+    results = {}
+    for r in out["results"]:
+        if r["id"] in results:
+            raise WorkflowScriptError(f"compose harness reported case {r['id']!r} twice")
+        results[r["id"]] = r
+    for case_id, args, expect, want in cases:
+        r = results.get(case_id)
+        shown = f"case {case_id!r} {args!r}"
+        if r is None:
+            errors.append(f"{shown}: node returned no result")
+        elif expect == "return":
+            if r["kind"] != "return" or r["value_type"] != "string" or r["value"] != want:
+                errors.append(f"{shown}: expected to return {want!r}, got {r!r}")
+        elif r["kind"] != "throw":
+            errors.append(f"{shown}: expected a 'Plan refused' throw, but it returned {r['value']!r}")
+        elif r["err_name"] != "Error" or not r["message"].startswith("Plan refused") \
+                or want not in r["message"]:
+            errors.append(f"{shown}: expected Error 'Plan refused: ...{want}...', got "
+                          f"{r['err_name']}: {r['message']!r}")
+    return errors
+
+
+def _mutate(source: str, old: str, new: str) -> str:
+    if source.count(old) != 1:
+        pytest.fail(f"sabotage anchor missing: {old!r} occurs {source.count(old)} times in the "
+                    "live script; update the sabotage")
+    mutated = source.replace(old, new)
+    assert mutated != source, "sabotage did not change the script; it would be vacuous"
+    return mutated
+
+
+def _pipeline_source() -> str:
+    if not PIPELINE_SCRIPT.is_file():
+        pytest.fail(f"{PIPELINE_SCRIPT} is missing; the #268 checks have nothing to check")
+    return PIPELINE_SCRIPT.read_text(encoding="utf-8")
+
+
+def test_compose_commit_title_behaviour():
+    """The live helper refuses every bad shape with 'Plan refused', returns
+    exact titles for good ones, and PLAN_SCHEMA carries the enum and both
+    required fields (#268)."""
+    assert commit_title_behaviour_errors(_pipeline_source()) == []
+
+
+_COMPOSE_SABOTAGES = [
+    ("max-len-720", "const MAX_TITLE_LEN = 72", "const MAX_TITLE_LEN = 720",
+     ["MAX_TITLE_LEN is 720", "case 'len-73'"]),
+    ("length-gte", "if (title.length > MAX_TITLE_LEN)", "if (title.length >= MAX_TITLE_LEN)",
+     ["case 'len-72'"]),
+    ("empty-check-off", "if (subject === '') {", "if (false) {",
+     ["case 'subject-empty'", "case 'subject-spaces'"]),
+    ("no-trim", "const subject = commitSubject.trim()", "const subject = commitSubject",
+     ["case 'trimmed-good'", "case 'subject-spaces'"]),
+    ("chore-to-wip", "'ci', 'chore']", "'ci', 'wip']",
+     ["COMMIT_TYPES is", "commitType enum/type", "case 'type-ok-chore'"]),
+    ("append-build", "'ci', 'chore']", "'ci', 'chore', 'build']",
+     ["COMMIT_TYPES is", "commitType enum/type"]),
+    ("drop-required-subject", "'testsToAdd', 'commitType', 'commitSubject']",
+     "'testsToAdd', 'commitType']", ["PLAN_SCHEMA.required is missing 'commitSubject'"]),
+    ("drop-required-type", "'testsToAdd', 'commitType', 'commitSubject']",
+     "'testsToAdd', 'commitSubject']", ["PLAN_SCHEMA.required is missing 'commitType'"]),
+    ("drop-min-length", "'commitSubject': { type: 'string', minLength: 1 }",
+     "'commitSubject': { type: 'string' }", ["commitSubject is"]),
+    ("slug-shape-off", "if (!/\\s/.test(subject)) {", "if (false) {", ["case 'subject-slug'"]),
+    ("shell-chars", r'/["`$\\\u0000-\u001f\u007f]/', r'/["\\\u0000-\u001f\u007f]/',
+     ["case 'subject-dollar'", "case 'subject-backtick'"]),
+    ("type-coerced",
+     "function composeCommitTitle(commitType, commitSubject, issueNumber) {\n",
+     "function composeCommitTitle(commitType, commitSubject, issueNumber) {\n"
+     "  if (!COMMIT_TYPES.includes(commitType)) commitType = 'chore'\n",
+     ["case 'type-bugfix'", "case 'type-FIX'", "case 'type-undefined'"]),
+    # the ReferenceError trap: any exception must not count as a refusal
+    ("slug-fallback",
+     "throw new Error('Plan refused: commitSubject is empty or whitespace, got ' + JSON.stringify(commitSubject))",
+     "return commitType + '(#' + issueNumber + '): ' + slug(String(issueNumber))",
+     ["case 'subject-empty'", "ReferenceError"]),
+]
+
+
+@pytest.mark.parametrize("sabotage", _COMPOSE_SABOTAGES, ids=[s[0] for s in _COMPOSE_SABOTAGES])
+def test_sabotage_compose_commit_title_weakened(sabotage):
+    _, old, new, needles = sabotage
+    errors = commit_title_behaviour_errors(_mutate(_pipeline_source(), old, new))
+    joined = "\n".join(errors)
+    for needle in needles:
+        assert needle in joined, f"harness missed the sabotage ({needle!r} not in):\n{joined}"
+
+
+def test_sabotage_slug_fallback_also_trips_static_check(tmp_path):
+    """S7's other half: a slug() call inside the helper is a check-5 finding."""
+    source = _pipeline_source()
+    old = "throw new Error('Plan refused: commitSubject is empty or whitespace, got ' + JSON.stringify(commitSubject))"
+    mutated = _mutate(source, old, "return commitType + '(#' + issueNumber + '): ' + slug(String(issueNumber))")
+    line = _line_of(source, source.index(old))
+    errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, mutated))
+    err = _only(errors, "slug() may only name the worktree/branch")
+    assert err.startswith(f"{PIPELINE_SCRIPT.name}:{line}: "), err
+
+
+def test_compose_harness_fails_when_helper_missing():
+    mutated = _pipeline_source().replace("composeCommitTitle", "composeTitle")
+    assert mutated != _pipeline_source()
+    with pytest.raises(pytest.fail.Exception, match="extraction anchor missing"):
+        commit_title_behaviour_errors(mutated)
+
+
+@pytest.mark.parametrize("kind,old,new,needle", [
+    pytest.param("sentinel-twice", "  emit(out);\n", "  emit(out);\n  emit(out);\n", "printed 2", id="sentinel-twice"),
+    pytest.param("forged-nonce", "nonce: req.nonce,", "nonce: 'forged',",
+                 "does not echo this call's nonce", id="forged-nonce"),
+])
+def test_compose_harness_refuses_untrustworthy_node_output(kind, old, new, needle):
+    assert _COMPOSE_NODE.count(old) == 1, kind
+    program = _COMPOSE_NODE.replace(old, new)
+    with pytest.raises(WorkflowScriptError, match=re.escape(needle)):
+        commit_title_behaviour_errors(_pipeline_source(), node_program=program)
+
+
+def test_compose_harness_fails_without_node(tmp_path, monkeypatch):
+    empty_bin = tmp_path / "emptybin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+    with pytest.raises(pytest.fail.Exception, match="node is not on PATH"):
+        commit_title_behaviour_errors(_pipeline_source())
+
+
+def test_boundary_subjects_are_not_space_padded():
+    """trim() would silently shorten a space-padded boundary case (S10)."""
+    for total in (72, 73):
+        subject, title = _boundary_subject(total)
+        assert len(title) == total and subject == subject.strip() and " " in subject
+
+
+def test_compose_commit_title_has_no_fallback_shape():
+    """No `||`/`??` default, default parameter, try/catch or slug in the helper."""
+    fn = _extract_top_level(_pipeline_source(), _COMPOSE_ANCHORS[2])
+    header = fn.split("\n", 1)[0]
+    assert "=" not in header[header.index("("):header.index(")")], header
+    for token in ("||", "??", "catch"):
+        assert token not in fn, f"composeCommitTitle contains {token!r}"
+    assert not _SLUG_CALL_RE.search(fn), "composeCommitTitle calls slug()"
+    assert not re.search(r"\btry\b", fn), "composeCommitTitle contains try"
+
+
+# ---- check 5 on the live script and on fixtures ---------------------------
+
+def test_live_script_uses_slug_only_for_worktree_and_branch():
+    lines = _pipeline_source().split("\n")
+    sites = [(i + 1, ln) for i, ln in enumerate(lines)
+             if _SLUG_CALL_RE.search(ln) and not _SLUG_DEF_RE.match(ln)]
+    assert len(sites) == 2, sites
+    assert [ln.split("=")[0].strip() for _, ln in sites] == ["const WT_DIR", "const BRANCH"], sites
+    assert sum(1 for ln in lines if _SLUG_DEF_RE.match(ln)) == 1
+
+
+def _pr_create_line(source: str) -> tuple[str, int]:
+    for i, ln in enumerate(source.split("\n"), start=1):
+        if "gh pr create --repo" in ln:
+            return ln, i
+    pytest.fail("sabotage anchor missing: no `gh pr create` line in the live script")
+
+
+def test_sabotage_pr_title_built_from_slug(tmp_path):
+    """S1: the pre-#268 --title line trips BOTH halves of check 5."""
+    source = _pipeline_source()
+    _, line = _pr_create_line(source)
+    mutated = _mutate(source, "--draft --title \"' + PR_TITLE + '\"",
+                      "--draft --title \"fix(#' + fetched.issueNumber + '): ' + slug(fetched.title) + '\"")
+    errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, mutated))
+    assert _only(errors, "slug() may only name").startswith(f"{PIPELINE_SCRIPT.name}:{line}: ")
+    assert _only(errors, "hardcoded conventional-commit type 'fix(#'").startswith(
+        f"{PIPELINE_SCRIPT.name}:{line}: ")
+
+
+@pytest.mark.parametrize("kind,old,new", [
+    pytest.param("laundered-variable", "const BRANCH = 'fix/' + fetched.issueNumber + '-' + slug(fetched.title)\n",
+     "const BRANCH = 'fix/' + fetched.issueNumber + '-' + slug(fetched.title)\n"
+     "const TITLE_SLUG = slug(fetched.title)\n", id="laundered-variable"),
+    pytest.param("allowed-line-spoof", "const BRANCH = 'fix/' + fetched.issueNumber + '-' + slug(fetched.title)\n",
+     "const BRANCH = 'fix/' + fetched.issueNumber + '-' + slug(fetched.title); "
+     "const T = slug(fetched.title)\n", id="allowed-line-spoof"),
+])
+def test_sabotage_slug_laundered_through_variable(tmp_path, kind, old, new):
+    source = _pipeline_source()
+    line = _line_of(source, source.index(old)) + (1 if kind == "laundered-variable" else 0)
+    errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, _mutate(source, old, new)))
+    hits = [e for e in errors if "slug() may only name" in e]
+    assert hits and all(e.startswith(f"{PIPELINE_SCRIPT.name}:{line}: ") for e in hits), errors
+
+
+@pytest.mark.parametrize("hint", ["address validator findings", "address CI findings"])
+def test_sabotage_hardcoded_commit_type_in_hint(tmp_path, hint):
+    source = _pipeline_source()
+    old = "' + COMMIT_TYPE + '(#' + fetched.issueNumber + '): " + hint
+    line = _line_of(source, source.index(old))
+    # (a) a whole literal, (b) a split literal that evades the <type>(# regex
+    for new, needle in (("fix(#' + fetched.issueNumber + '): " + hint,
+                         "hardcoded conventional-commit type 'fix(#'"),
+                        ("fix' + '(#' + fetched.issueNumber + '): " + hint,
+                         "is not preceded by `COMMIT_TYPE +`")):
+        errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, _mutate(source, old, new)))
+        assert _only(errors, needle).startswith(f"{PIPELINE_SCRIPT.name}:{line}: "), errors
+
+
+def test_sabotage_hardcoded_commit_type_in_prose(tmp_path):
+    source = _pipeline_source()
+    mutated, line = _inject_after_template_opening(source, "e.g. feat(#12): add a thing\n")
+    errors = check_workflow_script(_live_copy(tmp_path, PIPELINE_SCRIPT, mutated))
+    assert _only(errors, "hardcoded conventional-commit type 'feat(#'").startswith(
+        f"{PIPELINE_SCRIPT.name}:{line}: ")
+
+
+def test_commit_title_check_on_fixture(tmp_path):
+    ok = MINIMAL_SCRIPT.replace(
+        "const PROMPT = `",
+        "function slug(t) {\n  return t\n}\nconst BRANCH = 'b/' + slug('t')\n"
+        "const WT_DIR = slug('t')\nconst PROMPT = `")
+    assert ok != MINIMAL_SCRIPT and commit_title_findings("f.js", MINIMAL_SCRIPT) == []
+    assert check_workflow_script(_write(tmp_path, ok, "ok.js")) == []
+    for t in COMMIT_TYPES:
+        bad = ok.replace("return { a, b }", f"const X = '{t}(#1): ' + a\nreturn {{ a, b }}")
+        errors = check_workflow_script(_write(tmp_path, bad, f"bad-{t}.js"))
+        line = bad.split("\n").index(f"const X = '{t}(#1): ' + a") + 1
+        assert _only(errors, f"hardcoded conventional-commit type '{t}(#'").startswith(f"bad-{t}.js:{line}: ")
+    typed = ok.replace("return { a, b }", "const X = commitType + '(#1): ' + a\nreturn { a, b }")
+    assert check_workflow_script(_write(tmp_path, typed, "typed.js")) == []
+    # a word that merely ENDS in a type name is not a hardcoded type
+    assert commit_title_findings("f.js", "const s = 'hotfix(#1) prefix(#2)'\n") == []
+
+
+# ---- the wiring of PR_TITLE: refusal point, hints, PR stage ----------------
+
+def pipeline_title_wiring_errors(source: str) -> list[str]:
+    """Static facts about how implement-github-issue.js uses PR_TITLE (#268)."""
+    lines = source.split("\n")
+    errors: list[str] = []
+
+    def find(pattern: str) -> list[int]:
+        rx = re.compile(pattern)
+        return [i for i, ln in enumerate(lines) if rx.search(ln)]
+
+    def one(pattern: str, what: str) -> int | None:
+        hits = find(pattern)
+        if len(hits) != 1:
+            errors.append(f"expected exactly one {what}, found {len(hits)}")
+            return None
+        return hits[0]
+
+    no_plan = one(r"^if \(!plan\) throw ", "`if (!plan) throw` line")
+    call = one(r"^const PR_TITLE = composeCommitTitle\(plan\.commitType, plan\.commitSubject, "
+               r"fetched\.issueNumber\)$", "bare top-level `const PR_TITLE = composeCommitTitle(...)`")
+    ctype = one(r"^const COMMIT_TYPE = plan\.commitType$", "`const COMMIT_TYPE = plan.commitType`")
+    test_plan = one(r"^phase\('Test plan'\)$", "phase('Test plan') line")
+    if None not in (no_plan, call, test_plan):
+        if not no_plan < call < test_plan:
+            errors.append("the composeCommitTitle refusal must sit after `if (!plan) throw` and "
+                          "before phase('Test plan')")
+        elif any("await agent(" in ln for ln in lines[no_plan:call]):
+            errors.append("an agent runs between the plan check and the title refusal")
+    if None not in (call, ctype) and not call < ctype:
+        errors.append("COMMIT_TYPE is read before composeCommitTitle validated it")
+    uses = find(r"plan\.commit(?:Type|Subject)")
+    if sorted(uses) != sorted(x for x in (call, ctype) if x is not None):
+        errors.append(f"plan.commitType/commitSubject read outside the refusal point, lines "
+                      f"{[u + 1 for u in uses]}")
+    if len(find(r"(?<![\w$.])PR_TITLE\s*=(?!=)")) != 1:
+        errors.append("PR_TITLE must be assigned exactly once, by composeCommitTitle")
+    if find(r"\btry\s*\{|\bcatch\s*[({]|\.catch\s*\("):
+        errors.append("the script must not try/catch: a caught refusal becomes a silent default")
+    create = find(r"gh pr create --repo ")
+    if len(create) != 1 or "--title \"' + PR_TITLE + '\"" not in lines[create[0]]:
+        errors.append("`gh pr create --title` must interpolate PR_TITLE")
+    if not find(r"gh pr edit <number> --repo ' \+ REPO \+ ' --title \"' \+ PR_TITLE \+ '\""):
+        errors.append("the PR stage must retitle an adopted PR with gh pr edit --title PR_TITLE")
+    if not find(r"--json isDraft,title"):
+        errors.append("the PR agent must re-read the actual title (gh pr view --json isDraft,title)")
+    no_pr = one(r"^if \(!pr\) throw ", "`if (!pr) throw` line")
+    if no_pr is not None and not (no_pr + 1 < len(lines)
+                                  and lines[no_pr + 1].startswith("if (pr.title !== PR_TITLE) throw ")):
+        errors.append("`if (pr.title !== PR_TITLE) throw` must directly follow `if (!pr) throw`")
+    if not find(r"exact subject line: ' \+ PR_TITLE"):
+        errors.append("the implementer's commit hint must carry PR_TITLE")
+    for hint in ("address validator findings", "address CI findings"):
+        if not find(re.escape("' + COMMIT_TYPE + '(#' + fetched.issueNumber + '): " + hint)):
+            errors.append(f"the {hint!r} commit hint must take its type from COMMIT_TYPE")
+    return errors
+
+
+def test_pr_stage_asserts_returned_title():
+    assert pipeline_title_wiring_errors(_pipeline_source()) == []
+
+
+_WIRING_SABOTAGES = [
+    ("drop-title-check", "if (pr.title !== PR_TITLE) throw ", "// if (pr.title !== PR_TITLE) throw ",
+     "must directly follow"),
+    ("drop-adopted-retitle", "gh pr edit <number> --repo ' + REPO + ' --title \"' + PR_TITLE + '\"",
+     "gh pr edit <number> --repo ' + REPO + '", "retitle an adopted PR"),
+    ("title-evaporates", "--draft --title \"' + PR_TITLE + '\"", "--draft --title \"' + fetched.title + '\"",
+     "must interpolate PR_TITLE"),
+    ("refusal-moved-late",
+     "const PR_TITLE = composeCommitTitle(plan.commitType, plan.commitSubject, fetched.issueNumber)\n",
+     "", "exactly one bare top-level"),
+    ("refusal-caught",
+     "const PR_TITLE = composeCommitTitle(plan.commitType, plan.commitSubject, fetched.issueNumber)\n",
+     "let PR_TITLE; try { PR_TITLE = composeCommitTitle(plan.commitType, plan.commitSubject, "
+     "fetched.issueNumber) } catch (e) { PR_TITLE = plan.commitType + '(#' + fetched.issueNumber "
+     "+ '): ' + fetched.title }\n", "must not try/catch"),
+    ("implementer-hint-lost", "exact subject line: ' + PR_TITLE", "exact subject line: ' + BRANCH",
+     "implementer's commit hint"),
+]
+
+
+@pytest.mark.parametrize("sabotage", _WIRING_SABOTAGES, ids=[s[0] for s in _WIRING_SABOTAGES])
+def test_sabotage_title_wiring(sabotage):
+    kind, old, new, needle = sabotage
+    source = _pipeline_source()
+    mutated = _mutate(source, old, new)
+    if kind == "refusal-moved-late":  # S15: move the call after the Test plan agent
+        anchor = "phase('Implement')\n"
+        mutated = _mutate(mutated, anchor, old + anchor)
+        needle = "before phase('Test plan')"
+    errors = pipeline_title_wiring_errors(mutated)
+    assert any(needle in e for e in errors), errors
