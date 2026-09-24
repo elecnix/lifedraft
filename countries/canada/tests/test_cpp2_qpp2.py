@@ -970,5 +970,43 @@ class TestQPPSpecificParameters(unittest.TestCase):
         self.assertGreater(QPP_RATE_2026, CPP_RATE_2026)
 
 
+class TestQuebecRecordWithoutQppRateRaises(unittest.TestCase):
+    """Issue #289 (DP#32): a Quebec earner whose tax record carries no QPP
+    rate used to be priced silently at the CPP rate; it now raises, naming
+    the year and the province."""
+
+    def _patched(self, **overrides):
+        import dataclasses
+
+        class _P(TaxDataProvider):
+            def get_year_data(inner, year, country='canada', province='quebec'):
+                data = super().get_year_data(year, country, province)
+                if province in ('quebec', 'qc'):
+                    return dataclasses.replace(data, **overrides)
+                return data
+        return _P()
+
+    def test_quebec_with_zero_qpp_rate_raises(self):
+        from countries.canada.cpp_sharing import compute_cpp2_contribution
+        for province in ('quebec', 'qc'):
+            with self.assertRaises(ValueError) as cm:
+                compute_cpp2_contribution(
+                    60000, year=2025, province=province,
+                    provider=self._patched(qpp_rate=0.0))
+            self.assertIn('2025', str(cm.exception))
+            self.assertIn(province, str(cm.exception))
+
+    def test_ontario_unaffected_and_2023_cpp2_is_zero_without_raising(self):
+        from countries.canada.cpp_sharing import compute_cpp2_contribution
+        on = compute_cpp2_contribution(
+            90000, year=2025, province='ontario',
+            provider=self._patched(qpp_rate=0.0))
+        self.assertAlmostEqual(on['cpp2_employee'], 396.00, places=2)
+        # 2023: CPP2 did not exist yet (YAMPE == YMPE), a statutory zero.
+        qc_2023 = compute_cpp2_contribution(90000, year=2023, province='quebec')
+        self.assertEqual(qc_2023['cpp2_employee'], 0.0)
+        self.assertGreater(qc_2023['cpp1_employee'], 0.0)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -188,9 +188,17 @@ class TestTuitionCreditWiring(unittest.TestCase):
         start_year = 2026
         no_spouse = self._run_with_spouse_income(0)
         huge = self._run({start_year: 5_000_000})
+        # Issue #289: the spouse's employee premiums (the household premium
+        # total's increase over the no-spouse run, read off the results) are
+        # still withheld -- a non-refundable credit cannot refund them.
+        def _premiums(r):
+            return (r.payroll_pension_contributions + r.payroll_ei_premiums
+                    + r.payroll_qpip_premiums)
+        spouse_premiums = _premiums(huge[0]) - _premiums(no_spouse[0])
+        self.assertGreater(spouse_premiums, 0.0)
         self.assertAlmostEqual(
             huge[0].after_tax_income - no_spouse[0].after_tax_income,
-            huge[0].spouse_income, places=2,
+            huge[0].spouse_income - spouse_premiums, places=2,
             msg="a non-refundable credit must floor tax at 0, not pay a refund")
 
     def _run_monthly(self, tuition_by_year=None):
