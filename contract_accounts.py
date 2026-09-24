@@ -416,6 +416,183 @@ def _registered_composition_accounts(doc: Dict, products: Dict) -> Dict[str, Dic
             for kind, acct in derived.items()}
 
 
+# Issue #295: the per-beneficiary figures of accounts[].resp.beneficiaries[],
+# and the account total each one must add up to.
+_RESP_BENEFICIARY_AMOUNTS = (
+    "contributions_total", "contributions_before_age_15",
+    "cesg_basic_received", "cesg_additional_received",
+    "qesi_received", "clb_received",
+)
+_RESP_ACCOUNT_TOTALS = (
+    ("contributions_total", ("contributions_total",)),
+    ("cesg_received", ("cesg_basic_received", "cesg_additional_received")),
+    ("qesi_received", ("qesi_received",)),
+    ("clb_received", ("clb_received",)),
+)
+_RESP_TOTAL_TOLERANCE = 0.01
+# Float slack for comparisons of declared cents (14000.01 - 14000.00 is not
+# exactly 0.01 in binary floating point).
+_FLOAT_SLACK = 1e-9
+
+
+def _resp_principal(beneficiary: Dict) -> float:
+    """What a beneficiary has put into, or been granted in, the plan: the
+    base the account balance is attributed on."""
+    return (beneficiary["contributions_total"] + beneficiary["cesg_basic_received"]
+            + beneficiary["cesg_additional_received"] + beneficiary["qesi_received"]
+            + beneficiary["clb_received"])
+
+
+def map_resp_beneficiary_histories(doc: Dict, child_ids: List[str]) -> Dict[str, Dict]:
+    """Each RESP beneficiary's declared history, per child (issue #295).
+
+    Returns ``{person_id: {"history": {...}, "opening": {...}}}`` for every
+    child named on at least one RESP account:
+
+    * ``history`` -- the lifetime facts the grant engine seeds each
+      ``RESPChild`` from (``resp_rules.resp_child_from_config``): every
+      figure of ``_RESP_BENEFICIARY_AMOUNTS`` summed over the child's
+      accounts, ``years_with_100_before_age_15`` and ``family_plan`` (True
+      when any of the child's accounts names two or more beneficiaries).
+    * ``opening`` -- what is in the plan for this child at the projection
+      start: the account balance attributed pro rata to each beneficiary's
+      principal (contributions + CESG + QESI + CLB), and the per-child
+      contribution / grant / QESI buckets (``simulation_state`` reads them).
+
+    Figures are never averaged across beneficiaries. A child on two RESP
+    accounts gets the amounts SUMMED, because the lifetime maxima are per
+    beneficiary across plans; the years-with-$100 count is the LARGEST of
+    the per-account counts, because a year counted on two accounts is one
+    year (the union is not knowable from per-account counts, and the largest
+    count never overstates it).
+
+    Refused loudly (``ContractAdaptationError``), never repaired:
+    an account total that differs from the sum over its beneficiaries by
+    more than $0.01; a person named twice on one account; a beneficiary who
+    is not an admitted child, or who has no birth_date; basic CESG above the
+    room accrued from the birth date; CESG above $7,200, QESI above $3,600
+    or CLB above $2,000 over a child's accounts; pre-age-15 contributions
+    above the total; a years-with-$100 count above the completed years that
+    could qualify, or above what the pre-age-15 contributions can fund; a
+    positive balance on an account whose beneficiaries declare no principal.
+    """
+    from countries.canada.resp_rules import (
+        RESPCalculator, cesg_basic_room_accrued, CESG_PROGRAM_START_YEAR,
+    )
+    people = _people_by_id(doc)
+    as_of_year = int(doc["as_of"][:4])
+    admitted = set(child_ids)
+    mapped: Dict[str, Dict] = {}
+    for acc in doc.get("accounts", []):
+        if acc["kind"] != "resp":
+            continue
+        resp = acc["resp"]
+        beneficiaries = resp["beneficiaries"]
+        seen: set = set()
+        for b in beneficiaries:
+            pid = b["person"]
+            if pid in seen:
+                raise ContractAdaptationError(
+                    f"RESP account {acc['id']!r} names beneficiary {pid!r} twice. "
+                    f"Each beneficiary's history must be declared once per account.")
+            seen.add(pid)
+            if pid not in admitted:
+                raise ContractAdaptationError(
+                    f"RESP account {acc['id']!r} names beneficiary {pid!r}, who is not a "
+                    f"child the engine models. An RESP beneficiary's grants are computed "
+                    f"per child; a beneficiary the engine cannot hold would silently drop "
+                    f"out of the grant calculation.")
+        for total_key, parts in _RESP_ACCOUNT_TOTALS:
+            declared = resp[total_key]
+            summed = sum(b[part] for b in beneficiaries for part in parts)
+            if abs(declared - summed) > _RESP_TOTAL_TOLERANCE + _FLOAT_SLACK:
+                raise ContractAdaptationError(
+                    f"RESP account {acc['id']!r}: resp.{total_key} is {declared:,.2f}, but "
+                    f"its beneficiaries' {' + '.join(parts)} sum to {summed:,.2f}. The "
+                    f"account total must equal the sum over its beneficiaries.")
+        balance = acc["balance"]["amount"]
+        principals = [_resp_principal(b) for b in beneficiaries]
+        total_principal = sum(principals)
+        if total_principal <= 0 < balance:
+            raise ContractAdaptationError(
+                f"RESP account {acc['id']!r} has a balance of {balance:,.2f}, but its "
+                f"beneficiaries declare no contributions and no grants, so the balance "
+                f"cannot be attributed to any of them.")
+        family_plan = len(beneficiaries) >= 2
+        for b, principal in zip(beneficiaries, principals):
+            pid = b["person"]
+            if pid not in mapped:
+                mapped[pid] = {
+                    "history": {**{k: 0.0 for k in _RESP_BENEFICIARY_AMOUNTS},
+                                "years_with_100_before_age_15": 0,
+                                "family_plan": False},
+                    "opening": {"balance": 0.0, "contributions": 0.0,
+                                "grants": 0.0, "qesi": 0.0},
+                }
+            history = mapped[pid]["history"]
+            for key in _RESP_BENEFICIARY_AMOUNTS:
+                history[key] += b[key]
+            history["years_with_100_before_age_15"] = max(
+                history["years_with_100_before_age_15"], b["years_with_100_before_age_15"])
+            if family_plan:
+                history["family_plan"] = True
+            opening = mapped[pid]["opening"]
+            opening["balance"] += (balance * principal / total_principal
+                                   if total_principal > 0 else 0.0)
+            opening["contributions"] += b["contributions_total"]
+            opening["grants"] += (b["cesg_basic_received"] + b["cesg_additional_received"]
+                                  + b["clb_received"])
+            opening["qesi"] += b["qesi_received"]
+
+    for pid, entry in mapped.items():
+        history = entry["history"]
+        birth_date = people[pid].get("birth_date")
+        if not birth_date:
+            raise ContractAdaptationError(
+                f"RESP beneficiary {pid!r} has no birth_date. CESG/QESI eligibility, "
+                f"grant room and the 16-17 test are all dated from it (DP#1).")
+        birth_year = int(birth_date[:4])
+        room = cesg_basic_room_accrued(birth_year, as_of_year)
+        cesg = history["cesg_basic_received"] + history["cesg_additional_received"]
+        checks = (
+            (history["cesg_basic_received"] > room + _FLOAT_SLACK,
+             f"basic CESG received {history['cesg_basic_received']:,.2f} exceeds the "
+             f"{room:,.2f} of basic grant room accrued from {max(birth_year, CESG_PROGRAM_START_YEAR)} "
+             f"through {as_of_year}"),
+            (cesg > RESPCalculator.CESG_LIFETIME_MAX + _FLOAT_SLACK,
+             f"CESG received {cesg:,.2f} exceeds the "
+             f"{RESPCalculator.CESG_LIFETIME_MAX:,.0f} lifetime maximum"),
+            (history["qesi_received"] > RESPCalculator.QESI_LIFETIME_MAX + _FLOAT_SLACK,
+             f"QESI received {history['qesi_received']:,.2f} exceeds the "
+             f"{RESPCalculator.QESI_LIFETIME_MAX:,.0f} lifetime maximum"),
+            (history["clb_received"] > RESPCalculator.CLB_LIFETIME_MAX + _FLOAT_SLACK,
+             f"CLB received {history['clb_received']:,.2f} exceeds the "
+             f"{RESPCalculator.CLB_LIFETIME_MAX:,.0f} lifetime maximum"),
+            (history["contributions_before_age_15"]
+             > history["contributions_total"] + _FLOAT_SLACK,
+             f"contributions_before_age_15 {history['contributions_before_age_15']:,.2f} "
+             f"exceeds contributions_total {history['contributions_total']:,.2f}"),
+        )
+        for failed, why in checks:
+            if failed:
+                raise ContractAdaptationError(
+                    f"RESP beneficiary {pid!r}: {why}. A beneficiary statement cannot "
+                    f"show this; check the declared history.")
+        # Completed calendar years before the as_of year, from the birth year
+        # through the year the child turned 15, that could hold $100.
+        possible_years = max(0, min(as_of_year - 1, birth_year + 15) - birth_year + 1)
+        years = history["years_with_100_before_age_15"]
+        if years > possible_years or years * 100 > history["contributions_before_age_15"] + _FLOAT_SLACK:
+            raise ContractAdaptationError(
+                f"RESP beneficiary {pid!r}: years_with_100_before_age_15 is {years}, but "
+                f"only {possible_years} completed calendar year(s) before {as_of_year} fall "
+                f"on or before the year the beneficiary turned 15, and "
+                f"{history['contributions_before_age_15']:,.2f} contributed before age 15 "
+                f"funds at most {int(history['contributions_before_age_15'] // 100)} "
+                f"years of $100.")
+    return mapped
+
+
 def map_account_pots(doc: Dict, as_of: str) -> tuple:
     """The household-pooled account blocks, as
     ``(accounts_cfg, lira_cfg, lsif_cfg, portfolio_cfg)``.
@@ -438,8 +615,15 @@ def map_account_pots(doc: Dict, as_of: str) -> tuple:
         # dropped every subsequent RESP's contribution/grant history (a real
         # dollar amount, not a rounding nicety: a family with a joint RESP
         # plus a grandparent-funded second RESP lost the second entirely).
+        # Issue #295: the account totals are checked against the sum over
+        # their beneficiaries at load (map_resp_beneficiary_histories), so this
+        # household composition equals the sum of the per-child opening
+        # buckets. CLB is a federal grant -- paid out as a taxable EAP and
+        # repaid on collapse, like CESG -- so it joins the grant bucket
+        # instead of being counted as investment earnings.
         total_contrib = sum(a["resp"]["contributions_total"] for a in resp_accounts)
-        total_cesg = sum(a["resp"]["cesg_received"] for a in resp_accounts)
+        total_cesg = sum(a["resp"]["cesg_received"] + a["resp"]["clb_received"]
+                         for a in resp_accounts)
         total_qesi = sum(a["resp"]["qesi_received"] for a in resp_accounts)
         accounts_cfg["resp_composition"] = {
             "total_contributions": total_contrib,

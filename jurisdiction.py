@@ -140,13 +140,8 @@ class RESPChildProtocol(Protocol):
         ...
     
     @property
-    def resp_balance(self) -> float:
-        """Current RESP balance for this child."""
-        ...
-    
-    @resp_balance.setter
-    def resp_balance(self, value: float) -> None:
-        """Set RESP balance."""
+    def birth_year(self) -> int:
+        """Calendar year of birth (DP#1)."""
         ...
     
     def cesg_eligible(self, year: int) -> bool:
@@ -172,6 +167,17 @@ class RESPCalculatorProtocol(Protocol):
         
         Returns dict with 'total_qesi' and other keys.
         """
+        ...
+
+    def resp_contribution_check(self, contribution: float,
+                                child: RESPChildProtocol) -> Dict[str, float]:
+        """Split a contribution into the part within the child's lifetime
+        contribution limit ('contribution_allowed') and the 'excess'."""
+        ...
+
+    def household_grant_matched_cap(self, children: List[RESPChildProtocol],
+                                    year: int) -> float:
+        """The household's RESP allocation cap for the year (issue #295)."""
         ...
 
 
@@ -294,10 +300,9 @@ class JurisdictionAdapter(Protocol):
         """Create an RESP grant calculator."""
         ...
     
-    def create_resp_child(self, name: str, birth_year: int,
-                          is_quebec_resident: bool = True,
-                          resp_balance: float = 0) -> RESPChildProtocol:
-        """Create an RESP child record."""
+    def create_resp_children(self, config: Any) -> List[RESPChildProtocol]:
+        """Create one RESP child record per ``config.children`` entry, seeded
+        from each child's declared grant history (issue #295)."""
         ...
     
     # ── HELOC tracing ──

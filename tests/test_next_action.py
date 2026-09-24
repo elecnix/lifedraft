@@ -257,7 +257,14 @@ class CesgEligibilityTest(unittest.TestCase):
             "balance": {"amount": 20000, "as_of": "2026-01-01"},
             "acb": None, "holdings": [], "beneficiary": None,
             "successor_holder": None,
-            "resp": {"subscribers": ["p1"], "beneficiaries": ["ch"],
+            "resp": {"subscribers": ["p1"],
+                      # Issue #295: each beneficiary carries its own history.
+                      "beneficiaries": [{
+                          "person": "ch", "contributions_total": 10000,
+                          "contributions_before_age_15": 10000,
+                          "cesg_basic_received": 2000, "cesg_additional_received": 0,
+                          "qesi_received": 1000, "clb_received": 0,
+                          "years_with_100_before_age_15": 0}],
                       "contributions_total": 10000, "cesg_received": 2000,
                       "qesi_received": 1000, "clb_received": 0},
         }]

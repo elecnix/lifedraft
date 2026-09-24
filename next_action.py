@@ -240,7 +240,8 @@ def _resp_beneficiary_ids(contract: Dict[str, Any]) -> set:
         resp = account.get("resp")
         if resp is None:
             continue
-        ids.update(resp.get("beneficiaries", []))
+        # Issue #295: each beneficiary is an object carrying its history.
+        ids.update(b["person"] for b in resp.get("beneficiaries", []))
     return ids
 
 

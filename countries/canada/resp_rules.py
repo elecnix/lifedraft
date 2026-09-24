@@ -71,6 +71,15 @@ CLB_THRESHOLDS: Dict[int, Dict[int, float]] = {
 # Children born before 2007 accumulate room at the rate applicable in each year.
 CESG_ANNUAL_ROOM_CHANGE_YEAR = 2007
 CESG_CONTRIBUTION_MAX_CHANGE_YEAR = 2005
+# Issue #295 (DP#12/#20): CESG grant room accrues from 1998, the year the
+# Canada Education Savings Grant began (ESDC, "Canada Education Savings
+# Grant (CESG)"; InfoCapsule 12, grant room and carry-forward). A beneficiary
+# born earlier accrues room only from 1998. Room is derived in code from the
+# birth year, never read from input.
+CESG_PROGRAM_START_YEAR = 1998
+# The last age at which a beneficiary accrues CESG room and can be paid CESG:
+# room accrues through the end of the calendar year the beneficiary turns 17.
+CESG_LAST_ELIGIBLE_AGE = 17
 
 
 def _nearest_year(data: dict, year: int) -> int:
@@ -158,6 +167,37 @@ def get_cesg_contribution_max(year: int) -> float:
     return 2000 if year < CESG_CONTRIBUTION_MAX_CHANGE_YEAR else 2500
 
 
+def cesg_basic_room_accrued(birth_year: int, through_year: int) -> float:
+    """Basic CESG grant room accrued by a beneficiary from birth through the
+    end of ``through_year`` (issue #295, DP#12/#20: a code table, not input).
+
+    ESDC accrues the annual basic room (``get_cesg_annual_room``: $400 a year
+    before 2007, $500 from 2007) for every calendar year from the later of the
+    birth year and 1998 (the program start) through the year the beneficiary
+    turns 17. Residence in Canada since birth is assumed (the contract carries
+    no residency history before ``as_of``).
+    """
+    first = max(birth_year, CESG_PROGRAM_START_YEAR)
+    last = min(through_year, birth_year + CESG_LAST_ELIGIBLE_AGE)
+    return float(sum(get_cesg_annual_room(y) for y in range(first, last + 1)))
+
+
+def cesg_carry_forward_room(child: 'RESPChild', year: int) -> float:
+    """Unused basic CESG room carried into ``year`` (issue #295): the room
+    accrued through the end of ``year - 1`` minus every basic CESG paid so far
+    (declared history plus the grants the fold has paid), floored at 0.
+
+    A child whose grant history was never declared (``grant_history is None``,
+    the in-memory legacy path) has exactly 0 carry-forward: room cannot be
+    derived from grants that were never stated, and it is disclosed through
+    model_fidelity's ``resp_grant_history_not_declared`` entry.
+    """
+    if child.grant_history is None:
+        return 0.0
+    accrued = cesg_basic_room_accrued(child.birth_year, year - 1)
+    return max(0.0, accrued - child.total_basic_cesg_received)
+
+
 def _cesg_normal_annual_max(year: int, family_income: float) -> float:
     """Compute the normal (non-catchup) annual CESG maximum for a given year and income."""
     annual_room = get_cesg_annual_room(year)
@@ -173,6 +213,26 @@ def _cesg_normal_annual_max(year: int, family_income: float) -> float:
     return annual_room
 
 
+@dataclass(frozen=True)
+class RESPGrantHistory:
+    """A beneficiary's declared RESP history as at the projection start
+    (issue #295), from the ESDC or promoter beneficiary statement.
+
+    Lifetime amounts are summed over every RESP naming the beneficiary.
+    ``years_with_100_before_age_15`` counts the completed calendar years
+    before the ``as_of`` year, up to the year the beneficiary turned 15, with
+    at least $100 contributed -- the second prong of the CESG 16-17 test.
+    Every field is required: there is no default history (DP#13/DP#32).
+    """
+    contributions_total: float
+    contributions_before_age_15: float
+    years_with_100_before_age_15: int
+    cesg_basic_received: float
+    cesg_additional_received: float
+    qesi_received: float
+    clb_received: float
+
+
 @dataclass
 class RESPChild:
     """A child beneficiary in an RESP.
@@ -186,20 +246,39 @@ class RESPChild:
     """
     name: str
     birth_year: int  # Calendar year of birth (DP#1: store dates, not derived values)
+    # Issue #295: the declared history this child was seeded from, or None
+    # when it was never declared (the in-memory legacy path). REQUIRED -- no
+    # default -- so no constructor can silently mean "undeclared" (DP#32).
+    # Build children through resp_child_from_config, the one shared
+    # constructor (DP#9).
+    grant_history: Optional[RESPGrantHistory]
     province: str = 'quebec'  # DP#16: derived from config, not a boolean flag
     is_quebec_resident: bool = True  # Computed from province; prefer province parameter
 
+    # Running lifetime counters: seeded from grant_history, then advanced by
+    # the fold each year (#1046). total_cesg_received is the lifetime CESG
+    # counter the $7,200 cap reads (basic + additional, CLB excluded);
+    # total_additional_cesg_received is its additional-CESG part, so the basic
+    # part (which consumes carry-forward room) is their difference.
     total_contributions: float = 0.0
     total_cesg_received: float = 0.0
+    total_additional_cesg_received: float = 0.0
     total_qesi_received: float = 0.0
     total_clb_received: float = 0.0
 
     contribution_years: list = field(default_factory=list)
     total_before_age_15: float = 0.0
+    # Completed calendar years before the projection start in which at least
+    # $100 was contributed by the end of the year the child turned 15 (the
+    # declared half of the 16-17 test's second prong; projection years are
+    # counted from contribution_years).
+    prior_years_with_100_before_age_15: int = 0
 
-    resp_balance: float = 0.0
-
-    unused_cesg_room: list = field(default_factory=list)
+    @property
+    def total_basic_cesg_received(self) -> float:
+        """Lifetime basic CESG: the part of total_cesg_received that is not
+        additional CESG. Basic CESG is what consumes grant room."""
+        return self.total_cesg_received - self.total_additional_cesg_received
 
     def is_quebec_resident_in(self, year: int = None) -> bool:
         """DP#28: Quebec residency is computed from province, not a static boolean.
@@ -248,9 +327,75 @@ class RESPChild:
         if self.total_before_age_15 >= 2000:
             return True
 
-        years_with_100 = sum(1 for yr, amt in self.contribution_years
-                           if yr <= self.birth_year + 15 and amt >= 100)
+        # Issue #295: the declared count covers completed calendar years
+        # before the projection start, and contribution_years holds only
+        # projection years, so no year is counted twice.
+        years_with_100 = self.prior_years_with_100_before_age_15 + sum(
+            1 for yr, amt in self.contribution_years
+            if yr <= self.birth_year + 15 and amt >= 100)
         return years_with_100 >= 4
+
+
+def resp_child_from_config(child_cfg: Dict, start_year: int,
+                           default_province: str) -> RESPChild:
+    """The ONE constructor of an ``RESPChild`` from a config child entry
+    (issue #295, DP#9) -- used by FamilySimulation, the optimizer and
+    ``analyze_resp_for_family`` alike, so the three cannot seed a child
+    differently.
+
+    Birth year: ``child_cfg['birth_year']`` when present, otherwise
+    ``start_year - child_cfg['age']`` (age 0 is a newborn born in
+    ``start_year``). A child with neither is refused: a birth year of 0 would
+    make the child silently ineligible for every grant (DP#1/DP#28/DP#32).
+
+    History: ``child_cfg['resp_history']`` -- the declared beneficiary
+    history mapped from the contract -- seeds every lifetime counter. Every
+    key is indexed, so a history missing a figure raises ``KeyError`` instead
+    of defaulting to 0 (DP#13/DP#32). An absent or None history is the
+    in-memory legacy path: zero counters, ``grant_history=None`` (no
+    carry-forward room), disclosed by model_fidelity's
+    ``resp_grant_history_not_declared``.
+    """
+    name = child_cfg.get('name', 'Child')
+    if 'birth_year' in child_cfg:
+        birth_year = child_cfg['birth_year']
+    elif 'age' in child_cfg:
+        birth_year = start_year - child_cfg['age']
+    else:
+        raise ValueError(
+            f"RESP beneficiary {name!r} has neither 'birth_year' nor 'age': "
+            f"its CESG/QESI eligibility cannot be dated (DP#1). Declare the "
+            f"child's birth date.")
+    province = child_cfg['province'] if 'province' in child_cfg else default_province
+    history = child_cfg['resp_history'] if 'resp_history' in child_cfg else None
+    child = RESPChild(
+        name=name,
+        birth_year=birth_year,
+        grant_history=None,
+        province=province,
+        is_quebec_resident=(province.lower() in ('quebec', 'qc')),
+    )
+    if history is None:
+        return child
+    grant_history = RESPGrantHistory(
+        contributions_total=history['contributions_total'],
+        contributions_before_age_15=history['contributions_before_age_15'],
+        years_with_100_before_age_15=history['years_with_100_before_age_15'],
+        cesg_basic_received=history['cesg_basic_received'],
+        cesg_additional_received=history['cesg_additional_received'],
+        qesi_received=history['qesi_received'],
+        clb_received=history['clb_received'],
+    )
+    child.grant_history = grant_history
+    child.total_contributions = grant_history.contributions_total
+    child.total_cesg_received = (grant_history.cesg_basic_received
+                                 + grant_history.cesg_additional_received)
+    child.total_additional_cesg_received = grant_history.cesg_additional_received
+    child.total_qesi_received = grant_history.qesi_received
+    child.total_clb_received = grant_history.clb_received
+    child.total_before_age_15 = grant_history.contributions_before_age_15
+    child.prior_years_with_100_before_age_15 = grant_history.years_with_100_before_age_15
+    return child
 
 
 @dataclass
@@ -292,9 +437,34 @@ class RESPCalculator:
 
     def calculate_cesg(self, contribution: float, child: RESPChild,
                        year: int, family_income: float) -> Dict:
-        """Calculate CESG for a contribution to a child's RESP.
+        """CESG paid on ``contribution`` to ``child`` in ``year`` -- the ONE
+        CESG calculation (issue #295, DP#9: the former catch-up variant had no
+        production caller and is deleted).
 
-        DP#20: Income thresholds looked up by year.
+        Rules (ESDC CESG page; InfoCapsule 12, grant room and carry-forward):
+
+        * Additional CESG is 20% (income at or below the first threshold) or
+          10% (at or below the second) of the first $500 contributed in the
+          year. It is never carried forward.
+        * Basic CESG is 20% of the contribution, limited by the child's basic
+          grant room: this year's annual room plus the unused room carried
+          forward (``cesg_carry_forward_room``), and never more than twice the
+          annual room ($1,000 a year since 2007).
+        * The total is limited by the $7,200 lifetime CESG maximum.
+
+        A child whose grant history was never declared (``grant_history is
+        None``) keeps the pre-#295 calculation exactly: no carry-forward, the
+        basic grant on at most ``get_cesg_contribution_max`` of contribution,
+        and the normal annual maximum.
+
+        Returns ``basic_cesg`` and ``additional_cesg`` AFTER the lifetime cap,
+        so a caller can advance the basic and additional counters separately;
+        they always sum to ``total_cesg``. When the lifetime cap binds, the cut
+        is taken from the basic part first. The split at the cap does not
+        affect later grants, because nothing is paid after the lifetime cap.
+
+        DP#20: income thresholds, annual room and contribution max are looked
+        up by year.
         """
         if not child.cesg_eligible(year):
             return {
@@ -328,12 +498,6 @@ class RESPCalculator:
                 'reason': 'Lifetime CESG limit reached'
             }
 
-        contribution_max = get_cesg_contribution_max(year)
-        annual_room = get_cesg_annual_room(year)
-
-        basic_cesg_eligible_amount = min(contribution, contribution_max)
-        basic_cesg = basic_cesg_eligible_amount * self.CESG_BASIC_RATE
-
         # DP#20: Year-versioned thresholds
         thresholds = get_cesg_thresholds(year)
         first_threshold = thresholds['first_threshold']
@@ -347,91 +511,33 @@ class RESPCalculator:
             additional_amount = min(contribution, 500)
             additional_cesg = additional_amount * self.CESG_ADDITIONAL_MID_RATE
 
-        total_cesg = min(basic_cesg + additional_cesg, remaining)
+        annual_room = get_cesg_annual_room(year)
+        if child.grant_history is None:
+            # Undeclared history: the pre-#295 calculation, unchanged.
+            contribution_max = get_cesg_contribution_max(year)
+            basic_cesg = min(contribution, contribution_max) * self.CESG_BASIC_RATE
+            total_cesg = min(basic_cesg + additional_cesg, remaining)
+            total_cesg = min(total_cesg, _cesg_normal_annual_max(year, family_income))
+        else:
+            # Declared history: the basic grant can use this year's room plus
+            # the unused room carried forward, up to twice the annual room.
+            # accrued(year) - received == annual room + carry-forward whenever
+            # the carry-forward is positive, and never exceeds the true room
+            # otherwise.
+            room = max(0.0, cesg_basic_room_accrued(child.birth_year, year)
+                       - child.total_basic_cesg_received)
+            basic_cesg = min(contribution * self.CESG_BASIC_RATE, room, 2 * annual_room)
+            total_cesg = min(basic_cesg + additional_cesg, remaining)
 
-        annual_max = _cesg_normal_annual_max(year, family_income)
-        total_cesg = min(total_cesg, annual_max)
-
+        total_paid = round(total_cesg, 2)
+        additional_paid = min(round(additional_cesg, 2), total_paid)
         return {
-            'basic_cesg': round(basic_cesg, 2),
-            'additional_cesg': round(additional_cesg, 2),
-            'total_cesg': round(total_cesg, 2),
+            'basic_cesg': round(total_paid - additional_paid, 2),
+            'additional_cesg': additional_paid,
+            'total_cesg': total_paid,
             'remaining_lifetime_cesg': round(remaining - total_cesg, 2),
             'eligible': True,
             'reason': None
-        }
-
-    def calculate_cesg_with_catchup(self, contribution: float, child: RESPChild,
-                                      year: int, family_income: float,
-                                      unused_room: float = 0) -> Dict:
-        """Calculate CESG with carry-forward of unused room.
-
-        DP#20: Income thresholds and contribution limits looked up by year.
-        """
-        if not child.cesg_eligible(year):
-            remaining = self.CESG_LIFETIME_MAX - child.total_cesg_received
-            return {
-                'current_year_cesg': 0,
-                'catchup_cesg': 0,
-                'additional_cesg': 0,
-                'total_cesg': 0,
-                'remaining_lifetime_cesg': round(max(0, remaining), 2),
-                'eligible': False,
-                'reason': f'Child age {year - child.birth_year} > 17',
-            }
-
-        age = year - child.birth_year
-        if age >= 16 and not child.cesg_16_17_eligible(year):
-            remaining = self.CESG_LIFETIME_MAX - child.total_cesg_received
-            return {
-                'current_year_cesg': 0,
-                'catchup_cesg': 0,
-                'additional_cesg': 0,
-                'total_cesg': 0,
-                'remaining_lifetime_cesg': round(max(0, remaining), 2),
-                'eligible': False,
-                'reason': '16-17 eligibility not met (need $2,000 total or $100/yr x 4 before age 15)',
-            }
-        contribution_max = get_cesg_contribution_max(year)
-        annual_room = get_cesg_annual_room(year)
-        # DP#20: Year-versioned thresholds
-        thresholds = get_cesg_thresholds(year)
-        first_threshold = thresholds['first_threshold']
-        second_threshold = thresholds['second_threshold']
-
-        current_year_cesg = min(contribution, contribution_max) * self.CESG_BASIC_RATE
-
-        # Per CESG Act: catch-up applies to one prior year's unused room,
-        # capped at one contribution_max worth of contribution
-        catchup_cesg = min(max(0, contribution - contribution_max),
-                          contribution_max,
-                          max(0, unused_room)) * self.CESG_BASIC_RATE
-
-        additional = 0
-        if family_income <= first_threshold:
-            additional = min(contribution, 500) * self.CESG_ADDITIONAL_LOW_RATE
-        elif family_income <= second_threshold:
-            additional = min(contribution, 500) * self.CESG_ADDITIONAL_MID_RATE
-
-        remaining = self.CESG_LIFETIME_MAX - child.total_cesg_received
-        normal_max = _cesg_normal_annual_max(year, family_income)
-        # With catchup: basic component doubles (2× annual_room),
-        # additional CESG does not carry forward (CESG Act s.6)
-        if unused_room > 0:
-            catchup_annual_max = annual_room * 2 + (normal_max - annual_room)
-        else:
-            catchup_annual_max = normal_max
-
-        total_cesg = min(current_year_cesg + additional + catchup_cesg,
-                        remaining, catchup_annual_max)
-
-        return {
-            'current_year_cesg': round(current_year_cesg, 2),
-            'catchup_cesg': round(catchup_cesg, 2),
-            'additional_cesg': round(additional, 2),
-            'total_cesg': round(total_cesg, 2),
-            'remaining_lifetime_cesg': round(remaining - total_cesg, 2),
-            'eligible': child.cesg_eligible(year),
         }
 
     def calculate_qesi(self, contribution: float, child: RESPChild,
@@ -547,15 +653,22 @@ class RESPCalculator:
             return {'clb_amount': 0, 'eligible': False, 'reason': 'Income above CLB threshold'}
 
     def resp_contribution_check(self, contribution: float, child: RESPChild) -> Dict:
-        """Check if a contribution exceeds lifetime limits."""
-        new_total = child.total_contributions + contribution
-        remaining = self.RESP_LIFETIME_CONTRIBUTION_LIMIT - child.total_contributions
+        """Check a contribution against the $50,000 per-beneficiary lifetime
+        contribution limit (ITA s.146.1(1) "excess amount").
 
-        if new_total > self.RESP_LIFETIME_CONTRIBUTION_LIMIT:
-            excess = new_total - self.RESP_LIFETIME_CONTRIBUTION_LIMIT
+        ``contribution_allowed`` is the part that fits in the remaining
+        lifetime room (never negative: a child already at or over the limit
+        is allowed $0), and ``excess`` is the rest of THIS contribution. The
+        fold contributes only the allowed part and redirects the excess
+        (issue #295) -- it never silently drops it.
+        """
+        room = max(0.0, self.RESP_LIFETIME_CONTRIBUTION_LIMIT - child.total_contributions)
+
+        if contribution > room:
+            excess = contribution - room
             excess_tax = excess * self.RESP_EXCESS_TAX_RATE
             return {
-                'contribution_allowed': remaining,
+                'contribution_allowed': room,
                 'excess': excess,
                 'excess_tax_per_month': excess_tax,
                 'within_limits': False,
@@ -567,8 +680,42 @@ class RESPCalculator:
             'excess': 0,
             'excess_tax_per_month': 0,
             'within_limits': True,
-            'remaining_lifetime': remaining - contribution
+            'remaining_lifetime': room - contribution
         }
+
+    def grant_maximising_contribution(self, child: RESPChild, year: int) -> float:
+        """The contribution to ``child`` in ``year`` that attracts the most
+        basic CESG (issue #295): the year's CESG contribution max ($2,500),
+        plus up to one more contribution max to use unused room carried
+        forward -- counted only when the child can receive CESG this year
+        (the 16-17 test) -- and never more than the child's remaining
+        $50,000 lifetime contribution room.
+
+        For a child with no declared history the carry-forward is 0, so this
+        is exactly the contribution max, as before #295.
+        """
+        contribution_max = get_cesg_contribution_max(year)
+        cap = contribution_max
+        if child.cesg_16_17_eligible(year):
+            carry_forward = cesg_carry_forward_room(child, year)
+            if carry_forward > 0:
+                cap = contribution_max + min(contribution_max,
+                                             carry_forward / self.CESG_BASIC_RATE)
+        # The cap keeps the table's own numeric type when nothing binds, so a
+        # child with no declared history reproduces the pre-#295 allocation
+        # exactly (the golden trajectory is compared value for value).
+        lifetime_room = self.RESP_LIFETIME_CONTRIBUTION_LIMIT - child.total_contributions
+        if lifetime_room < cap:
+            return max(0.0, lifetime_room)
+        return cap
+
+    def household_grant_matched_cap(self, children: List[RESPChild], year: int) -> float:
+        """The household's RESP allocation cap for ``year``: the sum of each
+        CESG-eligible child's ``grant_maximising_contribution`` (issue #295).
+        Read by StrategyEngine.allocate as ``FamilyState.resp_grant_matched_cap``.
+        """
+        return sum(self.grant_maximising_contribution(ch, year)
+                   for ch in children if ch.cesg_eligible(year))
 
     def resp_collapse_proceeds(self, base_cfg: dict, n_mtr: float) -> dict:
         """Compute net proceeds from collapsing an RESP (no student enrolled)."""
@@ -616,10 +763,6 @@ class RESPCalculator:
             'earnings_taxed': round(eap_portion, 2),
             'effective_tax_rate': student_mtr,
         }
-
-    def cesg_contribution_max(self, year: int) -> float:
-        """Delegate to module-level get_cesg_contribution_max (DP#25 bridge)."""
-        return get_cesg_contribution_max(year)
 
 
 # ── RESP wind-down (issue #578) ──────────────────────────────────────────
@@ -1071,10 +1214,12 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
 
     for i, ch in enumerate(children):
         name = ch.get('name', f'Child {i+1}')
-        age = ch.get('age', 0)
-        birth_year = ref_year - age
-        child = RESPChild(name=name, birth_year=birth_year, province=province)
-        child.resp_balance = resp_balance / len(children) if len(children) > 0 else resp_balance
+        # Issue #295: the one shared constructor (DP#9) -- it reads the
+        # child's birth_year (not only 'age') and its declared grant history,
+        # so this report agrees with the fold on every lifetime counter.
+        child = resp_child_from_config(ch, ref_year, province)
+        birth_year = child.birth_year
+        age = ref_year - birth_year
 
         eligible = child.cesg_eligible(ref_year)
         age_16_17_eligible = child.cesg_16_17_eligible(ref_year)
@@ -1105,7 +1250,7 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
             'clb_eligible': clb_result.get('eligible', False),
             'clb_amount': f"${clb_result.get('clb_amount', 0):.0f}/yr" if clb_result.get('eligible') else "Not eligible",
             'lifetime_contribution_limit': f"${calc.RESP_LIFETIME_CONTRIBUTION_LIMIT:,.0f}",
-            'remaining_contribution_room': f"${calc.RESP_LIFETIME_CONTRIBUTION_LIMIT:,.0f}",
+            'remaining_contribution_room': f"${max(0.0, calc.RESP_LIFETIME_CONTRIBUTION_LIMIT - child.total_contributions):,.0f}",
             'notes': []
         }
 

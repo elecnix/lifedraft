@@ -28,7 +28,7 @@ class TestCLBIncidentalExpense(unittest.TestCase):
 
     def test_first_clb_payment_includes_incidental(self):
         """First CLB payment includes $500 + $25 incidental expense."""
-        child = RESPChild(name="test", birth_year=2020)
+        child = RESPChild(grant_history=None, name="test", birth_year=2020)
         result = self.calc.calculate_clb(child, 2026, family_income=30000, num_children=1)
         self.assertEqual(result['clb_amount'], 500)
         self.assertEqual(result['incidental_expense'], 25)
@@ -36,7 +36,7 @@ class TestCLBIncidentalExpense(unittest.TestCase):
 
     def test_subsequent_clb_no_incidental(self):
         """Subsequent annual CLB payments do NOT include the incidental expense."""
-        child = RESPChild(name="test", birth_year=2020)
+        child = RESPChild(grant_history=None, name="test", birth_year=2020)
         child.total_clb_received = 500  # Already received initial payment
         result = self.calc.calculate_clb(child, 2027, family_income=30000, num_children=1)
         self.assertEqual(result['clb_amount'], 100)
@@ -49,7 +49,7 @@ class TestCLBIncidentalExpense(unittest.TestCase):
 
     def test_clb_not_eligible_no_incidental(self):
         """Non-eligible CLB returns no incidental expense."""
-        child = RESPChild(name="test", birth_year=2000)  # Born before 2004
+        child = RESPChild(grant_history=None, name="test", birth_year=2000)  # Born before 2004
         result = self.calc.calculate_clb(child, 2026, family_income=30000, num_children=1)
         self.assertEqual(result['clb_amount'], 0)
         self.assertNotIn('incidental_expense', result)
@@ -138,7 +138,7 @@ class TestCESGCarryForwardWithThresholdChanges(unittest.TestCase):
 
     def test_family_income_near_threshold_boundary(self):
         """Family income just below first CESG threshold gets additional CESG."""
-        child = RESPChild(name="test", birth_year=2018)
+        child = RESPChild(grant_history=None, name="test", birth_year=2018)
         thresholds_2026 = get_cesg_thresholds(2026)
         # Income just below first threshold → additional CESG applies
         income = thresholds_2026['first_threshold'] - 1
@@ -147,7 +147,7 @@ class TestCESGCarryForwardWithThresholdChanges(unittest.TestCase):
 
     def test_family_income_just_above_first_threshold_no_additional(self):
         """Family income above second CESG threshold: no additional CESG."""
-        child = RESPChild(name="test", birth_year=2018)
+        child = RESPChild(grant_history=None, name="test", birth_year=2018)
         thresholds_2026 = get_cesg_thresholds(2026)
         # Income above second threshold → no additional CESG
         income = thresholds_2026['second_threshold'] + 1
@@ -156,7 +156,7 @@ class TestCESGCarryForwardWithThresholdChanges(unittest.TestCase):
 
     def test_carry_forward_grants_accumulate(self):
         """Unused CESG room carries forward from previous years."""
-        child = RESPChild(name="test", birth_year=2020)
+        child = RESPChild(grant_history=None, name="test", birth_year=2020)
         # Year 1: Contribute $1000, get $200 basic CESG
         result1 = self.calc.calculate_cesg(1000, child, 2026, 150000)
         self.assertEqual(result1['basic_cesg'], 200)  # 20% of $1000
@@ -177,7 +177,7 @@ class TestQESISupplementaryRateThreshold(unittest.TestCase):
 
     def test_income_below_first_qesi_threshold_gets_supplementary(self):
         """Income below QESI first threshold: supplementary QESI applies."""
-        child = RESPChild(name="test", birth_year=2018, province='quebec')
+        child = RESPChild(grant_history=None, name="test", birth_year=2018, province='quebec')
         thresholds_2026 = get_qesi_thresholds(2026)
         income = thresholds_2026['first_threshold'] - 1
         result = self.calc.calculate_qesi(2500, child, 2026, income)
@@ -187,7 +187,7 @@ class TestQESISupplementaryRateThreshold(unittest.TestCase):
 
     def test_income_above_second_qesi_threshold_no_supplementary(self):
         """Income above QESI second threshold: basic rate only, no supplementary."""
-        child = RESPChild(name="test", birth_year=2018, province='quebec')
+        child = RESPChild(grant_history=None, name="test", birth_year=2018, province='quebec')
         thresholds_2026 = get_qesi_thresholds(2026)
         income = thresholds_2026['second_threshold'] + 1
         result = self.calc.calculate_qesi(2500, child, 2026, income)
@@ -204,37 +204,37 @@ class TestChildAge17EligibilityEdgeCase(unittest.TestCase):
 
     def test_cesg_eligible_at_16(self):
         """Child aged 16 can be eligible for CESG if 16-17 contribution conditions met."""
-        child = RESPChild(name="test", birth_year=2010)  # 16 in 2026
+        child = RESPChild(grant_history=None, name="test", birth_year=2010)  # 16 in 2026
         # Condition: total_before_age_15 >= $2000
         child.total_before_age_15 = 2000
         self.assertTrue(child.cesg_16_17_eligible(2026))
 
     def test_cesg_not_eligible_at_18(self):
         """Child aged 18 is NOT eligible for CESG."""
-        child = RESPChild(name="test", birth_year=2008)  # 18 in 2026
+        child = RESPChild(grant_history=None, name="test", birth_year=2008)  # 18 in 2026
         self.assertFalse(child.cesg_eligible(2026))
 
     def test_cesg_eligible_at_17_with_contributions(self):
         """Child aged 17 is eligible for CESG if 16-17 contribution conditions met."""
-        child = RESPChild(name="test", birth_year=2009)  # 17 in 2026
+        child = RESPChild(grant_history=None, name="test", birth_year=2009)  # 17 in 2026
         child.total_contributions = 2000
         self.assertTrue(child.cesg_eligible(2026))
 
     def test_cesg_not_eligible_at_17_without_contributions(self):
         """Child aged 17 without 16-17 contribution conditions is NOT eligible."""
-        child = RESPChild(name="test", birth_year=2009)  # 17 in 2026
+        child = RESPChild(grant_history=None, name="test", birth_year=2009)  # 17 in 2026
         child.total_contributions = 100  # Too low
         self.assertFalse(child.cesg_16_17_eligible(2026))
 
     def test_clb_not_eligible_at_16(self):
         """CLB eligibility ends at age 15 (not available at 16+)."""
-        child = RESPChild(name="test", birth_year=2010)  # 16 in 2026
+        child = RESPChild(grant_history=None, name="test", birth_year=2010)  # 16 in 2026
         result = self.calc.calculate_clb(child, 2026, family_income=30000, num_children=1)
         self.assertFalse(result['eligible'])
 
     def test_clb_eligible_at_15(self):
         """CLB is still available at age 15."""
-        child = RESPChild(name="test", birth_year=2011)  # 15 in 2026
+        child = RESPChild(grant_history=None, name="test", birth_year=2011)  # 15 in 2026
         result = self.calc.calculate_clb(child, 2026, family_income=30000, num_children=1)
         self.assertTrue(result['eligible'])
 
@@ -247,7 +247,7 @@ class TestRESPExcessPenalty(unittest.TestCase):
 
     def test_within_lifetime_limit(self):
         """Contribution within $50k lifetime limit: no excess, no penalty."""
-        child = RESPChild(name="test", birth_year=2018)
+        child = RESPChild(grant_history=None, name="test", birth_year=2018)
         child.total_contributions = 40000
         result = self.calc.resp_contribution_check(10000, child)
         self.assertTrue(result['within_limits'])
@@ -256,7 +256,7 @@ class TestRESPExcessPenalty(unittest.TestCase):
 
     def test_exactly_at_lifetime_limit(self):
         """Contribution that exactly reaches $50k: no excess."""
-        child = RESPChild(name="test", birth_year=2018)
+        child = RESPChild(grant_history=None, name="test", birth_year=2018)
         child.total_contributions = 45000
         result = self.calc.resp_contribution_check(5000, child)
         self.assertTrue(result['within_limits'])
@@ -264,7 +264,7 @@ class TestRESPExcessPenalty(unittest.TestCase):
 
     def test_over_lifetime_limit_by_1000(self):
         """$1,000 excess over $50k: 1%/month = $10/month penalty."""
-        child = RESPChild(name="test", birth_year=2018)
+        child = RESPChild(grant_history=None, name="test", birth_year=2018)
         child.total_contributions = 49500
         result = self.calc.resp_contribution_check(1500, child)
         # 49500 + 1500 = 51000, excess = 1000
