@@ -18,8 +18,27 @@ export const meta = {
 // args.issue = GitHub issue number or https://github.com/<owner>/<repo>/issues/<n> URL
 // args.repo  = "<owner>/<repo>" (defaults to this repo's remote when omitted)
 const REPO = args.repo || 'elecnix/lifedraft'
-const ISSUE = args.issue
-if (!ISSUE) throw new Error('args.issue is required: a GitHub issue number or URL')
+// The one place args.issue is read (#274). It accepts a positive integer, its plain decimal string, or this repo's
+// https issue URL, and THROWS on anything else: no prefix parsing, no default, no fallback. The number is then
+// interpolated literally into every command, so no agent is ever left to resolve a placeholder (a FETCH agent once
+// resolved one to the newest issue and the whole run worked on the wrong issue).
+function parseIssueNumber(issue, repo) {
+  const shown = typeof issue === 'string' ? JSON.stringify(issue) : String(issue)
+  let digits = null
+  if (typeof issue === 'number') {
+    if (Number.isSafeInteger(issue) && issue > 0) return issue
+  } else if (typeof issue === 'string') {
+    const url = /^https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/([1-9][0-9]*)$/.exec(issue)
+    if (url !== null && url[1].toLowerCase() !== repo.toLowerCase()) {
+      throw new Error('Issue refused: URL ' + shown + ' names repo ' + url[1] + ' but args.repo is ' + repo)
+    }
+    if (url !== null) digits = url[2]
+    else if (/^[1-9][0-9]*$/.test(issue)) digits = issue
+  }
+  if (digits !== null && Number.isSafeInteger(Number(digits))) return Number(digits)
+  throw new Error('Issue refused: ' + shown + ' is not a positive issue number or a https://github.com/' + repo + '/issues/NUMBER URL')
+}
+const ISSUE_N = parseIssueNumber(args.issue, REPO)
 
 // ---- schemas (validated at the tool-call layer; agents call StructuredOutput) ----
 const FETCH_SCHEMA = {
@@ -144,9 +163,10 @@ const CI_SCHEMA = {
       required: ['name']
     } },
     'botComments': { type: 'array', items: { type: 'string' } },
+    'rateLimitWaits': { type: 'array', items: { type: 'string' } },
     'notes': { type: 'string' }
   },
-  required: ['state', 'checksSummary', 'failedChecks', 'botComments', 'notes']
+  required: ['state', 'checksSummary', 'failedChecks', 'botComments', 'rateLimitWaits', 'notes']
 }
 
 // ---- shared instruction fragments baked into every worktree-touching prompt ----
@@ -177,6 +197,22 @@ Run the full suite with a memory budget capped (multiple agents share the box):
   PYTEST_MEM_BUDGET_MB=8192 VIRTUAL_ENV=$PWD/.venv .venv/bin/python -m pytest -q
 Never 'git reset --hard origin/main' inside a reused worktree: that would discard the commits under review. A plain
 'git fetch origin main' silently does nothing in this bare-repo setup; use the explicit refspec above.`
+
+// Every stage that reads CI carries this rule (#274). Two runs polling CI through GraphQL once exhausted the account's
+// shared GraphQL quota, and every gh command of every session then failed. A rate-limit error carries no CI state, so
+// reading it as pending burns a monitor round and reading it as fail spawns a pointless fixer.
+const RATE_LIMIT_RULE = `
+RATE LIMITS (#274): if any gh call fails with HTTP 403 or 429, or its output mentions a rate limit ("API rate limit
+exceeded", "secondary rate limit"), classify NOTHING from that call. Instead:
+  a. Read the quota: gh api rate_limit --jq '{core: .resources.core, graphql: .resources.graphql}'
+     and take .reset (a Unix epoch) of the resource whose .remaining is 0. If none reads 0 it was a secondary rate
+     limit: wait at least 60 s.
+  b. Wait until that reset has passed, in bounded calls of at most ~9 minutes each, typing the epoch plus 5 as a
+     literal number, and repeat the call until the date is past it:
+     timeout 560 bash -c 'while [ "$(date +%s)" -le EPOCH_PLUS_5 ]; do sleep 60; done'
+  c. Record each wait (resource, reset epoch, seconds waited): one rateLimitWaits entry each when your schema has that
+     field, otherwise in your report. Then redo the read that failed.
+A rate-limit error is never reported as pending or fail: it is not a CI state, and a wait does not count as a poll.`
 
 // Code-writing stages own the BRANCH, never the PR. A dogfood run (#247) caught the implementer opening the PR,
 // waiting on CI and marking it ready itself — so the PR reached reviewers before any validator had judged it.
@@ -242,12 +278,17 @@ phase('Fetch')
 
 // 1) Fetch + orient. Outputs the "goal" that every later stage carries forward.
 const fetched = await agent(
-  'You are the FETCH agent of an issue-implementation pipeline. You have ONE job: read the GitHub issue at ' + ISSUE + '\n' +
+  'You are the FETCH agent of an issue-implementation pipeline. You have ONE job: read GitHub issue #' + ISSUE_N + '\n' +
   'in repo ' + REPO + ' and come back with an unambiguous statement of what is being asked and what "done" means.\n' +
   'Do not modify any files. Do not create a worktree. You exist only to gather and orient.\n\n' +
   'Steps:\n' +
-  '1. Normalize the issue reference. Run: gh issue view ' + ISSUE + ' --repo ' + REPO +
-  ' --json number,title,body,url,state,labels,comments --jq .   (if ' + ISSUE + ' is a URL, pass its number)\n' +
+  '1. Read the issue and its comments over the REST API, with exactly these commands (the pipeline already fixed the\n' +
+  '   number; do not look it up, and do not read any other issue in its place):\n' +
+  '   gh api repos/' + REPO + '/issues/' + ISSUE_N + ' --jq .\n' +
+  '   gh api repos/' + REPO + '/issues/' + ISSUE_N + '/comments --paginate --jq .\n' +
+  '   Set issueNumber from the response\'s own .number field, never from this prompt: the pipeline stops the run if it\n' +
+  '   differs from ' + ISSUE_N + '. labels are the label names; each comment\'s author is its user.login. If the response\n' +
+  '   carries a pull_request key, the number names a pull request, not an issue: say so first in constraintsNoticed.\n' +
   '2. Read the title, body, and every comment carefully.\n' +
   '3. If the issue links an upstream resource, document, or file, fetch/read that too with the available tools so your orientation is grounded.\n' +
   '4. Return the schema below.\n\n' +
@@ -268,6 +309,7 @@ const fetched = await agent(
   { phase: 'Fetch', label: 'fetch-issue', schema: FETCH_SCHEMA, effort: 'medium' }
 )
 if (!fetched) throw new Error('Fetch agent returned null — aborting.')
+if (fetched.issueNumber !== ISSUE_N) throw new Error('FETCH returned issue #' + fetched.issueNumber + ' but #' + ISSUE_N + ' was requested — refusing to plan the wrong issue')
 log('Issue #' + fetched.issueNumber + ' fetched: "' + fetched.title + '"')
 
 const ISSUE_FULL = issueText(fetched)
@@ -564,34 +606,45 @@ while (ciRound < MAX_CI_ROUNDS) {
     'You are the CI MONITOR of an issue-implementation pipeline. You start fresh. PR #' + pr.number + ' (draft) in ' + REPO +
     '\nwas just opened from branch ' + BRANCH + '. Your job: determine the real CI state and report it — you do NOT fix anything\n' +
     'here, and you do NOT change the PR’s draft/ready state; you return pending / green / fail and the pipeline decides.\n\n' +
-    'EXPECTED HEAD: ' + headSha + '. First confirm the PR’s head is this commit\n' +
-    '(gh pr view ' + pr.number + ' --repo ' + REPO + ' --json headRefOid). Checks on any OTHER commit are stale: if the head\n' +
-    'differs, or checks for this head have not been created yet, report pending — never green.\n\n' +
+    'EXPECTED HEAD: ' + headSha + '. Every CI read below goes through the REST API and is pinned to this commit. Do not\n' +
+    'use the GraphQL-backed PR-checks command, or any other GraphQL call, to poll: polling GraphQL drained the account\'s\n' +
+    'shared quota and broke every gh command for every session (#274).\n\n' +
     '=== ACTIONS ===\n' +
-    '1. Run gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,state,bucket,link,description,workflow --jq .\n' +
-    '   The ONLY valid --json fields are bucket, completedAt, description, event, link, name, startedAt, state, workflow —\n' +
-    '   there is no conclusion/url/detailsUrl field, so requesting one is an error, not a finding. Categorize with bucket:\n' +
-    '   fail => FAIL, pending => still running, pass/skipping => ok. If bucket is absent, fall back to state:\n' +
-    '   FAILURE/ERROR/ACTION_REQUIRED/TIMED_OUT/CANCELLED/STALE => FAIL; PENDING/QUEUED/IN_PROGRESS/EXPECTED => running;\n' +
-    '   SUCCESS/NEUTRAL/SKIPPED => ok.\n' +
-    '2. If any check is still running (the Tests job on a PR runs the full suite, minutes), BLOCK and watch:\n' +
-    '   timeout 540 gh pr checks ' + pr.number + ' --repo ' + REPO + ' --watch --interval 30 || true\n' +
-    '   then re-run step 1. You may repeat this bounded watch up to ~4 times; each returns a fresh snapshot. Do not let it\n' +
-    '   extend past ~40 minutes of tries; report pending if it still has not concluded.\n' +
-    '3. Read the repo’s workflow files (.github/workflows/*) to know which runs to expect; every workflow that declares\n' +
+    '1. Confirm the PR head over REST: gh api repos/' + REPO + '/pulls/' + pr.number + ' --jq .head.sha\n' +
+    '   Checks on any OTHER commit are stale: if the head is not ' + headSha + ', report pending, never green.\n' +
+    '2. Snapshot the CI state of that commit, with both of these (check-runs page at 30 by default, so keep\n' +
+    '   per_page=100 and --paginate, or a failing run on a later page is silently dropped):\n' +
+    '   gh api "repos/' + REPO + '/commits/' + headSha + '/check-runs?per_page=100" --paginate --jq ".check_runs[] | [.name, .status, .conclusion, .details_url] | @tsv"\n' +
+    '   gh api repos/' + REPO + '/commits/' + headSha + '/status --jq "{state, total_count, statuses: [.statuses[] | {context, state, target_url}]}"\n' +
+    '   Classify each check-run: status other than completed => running; conclusion failure, timed_out, cancelled,\n' +
+    '   action_required, stale or startup_failure => FAIL; conclusion success, neutral or skipped => ok.\n' +
+    '   Classify the commit statuses: total_count 0 means there are none, and the combined state then reads pending\n' +
+    '   although nothing is running, so do NOT read it as running; otherwise error or failure => FAIL, pending => running.\n' +
+    '   Zero check-runs is pending, never green: the runs for this head have not been created yet.\n' +
+    '3. While anything is still running (the Tests job runs the full suite, minutes), poll no faster than once per 60 s,\n' +
+    '   one bounded call at a time; this one waits 60 s between polls and returns early once no check-run is running:\n' +
+    '   timeout 540 bash -c \'for i in 1 2 3 4 5 6 7 8; do sleep 60; n=$(gh api "repos/' + REPO + '/commits/' + headSha + '/check-runs?per_page=100" --paginate --jq "[.check_runs[] | select(.completed_at == null)] | length") || exit 3; echo "poll $i: $n running"; if [ "$n" = 0 ]; then exit 0; fi; done\'\n' +
+    '   then redo step 2, which alone decides the state. Repeat this bounded poll up to ~4 times; do not let it extend\n' +
+    '   past ~40 minutes of tries; report pending if it still has not concluded. Never poll faster than once per 60 s.\n' +
+    '4. Read the repo’s workflow files (.github/workflows/*) to know which runs to expect; every workflow that declares\n' +
     '   runs-on ubuntu-latest runs on GitHub-hosted runners (repo is public, minutes are free).\n' +
-    '4. Capture log URLs for every failed check from step 1, and if a failed check exists, fetch its logs best-effort\n' +
-    '   (gh run view --log-failed) and summarize the failing assertion into failedChecks[].detail.\n' +
-    '5. Report bot comments on the PR (e.g. the cite reviewer / pr-body-format advisories) into botComments:\n' +
-    '   gh pr view ' + pr.number + ' --repo ' + REPO + ' --json comments,reviews\n' +
-    '   These are informational only; only failed-check STATE drives the fail verdict.\n\n' +
-    'Return exactly one of: green (all checks SUCCESS/NEUTRAL/SKIPPED), fail (any FAILURE/TIME_OUT/CANCELLED/ACTION_REQUIRED with\n' +
-    'its name/url/logUrl/detail), or pending (still running / could not read). Be honest: if you could not read conclusively,\n' +
-    'report pending, not green.',
+    '5. For every failed check-run, record its name and details_url, then fetch its logs best-effort: the run id is the\n' +
+    '   number after /actions/runs/ in details_url, and gh run view RUN_ID --repo ' + REPO + ' --log-failed prints the\n' +
+    '   failing step. Summarize the failing assertion into failedChecks[].detail.\n' +
+    '6. Report bot comments on the PR (e.g. the cite reviewer / pr-body-format advisories) into botComments, over REST:\n' +
+    '   gh api repos/' + REPO + '/issues/' + pr.number + '/comments --paginate --jq ".[] | {user: .user.login, body}"\n' +
+    '   gh api repos/' + REPO + '/pulls/' + pr.number + '/reviews --paginate --jq ".[] | {user: .user.login, state, body}"\n' +
+    '   These are informational only; only failed-check STATE drives the fail verdict.\n' +
+    RATE_LIMIT_RULE + '\n\n' +
+    'Return exactly one of: green (at least one check-run, every check-run completed with success/neutral/skipped, and\n' +
+    'commit statuses either none or success), fail (any FAIL above, each with its name/url/logUrl/detail), or pending\n' +
+    '(still running / head moved / could not read). Be honest: if you could not read conclusively, report pending, not\n' +
+    'green. rateLimitWaits lists every rate-limit wait you made, one entry each; [] when there was none.',
     { phase: 'CI', label: 'ci-monitor-' + (ciRound + 1), schema: CI_SCHEMA, effort: 'medium' }
   )
   if (!ciState) throw new Error('CI monitor ' + (ciRound + 1) + ' returned null')
-  log('CI monitor ' + (ciRound + 1) + ': ' + ciState.state + (ciState.failedChecks.length ? ' (failures: ' + ciState.failedChecks.map(c => c.name).join(', ') + ')' : ''))
+  if (!Array.isArray(ciState.rateLimitWaits)) throw new Error('CI monitor ' + (ciRound + 1) + ' returned no rateLimitWaits array — refusing to guess whether it waited out a rate limit')
+  log('CI monitor ' + (ciRound + 1) + ': ' + ciState.state + ' (rate-limit waits: ' + ciState.rateLimitWaits.length + ')' + (ciState.failedChecks.length ? ' (failures: ' + ciState.failedChecks.map(c => c.name).join(', ') + ')' : ''))
 
   if (ciState.state === 'green') break
   ciRound++
@@ -615,9 +668,11 @@ while (ciRound < MAX_CI_ROUNDS) {
       'cd ' + implementation.worktreePath + '   (branch ' + BRANCH + '; worktree already set up — do NOT reset it)\n\n' +
       '1. git -C ' + implementation.worktreePath + ' fetch origin \'+refs/heads/main:refs/remotes/origin/main\' and make sure\n' +
       '   you are on ' + BRANCH + ' with the pushed HEAD.\n' +
-      '2. For each failed check, READ its actual failure: pull the run logs (gh run view --log-failed with the run id from the\n' +
-      '   check link, or gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,link,bucket) and extract the exact failing\n' +
-      '   assertion/step.\n' +
+      '2. For each failed check, READ its actual failure: pull the run logs (gh run view RUN_ID --repo ' + REPO + ' --log-failed,\n' +
+      '   the run id being the number after /actions/runs/ in the check link). To list the check-runs of the failing head,\n' +
+      '   use REST only, pinned to that commit:\n' +
+      '   gh api "repos/' + REPO + '/commits/' + headSha + '/check-runs?per_page=100" --paginate --jq ".check_runs[] | [.name, .conclusion, .details_url] | @tsv"\n' +
+      '   and extract the exact failing assertion/step. A rate-limit error is not a check result; wait it out as below.\n' +
       '   Never guess what failed.\n' +
       '3. Fix the root cause, add/extend a detector test, run the targeted check locally, then the full suite with\n' +
       '   PYTEST_MEM_BUDGET_MB=8192. For a coverage-gate failure, regenerate the baseline in the same PR: python tools/coverage_gate.py --update.\n' +
@@ -625,6 +680,7 @@ while (ciRound < MAX_CI_ROUNDS) {
       '   (Co-Authored-By: Claude Code <noreply@anthropic.com>), push to origin/' + BRANCH + '. Never --no-verify; never an allowlist\n' +
       '   entry. State method beside result. If you could not fix something, say so in summary with the blocker.\n' +
       'The PR already exists; do not touch its state (draft/ready/title/body) — only push commits to its branch.\n' +
+      RATE_LIMIT_RULE + '\n' +
       STAGE_SCOPE,
       { phase: 'CI', label: 'ci-fixer-' + ciRound, schema: FIX_SCHEMA, effort: 'high' }
     )
@@ -658,12 +714,20 @@ const ready = await agent(
   'You are the READY agent of an issue-implementation pipeline. You start fresh. PR #' + pr.number + ' in ' + REPO +
   ' was validated and its CI monitor reported green. You are the only stage permitted to mark it ready for review, and\n' +
   'you do it only after re-proving green yourself — do not trust the monitor.\n\n' +
-  '1. gh pr view ' + pr.number + ' --repo ' + REPO + ' --json headRefOid,isDraft,state — the head MUST be ' + headSha + '\n' +
-  '   and state OPEN. If the head moved, someone pushed after the monitor: do NOT mark ready; report ready=false.\n' +
-  '2. gh pr checks ' + pr.number + ' --repo ' + REPO + ' --json name,bucket — every bucket must be pass or skipping, with at\n' +
-  '   least one check present. Anything pending/fail/cancel, or zero checks: do NOT mark ready; report ready=false.\n' +
-  '3. Only then: gh pr ready ' + pr.number + ' --repo ' + REPO + ' — and re-read isDraft to confirm it is now false.\n' +
-  'Never merge. Return ready=true only if isDraft is false AFTER step 3, with the commands and outputs as evidence.',
+  'Read CI through the REST API only, pinned to the head commit; never through the GraphQL-backed PR-checks command (#274).\n\n' +
+  '1. gh api repos/' + REPO + '/pulls/' + pr.number + ' --jq "{sha: .head.sha, draft: .draft, state: .state}" — the sha MUST be\n' +
+  '   ' + headSha + ' and state open. If the head moved, someone pushed after the monitor: do NOT mark ready; report ready=false.\n' +
+  '2. Re-read CI on exactly that commit, with both of these:\n' +
+  '   gh api "repos/' + REPO + '/commits/' + headSha + '/check-runs?per_page=100" --paginate --jq ".check_runs[] | [.name, .status, .conclusion] | @tsv"\n' +
+  '   gh api repos/' + REPO + '/commits/' + headSha + '/status --jq "{state, total_count}"\n' +
+  '   Require at least one check-run, every check-run completed with conclusion success, neutral or skipped, and commit\n' +
+  '   statuses either total_count 0 (none) or combined state success. Anything running, failed, cancelled, or zero\n' +
+  '   check-runs: do NOT mark ready; report ready=false.\n' +
+  RATE_LIMIT_RULE + '\n' +
+  'A rate limit is never a reason for ready=false: wait it out, then redo the step it interrupted.\n' +
+  '3. Only then: gh pr ready ' + pr.number + ' --repo ' + REPO + ' — and re-read the draft flag with\n' +
+  '   gh api repos/' + REPO + '/pulls/' + pr.number + ' --jq .draft to confirm it is now false.\n' +
+  'Never merge. Return ready=true only if the draft flag is false AFTER step 3, with the commands and outputs as evidence.',
   { phase: 'Ready', label: 'mark-ready', effort: 'low', schema: {
     type: 'object',
     properties: { 'ready': { type: 'boolean' }, 'evidence': { type: 'string' } },
