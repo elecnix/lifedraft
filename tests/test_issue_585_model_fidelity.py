@@ -452,6 +452,16 @@ _CODE_ANCHORS = {
     # ever removed, this anchor goes stale and the caveat must go with it.
     'rrsp_contribution_refused': (
         'rules_contributions.py', 'ws.rrsp_refused_own'),
+    # Issue #286: the carry-forward caveat is anchored to the rule that
+    # records the carried amount; the undeclared-seed caveat to the ledger
+    # seeding it describes; the credits caveat to the cap floor (derived from
+    # bracket rates alone -- no credit enters it).
+    'rrsp_deduction_carried_forward': (
+        'rules_contributions.py', 'ws.rrsp_deduction_carried_forward = carried_forward'),
+    'rrsp_undeducted_contributions_undeclared': (
+        'simulation_state.py', 'def _seed_undeducted_rrsp_ledger('),
+    'rrsp_refund_excludes_credits': (
+        'rrsp_ledger.py', 'def lowest_taxed_floor('),
     # Issue #290: the registered balances are priced as the horizon deemed
     # disposition through terminal_registered_tax / _net_benefit_estate.
     'net_benefit_registered_tax_at_horizon': (

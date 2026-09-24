@@ -455,6 +455,9 @@ class YearWorkingState:
     rrsp_deduction_savings: float = 0.0
     spouse_deduction_savings: float = 0.0
     deduction_claims: list = field(default_factory=list)
+    # Issue #286: the undeducted amount the useful-deduction cap left in the
+    # ledger at year end (carried forward to a later year, never lost).
+    rrsp_deduction_carried_forward: float = 0.0
     deduct_later_staggered_total: float = 0.0
     deduct_later_first_claim_income: float = 0.0
     deduct_later_total_deducted: float = 0.0

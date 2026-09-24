@@ -153,10 +153,11 @@ def test_ws_field_inventory(inventory: _Inventory):
     total_fields = len(inventory.fields)
     multi_module_writers = sum(1 for f in inventory.fields.values() if len(f.writer_files) > 1)
 
-    # 261: the total ws.<field> surface touched by all rules.
+    # 262: the total ws.<field> surface touched by all rules (#286 added
+    #      ws.rrsp_deduction_carried_forward, written by rrsp_deduction).
     #  26: fields written by >1 source module (module-level multi-writers).
-    assert total_fields == 261, (
-        f"expected 261 ws fields, got {total_fields} -- the scanner missed "
+    assert total_fields == 262, (
+        f"expected 262 ws fields, got {total_fields} -- the scanner missed "
         "rules_*.py files or failed to resolve a helper; the guard's"
         " measurements are no longer trustworthy."
     )
@@ -168,9 +169,20 @@ def test_ws_field_inventory(inventory: _Inventory):
 def test_seam_inventory(inventory: _Inventory):
     """A *seam* is a (producer_rule, consumer_rule) pair where the producer
     is the LATEST writer of a field that precedes a PURE consumer (a reader
-    that does not also write the field).  54 such pairs exist today; the
+    that does not also write the field).  53 such pairs exist today; the
     count is pinned so adding or removing a seam is a deliberate, reviewed
     change rather than a silent drift.
+
+    (#286 removed two: ``rrsp_deduction`` and ``rrsp_refund_heloc_paydown``
+    no longer read the ``contributions`` rule's ``*_rrsp_actual`` amounts --
+    the refund is the ledger's capped claim, one source, not a second
+    ``contribution x marginal rate`` product computed from those amounts.
+    It then added one: ``retirement_income`` -> ``rrsp_deduction``. A
+    retired contributor's deduction base includes the CPP/pension/OAS and
+    forced RRIF minimum that ``retirement_income`` (first in RULE_ORDER)
+    writes, so a deduction carried at retirement is claimed against
+    retirement income instead of sitting undeducted for the rest of the
+    horizon.)
 
     (The feasibility brief estimated "52"; the difference is methodology --
     the brief's ad-hoc prototype did not resolve two same-file helper
@@ -190,8 +202,8 @@ def test_seam_inventory(inventory: _Inventory):
             if preceding:
                 seam_pairs.add((preceding[-1], consumer))
 
-    assert len(seam_pairs) == 54, (
-        f"expected 54 producer-consumer rule pairs, got {len(seam_pairs)} -- "
+    assert len(seam_pairs) == 53, (
+        f"expected 53 producer-consumer rule pairs, got {len(seam_pairs)} -- "
         f"a rule was added/removed/reordered. Review the change."
     )
 

@@ -520,6 +520,10 @@ def evaluate_strategy_with_simulation(
     # rediscovered from the source. Signalled as DATA (same bridge as #707).
     from rules_contributions import summarize_rrsp_refusal
     rrsp_refusal = summarize_rrsp_refusal(results)
+    # Issue #286: the RRSP deduction carry-forward verdict travels with the
+    # row too (same bridge as rrsp_refusal above).
+    from rules_contributions import summarize_rrsp_deduction_carry_forward
+    rrsp_carry_forward = summarize_rrsp_deduction_carry_forward(results)
 
     return {
         'strategy': name,
@@ -529,6 +533,7 @@ def evaluate_strategy_with_simulation(
         'drawdown_shortfall': drawdown_shortfall,
         'exhausted': drawdown_shortfall['exhausted'],
         'rrsp_refusal': rrsp_refusal,
+        'rrsp_deduction_carry_forward': rrsp_carry_forward,
         'runway': runway.to_dict(),
         'total_invested': final.total_assets + final.total_debt - final.non_reg_balance,
         'TFSA': final.total_tfsa,
@@ -3309,6 +3314,14 @@ def main():
     cfg.setdefault('assumptions', {})['rrsp_contribution_refused'] = \
         worst_rrsp_refusal([r.get('rrsp_refusal') for r in results
                             if isinstance(r, dict)])
+    # Issue #286: record whether any ranked scenario carried an RRSP
+    # deduction forward (a contribution above the year's useful deduction)
+    # onto cfg BEFORE any surface renders -- same bridge as above.
+    from rules_contributions import worst_rrsp_deduction_carry_forward
+    cfg.setdefault('assumptions', {})['rrsp_deduction_carried_forward'] = \
+        worst_rrsp_deduction_carry_forward(
+            [r.get('rrsp_deduction_carry_forward') for r in results
+             if isinstance(r, dict)])
     # Issue #141: record whether any ranked scenario denied a superficial
     # loss (the ITA s.53(1)(c) window) onto cfg BEFORE any surface renders,
     # so the model_fidelity caveat (which reads assumptions.superficial_loss)

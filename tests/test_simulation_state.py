@@ -66,7 +66,7 @@ def _base_allocs(year=0):
         'primary_rrsp': 10000, 'spousal_rrsp': 5000,
         'primary_tfsa': 5000, 'spouse_tfsa': 3000,
         'resp': 2500, 'non_reg': 5000,
-        '_primary_income': 120000, '_spouse_income': 50000,
+        '_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000,
         '_annual_savings': 34000,
     }
 
@@ -318,7 +318,7 @@ class TestHelocTracing(unittest.TestCase):
     def test_tracing_updated_by_simulate_year(self):
         cfg = _make_config()
         state = SimState.initial(cfg)
-        allocs = {'non_reg': 10000, '_primary_income': 120000, '_spouse_income': 50000, '_annual_savings': 34000}
+        allocs = {'non_reg': 10000, '_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000, '_annual_savings': 34000}
         _, new_state = simulate_year_pure(
             state,
             0,
@@ -458,8 +458,8 @@ class TestEdgeCases(unittest.TestCase):
         canada = state.jurisdiction_state['canada']
         canada['adult_rrsp']['primary']['own_room'] = 0  # #700
         canada['adult_tfsa']['primary']['room'] = 0  # #700
-        allocs = {'primary_rrsp': 10000, '_primary_income': 120000, 
-                  '_spouse_income': 50000, '_annual_savings': 34000}
+        allocs = {'primary_rrsp': 10000, '_primary_income': 120000, '_primary_taxable_income': 120000, 
+                  '_spouse_income': 50000, '_spouse_taxable_income': 50000, '_annual_savings': 34000}
         
         _, new_state = simulate_year_pure(
             state,
@@ -475,7 +475,7 @@ class TestEdgeCases(unittest.TestCase):
     def test_zero_savings(self):
         cfg = _make_config()
         state = SimState.initial(cfg)
-        allocs = {'_primary_income': 120000, '_spouse_income': 50000, '_annual_savings': 0}
+        allocs = {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000, '_annual_savings': 0}
         
         result, _ = simulate_year_pure(
             state,
@@ -530,8 +530,8 @@ class TestFHSASimulation(unittest.TestCase):
         state = _fhsa_state(fhsa_room=8000)
         allocs = {
             'fhsa': 8000,
-            '_primary_income': 120000,
-            '_spouse_income': 50000,
+            '_primary_income': 120000, '_primary_taxable_income': 120000,
+            '_spouse_income': 50000, '_spouse_taxable_income': 50000,
             '_annual_savings': 34000,
         }
         result, new_state = simulate_year_pure(
@@ -552,7 +552,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
             ),
         )
@@ -560,7 +560,7 @@ class TestFHSASimulation(unittest.TestCase):
 
     def test_fhsa_contribution_in_total_assets(self):
         state = _fhsa_state(fhsa_room=8000, fhsa_balance=0)
-        allocs = {'fhsa': 8000, '_primary_income': 120000, '_spouse_income': 50000}
+        allocs = {'fhsa': 8000, '_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000}
         result, new_state = simulate_year_pure(
             state,
             0,
@@ -578,7 +578,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
                 mortgage_data=_mort_data(state),
             ),
@@ -591,7 +591,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=None,
                 mortgage_data=_mort_data(state),
             ),
@@ -604,7 +604,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
                 mortgage_data=_mort_data(state),
             ),
@@ -617,7 +617,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
                 mortgage_data=_mort_data(state),
             ),
@@ -630,7 +630,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=8000, fhsa_annual_limit=8000,
                 mortgage_data=_mort_data(state),
             ),
@@ -639,7 +639,7 @@ class TestFHSASimulation(unittest.TestCase):
 
     def test_fhsa_growth_applied(self):
         state = _fhsa_state(fhsa_room=8000, fhsa_balance=0)
-        allocs = {'fhsa': 8000, '_primary_income': 120000, '_spouse_income': 50000}
+        allocs = {'fhsa': 8000, '_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000}
         result, new_state = simulate_year_pure(
             state,
             0,
@@ -657,7 +657,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=5000, mortgage_data=_mort_data(state),
             ),
         )
@@ -671,7 +671,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
             ),
         )
@@ -698,7 +698,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=5000, fhsa_annual_limit=8000,
                 mortgage_data=_mort_data(state),
             ),
@@ -711,7 +711,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
             ),
         )
@@ -724,7 +724,7 @@ class TestFHSASimulation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 _make_config(), investment_return=0.07, fhsa_contribution=8000, mortgage_data=_mort_data(state),
             ),
         )
@@ -732,7 +732,7 @@ class TestFHSASimulation(unittest.TestCase):
 
     def test_fhsa_balance_specifically_in_total_assets(self):
         state = _fhsa_state(fhsa_room=8000, fhsa_balance=5000)
-        allocs = {'fhsa': 8000, '_primary_income': 120000, '_spouse_income': 50000}
+        allocs = {'fhsa': 8000, '_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000}
         result, new_state = simulate_year_pure(
             state,
             0,
@@ -776,7 +776,7 @@ class TestFHSASimulationExtra(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 cfg, investment_return=0.07, fhsa_contribution=0, fhsa_annual_limit=8000,
                 mortgage_data=_mort_data(state),
             ),
@@ -810,7 +810,7 @@ class TestCanadaPropertyDescriptor(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 cfg, investment_return=0.07, mortgage_data=_mort_data(state),
             ),
         )
@@ -831,7 +831,7 @@ class TestLegacyJurisdictionStateDeprecation(unittest.TestCase):
             state,
             0,
             inputs=_build_year_inputs(
-                {'_primary_income': 120000, '_spouse_income': 50000},
+                {'_primary_income': 120000, '_primary_taxable_income': 120000, '_spouse_income': 50000, '_spouse_taxable_income': 50000},
                 cfg, investment_return=0.07, mortgage_data=_mort_data(state),
             ),
         )
