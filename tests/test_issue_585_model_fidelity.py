@@ -84,10 +84,10 @@ class TestApproximationConstructionIsGuarded(unittest.TestCase):
 # ── 2. Known approximations reach every output surface ─────────────────────
 
 # A config that activates a known approximation across every output surface.
-# The example caveat exercised here is `net_benefit_withdrawal_tax_is_estimated`
-# (#580): the forced-RRIF `rrif_forced_excess_tax_rate` caveat that used to ride
-# this config was RETIRED by #825 (see TestNoStaleCaveats / the "gone" test),
-# and it was the only purely retirement-data-gated caveat, so the plumbing test
+# The example caveat exercised here is `net_benefit_registered_tax_at_horizon`
+# (#290, which replaced #580's estimated-withdrawal-tax caveat): the forced-RRIF
+# `rrif_forced_excess_tax_rate` caveat that used to ride this config was
+# RETIRED by #825 (see TestNoStaleCaveats / the "gone" test), and it was the only purely retirement-data-gated caveat, so the plumbing test
 # now rides an always-available objective caveat instead.
 _CFG_TRIGGERS_DRAWDOWN = {
     'family': {'members': [
@@ -107,7 +107,7 @@ _RESULTS = [
 ]
 
 # The example caveat these output-surface tests assert on.
-_EXAMPLE_CAVEAT = 'net_benefit_withdrawal_tax_is_estimated'
+_EXAMPLE_CAVEAT = 'net_benefit_registered_tax_at_horizon'
 
 
 class TestActiveApproximationReachesEveryOutputSurface(unittest.TestCase):
@@ -122,7 +122,7 @@ class TestActiveApproximationReachesEveryOutputSurface(unittest.TestCase):
         out = TextReport(_RESULTS, _CFG_TRIGGERS_DRAWDOWN, title="T").render()
         self.assertIn("MODEL FIDELITY", out)
         self.assertIn("net_benefit", out)
-        self.assertIn("withdrawal tax", out)
+        self.assertIn("deemed disposition", out)
 
     def test_json_report_surfaces_the_caveat(self):
         out = json.loads(JsonReport(_RESULTS, _CFG_TRIGGERS_DRAWDOWN, title="T").render())
@@ -144,7 +144,7 @@ class TestActiveApproximationReachesEveryOutputSurface(unittest.TestCase):
         lines = model_fidelity.render_text(_CFG_TRIGGERS_DRAWDOWN)
         joined = "\n".join(lines)
         self.assertIn("net_benefit", joined)
-        self.assertIn("withdrawal tax", joined)
+        self.assertIn("deemed disposition", joined)
 
 
 # ── 3. A rule that is disabled says so by no longer appearing ──────────────
@@ -238,13 +238,13 @@ class TestApproximationIsConfigDriven(unittest.TestCase):
         self.assertNotIn('terminal_wealth_is_pretax', after_tax)
 
     def test_net_benefit_carries_its_own_estimated_tax_caveat_not_the_pretax_one(self):
-        """max_net_benefit is NOT a raw pre-tax sum — it deducts an estimated
-        withdrawal tax. It gets its own, accurate caveat rather than the
-        terminal-wealth one."""
+        """max_net_benefit is NOT a raw pre-tax sum — it deducts the terminal
+        registered tax at the horizon (#290). It gets its own, accurate caveat
+        rather than the terminal-wealth one."""
         cfg = {'assumptions': {'start_year': 2026}}
         ids = {a.id for a in model_fidelity.active_approximations(
             cfg, objective_name='max_net_benefit')}
-        self.assertIn('net_benefit_withdrawal_tax_is_estimated', ids)
+        self.assertIn('net_benefit_registered_tax_at_horizon', ids)
         self.assertNotIn('terminal_wealth_is_pretax', ids)
 
     def test_unknown_objective_reports_rather_than_hides(self):
@@ -253,7 +253,7 @@ class TestApproximationIsConfigDriven(unittest.TestCase):
         cfg = {'assumptions': {'start_year': 2026}}
         ids = {a.id for a in model_fidelity.active_approximations(cfg, objective_name=None)}
         self.assertIn('terminal_wealth_is_pretax', ids)
-        self.assertIn('net_benefit_withdrawal_tax_is_estimated', ids)
+        self.assertIn('net_benefit_registered_tax_at_horizon', ids)
         self.assertIn('net_benefit_omits_estate_elections', ids)
 
     def test_net_benefit_estate_blindness_caveat_names_the_objective_that_prices_it(self):
@@ -462,10 +462,12 @@ _CODE_ANCHORS = {
         'simulation_state.py', 'def _seed_undeducted_rrsp_ledger('),
     'rrsp_refund_excludes_credits': (
         'rrsp_ledger.py', 'def lowest_taxed_floor('),
-    'net_benefit_withdrawal_tax_is_estimated': (
-        'objective.py', 'def compute_net_benefit('),
-    # Issue #672: sibling caveat, same anchor -- both describe
-    # compute_net_benefit(), which never models a death event.
+    # Issue #290: the registered balances are priced as the horizon deemed
+    # disposition through terminal_registered_tax / _net_benefit_estate.
+    'net_benefit_registered_tax_at_horizon': (
+        'objective.py', 'def terminal_registered_tax('),
+    # Issue #672: the residual estate blindness of compute_net_benefit (the
+    # non-reg pot, TFSA, residence and insurance levers).
     'net_benefit_omits_estate_elections': (
         'objective.py', 'def compute_net_benefit('),
     # Issue #1034: the residual cross-pot basis inconsistency -- the SM sleeve
@@ -473,7 +475,7 @@ _CODE_ANCHORS = {
     # compute_net_benefit's own marginal_rate formula. Anchored to the SM
     # sleeve's estate-path call site.
     'net_benefit_sm_sleeve_cheaper_than_non_reg': (
-        'objective.py', '_compute_estate(**_sm_estate_args).sm_investment_tax'),
+        'objective.py', 'sm_deemed_tax = _estate.sm_investment_tax'),
     # epic #603 Track C Phase 2c (#600): after_tax_estate_defaulted_assumptions
     # is GONE (the schema CAN now express all five elections -- the caveat's own
     # claim became false). Two narrower, still-true caveats replace it.

@@ -12,8 +12,9 @@ grew:
   * output_plugins.py -- the _print_decumulation_shortfall_report() console
     deliverable #757 added (its "not engaged" early-return and its
     "render the registered caveat" branch; relocated from optimize.py in #232
-    slice 3), plus optimize.py's compute_net_benefit() no-birth_year
-    retirement-income path (the retirement block #757 sits beside).
+    slice 3), plus compute_net_benefit()'s empty-results guard and (since
+    #290 retired the birth-year-gated retirement block) its registered-leg
+    refusal on a result that carries no float non-reg ACB.
   * trajectory_invariants.py -- the invariant-harness helpers
     (all_invariant_names, the duplicate-registration guard, assert_invariant's
     failure-raise) and the no-op / violation branches of the per-year checks
@@ -137,40 +138,55 @@ class TestPrintDecumulationShortfallReport:
 
 
 # =============================================================================
-# optimize.py -- compute_net_benefit: the no-birth_year retirement-income path
+# objective.py -- compute_net_benefit: empty results and the registered leg
 # =============================================================================
 
 class TestComputeNetBenefitRetirementBranches:
-    """compute_net_benefit() has two retirement-income branches gated on
-    whether the primary member has a usable birth_year. The golden / #232
-    tests always supply one (1979), so the no-birth_year `else` block and the
-    empty-results guard were uncovered."""
+    """compute_net_benefit()'s empty-results guard, and (issue #290) the
+    registered leg's refusal when the terminal result carries a registered
+    balance but no float non-reg ACB. Pre-#290 this class covered a
+    no-birth_year retirement-income branch that no longer exists."""
 
     def test_empty_results_returns_zero(self):
         assert objective.compute_net_benefit([], {}) == 0.0
 
-    def test_rrsp_balance_without_birth_year_uses_config_retirement_income(self):
-        """When total_rrsp > 0 but no birth_year is declared, the retirement
-        income is built from config (CPP + OAS + pension + LIF) rather than
-        via project_retirement -- the `else` block. Returns a finite float."""
+    def test_registered_balance_with_none_acb_refuses(self):
+        """total_rrsp > 0 with non_reg_acb=None cannot be priced through the
+        estate path (it prices the non-reg pot too): it raises, never a
+        finite guess."""
         final = YearResult(
             year=2036,
             total_assets=500_000, total_debt=200_000,
-            total_rrsp=300_000, total_tfsa=100_000,
+            primary_rrsp=300_000, total_rrsp=300_000, total_tfsa=100_000,
             non_reg_balance=100_000, non_reg_acb=None, resp_balance=0,
             lif_withdrawal=5_000,
         )
-        # No birth_year on the primary -> the else branch fires.
         cfg = {
             'family': {'members': [
                 {'role': 'primary', 'cpp_monthly_estimated': 1000,
                  'pension_income_annual': 20_000}]},
             'assumptions': {'oas_annual': 8_500},
+            'tax': {'province': 'quebec', 'start_year': 2026},
+        }
+        with pytest.raises(ValueError, match='non_reg_acb'):
+            objective.compute_net_benefit([final], cfg)
+
+    def test_registered_balance_with_float_acb_is_finite(self):
+        final = YearResult(
+            year=2036,
+            total_assets=500_000, total_debt=200_000,
+            primary_rrsp=300_000, total_rrsp=300_000, total_tfsa=100_000,
+            non_reg_balance=100_000, non_reg_acb=60_000, resp_balance=0,
+            lif_withdrawal=5_000,
+        )
+        cfg = {
+            'family': {'members': [
+                {'role': 'primary', 'cpp_monthly_estimated': 1000,
+                 'pension_income_annual': 20_000}]},
+            'assumptions': {'oas_annual': 8_500},
+            'tax': {'province': 'quebec', 'start_year': 2026},
         }
         net = objective.compute_net_benefit([final], cfg)
-        assert isinstance(net, float)
-        # Sanity: with positive assets and tax savings, net benefit is finite
-        # and not NaN/inf (the block must have run, not raised).
         assert math.isfinite(net)
 
 

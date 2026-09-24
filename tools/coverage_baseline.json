@@ -101,6 +101,7 @@
     "optimizer.py": 23,
     "output_paths.py": 0,
     "output_plugins.py": 23,
+    "process_pool.py": 0,
     "property_structure.py": 1,
     "provenance.py": 29,
     "retirement_analysis.py": 68,
@@ -129,7 +130,7 @@
     "sensitivity.py": 263,
     "session_log.py": 5,
     "simulate.py": 343,
-    "simulation.py": 18,
+    "simulation.py": 12,
     "simulation_config.py": 0,
     "simulation_deps.py": 0,
     "simulation_rules.py": 0,
@@ -142,7 +143,7 @@
     "tax_data.py": 19,
     "trajectory_invariants.py": 16,
     "transaction_costs.py": 0,
-    "voi.py": 42,
+    "voi.py": 32,
     "year_result.py": 0
   }
 }

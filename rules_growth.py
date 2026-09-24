@@ -1,15 +1,19 @@
 """Growth rules: every pot compounds, each at the rate that pot actually earns.
 
-``registered_growth`` / ``non_reg_growth`` compound at the portfolio's blended
-per-pot rate (``_blended_pot_rate``, which also prices MER and per-account
-composition); ``emergency_reserve_growth`` and ``deposit_product_growth``
+``registered_growth`` compounds at the portfolio's blended per-pot rate
+(``_blended_pot_rate``, which also prices MER and per-account composition);
+``non_reg_growth`` compounds at the DP#27 after-tax rate shifted by the non_reg
+account's declared ``expected_return`` blend and ``mer`` (#291, see
+``apply_non_reg_growth``); ``emergency_reserve_growth`` and ``deposit_product_growth``
 deliberately do NOT -- a reserve modelled as compounding at the equity return
 is not a reserve (#688), and a taken deposit product compounds at its own
 declared ``rate_schedule`` (#936).
 
-``_blended_pot_rate`` is the ONE spelling of a pot's rate (DP#9); the LIRA/LIF
-rule (``rules_registered_plans``) and the FHSA rule (``rules_contributions``)
-import it from here rather than re-spelling it.
+``_blended_pot_rate`` is the ONE spelling of a registered pot's rate (DP#9);
+the LIRA/LIF rule (``rules_registered_plans``) and the FHSA rule
+(``rules_contributions``) import it from here rather than re-spelling it. Its
+override blend and MER read live in ``_pot_gross_rate`` / ``_pot_mer_rate``,
+which the non_reg rule shares (#291).
 
 Split out of ``simulation_rules.py``; the rule bodies are unchanged.
 """
@@ -24,9 +28,54 @@ from rule_registry import RuleContext, YearWorkingState, rule
 logger = logging.getLogger(__name__)
 
 
+def _pot_gross_rate(ctx: 'RuleContext', kind: str, pot_total: float) -> float:
+    """Issue #823: the GROSS rate for one aggregate pot -- the balance-weighted
+    blend of the per-account ``expected_return`` overrides declared on accounts
+    of ``kind`` and the global ``ctx.investment_return`` for the rest of the pot.
+
+    No override declared for ``kind`` (or an empty pot) -> exactly
+    ``ctx.investment_return`` (identity-preserving for the golden run). Split
+    out of ``_blended_pot_rate`` by #291 so the non_reg rule can apply the same
+    blend as a shift of its after-tax rate; the arithmetic is unchanged.
+    """
+    if pot_total <= 0:
+        return ctx.investment_return
+    gross = ctx.investment_return
+    overrides = ctx.config.account_return_overrides
+    entry = overrides.get(kind) if overrides else None
+    if entry:
+        override_balance = entry.get('override_balance', 0.0)
+        weighted_rate_sum = entry.get('weighted_rate_sum', 0.0)
+        if override_balance > 0:
+            gross = (weighted_rate_sum
+                     + max(0.0, pot_total - override_balance) * ctx.investment_return
+                     ) / pot_total
+    return gross
+
+
+def _pot_mer_rate(ctx: 'RuleContext', kind: str) -> Optional[float]:
+    """Issue #691/#136/#291: the declared MER rate of pot ``kind``, or ``None``
+    when no account of that kind declared one.
+
+    ``None`` (absent) and ``0.0`` (a declared fee-free fact) are distinct
+    (DP#32). An entry that exists but carries no ``mer_rate`` is malformed
+    input: ``mer_rate`` is read by subscript so it raises ``KeyError`` rather
+    than reading as a 0% fee.
+    """
+    mer_drag = ctx.config.account_mer_drag
+    fee = mer_drag.get(kind) if mer_drag else None
+    if fee is None:
+        return None
+    return fee['mer_rate']
+
+
 def _blended_pot_rate(ctx: 'RuleContext', kind: str, pot_total: float) -> float:
-    """Issue #823/#691: the growth rate for one aggregate pot
-    (rrsp/tfsa/non_reg/...).
+    """Issue #823/#691: the growth rate for one aggregate REGISTERED pot
+    (rrsp/tfsa/fhsa/lira/lif).
+
+    The non_reg pot does not use it (#291): ``apply_non_reg_growth`` composes
+    the same two helpers (``_pot_gross_rate``, ``_pot_mer_rate``) onto its
+    DP#27 after-tax rate, without the registered-only #641 WHT drag.
 
     Two per-account overrides, composed, both balance-weighted into the pot:
 
@@ -59,28 +108,16 @@ def _blended_pot_rate(ctx: 'RuleContext', kind: str, pot_total: float) -> float:
         return ctx.investment_return
     # Gross rate: the #823 expected_return blend, or the global rate when no
     # account of this kind declared one (identity-preserving for the golden run).
-    gross = ctx.investment_return
-    overrides = ctx.config.account_return_overrides
-    entry = overrides.get(kind) if overrides else None
-    if entry:
-        override_balance = entry.get('override_balance', 0.0)
-        weighted_rate_sum = entry.get('weighted_rate_sum', 0.0)
-        if override_balance > 0:
-            gross = (weighted_rate_sum
-                     + max(0.0, pot_total - override_balance) * ctx.investment_return
-                     ) / pot_total
+    gross = _pot_gross_rate(ctx, kind, pot_total)
     # Issue #691/#136: subtract the MER rate of fee-flagged accounts in this
     # pot from the gross rate. The MER is a constant rate (not a frozen
     # weighted sum divided by the pot total), so the fee is mer_rate *
     # pot_total each year — dynamic, not decaying. Absent (no mer_drag entry)
     # or fee-free (mer_rate == 0) -> no change, so the gross rate is returned
     # untouched (golden no-op, DP#32).
-    mer_drag = ctx.config.account_mer_drag
-    fee = mer_drag.get(kind) if mer_drag else None
-    if fee:
-        mer_rate = fee.get('mer_rate', 0.0)
-        if mer_rate:
-            gross -= mer_rate
+    mer_rate = _pot_mer_rate(ctx, kind)
+    if mer_rate:
+        gross -= mer_rate
     # Issue #641: subtract the foreign-withholding-tax drag of this REGISTERED
     # pot's declared holdings (rrsp/tfsa) -- the one tax that leaks from an
     # otherwise tax-sheltered account. Absent (no registered composition, or a
@@ -125,33 +162,67 @@ def apply_registered_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:
 def apply_non_reg_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:
     """DP#27: non-reg investments grow at the income-type-specific
     after-tax rate (portfolio composition + marginal rate), not the flat
-    gross rate registered accounts use. Depends on ``contributions``.
+    gross rate registered accounts use -- shifted by the non_reg account's
+    own declared ``expected_return`` and ``mer`` (#291). Depends on
+    ``contributions``.
+
+    Issue #291 -- the convention. A fund's MER is paid inside the fund, out of
+    its TOTAL return, before anything is distributed: the declared
+    distribution yield is the net distribution the investor actually receives,
+    so the fee comes out of the deferred capital-appreciation term at its full
+    rate. A per-account ``expected_return`` replaces the gross total return for
+    its balance-weighted share of the pot (the #823 blend), and that
+    difference is likewise capital appreciation. ACB is unaffected (DP#19).
+
+    The derivation. ``_non_reg_after_tax_return_for`` returns
+    ``atr(g) = after_tax_yield + (g - declared_yield)`` and ``after_tax_yield``
+    does not depend on ``g``. Evaluating it at the fee-net, override-blended
+    gross ``g' = blend - mer`` is therefore exactly::
+
+        atr(g') = atr(g) + (blend - g) - mer
+
+    i.e. ``atr + (blended_gross - gross) - mer``, which is what this rule
+    computes -- an exact linear shift, not an approximation. It is applied
+    here rather than inside ``_non_reg_after_tax_return_for`` because the
+    blend is balance-weighted on the LIVE pot, and that function must never
+    read a balance (#575/#583).
+
+    The shift is applied unconditionally: no float equality between the
+    after-tax rate and ``ctx.investment_return`` decides whether a declared
+    input is read (the pre-#291 gate did, and the fold's after-tax rate is
+    below gross for any taxed yield, so both inputs were silently dropped).
+    With neither input declared the shift is exactly ``+ 0.0`` (golden no-op).
+
+    The Smith-Manoeuvre sleeve grows at ``ws.taxable_after_tax_rate``, the
+    UNSHIFTED shared taxable rate: it is not a declared account, so it never
+    inherits the non_reg account's fee or return override.
     """
     if ctx.non_reg_after_tax_return is not None:
-        non_reg_growth_rate = ctx.non_reg_after_tax_return
+        taxable_rate = ctx.non_reg_after_tax_return
     else:
-        non_reg_growth_rate = ctx.investment_return
+        taxable_rate = ctx.investment_return
         logger.warning(
             "non_reg_after_tax_return not provided; falling back to flat investment_return=%.4f. "
             "For accurate non-reg projections, provide non_reg_after_tax_return "
             "from portfolio composition data (DP#27).",
             ctx.investment_return
         )
-    # Issue #823: blend a per-account expected_return override on non_reg
-    # accounts into the pot rate (see _blended_pot_rate). Applied on the
-    # fallback (flat investment_return) path; when portfolio composition
-    # supplies an after-tax rate (the DP#27 normal path), the override is not
-    # blended in -- threading a per-account pre-tax override through the
-    # portfolio after-tax adjustment is a future refinement. FTQ (the issue's
-    # subject) lives in RRSP, not non_reg, so this is not the load-bearing
-    # path for #823.
-    if non_reg_growth_rate == ctx.investment_return:
-        non_reg_growth_rate = _blended_pot_rate(ctx, 'non_reg', ws.new_nonreg_bal)
-    ws.non_reg_growth_rate = non_reg_growth_rate
+    # The shared DP#27 taxable rate the SM sleeve reads -- deliberately WITHOUT
+    # the non_reg account's own declarations (#291).
+    ws.taxable_after_tax_rate = taxable_rate
+    # #291/#823: the declared expected_return blend shifts the rate by exactly
+    # (blended gross - global gross); absent -> (ir - ir) == 0.0.
+    pot_rate = taxable_rate + (_pot_gross_rate(ctx, 'non_reg', ws.new_nonreg_bal)
+                               - ctx.investment_return)
+    # #291/#691: the declared MER comes out of total return (see docstring).
+    # Absent -> None -> skipped; a declared 0.0 subtracts nothing.
+    mer_rate = _pot_mer_rate(ctx, 'non_reg')
+    if mer_rate is not None:
+        pot_rate -= mer_rate
     pre = ws.new_nonreg_bal
-    ws.new_nonreg_bal *= (1 + non_reg_growth_rate)
+    ws.new_nonreg_bal *= (1 + pot_rate)
     # ACB does NOT grow with returns (it's cost basis)
-    return pre > 0 and non_reg_growth_rate != 0
+    return pre > 0 and pot_rate != 0
 
 @rule('emergency_reserve_growth')
 def apply_emergency_reserve_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:

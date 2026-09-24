@@ -569,15 +569,22 @@ def apply_sm_interest(ws: YearWorkingState, ctx: RuleContext) -> bool:
 
 @rule('sm_investment_growth')
 def apply_sm_investment_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:
-    """Grow the SM (readvanced) investment at the same after-tax rate as
-    the plain non-reg account (#576: it is non-registered/taxable by
-    construction). Depends on ``non_reg_growth`` (the rate) and
-    ``sm_readvance`` (the balance).
+    """Grow the SM (readvanced) investment at the shared DP#27 taxable
+    after-tax rate (#576: it is non-registered/taxable by construction).
+    Depends on ``non_reg_growth`` (the rate) and ``sm_readvance`` (the
+    balance).
+
+    Issue #291: the sleeve reads ``ws.taxable_after_tax_rate`` -- the UNSHIFTED
+    shared rate -- and deliberately does not inherit the non_reg account's
+    declared ``mer`` or ``expected_return``. The SM sleeve is not a declared
+    contract account (it opens at 0 and is funded only by readvances), so
+    charging it another account's fee would invent a fee on money that never
+    declared one.
     """
     if ctx.use_readvanceable:
         pre = ws.new_sm_investment
-        ws.new_sm_investment *= (1 + ws.non_reg_growth_rate)
-        return pre > 0 and ws.non_reg_growth_rate != 0
+        ws.new_sm_investment *= (1 + ws.taxable_after_tax_rate)
+        return pre > 0 and ws.taxable_after_tax_rate != 0
     return False
 
 @rule('margin_heloc_interest')

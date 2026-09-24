@@ -68,6 +68,11 @@ def _make_state(
     )
 
 
+# Issue #290: compute_net_benefit needs the household's tax context to price
+# the terminal registered balance (fabricated, as every fixture here).
+_TAX_2026_QC = {'province': 'quebec', 'start_year': 2026}
+
+
 def _make_config(
     margin_available=200000,
     mortgage_balance=100000,
@@ -626,36 +631,38 @@ class TestAutoDetection(unittest.TestCase):
         # (attribution check is called internally)
         self.assertGreaterEqual(len(sim._state.jurisdiction_state['canada']['spousal_contribution_years']), 0)
 
-    def test_retirement_module_used_in_net_benefit_with_age(self):
-        """compute_net_benefit uses retirement.py when birth_year is available."""
+    def test_net_benefit_prices_terminal_registered_tax_with_objective_cfg(self):
+        """Issue #290: the terminal registered balance is priced through the
+        estate path (not a birth-year-gated retirement re-projection), with
+        the objective cfg the ranking path builds."""
+        import objective
+        config = _make_config()
+        sim = FamilySimulation(config, STRATEGY_BALANCED, build_rate_path("test", 0.05, 10, 'variable', [0.05]), use_readvanceable=False)
+        results = sim.run()
+        ocfg = objective.objective_cfg(config)
+        self.assertGreater(results[-1].total_rrsp, 0)
+        reg_tax = objective.terminal_registered_tax(results, ocfg)
+        self.assertGreater(reg_tax, 0)
+        self.assertEqual(
+            reg_tax, objective.compute_after_tax_estate(results, ocfg).registered_tax)
+
+    def test_net_benefit_refuses_a_cfg_without_the_tax_year(self):
+        """Issue #290: a cfg that does not declare tax.province / start_year
+        cannot price the terminal registered balance -- it refuses, never
+        assumes 2026 / Quebec."""
         from objective import compute_net_benefit
         config = _make_config()
         sim = FamilySimulation(config, STRATEGY_BALANCED, build_rate_path("test", 0.05, 10, 'variable', [0.05]), use_readvanceable=False)
         results = sim.run()
-        # With birth_year in cfg, retirement module should be used
-        cfg_with_age = {
+        cfg_no_tax = {
             'family': {'members': [{'role': 'primary', 'birth_year': 1990}]},
             'assumptions': {'capital_gains_inclusion': 0.50,
                            'resp_eap_taxable_portion': 0.60,
-                           'resp_eap_tax_rate': 0.15},
+                           'resp_eap_tax_rate': 0.15,
+                           'oas_annual': 8000},
         }
-        net = compute_net_benefit(results, cfg_with_age)
-        self.assertIsNotNone(net)
-
-    def test_retirement_module_not_used_without_age(self):
-        """compute_net_benefit falls back to simplified when no birth_year."""
-        from objective import compute_net_benefit
-        config = _make_config()
-        sim = FamilySimulation(config, STRATEGY_BALANCED, build_rate_path("test", 0.05, 10, 'variable', [0.05]), use_readvanceable=False)
-        results = sim.run()
-        cfg_no_age = {
-            'family': {'members': [{'role': 'primary'}]},  # No birth_year
-            'assumptions': {'capital_gains_inclusion': 0.50,
-                           'resp_eap_taxable_portion': 0.60,
-                           'resp_eap_tax_rate': 0.15},
-        }
-        net = compute_net_benefit(results, cfg_no_age)
-        self.assertIsNotNone(net)
+        with self.assertRaises(ValueError):
+            compute_net_benefit(results, cfg_no_tax)
 
 
 # =============================================================================
@@ -809,11 +816,12 @@ class TestOptimizeUsesACB(unittest.TestCase):
         """compute_net_benefit uses YearResult.non_reg_acb when available."""
         yr1 = YearResult(year=1, total_assets=200000, total_debt=100000,
                           non_reg_balance=150000, non_reg_acb=100000,
-                          total_rrsp=50000, total_tfsa=0, resp_balance=0,
+                          primary_rrsp=50000, total_rrsp=50000, total_tfsa=0, resp_balance=0,
                           rrsp_tax_savings=10000, readvance_tax_savings=0)
         net = compute_net_benefit(
             [yr1],
-            {'assumptions': {'capital_gains_inclusion': 0.50}},
+            {'assumptions': {'capital_gains_inclusion': 0.50},
+             'tax': _TAX_2026_QC},
         )
         # Gains = 150k - 100k = 50k (using ACB, not estimated)
         # With the rough estimate it would be: 150k - sum(contributions) which might differ
@@ -823,14 +831,15 @@ class TestOptimizeUsesACB(unittest.TestCase):
         """Backward compat: works even with old YearResult lacking ACB."""
         yr1 = YearResult(year=1, total_assets=200000, total_debt=100000,
                           non_reg_balance=150000,
-                          total_rrsp=50000, total_tfsa=0, resp_balance=0,
+                          primary_rrsp=50000, total_rrsp=50000, total_tfsa=0, resp_balance=0,
                           rrsp_tax_savings=10000, readvance_tax_savings=0,
                           contributions={'non_reg': 80000})
         # YearResult always has non_reg_acb now, defaulting to 0
         # But compute_net_benefit has a fallback path for when it's 0
         net = compute_net_benefit(
             [yr1],
-            {'assumptions': {'capital_gains_inclusion': 0.50}},
+            {'assumptions': {'capital_gains_inclusion': 0.50},
+             'tax': _TAX_2026_QC},
         )
         self.assertIsNotNone(net)
 
@@ -1274,77 +1283,61 @@ class TestCashFlowIntegration(unittest.TestCase):
 
 
 class TestRetirementDrawdownIntegration(unittest.TestCase):
-    """Verify compute_net_benefit uses retirement module properly."""
-    
-    def test_birth_year_triggers_drawdown(self):
-        """When birth_year present, retirement drawdown replaces simplified calc."""
-        yr1 = YearResult(year=1, total_assets=200000, total_debt=100000,
-                          non_reg_balance=50000, non_reg_acb=30000,
-                          total_rrsp=100000, total_tfsa=50000, resp_balance=0,
-                          rrsp_tax_savings=10000, readvance_tax_savings=0)
-        net = compute_net_benefit(
-            [yr1],
-            {'assumptions': {'capital_gains_inclusion': 0.50},
-             'family': {'members': [
-                 {'role': 'primary', 'birth_year': 1980},
-             ]}},
-        )
-        self.assertIsNotNone(net)
-        # drawdown should produce a finite tax amount
-        self.assertLess(net, 200000)  # Some withdrawal tax deducted
-    
-    def test_no_birth_year_uses_simplified(self):
-        """Without birth_year, simplified 30% withdrawal tax applies."""
-        yr1 = YearResult(year=1, total_assets=200000, total_debt=100000,
-                          non_reg_balance=50000, non_reg_acb=30000,
-                          total_rrsp=100000, total_tfsa=50000, resp_balance=0,
-                          rrsp_tax_savings=10000, readvance_tax_savings=0)
-        net = compute_net_benefit(
-            [yr1],
-            {'assumptions': {'capital_gains_inclusion': 0.50},
-             'family': {'members': [
-                 {'role': 'primary'},  # No birth_year
-             ]}},
-        )
-        self.assertIsNotNone(net)
-    
+    """compute_net_benefit's terminal registered tax (issue #290).
+
+    Pre-#290 these tests exercised a birth-year-gated retirement re-projection
+    whose sum read a key its rows never carried, so its RRSP tax was always 0
+    and the assertions here were vacuous. The leg is now the horizon deemed
+    disposition through the estate path, per owner."""
+
+    _CFG = {'assumptions': {'capital_gains_inclusion': 0.50},
+            'family': {'members': [{'role': 'primary', 'birth_year': 1980}]},
+            'tax': {'province': 'quebec', 'start_year': 2026}}
+
+    def test_registered_balance_is_taxed_at_the_horizon(self):
+        """A positive terminal RRSP pays a positive terminal tax: the same
+        result with the RRSP moved into the TFSA (same total assets) scores
+        higher under net_benefit."""
+        in_rrsp = YearResult(year=1, total_assets=200000, total_debt=100000,
+                             non_reg_balance=50000, non_reg_acb=30000,
+                             primary_rrsp=100000, total_rrsp=100000,
+                             total_tfsa=50000, resp_balance=0,
+                             rrsp_tax_savings=10000, readvance_tax_savings=0)
+        in_tfsa = YearResult(year=1, total_assets=200000, total_debt=100000,
+                             non_reg_balance=50000, non_reg_acb=30000,
+                             total_tfsa=150000, resp_balance=0,
+                             rrsp_tax_savings=10000, readvance_tax_savings=0)
+        self.assertGreater(compute_net_benefit([in_tfsa], self._CFG),
+                           compute_net_benefit([in_rrsp], self._CFG))
+
     def test_drawdown_uses_actual_acb(self):
-        """Retirement drawdown uses tracked ACB for CG tax."""
+        """The non-reg capital-gains leg uses tracked ACB."""
         # High ACB = low CG tax
         yr_high_acb = YearResult(year=1, total_assets=200000, total_debt=100000,
                                   non_reg_balance=100000, non_reg_acb=90000,
-                                  total_rrsp=50000, total_tfsa=50000, resp_balance=0,
+                                  primary_rrsp=50000, total_rrsp=50000,
+                                  total_tfsa=50000, resp_balance=0,
                                   rrsp_tax_savings=10000, readvance_tax_savings=0)
         # Low ACB = high CG tax
         yr_low_acb = YearResult(year=1, total_assets=200000, total_debt=100000,
                                  non_reg_balance=100000, non_reg_acb=10000,
-                                 total_rrsp=50000, total_tfsa=50000, resp_balance=0,
+                                 primary_rrsp=50000, total_rrsp=50000,
+                                 total_tfsa=50000, resp_balance=0,
                                  rrsp_tax_savings=10000, readvance_tax_savings=0)
-        cfg = {'assumptions': {'capital_gains_inclusion': 0.50},
-               'family': {'members': [{'role': 'primary', 'birth_year': 1980}]}}
-        net_high = compute_net_benefit([yr_high_acb], cfg)
-        net_low = compute_net_benefit([yr_low_acb], cfg)
+        net_high = compute_net_benefit([yr_high_acb], self._CFG)
+        net_low = compute_net_benefit([yr_low_acb], self._CFG)
         # High ACB → lower CG tax → higher net benefit
         self.assertGreater(net_high, net_low)
-    
-    def test_oas_clawback_reduces_net_benefit(self):
-        """Large RRSP triggers OAS clawback in retirement, reducing net_benefit."""
-        yr_small = YearResult(year=1, total_assets=500000, total_debt=100000,
-                               non_reg_balance=0, non_reg_acb=0,
-                               total_rrsp=400000, total_tfsa=0, resp_balance=0,
-                               rrsp_tax_savings=50000, readvance_tax_savings=0)
-        yr_large = YearResult(year=1, total_assets=500000, total_debt=100000,
-                               non_reg_balance=0, non_reg_acb=0,
-                               total_rrsp=400000, total_tfsa=0, resp_balance=0,
-                               rrsp_tax_savings=50000, readvance_tax_savings=0)
-        # Same data — just verify drawdown runs and produces reasonable results
-        net = compute_net_benefit(
-            [yr_small],
-            {'assumptions': {'capital_gains_inclusion': 0.50},
-             'family': {'members': [{'role': 'primary', 'birth_year': 1979}]}},
-        )
-        self.assertIsNotNone(net)
-        self.assertLess(net, 500000)  # Some withdrawal tax
+
+    def test_total_rrsp_without_owner_split_refuses(self):
+        """A result carrying only total_rrsp cannot be priced per owner; it
+        refuses rather than pricing the RRSP at $0 (the #290 silent zero)."""
+        yr = YearResult(year=1, total_assets=500000, total_debt=100000,
+                        non_reg_balance=0, non_reg_acb=0,
+                        total_rrsp=400000, total_tfsa=0, resp_balance=0,
+                        rrsp_tax_savings=50000, readvance_tax_savings=0)
+        with self.assertRaises(ValueError):
+            compute_net_benefit([yr], self._CFG)
 
 
 # =============================================================================

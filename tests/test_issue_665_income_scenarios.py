@@ -304,6 +304,44 @@ class TestWinnersByIncomeScenario(unittest.TestCase):
         winners = output_plugins.winners_by_income_scenario(results)
         self.assertFalse(winners[1]["changed_from_base"])
 
+    def test_the_printed_report_says_the_recommendation_changes(self):
+        """The change flag reaches the printed report, not just the dict
+        (issue #665: "the tool must say so, not just rank silently"). Pinned
+        on synthetic rows: engine-driven fixtures stopped flipping their
+        winner when #290 started pricing the terminal RRSP, so no engine test
+        reaches this line incidentally any more."""
+        import contextlib
+        import io
+
+        def _row(sid, label, strategy, net_benefit):
+            return {
+                "income_scenario_id": sid, "income_scenario_label": label,
+                "strategy": strategy, "net_benefit": net_benefit,
+                "deduct_later": False,
+                "solvency": {
+                    "engaged": True, "ruined": False, "first_ruin_year": None,
+                    "first_shortfall_year": None, "shortfall_years": 0,
+                    "runway_months_at_start": 12.0,
+                    "forced_liquidation_gross_by_source": {},
+                    "forced_liquidation_tax": 0.0,
+                    "forced_liquidation_realized_loss": 0.0,
+                    "uncovered_shortfall": 0.0,
+                    "credit_facility_unrepresentable": False,
+                },
+            }
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            output_plugins._print_income_scenario_report([
+                _row("stay", "Stay", "readvance_priority", 500000),
+                _row("stay", "Stay", "no_readvance", 400000),
+                _row("job_loss", "Job loss", "no_readvance", 150000),
+                _row("job_loss", "Job loss", "readvance_priority", 90000),
+            ])
+        out = buf.getvalue()
+        self.assertIn("Recommendation CHANGES under 'Job loss'", out)
+        self.assertIn("no_readvance", out)
+
     def test_single_scenario_has_no_comparison(self):
         results = [
             {"income_scenario_id": "current", "income_scenario_label": "Current income",

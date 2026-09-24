@@ -213,6 +213,7 @@ This is load-bearing, because a false green is load-bearing: someone merges on i
 | `tools/coverage_gate.py` (CI) | add a production file no test touches, **increase** any file's uncovered-line count, or add a `# pragma: no cover` |
 | `.github/workflows/clone-detection.yml` | duplicate logic that *this PR* introduces (dupdelta, warn-only) |
 | `tests/architecture/test_claude_workflow_scripts.py` | add or edit a `.claude/workflows/*.js` that does not compile as an async body, has a non-literal `meta`, lets `phase()` and `meta.phases` drift, or hardcodes a home path (needs `node` on PATH; fails without it) |
+| `tests/test_examples_guard.py` | hand-edit an `examples/**/report.*` instead of running `python tools/examples.py regen` (under Python 3.12), let a report drift from what the engine now produces, drop a required README section, let the README and `meta.json` verdicts disagree, or leave `examples/` matching zero examples (a collection error for the whole suite). See [`examples/README.md`](examples/README.md) |
 
 **When a guard fires, fix the code — do not add an allowlist entry.** The allowlists exist for
 already-triaged exceptions carrying a citation and a mechanism. Growing one to make your build go

@@ -1,7 +1,8 @@
 """Issue #231 slice 1 enforcement: ``YearInputs`` must stay frozen.
 
-The reshape bundles the year step's 56 per-call inputs into ONE object so a
-rule can no longer rebind or replace a field. That guarantee -- rules read
+The reshape bundles the year step's per-call inputs (56 at the time; 55 since
+issue #277 moved the prior year's GIS-countable income into ``SimState``) into
+ONE object so a rule can no longer rebind or replace a field. That guarantee -- rules read
 their inputs and cannot mutate them -- is the *reason* the reshape is an
 improvement, and it is what DP#26's "pure function over explicit state"
 depends on. Nothing else in the suite notices when it evaporates: dropping

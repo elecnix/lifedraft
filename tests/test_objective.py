@@ -26,6 +26,12 @@ from objective import (
 )
 
 
+# Issue #290: net_benefit reads the household's own calendar year (for the OAS
+# fallback and the terminal-year brackets) and refuses a cfg without it, so the
+# net-benefit tests pass the objective cfg's tax block (fabricated).
+_CFG = {'tax': {'province': 'quebec', 'start_year': 2026}}
+
+
 def _make_results(**overrides) -> list:
     """Build a list of YearResult with fabricated data (DP#4)."""
     base = YearResult(total_assets=500000, total_debt=100000,
@@ -71,16 +77,23 @@ class TestObjectiveFunction(unittest.TestCase):
 class TestMaxNetBenefit(unittest.TestCase):
     def test_basic(self):
         results = _make_results()
-        score = MAX_NET_BENEFIT.evaluate(results)
+        score = MAX_NET_BENEFIT.evaluate(results, _CFG)
         # assets(500k) - debt(100k) + rrsp_savings(20k) + sm_savings(5k)
         expected = 500000 - 100000 + 20000 + 5000
         self.assertAlmostEqual(score, expected)
     
     def test_multi_year(self):
         results = _make_multi_year(5)
-        score = MAX_NET_BENEFIT.evaluate(results)
+        score = MAX_NET_BENEFIT.evaluate(results, _CFG)
         self.assertIsInstance(score, (int, float))
         self.assertGreater(score, 0)
+
+
+    def test_no_cfg_refuses_rather_than_assuming_a_year(self):
+        """Issue #290: evaluate(results) with no cfg scores the household with
+        cfg={} -- no year, no province. net_benefit refuses it."""
+        with self.assertRaises(ValueError):
+            MAX_NET_BENEFIT.evaluate(_make_results())
 
 
 class TestMaxTerminalWealth(unittest.TestCase):
@@ -149,7 +162,7 @@ class TestGetObjective(unittest.TestCase):
     
     def test_all_objectives_callable(self):
         for name, obj in OBJECTIVES.items():
-            score = obj.evaluate(_make_results())
+            score = obj.evaluate(_make_results(), _CFG)
             self.assertIsInstance(score, (int, float), f"{name} returned {type(score)}")
 
 

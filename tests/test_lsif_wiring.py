@@ -107,6 +107,7 @@ class TestLSIFNetBenefit:
             year=2036,
             total_assets=500000,
             total_debt=200000,
+            primary_rrsp=300000,
             total_rrsp=300000,
             total_tfsa=100000,
             non_reg_balance=100000,
@@ -133,6 +134,9 @@ class TestLSIFNetBenefit:
                 'resp_eap_taxable_portion': 0.60,
                 'resp_eap_tax_rate': 0.15,
             },
+            # Issue #290: the household's own tax context (fabricated), read by
+            # the registered leg and the LSIF year -- never an assumed 2026.
+            'tax': {'province': 'quebec', 'start_year': 2026},
         }
         if lsif_amount > 0:
             cfg['lsif'] = {
@@ -221,6 +225,7 @@ class TestNoPersonalDataInCode:
                 {'role': 'spouse', 'birth_year': 1956, 'gross_income': 50000},
             ]},
             'assumptions': {},
+            'tax': {'province': 'quebec', 'start_year': 2026},
             'lsif': {'purchase_amount': 5000, 'purchase_year': 2026,
                      'is_quebec_resident': True, 'employment_income': 50000},
         }

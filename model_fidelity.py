@@ -66,7 +66,7 @@ class FidelityContext:
     The resolved config, plus the *objective the run is actually ranking on*.
     The objective matters because several approximations bite only for some
     objectives: ``max_terminal_wealth`` sums balances pre-tax, while
-    ``max_net_benefit`` deducts an (approximate) withdrawal tax. A caveat that
+    ``max_net_benefit`` deducts a terminal tax on part of it. A caveat that
     fires for both would be wrong for one of them.
 
     ``objective_name`` is None when the surface has no single objective in view
@@ -541,62 +541,81 @@ def _net_benefit_objective_active(ctx: FidelityContext) -> bool:
 
 
 register(Approximation(
-    id='net_benefit_withdrawal_tax_is_estimated',
-    summary=("net_benefit does deduct a future withdrawal tax, but an ESTIMATED one: it "
-             "prices the terminal RRSP against a single assumed retirement scenario, and "
-             "falls back to a flat 30% withdrawal tax whenever the member has no "
-             "birth_year — neither is the deemed disposition that actually occurs"),
+    id='net_benefit_registered_tax_at_horizon',
+    summary=("net_benefit prices the RRSP / RRIF / spousal RRSP / LIF / LIRA balances as "
+             "a deemed disposition AT THE PROJECTION HORIZON, via the same estate path as "
+             "max_after_tax_estate: it treats the horizon as the date of death, so it does "
+             "not model a pre-death drawdown that would spread that income over "
+             "lower-bracket years"),
     biased_figure='net_benefit ranking figure (the default objective, and the console headline)',
     direction=Direction.UNKNOWN,
-    detail=("objective.py:compute_net_benefit() — the RRSP withdrawal tax is computed from "
-             "a projected retirement state when birth_year is present, and from a flat "
-             "30% assumption when it is not (a round-number placeholder, not this "
-             "household's rate). Distinct from 'terminal_wealth_is_pretax': net_benefit "
-             "is not a raw pre-tax sum, it is an approximately-taxed one."),
-    issue='#580',
+    detail=("objective.py:compute_net_benefit() subtracts "
+             "compute_estate(**_estate_call_args(...)).registered_tax -- the ITA "
+             "s.146(8.8)/146.3(6) terminal inclusion, the SAME spelling "
+             "max_after_tax_estate uses (issue #290, DP#9). What remains assumed: "
+             "(1) the horizon is the date of death -- a household that instead draws "
+             "the balance down over retirement would pay less (lower brackets) or more "
+             "(OAS clawback, higher rates later), so the direction is UNKNOWN; "
+             "(2) the terminal-year brackets are cfg tax.province at "
+             "tax.start_year + len(results) - 1; "
+             "(3) the primary's RRSP is taxed on the primary's return and the spouse's "
+             "and spousal RRSP on the spouse's, but the LIF and LIRA balances are "
+             "attributed wholly to the PRIMARY's return (the terminal YearResult carries "
+             "no per-owner locked-in split); "
+             "(4) undeclared estate elections fall back to "
+             "objective._UNDECLARED_ESTATE_DEFAULTS (see "
+             "'estate_elections_not_declared'); "
+             "(5) the FHSA balance is still counted at face value with no terminal tax; "
+             "(6) the leg is the estate's REGISTERED component only: on each terminal "
+             "return the estate runs the registered income through the brackets from "
+             "$0 and stacks the capital gains on top, while net_benefit prices the "
+             "non-reg pot with its own marginal_rate -- so an election that shifts "
+             "registered income between the two returns can move net_benefit while "
+             "the estate's TOTAL tax does not move (see "
+             "'net_benefit_sm_sleeve_cheaper_than_non_reg' for the same basis mismatch). "
+             "Before #290 this leg re-projected a retirement drawdown on hidden "
+             "constants and summed a key its rows never carried, pricing the terminal "
+             "RRSP at $0."),
+    issue='#290',
     applies=_net_benefit_objective_active,
 ))
 
 
-# Issue #672: the sibling caveat above ("an ESTIMATED withdrawal tax") is
-# TRUE but not sharp enough — it reads as ordinary imprecision, when what
-# #661's VOI sweep actually measured is stronger: net_benefit's withdrawal-tax
-# estimate is a PRE-DEATH retirement drawdown that never models a death at
-# all, so the estate election levers move it by EXACTLY $0, not "somewhat
-# imprecisely". This is a distinct, sharper claim ("no sensitivity", not "an
-# approximation") and needs its own entry rather than a reworded one, per
-# DP#32's caveat-vocabulary discipline: "these five inputs have zero effect
-# on the number you are reading" is a different fact than "this number is
-# estimated".
+# Issue #672: #661's VOI sweep measured that the estate election levers moved
+# net_benefit by EXACTLY $0 -- a distinct, sharper claim ("no sensitivity",
+# not "an approximation") that needs its own entry, per DP#32's
+# caveat-vocabulary discipline. #1034 (SM sleeve) and #290 (registered
+# balances) have since routed two pots through the estate path; this entry
+# names the blindness that remains.
 register(Approximation(
     id='net_benefit_omits_estate_elections',
-    summary=("net_benefit prices the SM sleeve's terminal deemed disposition via "
-             "the estate code path (issue #1034), so the spousal-rollover election "
-             "MOVES it for a leveraged household; but it still prices the non-reg "
-             "pot with its own marginal_rate (not the estate's progressive "
-             "stacking + rollover), and it does not price TFSA / principal-residence "
-             "/ life-insurance at death at all -- so those estate elections remain "
-             "inert; rank on max_after_tax_estate to see the FULL estate priced"),
+    summary=("net_benefit prices the registered balances (issue #290) and the SM "
+             "sleeve (issue #1034) via the estate code path, so the spousal-rollover "
+             "election MOVES it; but it still prices the non-reg pot with its own "
+             "marginal_rate (not the estate's progressive stacking + rollover), and it "
+             "does not price TFSA / principal-residence / life-insurance at death at "
+             "all -- so those estate elections remain inert; rank on "
+             "max_after_tax_estate to see the FULL estate priced"),
     biased_figure=('net_benefit ranking figure (the default objective, and the console '
                     'headline) -- its partial blindness to the /estate election levers specifically'),
     direction=Direction.UNKNOWN,
     detail=("#661's VOI sweep (voi.py) measured /estate/default_spousal_rollover at $0 "
              "VOI under max_net_benefit and $84,998 under max_after_tax_estate on a "
-             "reference household -- proof, not inference, that compute_net_benefit() "
-             "(objective.py) never routed through objective.compute_after_tax_estate() / "
-             "countries/canada/estate.py. Issue #1034 closed the largest piece: "
-             "compute_net_benefit() now prices the SM sleeve's terminal deemed "
-             "disposition by calling the same estate code path (DP#9, one spelling) -- "
-             "so the spousal-rollover election (which the SM sleeve mirrors, via the "
-             "non-reg pot's rollover) now moves net_benefit for a leveraged household. "
-             "The blindness that remains is the NON-REG pot: net_benefit still prices "
-             "it with its own marginal_rate (a pre-death retirement drawdown estimate), "
-             "not the estate's progressive stacking + rollover, so the rollover's "
-             "effect on the non-reg pot's deemed disposition still does not move it; and "
-             "TFSA (tax-free), principal-residence designation, and life-insurance death "
-             "benefits are not priced at death at all. Rank on max_after_tax_estate to "
-             "see the full estate priced, or read both: optimize.py prints "
-             "them side by side whenever `estate` is declared (issue #672)."),
+             "reference household, before #1034 and #290 -- proof, not inference, that "
+             "compute_net_benefit() (objective.py) then never routed through "
+             "countries/canada/estate.py. Issue #1034 routed the SM sleeve's terminal "
+             "deemed disposition through the same estate code path (DP#9, one "
+             "spelling), and issue #290 did the same for the registered balances "
+             "(RRSP / spousal RRSP / LIF / LIRA), so the spousal-rollover election and "
+             "the per-account rollover overrides now move net_benefit. The blindness "
+             "that remains is the NON-REG pot: net_benefit still prices it with its own "
+             "marginal_rate, not the estate's progressive stacking + rollover, so the "
+             "rollover's effect on the non-reg pot's deemed disposition does not move "
+             "it; and TFSA (tax-free), principal-residence designation, and "
+             "life-insurance death benefits are not priced at death at all. Rank on "
+             "max_after_tax_estate to see the full estate priced, or read both: "
+             "optimize.py prints them side by side whenever `estate` is declared "
+             "(issue #672)."),
     issue='#672',
     applies=_net_benefit_objective_active,
 ))

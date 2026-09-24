@@ -229,6 +229,22 @@ def _non_reg_after_tax_return_for(year: int, primary_marginal_rate: float,
     taxed only when realized, via the FMV-vs-ACB gain fraction already
     computed in ``plan_drawdown_net``.
 
+    Declared per-account ``mer`` / ``expected_return`` (#291): this function
+    returns the after-tax rate at the GLOBAL gross. The non_reg account's
+    declared ``expected_return`` blend and ``mer`` are applied in
+    ``rules_growth.apply_non_reg_growth`` as the exact linear shift
+    ``atr + (blended_gross - gross) - mer_rate``, which equals evaluating this
+    function at the fee-net, override-blended gross (``after_tax_yield`` does
+    not depend on ``gross_return``). The convention: the MER is taken from the
+    fund's total return BEFORE distributions; the declared yield is the net
+    distribution actually paid; so the fee reduces the deferred
+    capital-appreciation term at its full rate, and ACB is unaffected (DP#19).
+    The shift lives in the rule, not here, because the override blend is
+    balance-weighted on the LIVE pot and this function must never read a
+    balance (#575, #583). The Smith-Manoeuvre sleeve grows at the unshifted
+    rate returned here: it is not a declared account and never inherits the
+    non_reg account's fee or override.
+
     Args:
         year: Simulation year (0-based). Composition is static input data
             today, so this is currently unused; kept for a future
@@ -1174,41 +1190,7 @@ def _adult_income_maps(primary_income, spouse_income, p_loans, s_loans,
     return income_by_role, loan_by_role
 
 
-def _prior_gis_countable(results) -> Optional[float]:
-    """Issue #1020 (S04 Step 1): the prior year's GIS-countable income.
-
-    GIS uses CRA's PRIOR-YEAR income test. The countable base is the prior
-    year's TOTAL net income EXCLUDING OAS (OAS is excluded from the GIS
-    income test by statute -- see ``countries.canada.retirement.gis_benefit``'s
-    ``net_income`` contract: "excluding OAS, but including CPP, RRIF, etc.").
-    That includes EMPLOYMENT income in a pre-retirement / part-retirement
-    prior year (a still-working spouse's salary IS countable), so the base is
-    the prior year's ``retirement_income`` (CPP + OAS + pension + GIS +
-    drawdown + LIF) PLUS ``employment_income``, MINUS OAS and GIS (both
-    excluded from the test). CRA-faithful: the year before 65 is a working
-    year, its salary is countable, and that is exactly why the preservation
-    maneuver must be set up in the 50s.
-
-    Returns None when there is no prior year (year 0), so the
-    ``retirement_income`` rule leaves GIS at its seeded 0.0 (DP#32: absence is
-    a loud no-op, never a silent zero-coercion).
-    """
-    if not results:
-        return None
-    prior = results[-1]
-    # Countable = everything taxable the household received, minus OAS and
-    # GIS (both non-countable for the GIS test). employment_income is the
-    # post-retirement-stop employment sum (0 once fully retired); retirement_
-    # income carries CPP/pension/drawdown/LIF; both together span the whole
-    # net-income base the CRA test sees.
-    return (prior.retirement_income
-            + prior.employment_income
-            - prior.oas_income
-            - getattr(prior, 'gis_income', 0.0))
-
-
-def simulate_year(state, year: int, ctx: SimulationContext,
-                  prior_gis_countable_income=None) -> Tuple[YearResult, 'object']:
+def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult, 'object']:
     """Pure annual step (DP#26/#583): ``(state, year, ctx) -> (YearResult, next_state)``.
 
     This function reads NOTHING off any instance. ``state`` is the fold's
@@ -1218,10 +1200,11 @@ def simulate_year(state, year: int, ctx: SimulationContext,
     Folding this over ``range(projection_years)`` reproduces ``run()``
     exactly; this function never mutates ``state`` or ``ctx``.
 
-    Issue #1020 (S04 Step 1): ``prior_gis_countable_income`` is the prior
-    year's GIS-countable income (retirement income excluding OAS), threaded
-    from the prior ``YearResult`` by the fold. None (year 0 / no prior year)
-    -> the ``retirement_income`` rule leaves GIS at its seeded 0.0 (DP#32).
+    Issue #277: nothing crosses years outside ``state``. The prior year's
+    GIS-countable income (CRA's prior-year GIS income test) is carried in
+    ``state.jurisdiction_state['canada']`` by ``simulate_year_pure`` itself,
+    so every fold of this function -- ``FamilySimulation.run``, the
+    optimizers -- pays GIS the same way.
     """
     from simulation_state import (
         simulate_year_pure, _build_year_inputs, child_savings_for_year,
@@ -1813,9 +1796,6 @@ def simulate_year(state, year: int, ctx: SimulationContext,
             # Issue #899 (part a): each additional accumulating adult's OWN
             # end-of-year RRSP/TFSA (empty for a two-adult household).
             extra_adult_accounts=extra_adult_accounts,
-            # Issue #1020 (S04 Step 1): prior-year GIS-countable income for the
-            # retirement_income rule's gis_benefit call (CRA prior-year test).
-            prior_gis_countable_income=prior_gis_countable_income,
         ),
     )
     # Issue #693 (epic #690 bite 2): surface this year's rental income on the
@@ -2271,7 +2251,8 @@ class FamilySimulation:
 
         Thin delegator (DP#26/#583) over the pure
         ``_non_reg_after_tax_return_for`` -- see that function's docstring
-        for the full rationale.
+        for the full rationale. The non_reg account's declared mer /
+        expected_return are applied downstream in ``apply_non_reg_growth`` (#291).
         """
         return _non_reg_after_tax_return_for(
             year, primary_marginal_rate, gross_return,
@@ -2322,8 +2303,7 @@ class FamilySimulation:
             portfolio=self._portfolio,
         )
 
-    def _simulate_year_step(self, state, year: int,
-                           prior_gis_countable_income=None) -> Tuple[YearResult, 'object']:
+    def _simulate_year_step(self, state, year: int) -> Tuple[YearResult, 'object']:
         """Pure annual step (DP#26/#583): (state, year) → (YearResult, next_state).
 
         Delegates to the module-level ``simulate_year(state, year, ctx)``,
@@ -2336,8 +2316,7 @@ class FamilySimulation:
         method nor ``simulate_year`` mutates ``self`` or the incoming
         ``state``.
         """
-        return simulate_year(state, year, self._build_context(),
-                              prior_gis_countable_income=prior_gis_countable_income)
+        return simulate_year(state, year, self._build_context())
 
     def run(self) -> List[YearResult]:
         """Run the full simulation as a fold over annual steps (DP#26).
@@ -2358,12 +2337,7 @@ class FamilySimulation:
 
         def step(acc, year):
             results, state = acc
-            # Issue #1020 (S04 Step 1): GIS uses the PRIOR year's income test
-            # (CRA). Thread the prior year's GIS-countable income (retirement
-            # income excluding OAS) from the prior YearResult. None for year 0
-            # (no prior year) -- the retirement_income rule leaves GIS at 0.
-            prior_gis = _prior_gis_countable(results)
-            result, next_state = self._simulate_year_step(state, year, prior_gis)
+            result, next_state = self._simulate_year_step(state, year)
             results.append(result)
             return results, next_state
 
@@ -3019,10 +2993,6 @@ class FamilySimulation:
                     # Issue #899 (part a): each additional accumulating adult's OWN
                     # end-of-year RRSP/TFSA (empty for a two-adult household).
                     extra_adult_accounts=extra_adult_accounts,
-                    # Issue #1020 (S04 Step 1): prior-year GIS-countable income
-                    # for the retirement_income rule's gis_benefit call (CRA
-                    # prior-year test). None for year 0 (no prior year).
-                    prior_gis_countable_income=_prior_gis_countable(results),
                     # Issue #137 (finding #2): surface the year-0 deployment-lag
                     # carry cost on this per-year step's result, mirroring the yearly
                     # path (simulate_year's `deployment_lag_cost=ctx

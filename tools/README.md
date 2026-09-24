@@ -6,6 +6,11 @@
   test-duration profiler + per-test runtime regression gate.
 - [`mutation_guard.py`](#mutation_guardpy--curated-fast-mutation-guard-for-dp11dp18) — curated,
   fast mutation guard for DP#11/DP#18.
+- [`examples.py`](#examplespy--runnable-research-backed-examples) — regenerates and
+  checks the runnable research-backed examples in `examples/` (issue #300).
+- [`concurrent_optimize_repro.py`](#concurrent_optimize_repropy--reproduce-a-concurrent-optimizepy-hang-292) —
+  starts N `optimize.py` runs at once and records where any stalled process is blocked
+  (#292).
 
 ---
 
@@ -26,6 +31,8 @@ the invariant is made explicit per module:
 |---|---|---|
 | `coverage_gate.py` | `tests/test_coverage_gate.py` | the three gates (A/B/C), `run_gates`, `update_baseline`, the auto-tightening ratchet |
 | `perf_gate.py` | `tests/test_perf_gate.py` | `is_regression` thresholds, `run_gate` flags/ignores regressions, `update_baseline` wholesale replace |
+| `examples.py` | `tests/test_examples_tool.py`, `tests/test_examples_guard.py` | discovery (zero-match, bad slug, stray file), `run_optimize` (hermetic HOME, non-zero exit, silent exit 0), `project_report` (key classification, engine order, strict columns, winner identity, hash), `project_markdown` trim, static checks (files, gitignore, input, meta, README, personal data), byte and cross-version compare, CLI; the guard drives the real `optimize.py` per example |
+| `concurrent_optimize_repro.py` | `tests/test_concurrent_optimize_repro.py` | `/proc/<pid>/stat` parsing, the deepest-first descendant walk, `classify`, and every exit code (0/2/3/4/5/6) driven by stub `--optimize` scripts, including a faulthandler stack in a stalled run's log |
 
 ---
 
@@ -136,7 +143,8 @@ that the code is reachable.**
 
 ## Known caveat: code executed only inside `ProcessPoolExecutor` workers
 
-`voi.py:566` fans simulations out across worker processes. `concurrency = multiprocessing`
+`optimize.py` and `voi.py` fan simulations out across worker processes (through
+`process_pool.map_ordered`, #292). `concurrency = multiprocessing`
 is deliberately **not** enabled, so coverage.py does not record what those workers execute:
 lines reached *only* inside a VOI worker read as uncovered here.
 
@@ -338,6 +346,29 @@ a test that claims to verify an engine behaviour but skips the engine.
 
 ---
 
+# `examples.py` — runnable research-backed examples
+
+```sh
+# regenerate every example's report.json / report.md (Python 3.12 only)
+python tools/examples.py regen
+
+# or just one
+python tools/examples.py regen examples/<source>/<slug>
+
+# what CI runs: static contract + regenerate-and-compare, one pair per example
+python -m pytest -q tests/test_examples_guard.py
+```
+
+`regen` runs the real `optimize.py` in a subprocess (DP#11) with an empty
+`HOME`, projects the ~13 MB `--json` output to a <= 200 KB `report.json`
+(the contract, and the `PROJECTION_VERSION` bump rule, are in the module
+docstring), and copies the engine's `--md` output. The guard calls the same
+`regenerate()` and compares bytes, so a hand-edited report cannot pass. The
+layout, meta.json schema, README sections, verdict grammar and contribution flow
+are documented in [`examples/README.md`](../examples/README.md).
+
+---
+
 # `clone_delivery.py` — clone-detection findings delivery (#1093)
 
 ```sh
@@ -370,3 +401,47 @@ The job stays warn-only: the tool exits nonzero only when it cannot deliver
 (e.g. missing token while a comment is owed), never on findings.
 
 Tests: `tests/test_clone_delivery.py`.
+
+---
+
+# `concurrent_optimize_repro.py` — reproduce a concurrent `optimize.py` hang (#292)
+
+```bash
+# 7 runs at once, each with the engine's default pool width, 20-minute deadline
+python tools/concurrent_optimize_repro.py --runs 7 --wall-clock 1200 --out-dir /tmp/repro
+
+# the nightly CI shape (tests.yml, job concurrency-repro)
+python tools/concurrent_optimize_repro.py --runs 3 --workers 2 --wall-clock 900 --out-dir repro-out
+
+# compare against another checkout (e.g. the tree before a fix)
+python tools/concurrent_optimize_repro.py --runs 7 --wall-clock 1200 --optimize ../old/optimize.py --out-dir /tmp/old
+```
+
+Issue #292 reported several concurrent `optimize.py` runs frozen at 0% CPU for hours.
+This tool turns "a hang is possible" into a recorded observation. It first runs the
+contract once **serially** (`--workers 1`) as a preflight and keeps that `--json` as the
+reference. Then it starts `--runs` copies at once, each with `PYTHONFAULTHANDLER=1` and its
+own log. Every 0.2 s it walks `/proc` to follow each run's process tree, tracking the peak
+child count and the tree's RSS. A run still alive at `--wall-clock` counts as **stalled**.
+For every process in that run's tree, deepest first, the tool records
+`/proc/<pid>/wchan` and `State`, runs `py-spy dump --native` (or prints
+`py-spy not on PATH: Python stacks via faulthandler only`), and sends SIGABRT so that
+faulthandler writes every thread's Python stack into the run's log. It then SIGKILLs
+whatever is left.
+
+| exit | meaning |
+|---|---|
+| 0 | every run finished, its JSON is byte-identical to the serial reference, and each run was seen with at least one child process (its pool engaged) |
+| 2 | at least one run stalled; the report names the logs holding the stacks |
+| 3 | the serial preflight was refused or timed out, so the repro would measure nothing |
+| 4 | a run exited non-zero |
+| 5 | a run's JSON differs from the serial reference (the first differing byte is printed) |
+| 6 | a run never spawned a child process: the pool never engaged, so the repro measured nothing |
+
+The default input is the two-generation trim of the synthetic `schema/example.json`
+(`tests/test_input_contract._two_generation_subset`). `optimize.py` refuses the raw
+example (#901: the extra adults decumulate), so a repro on it would pass after measuring
+nothing. Exit codes 3 and 6 exist to make that failure loud.
+
+`py-spy` needs ptrace rights over the target. On a GitHub-hosted runner it may be refused;
+its refusal is printed in the report, and the faulthandler stacks are still written.

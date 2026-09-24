@@ -2,12 +2,20 @@
 """The jurisdiction-dependent legs of :func:`objective.compute_net_benefit`.
 
 Issue #232: the net-benefit arithmetic lives in ``objective.py`` (the
-``max_net_benefit`` objective's fn), but three of its LEGS price jurisdiction
-programs whose production consumers are exactly that formula: the RRSP
-withdrawal tax (``countries.canada.retirement.project_retirement``), the
-Quebec LSIF tax credits (``countries.canada.lsif_credit``), and the federal
-iZEV / provincial Roulez-vert incentives (``countries.canada.zev_incentive``,
-``countries.canada.provinces.quebec.roulez_vert``).
+``max_net_benefit`` objective's fn), but some of its LEGS price jurisdiction
+programs whose production consumers are exactly that formula: the Quebec LSIF
+tax credits (``countries.canada.lsif_credit``), the federal iZEV / provincial
+Roulez-vert incentives (``countries.canada.zev_incentive``,
+``countries.canada.provinces.quebec.roulez_vert``), and the year-versioned OAS
+fallback (``countries.canada.retirement.get_oas_annual_max``).
+
+Issue #290: the terminal RRSP leg that used to live here (a retirement
+re-projection on hidden constants -- a $60k expense key no contract could set,
+ages from a hardcoded calendar year, a fixed retirement-age rule, one person's
+brackets for the couple's RRSPs -- whose sum read a key the rows never
+carried, so it priced the terminal RRSP at $0) is DELETED (DP#9, no shim). compute_net_benefit now
+prices the registered balances through the estate provider seam, the same
+``compute_estate`` call ``max_after_tax_estate`` makes.
 
 ``objective.py`` is the optimization layer and must stay countries-free
 (DP#25/#732, enforced by ``tests/test_jurisdiction_agnostic.py``), so these
@@ -15,35 +23,47 @@ legs cannot import the jurisdiction modules themselves. Routing them through
 the provider REGISTRY would not help: the static reach-detector
 (``tests/architecture/test_unreached_rule_modules.py``) follows CALLS, and a
 registry lookup is invisible to it -- lsif_credit / zev_incentive /
-roulez_vert / locked_in_account have no other production caller (the last via
-``project_retirement``'s ``LIFFund``), so they would read as DEAD and the
-guard would fire. The #732 precedent (estate) solved that with a real call in
-a reached module; here the reached module IS this file: objective.py imports
+roulez_vert have no other production caller, so they would read as DEAD and
+the guard would fire. The #732 precedent (estate) solved that with a real call
+in a reached module; here the reached module IS this file: objective.py imports
 these pure helpers, the helpers call the jurisdiction programs DIRECTLY, and
 the call chain entry -> objective -> this module -> countries.canada.* is
 fully visible to the detector.
 
 DP#3 (#232): each leg is a pure function -- same inputs -> same float, no
-hidden state. Each is a VERBATIM extraction of the block that used to sit
-inline in compute_net_benefit (optimize.py before #232), so no number moves.
+hidden state. DP#1/DP#13 (#290): the calendar year every leg needs is the
+household's own ``cfg['tax']['start_year']`` (``_tax_start_year``); an absent
+year refuses loudly, it is never assumed.
 """
 
-from config_access import resolve_return_rate
-from tax_calculator import tax_on_income
-from tax_data import default_tax_provider
 from countries.canada.lsif_credit import (
     LSIFPurchase, compute_lsif_credit, lsif_from_config,
 )
 from countries.canada.provinces.quebec.roulez_vert import compute_roulez_vert_rebate
-from countries.canada.retirement import (
-    RetirementState, get_oas_annual_max, project_retirement,
-)
+from countries.canada.retirement import get_oas_annual_max
 from countries.canada.zev_incentive import compute_izev_incentive, zev_purchase_from_dict
 from member_config import find_member_by_role  # data layer (DP#25 #998)
 
+def _tax_start_year(cfg) -> int:
+    """The household's simulation start year, ``cfg['tax']['start_year']``
+    (issue #290, DP#1/DP#13).
+
+    ``objective.objective_cfg`` always writes it; a hand-built cfg without it
+    is refused rather than silently read as a hardcoded current year (the
+    pre-#290 fallback). Explicit membership tests, never
+    ``.get(...) or`` (DP#32)."""
+    if 'tax' not in cfg or 'start_year' not in cfg['tax']:
+        raise ValueError(
+            "net_benefit needs the household's calendar year, "
+            "cfg['tax']['start_year'], and the cfg does not declare it. Build "
+            "the objective cfg with objective.objective_cfg(config); a current "
+            "year will not be assumed (DP#13/DP#32, issue #290).")
+    return cfg['tax']['start_year']
+
+
 # DP#13/DP#20: fallback OAS annual amount used by compute_net_benefit() when
 # the household's config supplies no ``assumptions.oas_annual``. This is a
-# named fallback for ABSENT input only -- the call sites below reach it via a
+# named fallback for ABSENT input only -- the call sites reach it via a
 # membership test (``'oas_annual' in assumptions``), NOT ``x or DEFAULT`` and
 # NOT an eager ``dict.get`` default, so DP#32 is respected: a configured zero
 # stays zero, and the fallback never runs against a supplied value (#248).
@@ -54,101 +74,20 @@ from member_config import find_member_by_role  # data layer (DP#25 #998)
 # every other consumer uses (pension_split_optimizer via #331,
 # simulation_rules, retirement) -- instead of a frozen literal. The relevant
 # year is the household's simulation start year (``cfg['tax']['start_year']``,
-# which run_optimization always writes into the objective cfg); a hand-built
-# config without that block falls back to ``_CURRENT_YEAR``, the same
-# current-year convention compute_net_benefit already uses for its age and
-# LSIF math. For 2026 this reads 8908 (pre-#1029 it was the stale frozen
-# 8500), so optimizer net-benefit numbers MOVE for households omitting
-# ``assumptions.oas_annual`` -- that delta is the intended correctness fix.
-_CURRENT_YEAR = 2026
-
-
+# which objective.objective_cfg always writes). Issue #290: a cfg without that
+# year now REFUSES (``_tax_start_year``) instead of falling back to a
+# hardcoded current year.
 def _default_oas_annual(cfg) -> float:
     """Year-versioned OAS maximum for ABSENT ``assumptions.oas_annual`` (#1029).
 
-    Reads the live government table for the household's simulation start year.
+    Reads the live government table for the household's simulation start year
+    (``_tax_start_year`` -- refuses when the cfg does not declare it, #290).
     Out-of-table years resolve against the nearest registered data year and
     ultimately the most recent published amount (``get_oas_annual_max``'s
     documented DP#13/DP#20 fallback) -- an absent table year becomes a
     published value, never a silent zero (DP#32).
     """
-    start_year = cfg.get('tax', {}).get('start_year')
-    if start_year is None:
-        start_year = _CURRENT_YEAR
-    return get_oas_annual_max(start_year)
-
-
-def rrsp_withdrawal_tax(final, cfg) -> float:
-    """RRSP -> withdrawal tax for the net-benefit objective.
-
-    Auto-includes retirement drawdown analysis when birth_year data is
-    available in cfg, otherwise uses a simplified marginal-rate estimate. The
-    block moved VERBATIM from compute_net_benefit (#232) -- the price of the
-    jurisdiction machinery this leg needs (project_retirement) staying out of
-    objective.py.
-    """
-    total = 0.0
-    if final.total_rrsp > 0:
-        members = cfg.get('family', {}).get('members', [])
-        primary = find_member_by_role(members, 'primary', {})  # #699 seam
-        birth_year = primary.get('birth_year')
-        if birth_year and birth_year > 1900:
-            # Auto-include retirement drawdown analysis (DP#16)
-            current_age = 2026 - birth_year
-            # Standard retirement age: 65, or current+10 if already past 55
-            retirement_age = max(current_age + 10, 65)
-            # DP#19: use actual ACB tracked by simulation, not a rough estimate
-            non_reg_acb = getattr(final, 'non_reg_acb',
-                                   final.non_reg_balance * 0.5)  # Fallback for old results
-            # DP#16/issue #232: Read CPP/OAS from config instead of hardcoding.
-            # Per issue #232: retirement_income=0 was a placeholder. Now compute actual
-            # retirement income from CPP monthly estimate, OAS, pension, and LIF withdrawal.
-            cpp_monthly_estimated = primary.get('cpp_monthly_estimated', 0)
-            cpp_start_age = primary.get('cpp_start_age', 65)
-            oas_start_age = primary.get('oas_start_age', 65)
-            oas_defer_months = primary.get('oas_defer_months', 0)
-            pension_income_annual = primary.get('pension_income_annual', 0)
-            # Compute CPP annual from monthly estimate
-            cpp_annual = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
-            # Compute OAS annual from config or defaults
-            _assumptions = cfg.get('assumptions', {})
-            # dict.get's default is eager; membership defers the fallback (#248)
-            oas_annual = (_assumptions['oas_annual'] if 'oas_annual' in _assumptions
-                          else _default_oas_annual(cfg))
-            # LIF withdrawal from simulation results (issue #230)
-            lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
-            ret_state = RetirementState(
-                rrif_balance=final.total_rrsp,  # RRSP becomes RRIF at retirement
-                tfsa_balance=final.total_tfsa,
-                non_reg_balance=final.non_reg_balance,
-                non_reg_acb=non_reg_acb,
-                age=retirement_age,
-                annual_expenses=cfg.get('assumptions', {}).get('retirement_expenses', 60000),
-                cpp_start_age=cpp_start_age,
-                cpp_annual=cpp_annual,
-                oas_annual=oas_annual,
-                lif_balance=getattr(final, 'lif_balance', 0),
-                lif_jurisdiction=primary.get('lira', {}).get('jurisdiction', 'federal'),
-                lif_birth_year=birth_year,
-            )
-            ret_results = project_retirement(ret_state, investment_return=resolve_return_rate(cfg))
-            total = sum(r.get('tax_owed', 0) for r in ret_results)
-        else:
-            # DP#13/issue #232: retirement_income should come from config.
-            # Compute actual retirement income from CPP + OAS + pension + LIF.
-            brackets = default_tax_provider().get_combined_brackets()
-            cpp_monthly_estimated = primary.get('cpp_monthly_estimated', 0)
-            cpp_annual_income = cpp_monthly_estimated * 12 if cpp_monthly_estimated > 0 else 0
-            _assumptions = cfg.get('assumptions', {})
-            # dict.get's default is eager; membership defers the fallback (#248)
-            oas_annual = (_assumptions['oas_annual'] if 'oas_annual' in _assumptions
-                          else _default_oas_annual(cfg))
-            pension_income_annual = primary.get('pension_income_annual', 0)
-            lif_withdrawal = getattr(final, 'lif_withdrawal', 0)
-            retirement_income = cpp_annual_income + oas_annual + pension_income_annual + lif_withdrawal
-            total = (tax_on_income(retirement_income + final.total_rrsp, brackets)
-                     - tax_on_income(retirement_income, brackets))
-    return total
+    return get_oas_annual_max(_tax_start_year(cfg))
 
 
 def lsif_credit_total(cfg) -> float:
@@ -163,22 +102,28 @@ def lsif_credit_total(cfg) -> float:
     DP#13: birth_year is sourced from config; the placeholder (LSIFPurchase's
     default of 2000) is a clearly-dated stand-in, not a real person's year.
     """
+    # DP#16: no declared LSIF block -> no purchase to price, and no calendar
+    # year is needed (the same absence rule lsif_from_config applies). A
+    # declared block needs the household's own year (#290 -- never 2026).
+    if 'lsif' not in cfg or not cfg['lsif']:
+        return 0.0
+    year = _tax_start_year(cfg)
     members = cfg.get('family', {}).get('members', [])
     primary = find_member_by_role(members, 'primary', {})  # #699 seam
     total = 0.0
     lsif_purchase = lsif_from_config(
-        cfg, birth_year=primary.get('birth_year', LSIFPurchase.birth_year), year=2026)
+        cfg, birth_year=primary.get('birth_year', LSIFPurchase.birth_year), year=year)
     if lsif_purchase is not None and lsif_purchase.amount > 0:
-        lsif_result = compute_lsif_credit(lsif_purchase, year=2026)
+        lsif_result = compute_lsif_credit(lsif_purchase, year=year)
         total = lsif_result.federal_credit + lsif_result.quebec_credit
 
     # Also check spouse LSIF eligibility (the below-threshold spouse is the
     # typically eligible one)
     spouse_mem = find_member_by_role(members, 'spouse', {})  # #699 seam
     spouse_lsif_purchase = lsif_from_config(
-        cfg, birth_year=spouse_mem.get('birth_year', LSIFPurchase.birth_year), year=2026)
+        cfg, birth_year=spouse_mem.get('birth_year', LSIFPurchase.birth_year), year=year)
     if spouse_lsif_purchase is not None and spouse_lsif_purchase.amount > 0:
-        spouse_lsif_result = compute_lsif_credit(spouse_lsif_purchase, year=2026)
+        spouse_lsif_result = compute_lsif_credit(spouse_lsif_purchase, year=year)
         total += spouse_lsif_result.federal_credit + spouse_lsif_result.quebec_credit
     return total
 
