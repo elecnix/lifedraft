@@ -35,10 +35,13 @@ class TestCPP2YearVersioned(unittest.TestCase):
         self.assertEqual(data.cpp2_rate, 0)
 
     def test_federal_2026_cpp2_max_pensionable(self):
-        """2026 federal data has CPP2 YAMPE = $81,900 (CRA 2026)."""
+        """2026 federal data has CPP2 YAMPE = $85,000 (CRA 2026, CPP2 max $416).
+
+        https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/calculating-deductions/making-deductions/second-additional-cpp-contribution-rates-maximums.html
+        (was pinned at $81,900, a figure no CRA page carries; corrected in #289)."""
         provider = TaxDataProvider()
         data = provider.get_year_data(2026, "canada", "federal")
-        self.assertAlmostEqual(data.cpp2_max_pensionable, 81900)
+        self.assertAlmostEqual(data.cpp2_max_pensionable, 85000)
 
     def test_federal_2025_cpp2_max_pensionable(self):
         """2025 federal data has CPP2 YAMPE = $81,200 (CRA 2025)."""
@@ -73,7 +76,7 @@ class TestCPP2YearVersioned(unittest.TestCase):
         """TaxDataProvider has get_cpp2_max_pensionable(year) method."""
         provider = TaxDataProvider()
         cpp2_max = provider.get_cpp2_max_pensionable(2026)
-        self.assertAlmostEqual(cpp2_max, 81900)
+        self.assertAlmostEqual(cpp2_max, 85000)
 
     def test_cpp2_max_pensionable_changes_by_year(self):
         """CPP2 YAMPE changes across years (not a constant)."""
@@ -134,7 +137,7 @@ class TestCPP2InCppSharing(unittest.TestCase):
         """CPP2_MAX_PENSIONABLE_2026 should be marked as deprecated."""
         from countries.canada.cpp_sharing import CPP2_MAX_PENSIONABLE_2026
         # Still exists for backward compat, but should be marked deprecated
-        self.assertAlmostEqual(CPP2_MAX_PENSIONABLE_2026, 81900)
+        self.assertAlmostEqual(CPP2_MAX_PENSIONABLE_2026, 85000)
 
     def test_cpp_sharing_input_uses_year_data(self):
         """CPPSharingInput can get CPP2 max from TaxDataProvider."""
@@ -144,7 +147,7 @@ class TestCPP2InCppSharing(unittest.TestCase):
         # instead of using the hardcoded constant
         provider = TaxDataProvider()
         fed_data = provider.get_year_data(2026, "canada", "federal")
-        self.assertAlmostEqual(fed_data.cpp2_max_pensionable, 81900)
+        self.assertAlmostEqual(fed_data.cpp2_max_pensionable, 85000)
 
 
 if __name__ == '__main__':

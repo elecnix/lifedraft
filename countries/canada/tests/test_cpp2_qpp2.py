@@ -909,7 +909,10 @@ class TestCPP1ContributionCalculation(unittest.TestCase):
     def test_qpp1_max_contribution(self):
         """Maximum QPP1 employee contribution uses QPP rate.
 
-        2026: (74,600 - 3,500) × 6.40% = 4,554.40
+        2026: (74,600 - 3,500) × 6.30% = 4,479.30. Retraite Quebec 2026:
+        basic plan 5.3% + first additional plan 1% (the basic rate fell from
+        5.4%; this test pinned 6.40% until #289 corrected the 2026 record).
+        https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
         """
         from countries.canada.cpp_sharing import compute_cpp2_contribution
         result = compute_cpp2_contribution(
@@ -917,7 +920,7 @@ class TestCPP1ContributionCalculation(unittest.TestCase):
             year=2026,
             province="quebec",
         )
-        expected = (CPP_MAX_PENSIONABLE_2026 - CPP_BASIC_EXEMPTION) * 0.0640
+        expected = 4479.30
         self.assertAlmostEqual(result["cpp1_employee"], expected, places=2)
 
     def test_cpp1_below_basic_exemption(self):

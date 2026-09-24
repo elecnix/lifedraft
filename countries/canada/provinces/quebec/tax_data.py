@@ -49,10 +49,21 @@ class QuebecTaxData:
             basic_personal_amount=cls.BASIC_PERSONAL_AMOUNT_2026,
             cpp_max_pensionable=74600,   # YMPE 2026
             cpp_rate=0.0595,
-            cpp2_max_pensionable=81900,  # DP#20: CPP2 YAMPE 2026
+            # DP#20: second earnings ceiling 2026 = $85,000 (CRA 'Second additional
+            # CPP contribution rates and maximums', AYMPE 2026 $85,000, max $416;
+            # Retraite Quebec: 'earnings between $74 600 and $85 000'):
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/calculating-deductions/making-deductions/second-additional-cpp-contribution-rates-maximums.html
+            # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+            cpp2_max_pensionable=85000,
             cpp2_rate=0.04,
             cpp_max_benefit_65=18092,
-            qpp_rate=0.0640,            # DP#52: QPP rate 6.40% (higher than CPP 5.95%)
+            # DP#52: QPP employee rate 2026 = 6.30% -- basic plan 5.3% + first
+            # additional plan 1% (the basic rate fell from 5.4% in 2025). Retraite
+            # Quebec: 'contributing to the basic plan under the QPP at a rate of
+            # 5.3%' / 'to the additional plan at a rate of 1%'; its worked
+            # example is $2,930 on $50,000 = (50,000 - 3,500) x 6.3%:
+            # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+            qpp_rate=0.0630,
             qpp_max_benefit_65=17334,   # DP#52: QPP max benefit at 65 (2026)
             qpp_survivor_flat_rate=6498, # DP#52: QPP survivor flat-rate (annual, 2026)
             oas_annual_max=8908,
