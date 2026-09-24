@@ -52,8 +52,8 @@ def _make_allocations(config):
         'spouse_tfsa': 1000,
         'resp': 0,
         'non_reg': 0,
-        '_primary_income': 130000,
-        '_spouse_income': 50000,
+        '_primary_income': 130000, '_primary_taxable_income': 130000,
+        '_spouse_income': 50000, '_spouse_taxable_income': 50000,
         '_annual_savings': 7000,
     }
 

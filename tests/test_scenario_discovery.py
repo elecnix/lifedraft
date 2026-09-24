@@ -442,7 +442,9 @@ class TestSMOptions:
 # ---------------------------------------------------------------------------
 
 class TestDeductLaterOptions:
-    """[True, False] when bracket_gap > 0, [False] when not."""
+    """[True, False] on a declared-spouse bracket gap, or when the primary's
+    RRSP room exceeds the headroom left in their current bracket (issue
+    #286); [False] otherwise."""
 
     def test_both_when_bracket_gap_positive(self):
         """Primary earns much more than spouse → bracket_gap > 0."""
@@ -450,12 +452,63 @@ class TestDeductLaterOptions:
         assert anchors['deduct_later_options'] == [True, False]
 
     def test_false_only_when_bracket_gap_zero(self):
-        """Same income for both members → bracket_gap ≈ 0."""
+        """Same income for both members → bracket_gap ≈ 0, and (issue #286)
+        the primary's room fits inside the headroom of their current bracket
+        (70k sits in the 58,523-108,680 band: 11,477 of headroom), so a
+        contribution that fills it stays in one bracket."""
         cfg = _base_cfg()
         cfg['family']['members'][0]['gross_income'] = 70000
         cfg['family']['members'][1]['gross_income'] = 70000
+        cfg['family']['members'][0]['rrsp_room_accumulated'] = 10000
         anchors = discover_anchors(cfg)
         assert anchors['deduct_later_options'] == [False]
+
+    # ── Issue #286: the current-bracket headroom criterion ──────────────
+    @staticmethod
+    def _cfg(primary_income, spouse_income, room):
+        cfg = _base_cfg()
+        members = cfg['family']['members']
+        members[0]['gross_income'] = primary_income
+        members[0]['rrsp_room_accumulated'] = room
+        if spouse_income is None:
+            del members[1]
+        else:
+            members[1]['gross_income'] = spouse_income
+            members[1]['rrsp_room_accumulated'] = room
+        return cfg
+
+    def test_same_bracket_couple_room_above_headroom_is_offered(self):
+        """150k/150k: no spousal gap, but 200k of room against 17,755 of
+        headroom (150k - the 132,245 bracket floor) spills across brackets."""
+        anchors = discover_anchors(self._cfg(150000, 150000, 200000))
+        assert anchors['deduct_later_options'] == [True, False]
+
+    def test_same_bracket_couple_room_within_headroom_is_not(self):
+        anchors = discover_anchors(self._cfg(150000, 150000, 10000))
+        assert anchors['deduct_later_options'] == [False]
+
+    def test_single_filer_large_room_is_offered(self):
+        anchors = discover_anchors(self._cfg(150000, None, 200000))
+        assert anchors['deduct_later_options'] == [True, False]
+
+    def test_single_filer_small_room_is_not(self):
+        """An absent spouse is no longer coerced to a 0% rate to trigger the
+        spousal-gap branch: a single filer whose room fits in the current
+        bracket is not offered the stagger."""
+        anchors = discover_anchors(self._cfg(150000, None, 5000))
+        assert anchors['deduct_later_options'] == [False]
+
+    def test_spousal_gap_still_offered(self):
+        anchors = discover_anchors(self._cfg(150000, 40000, 10000))
+        assert anchors['deduct_later_options'] == [True, False]
+
+    def test_undeclared_room_is_swept_not_assumed_zero(self):
+        """No rrsp_room_accumulated on the primary: the headroom test cannot
+        run, so both options are evaluated rather than room read as $0."""
+        cfg = self._cfg(150000, 150000, 10000)
+        del cfg['family']['members'][0]['rrsp_room_accumulated']
+        anchors = discover_anchors(cfg)
+        assert anchors['deduct_later_options'] == [True, False]
 
     def test_false_only_when_spouse_earns_more(self):
         """Spouse earning more than primary → bracket_gap < 0."""

@@ -64,8 +64,8 @@ def _make_allocations(config, year=0):
         'spouse_tfsa': 1000,
         'resp': 0,
         'non_reg': 0,
-        '_primary_income': 130000,
-        '_spouse_income': 50000,
+        '_primary_income': 130000, '_primary_taxable_income': 130000,
+        '_spouse_income': 50000, '_spouse_taxable_income': 50000,
         '_annual_savings': 7000,
     }
 
@@ -163,7 +163,7 @@ class TestSimulateYearPureYearSpecificLimits(unittest.TestCase):
             'primary_rrsp': 0, 'spousal_rrsp': 0, 'spouse_rrsp': 0,
             'primary_tfsa': 0, 'spouse_tfsa': 0,
             'resp': 0, 'non_reg': 0,
-            '_primary_income': 300000, '_spouse_income': 100000,
+            '_primary_income': 300000, '_primary_taxable_income': 300000, '_spouse_income': 100000, '_spouse_taxable_income': 100000,
             '_annual_savings': 0,
         }
         
@@ -230,7 +230,7 @@ class TestSimulateYearPureYearSpecificLimits(unittest.TestCase):
             'primary_rrsp': 0, 'spousal_rrsp': 0, 'spouse_rrsp': 0,
             'primary_tfsa': 5000, 'spouse_tfsa': 3000,
             'resp': 0, 'non_reg': 0,
-            '_primary_income': 130000, '_spouse_income': 50000,
+            '_primary_income': 130000, '_primary_taxable_income': 130000, '_spouse_income': 50000, '_spouse_taxable_income': 50000,
             '_annual_savings': 0,
         }
         
@@ -516,7 +516,7 @@ class TestFrozenBracketsMode(unittest.TestCase):
             'primary_rrsp': 0, 'spousal_rrsp': 0, 'spouse_rrsp': 0,
             'primary_tfsa': 0, 'spouse_tfsa': 0,
             'resp': 0, 'non_reg': 0,
-            '_primary_income': 300000, '_spouse_income': 100000,
+            '_primary_income': 300000, '_primary_taxable_income': 300000, '_spouse_income': 100000, '_spouse_taxable_income': 100000,
             '_annual_savings': 0,
         }
         
@@ -544,7 +544,7 @@ class TestFrozenBracketsMode(unittest.TestCase):
             'primary_rrsp': 0, 'spousal_rrsp': 0, 'spouse_rrsp': 0,
             'primary_tfsa': 5000, 'spouse_tfsa': 3000,
             'resp': 0, 'non_reg': 0,
-            '_primary_income': 130000, '_spouse_income': 50000,
+            '_primary_income': 130000, '_primary_taxable_income': 130000, '_spouse_income': 50000, '_spouse_taxable_income': 50000,
             '_annual_savings': 0,
         }
         

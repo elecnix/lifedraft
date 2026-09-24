@@ -52,12 +52,41 @@
       "anyOf": [{ "$ref": "#/$defs/room" }, { "type": "null" }]
     },
 
+    "rrsp_room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contribution_room", "as_of"],
+      "properties": {
+        "contribution_room": { "$ref": "#/$defs/money",
+          "x-uncertainty": {
+            "resolvability": "document",
+            "plausible_range": [0, 100000],
+            "resolved_by": "CRA My Account > RRSP and TFSA > contribution room. (Also on your latest Notice of Assessment for RRSP.)",
+            "question": "What is this person's actual unused contribution room?"
+          } },
+        "as_of": { "$ref": "#/$defs/date" },
+        "undeducted_contributions": { "$ref": "#/$defs/money",
+          "description": "Issue #286: RRSP contributions this person has already MADE but not yet DEDUCTED (ITA s.146(5); Schedule 7 carry-forward) as of this grant's as_of. Seeds the per-contribution deduction ledger, so the engine claims them in later years like any other carried-forward contribution. Absent = none declared (disclosed as a model-fidelity caveat, never read as $0); an explicit 0 is a checked fact.",
+          "x-uncertainty": {
+            "resolvability": "document",
+            "plausible_range": [0, 100000],
+            "resolved_by": "Notice of Assessment > RRSP deduction limit statement > unused RRSP contributions available to deduct",
+            "question": "What unused RRSP contributions has this person already made but not yet deducted?"
+          } }
+      },
+      "$comment": "The RRSP grant is the shared room shape plus the one RRSP-only fact (#286): contributions already made but not yet deducted. A separate def keeps the leaf kind-scoped -- a tfsa/fhsa/resp grant carrying it fails validation (additionalProperties:false)."
+    },
+
+    "rrsp_room_grant": {
+      "anyOf": [{ "$ref": "#/$defs/rrsp_room" }, { "type": "null" }]
+    },
+
     "person_room": {
       "type": "object",
       "additionalProperties": false,
       "required": ["rrsp", "tfsa", "fhsa", "resp"],
       "properties": {
-        "rrsp": { "$ref": "#/$defs/room_grant" },
+        "rrsp": { "$ref": "#/$defs/rrsp_room_grant" },
         "tfsa": { "$ref": "#/$defs/room_grant" },
         "fhsa": { "$ref": "#/$defs/room_grant" },
         "resp": { "$ref": "#/$defs/room_grant", "description": "RESP contribution room is a lifetime entitlement of the BENEFICIARY (child), shared across every RESP account that names them, not a per-account figure." }

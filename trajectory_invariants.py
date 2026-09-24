@@ -237,6 +237,9 @@ _BALANCE_FIELDS = [
     'lira_balance', 'lif_balance',
     'emergency_reserve_balance',  # issue #679
     'credit_facility_balance',  # issue #689
+    # issue #286: the undeducted RRSP contributions carried forward in the
+    # deduction ledger -- a balance of deductions owed to a later year.
+    'rrsp_deduction_carried_forward',
 ]
 
 _DEBT_FIELDS = ['mortgage_balance', 'heloc_balance', 'total_debt', 'credit_facility_balance']

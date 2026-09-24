@@ -28,40 +28,47 @@ Known approximations affecting this run's headline figures:
   - $0 of declared SPOUSAL RRSP contributions were refused (the contributor's pool was exhausted)
   - $4,045 of contributions declared to the SPOUSE'S OWN RRSP were refused (above the spouse's own room)
   - the refused amounts were NOT redirected -- they entered no account; a plan reading these contributions as made is wrong
+- An RRSP contribution exceeded the deduction that could still reduce that year's tax, so the excess was carried forward undeducted and is claimed in later years at a PROJECTED income and rate -- not refunded in the contribution year -> rrsp_tax_savings (the RRSP refund) in the years after the carry, and any ranking that sums it [unknown] (#286)
+  - year 15: RRSP contributions exceeded the deduction still useful against that year's taxable income; $4,973 was carried forward undeducted (not refunded that year)
+  - largest year-end carry-forward: $10,045
+- RRSP contributions already made but not yet deducted were not declared, so the deduction ledger starts empty: any carried-forward deduction on the Notice of Assessment is missing from the projection -> rrsp_tax_savings (the RRSP refund) in the early years [understates] (#286)
+  - primary: RRSP room is declared but undeducted contributions are not -- the deduction ledger started empty. Declare room.rrsp.undeducted_contributions (Notice of Assessment > RRSP deduction limit statement > unused RRSP contributions available to deduct); 0 is a valid answer
+  - spouse: RRSP room is declared but undeducted contributions are not -- the deduction ledger started empty. Declare room.rrsp.undeducted_contributions (Notice of Assessment > RRSP deduction limit statement > unused RRSP contributions available to deduct); 0 is a valid answer
+- The RRSP refund is the bracket tax the deduction removes from the contributor's taxable income, before non-refundable credits (basic personal amount, etc.): at low income, where credits already bring the tax to zero, the modelled refund is too high -> rrsp_tax_savings (the RRSP refund) for a low-income contributor [overstates] (#286)
 
 ## Best Per Category
 
 | Category | Net Benefit |
 | --- | --- |
-| Fill Registered Room Yes (Readvanceable) Yes (Stagger Years) | $7,542,056 |
-| Fill Registered Room No No | $4,150,334 |
+| Fill Registered Room Yes (Readvanceable) Yes (Stagger Years) | $7,540,737 |
+| Fill Registered Room No No | $4,145,898 |
 
 ## Optimal Refinance Level
 
 | Readvanceable Mortgage | Staggered Deduction | No Refinance | Fill Registered Room | Maximum Refinance (80%) | Best |
 | --- | --- | --- | --- | --- | --- |
-| Yes (Readvanceable) | Yes (Stagger Years) | $0 | $7,542,056 | $0 | Fill Registered Room |
-| No | No | $0 | $4,150,334 | $0 | Fill Registered Room |
+| Yes (Readvanceable) | Yes (Stagger Years) | $0 | $7,540,737 | $0 | Fill Registered Room |
+| No | No | $0 | $4,145,898 | $0 | Fill Registered Room |
 
 ## Top 15 Scenarios
 
 | # | Scenario | Loan-to-Value | Net Benefit | Liquid NW | Assets | Debt | Decumulation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | ? | 80.0% | $7,542,056 | $9,390,178 | $10,136,741 | $746,563 |  |
-| 2 | ? | 80.0% | $7,536,592 | $9,315,051 | $10,061,614 | $746,563 |  |
-| 3 | ? | 80.0% | $7,298,500 | $9,021,705 | $9,768,268 | $746,563 |  |
-| 4 | ? | 80.0% | $7,142,374 | $9,639,445 | $10,386,008 | $746,563 |  |
-| 5 | ? | 80.0% | $7,142,374 | $9,639,445 | $10,386,008 | $746,563 |  |
-| 6 | ? | 80.0% | $7,027,342 | $8,655,180 | $9,417,752 | $762,572 |  |
-| 7 | ? | 80.0% | $7,005,123 | $8,747,737 | $9,510,309 | $762,572 |  |
-| 8 | ? | 80.0% | $6,979,149 | $9,368,286 | $10,114,849 | $746,563 |  |
-| 9 | ? | 80.0% | $6,817,078 | $8,453,828 | $9,200,391 | $746,563 |  |
-| 10 | ? | 80.0% | $6,798,609 | $8,569,924 | $9,316,488 | $746,563 |  |
-| 11 | ? | 80.0% | $6,797,912 | $8,366,151 | $9,128,723 | $762,572 |  |
-| 12 | ? | 80.0% | $6,651,344 | $8,999,111 | $9,761,683 | $762,572 |  |
-| 13 | ? | 80.0% | $6,651,344 | $8,999,111 | $9,761,683 | $762,572 |  |
-| 14 | ? | 80.0% | $6,594,550 | $8,164,607 | $8,911,170 | $746,563 |  |
-| 15 | ? | 80.0% | $6,493,548 | $8,746,247 | $9,508,820 | $762,572 |  |
+| 1 | ? | 80.0% | $7,540,737 | $9,390,178 | $10,136,741 | $746,563 |  |
+| 2 | ? | 80.0% | $7,535,273 | $9,315,051 | $10,061,614 | $746,563 |  |
+| 3 | ? | 80.0% | $7,297,182 | $9,021,705 | $9,768,268 | $746,563 |  |
+| 4 | ? | 80.0% | $7,141,056 | $9,639,445 | $10,386,008 | $746,563 |  |
+| 5 | ? | 80.0% | $7,141,056 | $9,639,445 | $10,386,008 | $746,563 |  |
+| 6 | ? | 80.0% | $7,021,724 | $8,655,180 | $9,417,752 | $762,572 |  |
+| 7 | ? | 80.0% | $6,999,506 | $8,747,737 | $9,510,309 | $762,572 |  |
+| 8 | ? | 80.0% | $6,977,398 | $9,368,286 | $10,114,849 | $746,563 |  |
+| 9 | ? | 80.0% | $6,813,858 | $8,453,828 | $9,200,391 | $746,563 |  |
+| 10 | ? | 80.0% | $6,795,388 | $8,569,924 | $9,316,488 | $746,563 |  |
+| 11 | ? | 80.0% | $6,792,295 | $8,366,151 | $9,128,723 | $762,572 |  |
+| 12 | ? | 80.0% | $6,645,727 | $8,999,111 | $9,761,683 | $762,572 |  |
+| 13 | ? | 80.0% | $6,645,727 | $8,999,111 | $9,761,683 | $762,572 |  |
+| 14 | ? | 80.0% | $6,591,329 | $8,164,607 | $8,911,170 | $746,563 |  |
+| 15 | ? | 80.0% | $6,483,537 | $8,746,247 | $9,508,820 | $762,572 |  |
 
 ## Year-by-Year Breakdown — #1 Scenario: ?
 
@@ -124,20 +131,20 @@ Known approximations affecting this run's headline figures:
 
 | Year | Prim MTR | Spouse MTR | Bracket Gap | RRSP Tax Savings | SM Tax Savings | SM Interest | QC Deduct. Int | QC Carry-Fwd | SM Deduct % | SM Readvanced |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 45.71% | 36.12% | 9.59% | $16,523 | $244 | $1,046 | $3,099 | $0 | 50.95% | $19,195 |
-| 2 | 47.46% | 36.12% | 11.34% | $19,616 | $550 | $2,140 | $3,627 | $0 | 54.18% | $20,077 |
-| 3 | 47.46% | 36.12% | 11.34% | $10,321 | $884 | $3,285 | $4,227 | $0 | 56.69% | $21,000 |
+| 1 | 45.71% | 36.12% | 9.59% | $16,294 | $244 | $1,046 | $3,099 | $0 | 50.95% | $19,195 |
+| 2 | 47.46% | 36.12% | 11.34% | $19,225 | $550 | $2,140 | $3,627 | $0 | 54.18% | $20,077 |
+| 3 | 47.46% | 36.12% | 11.34% | $10,718 | $884 | $3,285 | $4,227 | $0 | 56.69% | $21,000 |
 | 4 | 47.46% | 36.12% | 11.34% | $5,374 | $1,251 | $4,482 | $4,893 | $0 | 58.81% | $21,964 |
 | 5 | 47.46% | 36.12% | 11.34% | $5,402 | $1,647 | $5,734 | $5,615 | $0 | 60.53% | $22,973 |
-| 6 | 47.46% | 36.12% | 11.34% | $5,597 | $2,040 | $7,043 | $6,398 | $0 | 62.06% | $24,029 |
-| 7 | 47.46% | 36.12% | 11.34% | $2,359 | $2,462 | $8,413 | $7,275 | $0 | 63.84% | $25,133 |
-| 8 | 45.71% | 36.12% | 9.59% | $5,088 | $2,936 | $9,846 | $8,198 | $0 | 65.23% | $26,287 |
-| 9 | 45.71% | 36.12% | 9.59% | $5,116 | $3,445 | $11,344 | $9,178 | $0 | 66.44% | $27,495 |
-| 10 | 45.71% | 36.12% | 9.59% | $5,145 | $3,961 | $12,912 | $10,217 | $0 | 67.52% | $28,758 |
-| 11 | 45.71% | 36.12% | 9.59% | $5,175 | $4,373 | $14,551 | $11,317 | $0 | 68.48% | $30,079 |
-| 12 | 45.71% | 36.12% | 9.59% | $5,205 | $4,803 | $16,266 | $12,479 | $0 | 69.35% | $31,461 |
-| 13 | 45.71% | 36.12% | 9.59% | $5,235 | $5,160 | $18,059 | $13,706 | $0 | 70.16% | $32,906 |
-| 14 | 41.12% | 36.12% | 5.00% | $5,266 | $5,525 | $19,935 | $15,001 | $0 | 70.90% | $34,418 |
+| 6 | 47.46% | 36.12% | 11.34% | $5,551 | $2,040 | $7,043 | $6,398 | $0 | 62.06% | $24,029 |
+| 7 | 47.46% | 36.12% | 11.34% | $2,323 | $2,462 | $8,413 | $7,275 | $0 | 63.84% | $25,133 |
+| 8 | 45.71% | 36.12% | 9.59% | $5,006 | $2,936 | $9,846 | $8,198 | $0 | 65.23% | $26,287 |
+| 9 | 45.71% | 36.12% | 9.59% | $5,034 | $3,445 | $11,344 | $9,178 | $0 | 66.44% | $27,495 |
+| 10 | 45.71% | 36.12% | 9.59% | $5,062 | $3,961 | $12,912 | $10,217 | $0 | 67.52% | $28,758 |
+| 11 | 45.71% | 36.12% | 9.59% | $5,091 | $4,373 | $14,551 | $11,317 | $0 | 68.48% | $30,079 |
+| 12 | 45.71% | 36.12% | 9.59% | $5,084 | $4,803 | $16,266 | $12,479 | $0 | 69.35% | $31,461 |
+| 13 | 45.71% | 36.12% | 9.59% | $4,979 | $5,160 | $18,059 | $13,706 | $0 | 70.16% | $32,906 |
+| 14 | 41.12% | 36.12% | 5.00% | $4,960 | $5,525 | $19,935 | $15,001 | $0 | 70.90% | $34,418 |
 | 15 | 25.69% | 36.12% | -10.43% | $916 | $0 | $21,897 | $16,446 | $0 | 71.95% | $35,999 |
 | 16 | 25.69% | 36.12% | -10.43% | $934 | $0 | $23,026 | $17,186 | $0 | 72.43% | $20,727 |
 | 17 | 25.69% | 25.69% | 0.00% | $0 | $0 | $23,026 | $16,993 | $0 | 72.43% | $0 |

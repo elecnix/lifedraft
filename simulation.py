@@ -1616,6 +1616,12 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         'non_reg': alloc.non_reg,
         '_primary_income': primary_income,
         '_spouse_income': spouse_income,
+        # Issue #286: the TAXABLE income (before the RRSP deduction) each
+        # contributor's RRSP deduction is valued and capped against -- the same
+        # base the pre-credit tax above was computed on, so the refund can
+        # never exceed the tax it reduces.
+        '_primary_taxable_income': primary_taxable_income,
+        '_spouse_taxable_income': spouse_taxable_income,
         # Issue #674: RRSP room accrual (simulation_rules.apply_contribution_
         # room) reads THESE, not the taxable totals above -- an EI-kind
         # segment is taxable income but $0 of it is "earned income" under
@@ -2449,6 +2455,25 @@ class FamilySimulation:
                 deductible_non_reg_first=self.config.refinance_advance_deductible_non_reg,
             )
             
+            # Issue #286: the year-0 taxable income (employment + rental/loan
+            # income - s.20(1)(c) interest - CCA) the lump's RRSP deduction is
+            # valued against -- the same helpers, brackets and opening UCC the
+            # regular year-0 step below uses (DP#9: one spelling).
+            lump_brackets = self._get_year_brackets(self.start_year)
+            _lp_loan_inc, _ls_loan_inc, _lp_loan_ded, _ls_loan_ded = _private_loan_interest_for(
+                cfg, self.start_year, primary_member, spouse_member)
+            (_lp_rent_op, _ls_rent_op, _lp_rent_ded, _ls_rent_ded,
+             _lp_rent_cca, _ls_rent_cca, _) = _rental_income_for(
+                cfg, self.start_year, primary_member, spouse_member,
+                state.jurisdiction_state.get('canada', {}).get('rental_ucc', {}))
+            _l_income_by_role, _l_loan_by_role = _adult_income_maps(
+                primary_income, spouse_income,
+                (_lp_loan_inc + _lp_rent_op, _lp_loan_ded + _lp_rent_ded + _lp_rent_cca),
+                (_ls_loan_inc + _ls_rent_op, _ls_loan_ded + _ls_rent_ded + _ls_rent_cca),
+                _extra_adult_specs(cfg, self.start_year, salary_growth, 0, lump_brackets))
+            lump_taxable = _income_tax_by_adult(
+                cfg, _l_income_by_role, _l_loan_by_role, lump_brackets)
+
             # Apply lump sum as year-0 allocation via simulate_year_pure
             lump_allocations = {
                 'primary_rrsp': lump_alloc.primary_rrsp,
@@ -2463,6 +2488,13 @@ class FamilySimulation:
                 'non_reg': lump_alloc.non_reg + self.free_cash,
                 '_primary_income': primary_income,
                 '_spouse_income': spouse_income,
+                # Issue #286: the RRSP deduction's taxable-income base for the
+                # lump's year-0 claim -- the SAME year-0 taxable income the
+                # regular year-0 step taxes (computed just above with the
+                # same helpers). The ledger's same-year cap stops the regular
+                # year-0 step from claiming this headroom a second time.
+                '_primary_taxable_income': lump_taxable['primary']['taxable_income'],
+                '_spouse_taxable_income': lump_taxable['spouse']['taxable_income'],
                 '_primary_earned_income': primary_earned_income,
                 '_spouse_earned_income': spouse_earned_income,
                 '_annual_savings': 0,
@@ -2826,6 +2858,10 @@ class FamilySimulation:
                 'non_reg': accum['non_reg'],
                 '_primary_income': primary_income,
                 '_spouse_income': spouse_income,
+                # Issue #286: the RRSP deduction's taxable-income base (see
+                # simulate_year's identical key).
+                '_primary_taxable_income': primary_taxable_income,
+                '_spouse_taxable_income': spouse_taxable_income,
                 '_primary_earned_income': primary_earned_income,
                 '_spouse_earned_income': spouse_earned_income,
                 '_annual_savings': annual_savings,
