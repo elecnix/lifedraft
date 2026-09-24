@@ -6,6 +6,8 @@
   test-duration profiler + per-test runtime regression gate.
 - [`mutation_guard.py`](#mutation_guardpy--curated-fast-mutation-guard-for-dp11dp18) — curated,
   fast mutation guard for DP#11/DP#18.
+- [`examples.py`](#examplespy--runnable-research-backed-examples) — regenerates and
+  checks the runnable research-backed examples in `examples/` (issue #300).
 
 ---
 
@@ -26,6 +28,7 @@ the invariant is made explicit per module:
 |---|---|---|
 | `coverage_gate.py` | `tests/test_coverage_gate.py` | the three gates (A/B/C), `run_gates`, `update_baseline`, the auto-tightening ratchet |
 | `perf_gate.py` | `tests/test_perf_gate.py` | `is_regression` thresholds, `run_gate` flags/ignores regressions, `update_baseline` wholesale replace |
+| `examples.py` | `tests/test_examples_tool.py`, `tests/test_examples_guard.py` | discovery (zero-match, bad slug, stray file), `run_optimize` (hermetic HOME, non-zero exit, silent exit 0), `project_report` (key classification, engine order, strict columns, winner identity, hash), `project_markdown` trim, static checks (files, gitignore, input, meta, README, personal data), byte and cross-version compare, CLI; the guard drives the real `optimize.py` per example |
 
 ---
 
@@ -335,6 +338,29 @@ curated mutations target. It does NOT catch:
 This guard is a complement to the coverage gate and the DP#18 dead-write test,
 not a replacement. It addresses the specific failure mode DP#11/DP#18 flag:
 a test that claims to verify an engine behaviour but skips the engine.
+
+---
+
+# `examples.py` — runnable research-backed examples
+
+```sh
+# regenerate every example's report.json / report.md (Python 3.12 only)
+python tools/examples.py regen
+
+# or just one
+python tools/examples.py regen examples/<source>/<slug>
+
+# what CI runs: static contract + regenerate-and-compare, one pair per example
+python -m pytest -q tests/test_examples_guard.py
+```
+
+`regen` runs the real `optimize.py` in a subprocess (DP#11) with an empty
+`HOME`, projects the ~13 MB `--json` output to a <= 200 KB `report.json`
+(the contract, and the `PROJECTION_VERSION` bump rule, are in the module
+docstring), and copies the engine's `--md` output. The guard calls the same
+`regenerate()` and compares bytes, so a hand-edited report cannot pass. The
+layout, meta.json schema, README sections, verdict grammar and contribution flow
+are documented in [`examples/README.md`](../examples/README.md).
 
 ---
 
