@@ -44,6 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sweep
 import contract_schema
+from objective import MIN_AFTER_TAX_ESTATE
 
 _SPEND = "assumptions.retirement.spending_target"
 _EXAMPLE_INPUT = os.path.join(
@@ -107,13 +108,12 @@ def _tightened_doc() -> dict:
 
 # ── Canned optimizer output: the separation, deterministically ───────────────
 
-def _candidate(strategy, order_id, score, first_year, shortfall_years,
-               draw_fraction=0.0):
+def _candidate(strategy, order_id, score, first_year, shortfall_years):
     """One ranked result dict the way ``run_optimization`` shapes it."""
     return {
         "strategy": strategy,
         "drawdown_order_id": order_id,
-        "draw_fraction": draw_fraction,
+        "draw_fraction": 0.0,
         "label": None,
         "objective_score": score,
         "net_benefit": score,
@@ -252,7 +252,6 @@ def test_the_anchor_run_uses_the_callers_objective(monkeypatch):
     """DP#22: the frozen plan is the decision the optimizer reaches under the
     objective the caller asked for -- the anchor pass must not silently score
     under a default."""
-    from objective import MIN_AFTER_TAX_ESTATE
     calls = []
     monkeypatch.setattr(sweep, "run_optimization",
                         _fake_optimizer(_PER_SPEND, calls=calls))
