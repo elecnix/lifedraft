@@ -35,20 +35,23 @@ Known approximations affecting this run's headline figures:
   - primary: RRSP room is declared but undeducted contributions are not -- the deduction ledger started empty. Declare room.rrsp.undeducted_contributions (Notice of Assessment > RRSP deduction limit statement > unused RRSP contributions available to deduct); 0 is a valid answer
   - spouse: RRSP room is declared but undeducted contributions are not -- the deduction ledger started empty. Declare room.rrsp.undeducted_contributions (Notice of Assessment > RRSP deduction limit statement > unused RRSP contributions available to deduct); 0 is a valid answer
 - The RRSP refund is the bracket tax the deduction removes from the contributor's taxable income, before non-refundable credits (basic personal amount, etc.): at low income, where credits already bring the tax to zero, the modelled refund is too high -> rrsp_tax_savings (the RRSP refund) for a low-income contributor [overstates] (#286)
+- New RESP contributions are split evenly across all children, including a child past the grant window, instead of being routed to the child who can still earn grants -> RESP balance, CESG/QESI paid, and terminal net worth [unknown] (#295)
+- A family-plan RESP's balance is attributed to its beneficiaries in proportion to each one's contributions and grants -> per-child RESP balance, EAP timing and AIP tax at collapse [unknown] (#295)
+- QESI is paid on each year's contribution only: unused QESI rights are not carried forward, and the 16-17 contribution condition is not applied to QESI -> QESI paid, RESP balance, and terminal net worth [unknown] (#295)
 
 ## Best Per Category
 
 | Category | Net Benefit |
 | --- | --- |
 | Fill Registered Room Yes (Readvanceable) Yes (Stagger Years) | $7,540,737 |
-| Fill Registered Room No No | $4,145,898 |
+| Fill Registered Room No No | $4,144,698 |
 
 ## Optimal Refinance Level
 
 | Readvanceable Mortgage | Staggered Deduction | No Refinance | Fill Registered Room | Maximum Refinance (80%) | Best |
 | --- | --- | --- | --- | --- | --- |
 | Yes (Readvanceable) | Yes (Stagger Years) | $0 | $7,540,737 | $0 | Fill Registered Room |
-| No | No | $0 | $4,145,898 | $0 | Fill Registered Room |
+| No | No | $0 | $4,144,698 | $0 | Fill Registered Room |
 
 ## Top 15 Scenarios
 
@@ -61,14 +64,14 @@ Known approximations affecting this run's headline figures:
 | 5 | ? | 80.0% | $7,141,056 | $9,639,445 | $10,386,008 | $746,563 |  |
 | 6 | ? | 80.0% | $7,021,724 | $8,655,180 | $9,417,752 | $762,572 |  |
 | 7 | ? | 80.0% | $6,999,506 | $8,747,737 | $9,510,309 | $762,572 |  |
-| 8 | ? | 80.0% | $6,977,398 | $9,368,286 | $10,114,849 | $746,563 |  |
+| 8 | ? | 80.0% | $6,953,023 | $9,335,917 | $10,082,480 | $746,563 |  |
 | 9 | ? | 80.0% | $6,813,858 | $8,453,828 | $9,200,391 | $746,563 |  |
 | 10 | ? | 80.0% | $6,795,388 | $8,569,924 | $9,316,488 | $746,563 |  |
 | 11 | ? | 80.0% | $6,792,295 | $8,366,151 | $9,128,723 | $762,572 |  |
 | 12 | ? | 80.0% | $6,645,727 | $8,999,111 | $9,761,683 | $762,572 |  |
 | 13 | ? | 80.0% | $6,645,727 | $8,999,111 | $9,761,683 | $762,572 |  |
 | 14 | ? | 80.0% | $6,591,329 | $8,164,607 | $8,911,170 | $746,563 |  |
-| 15 | ? | 80.0% | $6,483,537 | $8,746,247 | $9,508,820 | $762,572 |  |
+| 15 | ? | 80.0% | $6,471,529 | $8,730,322 | $9,492,895 | $762,572 |  |
 
 ## Year-by-Year Breakdown — #1 Scenario: ?
 
@@ -76,14 +79,14 @@ Known approximations affecting this run's headline figures:
 
 | Year | Total RRSP | RRSP (Primary) | Spousal RRSP | RRSP (Spouse) | Total TFSA | TFSA (Primary) | TFSA (Spouse) | RESP | Non-Reg | Non-Reg ACB | Unreal. Gains | CRI/LIRA | LIF | Total Assets | Total Debt | Net Worth |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | $463,754 | $266,818 | $63,528 | $133,409 | $103,586 | $19,026 | $84,560 | $28,718 | $163,449 | $132,134 | $31,315 | $40,280 | $0 | $905,862 | $529,642 | $376,219 |
-| 2 | $514,507 | $290,795 | $70,026 | $153,686 | $120,523 | $25,627 | $94,896 | $32,239 | $190,036 | $149,095 | $40,941 | $42,697 | $0 | $1,007,977 | $526,588 | $481,389 |
-| 3 | $561,627 | $313,847 | $76,128 | $171,652 | $135,316 | $31,049 | $104,267 | $35,465 | $213,007 | $161,276 | $51,731 | $45,259 | $0 | $1,118,585 | $523,322 | $595,263 |
-| 4 | $608,374 | $337,145 | $82,219 | $189,011 | $149,477 | $36,043 | $113,434 | $38,643 | $234,813 | $171,188 | $63,625 | $47,974 | $0 | $1,236,157 | $520,000 | $716,157 |
-| 5 | $657,943 | $361,838 | $88,677 | $207,428 | $164,478 | $41,338 | $123,140 | $42,018 | $257,837 | $181,152 | $76,685 | $50,853 | $0 | $1,361,549 | $520,000 | $841,549 |
-| 6 | $710,989 | $388,009 | $95,522 | $227,457 | $180,369 | $46,952 | $133,417 | $33,404 | $283,282 | $192,248 | $91,034 | $53,904 | $0 | $1,484,679 | $520,000 | $964,679 |
-| 7 | $758,846 | $412,887 | $101,827 | $244,132 | $193,396 | $51,001 | $142,395 | $23,606 | $303,322 | $196,924 | $106,398 | $57,138 | $0 | $1,596,315 | $520,000 | $1,076,315 |
-| 8 | $816,827 | $442,113 | $107,814 | $266,900 | $211,006 | $57,202 | $153,805 | $12,511 | $332,547 | $209,231 | $123,316 | $60,566 | $0 | $1,733,971 | $520,000 | $1,213,971 |
+| 1 | $463,754 | $266,818 | $63,528 | $133,409 | $103,586 | $19,026 | $84,560 | $22,802 | $163,449 | $132,134 | $31,315 | $40,280 | $0 | $899,945 | $529,642 | $370,303 |
+| 2 | $514,507 | $290,795 | $70,026 | $153,686 | $120,523 | $25,627 | $94,896 | $25,968 | $190,036 | $149,095 | $40,941 | $42,697 | $0 | $1,001,706 | $526,588 | $475,118 |
+| 3 | $561,627 | $313,847 | $76,128 | $171,652 | $135,316 | $31,049 | $104,267 | $28,817 | $213,007 | $161,276 | $51,731 | $45,259 | $0 | $1,111,938 | $523,322 | $588,615 |
+| 4 | $608,374 | $337,145 | $82,219 | $189,011 | $149,477 | $36,043 | $113,434 | $31,597 | $234,813 | $171,188 | $63,625 | $47,974 | $0 | $1,229,110 | $520,000 | $709,110 |
+| 5 | $657,943 | $361,838 | $88,677 | $207,428 | $164,478 | $41,338 | $123,140 | $34,549 | $257,837 | $181,152 | $76,685 | $50,853 | $0 | $1,354,079 | $520,000 | $834,079 |
+| 6 | $710,989 | $388,009 | $95,522 | $227,457 | $180,369 | $46,952 | $133,417 | $27,466 | $283,282 | $192,248 | $91,034 | $53,904 | $0 | $1,478,741 | $520,000 | $958,741 |
+| 7 | $758,846 | $412,887 | $101,827 | $244,132 | $193,396 | $51,001 | $142,395 | $19,410 | $303,322 | $196,924 | $106,398 | $57,138 | $0 | $1,592,119 | $520,000 | $1,072,119 |
+| 8 | $816,827 | $442,113 | $107,814 | $266,900 | $211,006 | $57,202 | $153,805 | $10,287 | $332,547 | $209,231 | $123,316 | $60,566 | $0 | $1,731,747 | $520,000 | $1,211,747 |
 | 9 | $878,292 | $473,085 | $114,154 | $291,053 | $229,657 | $63,774 | $165,883 | $0 | $363,411 | $221,607 | $141,804 | $64,200 | $0 | $1,879,992 | $520,000 | $1,359,992 |
 | 10 | $943,446 | $505,907 | $120,866 | $316,673 | $249,408 | $70,739 | $178,669 | $0 | $396,003 | $234,053 | $161,950 | $68,052 | $0 | $2,048,914 | $520,000 | $1,528,914 |
 | 11 | $1,012,509 | $540,687 | $127,973 | $343,849 | $270,323 | $78,121 | $192,203 | $0 | $430,416 | $246,569 | $183,847 | $72,135 | $0 | $2,228,871 | $520,000 | $1,708,871 |
