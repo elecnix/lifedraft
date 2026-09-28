@@ -487,29 +487,36 @@ def format_sweep_table(axis: str, rows: List[Dict[str, Any]],
         "the contract AS DECLARED, held constant across the sweep. The swept axis alone",
         "moves these facts, so this block is the frontier.",
     ]
-    frozen = rows[0] if rows else None
     # The plan's NAME is carried on every row (``identity=anchor``), so the header
     # can name the frozen candidate even when some -- or every -- swept value
     # never ranked it. That is deliberate, and it is why the header states the
     # COVERAGE: a named candidate with no measurements beside its name would
-    # otherwise read as a plan that was measured. One formatted marker, so the
-    # header cannot be read without the count (issue #386).
+    # otherwise read as a plan that was measured.
+    #
+    # The name comes from the rows' AGREEMENT, not from ``rows[0]``: every row of
+    # an axis takes its identity from one anchor, so this is constant by
+    # construction -- but a caller that concatenated two sweeps (or hand-built
+    # rows) must not see one row's candidate crowned as "the decision FROZEN"
+    # beside a count describing another (DP#32).
     ranked = sum(1 for r in rows if r.get("plan_present"))
     unmeasured = len(rows) - ranked
     status = ("measured" if unmeasured == 0
               else "ABSENT" if ranked == 0
               else "PARTIAL-ABSENT")
     coverage = f"[plan {status}: ranked {ranked} of {len(rows)} swept values]"
-    if frozen is None or frozen.get("plan_strategy") is None:
-        lines.append("  plan candidate: n/a - no named candidate was ranked on the "
-                     "contract as declared")
+    identities = {(r.get("plan_strategy"), r.get("plan_drawdown_order_id"),
+                   r.get("plan_draw_fraction")) for r in rows}
+    identity = identities.pop() if len(identities) == 1 else None
+    if identity is None or identity[0] is None:
+        reason = ("these rows name DIFFERENT frozen candidates" if identities
+                  else "no named candidate was ranked on the contract as declared")
+        lines.append(f"  plan candidate: n/a - {reason}")
     else:
-        fraction = frozen.get("plan_draw_fraction")
-        fraction_txt = (f"{fraction:.0%}" if isinstance(fraction, (int, float))
-                        else str(fraction))
-        lines.append(f"  plan candidate: {frozen.get('plan_strategy')} / drawdown "
-                     f"{frozen.get('plan_drawdown_order_id')} / draw {fraction_txt}"
-                     f"   {coverage}")
+        strategy, order_id, draw_fraction = identity
+        fraction_txt = (f"{draw_fraction:.0%}"
+                        if isinstance(draw_fraction, (int, float)) else str(draw_fraction))
+        lines.append(f"  plan candidate: {strategy} / drawdown {order_id} / "
+                     f"draw {fraction_txt}   {coverage}")
     if unmeasured:
         lines.append("  (a value that did not rank the plan was NOT checked on it; each such")
         lines.append("   row's plan cells read n/a (absent) and its winner is that value's)")

@@ -378,6 +378,23 @@ def test_table_marks_a_PARTIALLY_absent_plan_on_the_header():
     assert "plan ABSENT" not in header
 
 
+def test_table_refuses_to_name_a_plan_when_the_rows_disagree():
+    """Every row of an axis takes its plan identity from one anchor, so the
+    header's name is constant by construction -- but ``format_sweep_table`` is
+    public and can be handed rows from two sweeps. It must not crown one row's
+    candidate as "the decision FROZEN" for rows naming another (review on #386)."""
+    rows = [_row_stub(70000), _row_stub(90000, plan_strategy="another-plan")]
+    header = next(line for line in sweep.format_sweep_table("x", rows).splitlines()
+                  if "plan candidate" in line)
+    assert "n/a" in header
+    assert "DIFFERENT frozen candidates" in header
+    # ... and a mismatch in the drawdown order alone is the same disagreement.
+    rows = [_row_stub(70000), _row_stub(90000, plan_drawdown_order_id="tfsa_first")]
+    header = next(line for line in sweep.format_sweep_table("x", rows).splitlines()
+                  if "plan candidate" in line)
+    assert "DIFFERENT frozen candidates" in header
+
+
 def test_table_reports_full_coverage_without_a_warning_marker():
     rows = [_row_stub(70000), _row_stub(90000)]
     table = sweep.format_sweep_table("x", rows)
