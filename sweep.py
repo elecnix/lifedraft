@@ -483,6 +483,12 @@ def format_sweep_table(axis: str, rows: List[Dict[str, Any]],
         "moves these facts, so this block is the frontier.",
     ]
     frozen = rows[0] if rows else None
+    # The plan's NAME is carried on every row (``identity=anchor``), so the header
+    # can name the frozen candidate even when no swept value ever ranked it. That
+    # is deliberate -- and it is why the absence is stamped ON the header line,
+    # not left to the rows: a named candidate with no measurements beside its name
+    # would otherwise read as a plan that was measured.
+    never_ranked = not any(r.get("plan_present") for r in rows)
     if frozen is None or frozen.get("plan_strategy") is None:
         lines.append("  plan candidate: n/a - no named candidate was ranked on the "
                      "contract as declared")
@@ -491,10 +497,11 @@ def format_sweep_table(axis: str, rows: List[Dict[str, Any]],
         fraction_txt = (f"{fraction:.0%}" if isinstance(fraction, (int, float))
                         else str(fraction))
         lines.append(f"  plan candidate: {frozen.get('plan_strategy')} / drawdown "
-                     f"{frozen.get('plan_drawdown_order_id')} / draw {fraction_txt}")
-        if not any(r.get("plan_present") for r in rows):
-            lines.append("  (that candidate was ranked at NO swept value -- every row's plan is")
-            lines.append("   absent; the winner block below is all this sweep measured)")
+                     f"{frozen.get('plan_drawdown_order_id')} / draw {fraction_txt}"
+                     + ("   *** ABSENT AT EVERY SWEPT VALUE ***" if never_ranked else ""))
+        if never_ranked:
+            lines.append("  (that candidate was not ranked at any swept value, so no row below")
+            lines.append("   measures the plan; the winner block is all this sweep measured)")
     lines.append(f"  {'value':>16} | {'objective':>15} | {'first yr':>13} | "
                  f"{'shortfall yrs':>13} | exhausted")
     lines.append(f"  {'-' * 16}-+-{'-' * 15}-+-{'-' * 13}-+-{'-' * 13}-+----------")

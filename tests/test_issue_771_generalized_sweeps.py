@@ -351,13 +351,16 @@ def test_table_renders_value_objective_shortfall_and_exhausted():
 
 def test_table_names_the_frozen_plan_even_when_no_row_ranked_it():
     """The plan block NAMES the candidate it froze even when every value's
-    ranking lacks it, and says so -- otherwise a plan column of absences reads
-    like a sweep that measured nothing (issue #386)."""
+    ranking lacks it -- and stamps the absence ON the header line, so a named
+    candidate with no measurements beside it cannot read as a measured plan
+    (issue #386; Cite review question on the header)."""
     rows = [_row_stub(70000, plan_present=False),
             _row_stub(90000, plan_present=False)]
     table = sweep.format_sweep_table("x", rows)
-    assert "plan candidate: plan-x" in table
-    assert "ranked at NO swept value" in table
+    header = next(line for line in table.splitlines() if "plan candidate" in line)
+    assert "plan candidate: plan-x" in header
+    assert "ABSENT AT EVERY SWEPT VALUE" in header
+    assert "not ranked at any swept value" in table
 
 
 def test_format_all_reports_when_no_sweeps_were_declared():
