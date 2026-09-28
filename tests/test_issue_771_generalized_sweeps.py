@@ -7,7 +7,7 @@ substitutes nothing" defect this repo exists to kill). Alongside it:
 
 * a declared path (e.g. assumptions.retirement.spending_target) produces one
   optimizer result per value, carrying the objective AND the first-shortfall
-  year (#707/#770);
+  year (#707/#770) -- for BOTH the frozen plan and the value's winner (#386);
 * the three legacy axes are SUGAR over the same resolver (DP#9) -- sweeping the
   alias must be byte-for-byte the same as sweeping the canonical path it names,
   which is the strongest possible statement of "no second spelling."
@@ -108,8 +108,13 @@ def test_every_row_reports_objective_and_first_shortfall_year():
     doc = _couple_doc()
     rows = sweep.run_axis_sweep(doc, "assumptions.retirement.spending_target", [70000, 125000])
     for r in rows:
-        assert r["objective_score"] is not None
-        assert "first_shortfall_year" in r  # present even when None (never dropped)
+        # Both families of facts are present on every row and each is keyed by
+        # the candidate it came from (issue #386) -- never a bare
+        # `first_shortfall_year` that could be read as either one.
+        assert r["winner_objective_score"] is not None
+        assert "winner_first_shortfall_year" in r  # present even when None (never dropped)
+        assert "plan_first_shortfall_year" in r
+        assert "plan_present" in r and "winner_present" in r
 
 
 def test_higher_retirement_spending_lowers_the_objective():
@@ -117,7 +122,7 @@ def test_higher_retirement_spending_lowers_the_objective():
     net spending in retirement cannot RAISE terminal net benefit."""
     doc = _couple_doc()
     rows = sweep.run_axis_sweep(doc, "assumptions.retirement.spending_target", [70000, 125000])
-    assert rows[0]["objective_score"] > rows[1]["objective_score"]
+    assert rows[0]["winner_objective_score"] > rows[1]["winner_objective_score"]
 
 
 # ── DP#9: the legacy axes are sugar over the SAME resolver ───────────────────
@@ -152,16 +157,19 @@ def test_legacy_alias_and_canonical_path_produce_identical_results():
     doc = _couple_doc()
     via_alias = sweep.run_axis_sweep(doc, "investment_return", [0.05])
     via_path = sweep.run_axis_sweep(doc, "assumptions.return_model.rate", [0.05])
-    assert via_alias[0]["objective_score"] == via_path[0]["objective_score"]
+    assert via_alias[0]["winner_objective_score"] == via_path[0]["winner_objective_score"]
+    assert via_alias[0]["plan_objective_score"] == via_path[0]["plan_objective_score"]
 
 
-# ── first_shortfall_year is surfaced verbatim from the winner's summary ──────
+# ── the drawdown facts are surfaced verbatim from the named candidates ───────
 
 def test_first_shortfall_year_is_read_off_the_optimizer_winner(monkeypatch):
     """Prove the shortfall plumbing without depending on the engine actually
-    exhausting: the ranked winner's drawdown_shortfall summary is what a row
-    reports. results[0] is the winner because run_optimization sorts
-    exhausted-below-solvent (#707)."""
+    exhausting: the ranked winner's drawdown_shortfall summary is what a row's
+    ``winner_*`` facts report. results[0] is the winner because run_optimization
+    sorts exhausted-below-solvent (#707). The canned row carries no candidate
+    NAME, so there is nothing nameable to freeze as the plan (issue #386) --
+    ``plan_present`` is False rather than the winner being substituted."""
     doc = _couple_doc()
     canned = [{
         "label": "bankrupt-but-top",
@@ -175,9 +183,11 @@ def test_first_shortfall_year_is_read_off_the_optimizer_winner(monkeypatch):
     }]
     monkeypatch.setattr(sweep, "run_optimization", lambda *a, **k: canned)
     rows = sweep.run_axis_sweep(doc, "assumptions.retirement.spending_target", [90000])
-    assert rows[0]["first_shortfall_year"] == 19
-    assert rows[0]["exhausted"] is True
-    assert rows[0]["objective_score"] == 123.0
+    assert rows[0]["winner_first_shortfall_year"] == 19
+    assert rows[0]["winner_exhausted"] is True
+    assert rows[0]["winner_objective_score"] == 123.0
+    assert rows[0]["winner_present"] is True
+    assert rows[0]["plan_present"] is False
 
 
 # ── run_sweeps orchestration ─────────────────────────────────────────────────
@@ -277,20 +287,52 @@ def test_no_optimizer_results_yields_a_row_with_no_objective(monkeypatch):
     doc = _couple_doc()
     monkeypatch.setattr(sweep, "run_optimization", lambda *a, **k: [])
     rows = sweep.run_axis_sweep(doc, "assumptions.retirement.spending_target", [90000])
-    assert rows[0]["objective_score"] is None
-    assert rows[0]["first_shortfall_year"] is None
+    assert rows[0]["winner_objective_score"] is None
+    assert rows[0]["winner_first_shortfall_year"] is None
+    assert rows[0]["winner_present"] is False
+    assert rows[0]["plan_present"] is False
 
 
 # ── Readable output (acceptance criterion 4) ─────────────────────────────────
 
+def _row_stub(value, **over):
+    """A complete #386 row with every key, so a formatting test exercises the
+    real shape instead of a subset that silently stops testing new fields."""
+    row = {
+        "axis": "x", "value": value,
+        "plan_present": True,
+        "plan_strategy": "plan-x", "plan_drawdown_order_id": "configured",
+        "plan_draw_fraction": 0.0,
+        "plan_objective_score": 1_000_000.0, "plan_label": None,
+        "plan_engaged": True, "plan_exhausted": False,
+        "plan_first_shortfall_year": None, "plan_shortfall_years": 0,
+        "winner_present": True,
+        "winner_strategy": "winner-x", "winner_drawdown_order_id": "configured",
+        "winner_draw_fraction": 0.0,
+        "winner_objective_score": 1_000_000.0, "winner_label": None,
+        "winner_engaged": True, "winner_exhausted": False,
+        "winner_first_shortfall_year": None, "winner_shortfall_years": 0,
+    }
+    row.update(over)
+    return row
+
+
 def _rows_for_format():
     return [
-        {"axis": "x", "value": 70000, "objective_score": 10227699.0, "label": "a",
-         "engaged": True, "exhausted": False, "first_shortfall_year": None, "shortfall_years": 0},
-        {"axis": "x", "value": 125000, "objective_score": 3021459.0, "label": "b",
-         "engaged": True, "exhausted": True, "first_shortfall_year": 19, "shortfall_years": 8},
-        {"axis": "x", "value": 200000, "objective_score": None, "label": None,
-         "engaged": False, "exhausted": False, "first_shortfall_year": None, "shortfall_years": 0},
+        # Present but never engaged a drawdown: "not checked", never a zero.
+        _row_stub(70000, plan_objective_score=10227699.0, plan_engaged=False,
+                  winner_objective_score=10227699.0, winner_engaged=False),
+        _row_stub(125000, plan_objective_score=3021459.0,
+                  plan_exhausted=True, plan_first_shortfall_year=19,
+                  plan_shortfall_years=8,
+                  winner_objective_score=3021459.0, winner_exhausted=True,
+                  winner_first_shortfall_year=12),
+        # The anchored plan was ranked at NO swept value here: the plan block
+        # must read as ABSENT, never as a zero (DP#32).
+        _row_stub(200000, plan_present=False, plan_objective_score=None,
+                  plan_engaged=False, plan_first_shortfall_year=None,
+                  winner_present=False, winner_objective_score=None,
+                  winner_strategy=None, winner_engaged=False),
     ]
 
 
@@ -298,10 +340,24 @@ def test_table_renders_value_objective_shortfall_and_exhausted():
     table = sweep.format_sweep_table("assumptions.retirement.spending_target", _rows_for_format())
     assert "assumptions.retirement.spending_target" in table
     assert "70,000" in table            # grouped dollar value
-    assert "19" in table                # the first-shortfall year
+    assert "19" in table                # the plan's first-shortfall year
     assert "YES" in table               # the exhausted row is flagged
     assert "n/a (no drawdown)" in table  # the un-engaged row is not a silent zero
+    assert "n/a (absent)" in table       # a plan the sweep never ranked is absent, not 0
     assert "n/a" in table               # the None objective is not printed as 0
+    assert "PLAN" in table and "WINNER" in table  # the two families are labelled
+    assert "plan-x" in table and "winner-x" in table
+
+
+def test_table_names_the_frozen_plan_even_when_no_row_ranked_it():
+    """The plan block NAMES the candidate it froze even when every value's
+    ranking lacks it, and says so -- otherwise a plan column of absences reads
+    like a sweep that measured nothing (issue #386)."""
+    rows = [_row_stub(70000, plan_present=False),
+            _row_stub(90000, plan_present=False)]
+    table = sweep.format_sweep_table("x", rows)
+    assert "plan candidate: plan-x" in table
+    assert "ranked at NO swept value" in table
 
 
 def test_format_all_reports_when_no_sweeps_were_declared():
@@ -314,9 +370,7 @@ def test_format_all_joins_every_axis():
 
 
 def test_table_renders_a_non_numeric_swept_value():
-    rows = [{"axis": "x", "value": "high", "objective_score": 1.0, "label": "a",
-             "engaged": True, "exhausted": False, "first_shortfall_year": None,
-             "shortfall_years": 0}]
+    rows = [_row_stub("high")]
     assert "high" in sweep.format_sweep_table("x", rows)
 
 

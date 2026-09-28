@@ -20,6 +20,9 @@ the objective is RESOLVED and THREADED, and that under ``min_after_tax_estate``
 the winner's ``first_shortfall_year`` is monotone non-increasing in spend while
 under the ``max_net_benefit`` default it is not. All figures fabricated,
 role-based ids (DP#4/#15).
+
+Issue #386 renamed the row's shortfall facts: they are the WINNER's, and are now
+spelled ``winner_*`` so nothing can read them as the frozen plan's facts.
 """
 from __future__ import annotations
 
@@ -196,7 +199,11 @@ def _fsfy_rows(monkeypatch, objective):
     spends = [150_000, 250_000, 400_000, 600_000]
     rows = sweep.run_axis_sweep(doc, "assumptions.retirement.spending_target",
                                 spends, objective=objective)
-    return [r["first_shortfall_year"] for r in rows]
+    # #386: the winner's facts are the ``winner_*`` family; the frozen plan's are
+    # ``plan_*``. These tests are about the objective's RANKING, so they read the
+    # winner's column -- the canned row carries no candidate name, so no plan can
+    # be frozen from it at all.
+    return [r["winner_first_shortfall_year"] for r in rows]
 
 
 def test_sweep_under_min_after_tax_estate_is_monotone_non_increasing(monkeypatch):
