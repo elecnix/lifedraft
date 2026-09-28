@@ -83,6 +83,12 @@ def _couple_doc() -> dict:
     return doc
 
 
+def _shipped_example() -> dict:
+    """``examples/lifedraft/minimal-two-adult/input.json`` exactly as declared."""
+    with open(_EXAMPLE_INPUT) as fh:
+        return json.load(fh)
+
+
 def _tightened_doc() -> dict:
     """The shipped example tightened the synthetic way issue #386 reports: no
     employment income, asset balances scaled to 15% (accounts the household does
@@ -338,3 +344,26 @@ def test_the_engine_row_names_the_candidate_each_family_was_read_off():
             for field in ("objective_score", "engaged", "exhausted",
                           "first_shortfall_year", "shortfall_years"):
                 assert f"{family}_{field}" in row
+
+
+def test_the_engine_table_marks_a_PARTIALLY_absent_plan():
+    """A real PARTIAL case, not a canned one: the anchored strategy is only
+    discovered when the after-tax return clears the after-tax cost of the
+    borrowing it uses (DP#6's discovery rule), so a low ``investment_return``
+    sweep ranks the plan at the declared rate and not at the low ones. The table
+    must say so on the header -- a partially measured plan must not read as a
+    measured one."""
+    rows = sweep.run_axis_sweep(_shipped_example(), "investment_return",
+                                [0.01, 0.03, 0.06])
+    ranked = sum(1 for r in rows if r["plan_present"])
+    assert 0 < ranked < len(rows), (
+        "this fixture must exercise the PARTIAL case (the anchored leveraged "
+        "strategy unavailable at the low rates); if a model change made it "
+        "available everywhere, re-pick the fixture rather than let this pass "
+        "vacuously"
+    )
+    header = next(line for line
+                  in sweep.format_sweep_table("investment_return", rows).splitlines()
+                  if "plan candidate" in line)
+    assert "plan PARTIAL-ABSENT" in header
+    assert f"ranked {ranked} of {len(rows)}" in header

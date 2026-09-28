@@ -228,13 +228,18 @@ def _candidate_identity(result: Dict) -> Optional[Tuple[Any, Any, Any]]:
     ``(strategy, drawdown_order_id, draw_fraction)`` -- the three fields
     ``run_optimization`` stamps on every ranked result (the accumulation
     strategy's name, the pass-2 drawdown order's id, and the #735 draw
-    fraction). Returns None for a row that carries no ``strategy`` name at all
-    (a synthetic/older row): such a row cannot be NAMED as the anchored plan,
-    and returning None keeps it from matching an anchor by accident."""
+    fraction).
+
+    The guard is on the row's NAME, not on an optional block, and the identity is
+    built before it is returned: a row with no ``strategy`` name cannot be NAMED
+    as one candidate, and a tuple of Nones would otherwise match another unnamed
+    row by accident. That distinction is also why this is not the shape of the
+    "optional block, then one key" read ``asset_location_optimize
+    ._cross_member_sleeve`` performs (DP#32) -- a blind-rename clone detector
+    paired the two on shape alone before this was made explicit."""
     strategy = result.get("strategy")
-    if strategy is None:
-        return None
-    return (strategy, result.get("drawdown_order_id"), result.get("draw_fraction"))
+    identity = (strategy, result.get("drawdown_order_id"), result.get("draw_fraction"))
+    return identity if strategy is not None else None
 
 
 def _anchor_identity(doc: Dict, objective: Optional[ObjectiveFunction]):
@@ -484,11 +489,17 @@ def format_sweep_table(axis: str, rows: List[Dict[str, Any]],
     ]
     frozen = rows[0] if rows else None
     # The plan's NAME is carried on every row (``identity=anchor``), so the header
-    # can name the frozen candidate even when no swept value ever ranked it. That
-    # is deliberate -- and it is why the absence is stamped ON the header line,
-    # not left to the rows: a named candidate with no measurements beside its name
-    # would otherwise read as a plan that was measured.
-    never_ranked = not any(r.get("plan_present") for r in rows)
+    # can name the frozen candidate even when some -- or every -- swept value
+    # never ranked it. That is deliberate, and it is why the header states the
+    # COVERAGE: a named candidate with no measurements beside its name would
+    # otherwise read as a plan that was measured. One formatted marker, so the
+    # header cannot be read without the count (issue #386).
+    ranked = sum(1 for r in rows if r.get("plan_present"))
+    unmeasured = len(rows) - ranked
+    status = ("measured" if unmeasured == 0
+              else "ABSENT" if ranked == 0
+              else "PARTIAL-ABSENT")
+    coverage = f"[plan {status}: ranked {ranked} of {len(rows)} swept values]"
     if frozen is None or frozen.get("plan_strategy") is None:
         lines.append("  plan candidate: n/a - no named candidate was ranked on the "
                      "contract as declared")
@@ -498,10 +509,10 @@ def format_sweep_table(axis: str, rows: List[Dict[str, Any]],
                         else str(fraction))
         lines.append(f"  plan candidate: {frozen.get('plan_strategy')} / drawdown "
                      f"{frozen.get('plan_drawdown_order_id')} / draw {fraction_txt}"
-                     + ("   *** ABSENT AT EVERY SWEPT VALUE ***" if never_ranked else ""))
-        if never_ranked:
-            lines.append("  (that candidate was not ranked at any swept value, so no row below")
-            lines.append("   measures the plan; the winner block is all this sweep measured)")
+                     f"   {coverage}")
+    if unmeasured:
+        lines.append("  (a value that did not rank the plan was NOT checked on it; each such")
+        lines.append("   row's plan cells read n/a (absent) and its winner is that value's)")
     lines.append(f"  {'value':>16} | {'objective':>15} | {'first yr':>13} | "
                  f"{'shortfall yrs':>13} | exhausted")
     lines.append(f"  {'-' * 16}-+-{'-' * 15}-+-{'-' * 13}-+-{'-' * 13}-+----------")

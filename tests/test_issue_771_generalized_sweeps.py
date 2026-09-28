@@ -351,7 +351,7 @@ def test_table_renders_value_objective_shortfall_and_exhausted():
 
 def test_table_names_the_frozen_plan_even_when_no_row_ranked_it():
     """The plan block NAMES the candidate it froze even when every value's
-    ranking lacks it -- and stamps the absence ON the header line, so a named
+    ranking lacks it -- and states that coverage ON the header line, so a named
     candidate with no measurements beside it cannot read as a measured plan
     (issue #386; Cite review question on the header)."""
     rows = [_row_stub(70000, plan_present=False),
@@ -359,8 +359,32 @@ def test_table_names_the_frozen_plan_even_when_no_row_ranked_it():
     table = sweep.format_sweep_table("x", rows)
     header = next(line for line in table.splitlines() if "plan candidate" in line)
     assert "plan candidate: plan-x" in header
-    assert "ABSENT AT EVERY SWEPT VALUE" in header
-    assert "not ranked at any swept value" in table
+    assert "plan ABSENT" in header
+    assert "ranked 0 of 2" in header
+    assert "NOT checked on it" in table
+
+
+def test_table_marks_a_PARTIALLY_absent_plan_on_the_header():
+    """A plan ranked at some values but not others must not read as a fully
+    measured one either (review on #386): the header carries the count, so a
+    reader never has to reconstruct coverage from the per-row cells."""
+    rows = [_row_stub(70000, plan_present=True),
+            _row_stub(90000, plan_present=False),
+            _row_stub(125000, plan_present=True)]
+    table = sweep.format_sweep_table("x", rows)
+    header = next(line for line in table.splitlines() if "plan candidate" in line)
+    assert "plan PARTIAL-ABSENT" in header
+    assert "ranked 2 of 3" in header
+    assert "plan ABSENT" not in header
+
+
+def test_table_reports_full_coverage_without_a_warning_marker():
+    rows = [_row_stub(70000), _row_stub(90000)]
+    table = sweep.format_sweep_table("x", rows)
+    header = next(line for line in table.splitlines() if "plan candidate" in line)
+    assert "plan measured: ranked 2 of 2 swept values" in header
+    assert "PARTIAL" not in table and "ABSENT" not in table
+    assert "NOT checked on it" not in table
 
 
 def test_format_all_reports_when_no_sweeps_were_declared():
