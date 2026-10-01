@@ -718,7 +718,7 @@ class MemberRetirementData:
     role: str = "primary"             # 'primary' or 'spouse'
     birth_year: int = 1979           # DP#1: store date, not age
     cpp_start_age: int = 65         # 60-70 range
-    cpp_monthly_estimated: float = 0.0  # Estimated CPP benefit at start age
+    cpp_monthly_estimated: float = 0.0  # Monthly CPP at age 65 (base+CPP2); age-adjusted in cpp_from_estimate
     oas_start_age: int = 65         # 65-70 (can defer 0-60 months)
     oas_defer_months: int = 0       # 0 = start at 65, 60 = start at 70
     pension_income_annual: float = 0.0  # Employer pension (DB or DC)
@@ -793,6 +793,10 @@ class MemberRetirementData:
         issue #365: when earnings_history is present and
         cpp_monthly_estimated is 0, a grounded estimate is computed
         from contributory earnings.
+
+        issue #388: store the age-65 monthly only (base + CPP2). Age
+        adjustment for cpp_start_age happens once in cpp_from_estimate,
+        which treats cpp_monthly_estimated as the Statement-at-65 amount.
         """
         earnings_history_raw = data.get('earnings_history', None)
         cpp_monthly = data.get('cpp_monthly_estimated', 0)
@@ -808,12 +812,9 @@ class MemberRetirementData:
             ]
             start_age = data.get('cpp_start_age', 65)
             estimate = compute_benefit_estimate(entries, start_age=start_age)
-            if start_age == 60:
-                cpp_monthly = estimate.age_60_monthly
-            elif start_age == 70:
-                cpp_monthly = estimate.age_70_monthly
-            else:
-                cpp_monthly = estimate.age_65_monthly
+            # Age-65 convention (issue #388): do not pre-apply start-age
+            # factors here; include CPP2 tier so it is not discarded.
+            cpp_monthly = estimate.age_65_monthly + estimate.cpp2_age_65_monthly
 
         return cls(
             role=data.get('role', 'primary'),
