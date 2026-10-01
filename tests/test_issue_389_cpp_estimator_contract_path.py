@@ -149,10 +149,11 @@ class SilentZeroWarned(unittest.TestCase):
         )
 
     def test_younger_earner_without_cpp_does_not_warn(self):
-        """Mid-40s with no CPP source stay silent (intentional omit, DP#32).
+        """Age floor: under 50 with no CPP source stays silent (DP#32).
 
-        Strip incomes so #390 always-on does not invent an estimate — this
-        locks the warning gate's age floor, not the estimator itself.
+        Keep pensionable incomes neutered so always-on (#390) cannot set an
+        estimate — silence must come from the age gate, not from a
+        non-zero estimate. Pair with the age>=50 warning test above.
         """
         doc = _two_generation_subset(_load_example())
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
@@ -160,6 +161,8 @@ class SilentZeroWarned(unittest.TestCase):
         p1.pop("earnings_history", None)
         for _inc in p1.get("incomes", []):
             _inc["kind"] = "other"
+        # Explicit mid-40s (example p1 is ~46 as of 2026-07-12; pin it).
+        p1["birth_date"] = "1980-03-14"
         try:
             with self.assertLogs("contract_people", level="WARNING") as cm:
                 ic.to_internal_config(doc)
@@ -168,8 +171,31 @@ class SilentZeroWarned(unittest.TestCase):
             msgs = []
         self.assertFalse(
             any("cpp_income=0" in msg for msg in msgs),
-            msg=f"mid-career earners must stay silent: {msgs}",
+            msg=f"under-50 with no CPP source must stay silent: {msgs}",
         )
+
+    def test_mid_career_with_incomes_estimate_does_not_warn(self):
+        """#390 always-on: mid-career with employment incomes gets an
+        estimate, so the silent-zero warning must not fire."""
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1.pop("entitlements", None)
+        p1.pop("earnings_history", None)
+        p1["birth_date"] = "1980-03-14"
+        try:
+            with self.assertLogs("contract_people", level="WARNING") as cm:
+                ic.to_internal_config(doc)
+            msgs = cm.output
+        except AssertionError:
+            msgs = []
+        self.assertFalse(
+            any("person 'p1'" in msg and "cpp_income=0" in msg for msg in msgs),
+            msg=f"estimated earner must not warn: {msgs}",
+        )
+        primary = next(
+            m for m in ic.to_internal_config(doc)["family"]["members"]
+            if m["role"] == "primary")
+        self.assertGreater(primary["cpp_monthly_estimated"], 0)
 
     def test_no_warning_for_person_with_estimate(self):
         doc = _doc_with_history()
