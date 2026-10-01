@@ -25,7 +25,8 @@ import math
 from typing import Any, Dict, List, Optional
 
 from contract_errors import ContractAdaptationError
-from countries.canada.hbp_rules import HBP_MAX_WITHDRAWAL
+from countries.canada.hbp_rules import (HBP_MAX_WITHDRAWAL,
+                                        is_first_time_home_buyer)
 
 
 def _map_private_loans(doc: Dict) -> List[Dict[str, Any]]:
@@ -255,6 +256,58 @@ def _map_zev_purchases(doc: Dict) -> List[Dict[str, Any]]:
     return out
 
 
+def _declared_list(mapping: Dict, key: str) -> List[Any]:
+    """The list at ``mapping[key]``, or an EMPTY list when the key is absent.
+
+    DP#32, explicitly: a key that is PRESENT with an empty list is a DECLARED
+    empty list, which is a value -- and a declared non-empty list is a value too.
+    ``mapping.get(key) or []`` would conflate all three with absence (a
+    declared-empty list would read as "nothing declared"), so presence is
+    tested and the value returned verbatim.
+    """
+    if key not in mapping:
+        return []
+    value = mapping[key]
+    return value if isinstance(value, list) else []
+
+
+def _owned_residence_years(person: Dict, as_of_year: int) -> List[int]:
+    """The calendar years a person declared owning a principal residence.
+
+    Issue #357. Expands the declared ``[from, to]`` spans into the year list the
+    FHSA rule already consumes (``FHSAAccount.principal_residence_years``), so
+    eligibility stays DATE arithmetic (DP#28) and the rule keeps one spelling of
+    the lookback. A ``to: null`` span is open-ended, bounded by ``as_of_year``:
+    the engine knows nothing about years the document has not reached, and an
+    open span means "still held at the snapshot".
+    """
+    years: set = set()
+    for span in _declared_list(person, "owned_principal_residence_history"):
+        start = int(str(span["from"])[:4])
+        end_raw = span.get("to")
+        end = as_of_year if end_raw is None else int(str(end_raw)[:4])
+        if end < start:
+            end = start          # a reversed span states one year, not none
+        years.update(range(start, end + 1))
+    return sorted(years)
+
+
+def _spouse_relationship_start_year(person: Dict) -> Optional[int]:
+    """When this person's declared union began, if it does.
+
+    Issue #357: the HBP's "in-home" condition counts a home owned by the
+    PARTNER only when the buyer lived in it DURING the relationship, so the
+    union's start year is part of the eligibility fact. ``None`` when no start
+    is declared -- which the rule treats conservatively (the partner's history
+    counts in full; that can only deny the non-taxable withdrawal, never wrongly
+    grant it).
+    """
+    for rel in _declared_list(person, "relationships"):
+        if rel.get("type") == "spouse_of" and rel.get("from"):
+            return int(str(rel["from"])[:4])
+    return None
+
+
 def _map_first_home_purchases(doc: Dict, child_ids: set,
                               adult_ids: set) -> List[Dict[str, Any]]:
     """Issues #704/#931: parse the ``first_home_purchases[]`` block into the
@@ -300,12 +353,76 @@ def _map_first_home_purchases(doc: Dict, child_ids: set,
                     f"disappear (issue #359; DP#32 -- refused, not overridden). "
                     f"Keep a single entry for this buyer and year."
                 )
+        as_of_year = int(str(doc["as_of"])[:4])
+        people_by_id = {p["id"]: p for p in doc["people"]}
+        buyer_person = people_by_id[buyer]
+        own_years = _owned_residence_years(buyer_person, as_of_year)
+        # Issue #357: the HBP test also counts a home the PARTNER owned and the
+        # buyer lived in during the relationship (ITA s.146.01(1)).
+        partner_years: List[int] = []
+        for rel in _declared_list(buyer_person, "relationships"):
+            if rel.get("type") == "spouse_of":
+                partner = people_by_id.get(rel["person"])
+                if partner is not None:
+                    partner_years = _owned_residence_years(partner, as_of_year)
+        eligible = is_first_time_home_buyer(
+            year, own_years=own_years, partner_years=partner_years,
+            relationship_start_year=_spouse_relationship_start_year(buyer_person))
+        if not eligible:
+            lookback = sorted(set(range(year - 4, year + 1)))
+            raise ContractAdaptationError(
+                f"first_home_purchases declares buyer={buyer!r} buying in {year}, but "
+                f"that person is not a FIRST-TIME home buyer: under ITA s.146.01(1) "
+                f"the Home Buyers' Plan and under ITA s.146.6(1) a tax-free FHSA "
+                f"qualifying withdrawal both require that they did not live in the "
+                f"4-calendar-year lookback {lookback[0]}-{lookback[-1]} in a home "
+                f"they (or their partner, during the relationship) owned. Declared "
+                f"ownership years: buyer {own_years}, partner {partner_years}. The "
+                f"engine would otherwise hand them a non-taxable $60,000 RRSP "
+                f"withdrawal and a tax-free FHSA drain that CRA and Revenu Quebec "
+                f"would refuse (issue #357; DP#32: refused, not silently granted). "
+                f"Model the RRSP withdrawal as an ordinary taxable one instead."
+            )
+
+        as_of_year = int(str(doc["as_of"])[:4])
+        people_by_id = {p["id"]: p for p in doc["people"]}
+        buyer_person = people_by_id[buyer]
+        own_years = _owned_residence_years(buyer_person, as_of_year)
+        # Issue #357: the HBP test also counts a home the PARTNER owned and the
+        # buyer lived in during the relationship (ITA s.146.01(1)).
+        partner_years: List[int] = []
+        for rel in _declared_list(buyer_person, "relationships"):
+            if rel.get("type") == "spouse_of":
+                partner = people_by_id.get(rel["person"])
+                if partner is not None:
+                    partner_years = _owned_residence_years(partner, as_of_year)
+        eligible = is_first_time_home_buyer(
+            year, own_years=own_years, partner_years=partner_years,
+            relationship_start_year=_spouse_relationship_start_year(buyer_person))
+        if not eligible:
+            lookback = sorted(set(range(year - 4, year + 1)))
+            raise ContractAdaptationError(
+                f"first_home_purchases declares buyer={buyer!r} buying in {year}, but "
+                f"that person is not a FIRST-TIME home buyer: under ITA s.146.01(1) "
+                f"the Home Buyers' Plan and under ITA s.146.6(1) a tax-free FHSA "
+                f"qualifying withdrawal both require that they did not live in the "
+                f"4-calendar-year lookback {lookback[0]}-{lookback[-1]} in a home "
+                f"they (or their partner, during the relationship) owned. Declared "
+                f"ownership years: buyer {own_years}, partner {partner_years}. The "
+                f"engine would otherwise hand them a non-taxable $60,000 RRSP "
+                f"withdrawal and a tax-free FHSA drain that CRA and Revenu Quebec "
+                f"would refuse (issue #357; DP#32: refused, not silently granted). "
+                f"Model the RRSP withdrawal as an ordinary taxable one instead."
+            )
+
         mapped = {"buyer": buyer, "year": year}
         # Issue #359: the declared HBP withdrawal rides along ONLY when it is
         # declared -- an absent leaf leaves no key behind, so the fold's own
         # min(RRSP, $60k) default still applies (DP#32: absence is not a value
         # to default here, and "no key" is what lets the pre-#359 behaviour stay
         # byte-identical).
+        if own_years:
+            mapped["prior_residence_years"] = own_years
         if "hbp_amount" in purchase:
             amount = purchase["hbp_amount"]
             # Issue #359 (review finding on this stack): a NON-FINITE amount must

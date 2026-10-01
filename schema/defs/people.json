@@ -6,6 +6,17 @@
 
   "$defs": {
 
+    "residence_period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "$ref": "#/$defs/date", "description": "First calendar year this ownership began." },
+        "to": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "Last calendar year this ownership ended, or null if still held." }
+      },
+      "description": "One span of owned principal-residence years (issue #357)."
+    },
+
     "relationship": {
       "type": "object",
       "additionalProperties": false,
@@ -151,6 +162,10 @@
         "legal_name": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Optional real name for the user's own copy of the document. null in any fixture/example (DP#15: no personal data in the repo)." },
         "birth_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "null = unknown (e.g. a deceased ancestor whose exact DOB was never recorded). Replaces birth_year everywhere (#597); every age-gated rule (RRIF@71, CPP/OAS by month, FHSA 15y window) computes from this, never from a stored age." },
         "room": { "$ref": "#/$defs/person_room", "description": "$defs/person_room is supplied entirely by the Canada overlay (its keys are Canada account-kind names: rrsp/tfsa/fhsa/resp). A jurisdiction with different registered-account vocabulary supplies its own person_room shape." },
+        "owned_principal_residence_history": { "type": "array",
+          "items": { "$ref": "#/$defs/residence_period" },
+          "uniqueItems": true,
+          "description": "Issue #357: OPTIONAL. The calendar-year spans over which this person OWNED a home they used as a PRINCIPAL RESIDENCE (a condo they sold, a house they divorced out of) -- not a currently held property, which is declared in properties[]. This is the fact the first-time-buyer tests need: under ITA s.146.01(1) a buyer may not take the Home Buyers' Plan withdrawal unless, in the 4-calendar-year lookback, they did not live in a home they owned; under ITA s.146.6(1) the same lookback gates a tax-free FHSA qualifying withdrawal. The engine reads this ONLY for a declared first_home_purchases entry for this person, and refuses that purchase rather than granting a tax-free instrument nobody is entitled to. OMIT the key to mean nothing declared -- an ABSENCE, not a disqualification (DP#32): a household that has never owned a home is entitled." },
         "death_date": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "A FACT: non-null only if this person has already died as of the document's as_of. null does not mean 'assumed immortal' — projected mortality for living people is a BELIEF, see assumptions.mortality." },
         "residency": {
           "type": "object",

@@ -455,6 +455,12 @@ def apply_child_first_home_purchases(accounts: list, children: list,
         return accounts
     buyers_this_year = {p['buyer'] for p in first_home_purchases
                         if int(p['year']) == calendar_year}
+    # Issue #357: the buyer's DECLARED owned-residence years (child fold's own
+    # copy; absent unless declared).
+    hbp_years_by_buyer = {p['buyer']: tuple(p['prior_residence_years'])
+                          for p in first_home_purchases
+                          if int(p['year']) == calendar_year
+                          and 'prior_residence_years' in p}
     # Issue #359: each buyer's DECLARED HBP amount, absent unless declared.
     hbp_amount_by_buyer = {p['buyer']: p['hbp_amount']
                            for p in first_home_purchases
@@ -465,13 +471,15 @@ def apply_child_first_home_purchases(accounts: list, children: list,
         child_id = children[i].get('id') if i < len(children) else None
         out.append(_apply_first_home_to_account(
             acc, child_id is not None and child_id in buyers_this_year,
-            calendar_year, hbp_amount_by_buyer.get(child_id)))
+            calendar_year, hbp_amount_by_buyer.get(child_id),
+            hbp_years_by_buyer.get(child_id, ())))
     return out
 
 
 def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
                                  calendar_year: int,
-                                 hbp_amount: Optional[float] = None) -> dict:
+                                 hbp_amount: Optional[float] = None,
+                                 prior_residence_years=()) -> dict:
     """One member's first-home step on a SINGLE account dict (issue #704/#931).
 
     Shared verbatim by the child fold (``apply_child_first_home_purchases``, one
@@ -505,7 +513,17 @@ def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
     new = dict(acc)
     # 1. A purchase FIRING this year opens the FHSA withdrawal + HBP.
     if buys_this_year:
-        fhsa = FHSAAccount(balance=acc['fhsa_balance'], open_year=calendar_year)
+        # Issue #357: the buyer's DECLARED owned-principal-residence years go
+        # into the account, so `qualifying_withdrawal` runs the real s.146.6(1)
+        # first-time-buyer test instead of defaulting to "eligible" because the
+        # history was never passed. `FHSAAccount.is_first_home_buyer` already
+        # implemented this rule and was reached only from tests; the mapper
+        # refuses an ineligible purchase outright, so reaching a non-eligible
+        # withdrawal here means the years arrived without that gate -- and the
+        # correct response is still to withhold the TAX-FREE amount rather than
+        # grant it (a qualifying withdrawal would be refused by CRA).
+        fhsa = FHSAAccount(balance=acc['fhsa_balance'], open_year=calendar_year,
+                           principal_residence_years=list(prior_residence_years))
         fhsa_result = fhsa.qualifying_withdrawal(calendar_year)
         fhsa_out = fhsa_result['amount'] if fhsa_result['eligible'] else 0.0
         # Issue #359: a DECLARED amount is honoured exactly, or refused. Absent
@@ -622,6 +640,14 @@ def apply_adult_first_home_purchases(prior_adult_hbp: dict,
     slot_of = {aid: i for i, aid in enumerate(adult_ids)}
     buyers_this_year = {p['buyer'] for p in first_home_purchases
                         if int(p['year']) == calendar_year and p['buyer'] in slot_of}
+    # Issue #357: the buyer's DECLARED owned-residence years, absent unless
+    # declared (the mapper refuses an ineligible purchase, so a year list here
+    # corroborates eligibility and feeds the FHSA rule).
+    hbp_years_by_buyer = {p['buyer']: tuple(p['prior_residence_years'])
+                          for p in first_home_purchases
+                          if int(p['year']) == calendar_year
+                          and p['buyer'] in slot_of
+                          and 'prior_residence_years' in p}
     # Issue #359: each buyer's DECLARED HBP amount, absent unless declared.
     hbp_amount_by_buyer = {p['buyer']: p['hbp_amount']
                            for p in first_home_purchases
@@ -650,7 +676,8 @@ def apply_adult_first_home_purchases(prior_adult_hbp: dict,
             acc['hbp'] = {k: v for k, v in prior_adult_hbp[aid].items()
                           if k != 'slot'}
         new = _apply_first_home_to_account(
-            acc, buys, calendar_year, hbp_amount_by_buyer.get(aid))
+            acc, buys, calendar_year, hbp_amount_by_buyer.get(aid),
+            hbp_years_by_buyer.get(aid, ()))
         if buys:
             fhsa_balance = new['fhsa_balance']
             fhsa_closed = True
