@@ -391,6 +391,60 @@ class QuebecPlanSelection(unittest.TestCase):
         self.assertEqual(primary_qc["cpp_benefit_source"], "estimated_from_incomes")
 
 
+class ConcurrentPensionableIncomes(unittest.TestCase):
+    """A household can EARN two kinds of pensionable income at once.
+
+    The overlay used to keep the FIRST income it saw for a year and discard the
+    rest (``setdefault``), while the projection path summed -- so one household
+    got two different answers inside a single series, and the discarded income
+    vanished with no trace. That is the AGENTS.md trap ("returning the first
+    match ... silently drops the rest") applied to a government entitlement:
+    employment + self-employment understated the CPP estimate.
+    """
+
+    @staticmethod
+    def _two_incomes():
+        return [
+            {"id": "emp", "kind": "employment", "amount": 35_000,
+             "from": "2018-01-01", "to": None},
+            {"id": "self", "kind": "self_employment", "amount": 25_000,
+             "from": "2018-01-01", "to": None},
+        ]
+
+    def test_two_incomes_in_the_same_year_are_summed_not_dropped(self):
+        entries = build_earnings_for_estimate(
+            incomes=self._two_incomes(), salary_growth=0.0,
+            as_of_year=2026, birth_year=1980, end_age=65)
+        by_year = {e.year: e.employment_income for e in entries}
+        self.assertEqual(by_year[2018], 60_000)
+        # ... and the as_of year, which the projection path fills, is summed too.
+        self.assertEqual(by_year[2026], 60_000)
+
+    def test_the_estimate_rises_when_the_second_income_is_counted(self):
+        """Relational, not a snapshot: the summed series cannot price the same
+        as the dropped one."""
+        both = build_earnings_for_estimate(
+            incomes=self._two_incomes(), salary_growth=0.0,
+            as_of_year=2026, birth_year=1980, end_age=65)
+        one = build_earnings_for_estimate(
+            incomes=self._two_incomes()[:1], salary_growth=0.0,
+            as_of_year=2026, birth_year=1980, end_age=65)
+        est_both = compute_benefit_estimate(both, start_age=65)
+        est_one = compute_benefit_estimate(one, start_age=65)
+        self.assertGreater(est_both.age_65_monthly, est_one.age_65_monthly)
+
+    def test_declared_history_still_wins_over_an_income_derived_year(self):
+        """History precedence is unchanged: a declared figure is never inflated
+        by an income landing on the same year."""
+        entries = build_earnings_for_estimate(
+            earnings_history=[{"year": y, "employment_income": 100_000}
+                              for y in range(2018, 2021)],
+            incomes=self._two_incomes()[:1], salary_growth=0.0,
+            as_of_year=2026, birth_year=1980, end_age=65)
+        by_year = {e.year: e.employment_income for e in entries}
+        self.assertEqual(by_year[2019], 100_000)
+
+
 class BuildEarningsGuards(unittest.TestCase):
     def test_skips_non_digit_to_in_overlay(self):
         entries = build_earnings_for_estimate(
@@ -475,7 +529,7 @@ class MissingResidencyRefuses(unittest.TestCase):
 
 
 class QppMaxBenefitFallback(unittest.TestCase):
-    def test_qpp_year_before_table_uses_earliest_row(self):
+    def test_qpp_year_before_table_falls_through_to_the_cpp_maximum(self):
         from countries.canada.cpp_estimator import _max_benefit_for_year
         # Exact table year.
         self.assertEqual(_max_benefit_for_year(2026, plan="qpp"), 17334)

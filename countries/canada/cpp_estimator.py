@@ -373,6 +373,10 @@ def build_earnings_for_estimate(
     as_of = as_of_date or f"{as_of_year}-12-31"
 
     by_year: dict[int, float] = {}
+    # Years the DECLARED history covers. History wins outright (documented
+    # above); income-derived amounts never add to a year the history already
+    # states, so a declared figure is never inflated.
+    history_years: set[int] = set()
 
     for raw in earnings_history or ():
         year = raw.get("year")
@@ -382,6 +386,7 @@ def build_earnings_for_estimate(
         if income is None:
             continue
         by_year[int(year)] = float(income)
+        history_years.add(int(year))
 
     pensionable = [
         inc for inc in (incomes or ())
@@ -408,7 +413,15 @@ def build_earnings_for_estimate(
             year_start = f"{y}-01-01"
             if end_raw is not None and str(end_raw)[:10] <= year_start:
                 continue
-            by_year.setdefault(y, amount)
+            # Concurrent pensionable incomes in the SAME calendar year are
+            # ADDED, not raced: a household with employment + self-employment
+            # (or two jobs) contributes both, and returning the first match
+            # would silently drop the rest -- the AGENTS.md trap that once cost
+            # a household 40% of its debt. A year the declared history already
+            # states is left alone, so history still wins outright.
+            if y in history_years:
+                continue
+            by_year[y] = by_year.get(y, 0.0) + amount
 
     end_year = birth_year + end_age - 1
 
