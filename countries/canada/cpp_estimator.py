@@ -15,17 +15,25 @@ Design:
   imports from simulation or optimization layers.
 - DP#15: No personal data in defaults. All example data uses round numbers.
 
-The estimator is optional: callers that provide earnings_history get a
-grounded estimate; callers without it continue using the existing
-cpp_monthly_estimated placeholder.
+Callers that supply a contributory earnings series (explicit
+earnings_history and/or incomes projected with salary_growth — issue #390)
+get a grounded estimate; a Service Canada / Retraite Québec Statement
+always replaces it on the contract path.
 
 Algorithm:
     - Compute ratios over a contributory-period span (data span or 40 years).
-    - Missing years in the span count as zero (sparse careers get lower benefit).
+    - Missing years *inside* the span count as zero (sparse careers get lower
+      benefit). Issue #390: when the span must grow to the 40-year minimum,
+      pad BEFORE the first data year — never zero-pad after the last known /
+      projected year (callers extend through age 65 with projected income).
     - General dropout (17%, max 8 years) removes lowest ratio-years.
     - Average ratio × max_benefit_65 → base benefit at 65.
     - CPP2 tier computed in parallel for 2024+ earnings above YMPE.
     - Age factors: 0.6%/month penalty before 65, 0.7%/month bonus after 65.
+
+Quebec (issue #390): ``plan="qpp"`` swaps the age-65 *max benefit* table for
+Retraite Québec year-versioned maxima. YMPE / YAMPE history and the CPP2
+tier remain CPP-table-centric (shared ceilings; boiling-ocean avoided).
 
 References:
     https://www.canada.ca/en/services/benefits/publicpensions/cpp/cpp-benefit.html
@@ -34,7 +42,7 @@ References:
 """
 
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 from countries.canada.retirement import (
     CPP_EARLY_START_PENALTY,
@@ -72,6 +80,17 @@ _HISTORICAL_YMPE: dict = {
     2011: 48300, 2012: 50100, 2013: 51100, 2014: 52500, 2015: 53600,
     2016: 54900, 2017: 55300, 2018: 55900, 2019: 57400, 2020: 58700,
     2021: 61600, 2022: 64900,
+}
+
+# ── QPP max retirement benefit at 65 (issue #390) ────────────────────────────
+# Year-versioned Retraite Québec maxima. Used only when plan="qpp".
+# Source: countries/canada/provinces/quebec/tax_data.py (DP#20 / DP#52).
+# YMPE/YAMPE/CPP2 remain on the CPP tables above (shared ceilings).
+_QPP_MAX_BENEFIT_65: dict = {
+    2023: 15170,
+    2024: 17334,
+    2025: 17334,
+    2026: 17334,
 }
 
 
@@ -127,11 +146,24 @@ def _yampe_for_year(year: int) -> float:
     return _ympe_for_year(year) * 1.14
 
 
-def _max_benefit_for_year(year: int) -> float:
-    """Get max CPP retirement benefit at 65, with fallback."""
+def _max_benefit_for_year(year: int, plan: str = "cpp") -> float:
+    """Get max CPP/QPP retirement benefit at 65, with fallback.
+
+    ``plan="qpp"`` (issue #390) uses Retraite Québec maxima when known;
+    falls back to the latest QPP row, then to CPP if the QPP table is empty.
+    """
+    if plan == "qpp":
+        if year in _QPP_MAX_BENEFIT_65:
+            return _QPP_MAX_BENEFIT_65[year]
+        if _QPP_MAX_BENEFIT_65:
+            max_known = max(_QPP_MAX_BENEFIT_65.keys())
+            if year > max_known:
+                return _QPP_MAX_BENEFIT_65[max_known]
+            min_known = min(_QPP_MAX_BENEFIT_65.keys())
+            return _QPP_MAX_BENEFIT_65[min_known]
+        # Empty QPP table: fall through to CPP rather than invent 0.
     if year in CPP_OAS_BY_YEAR:
         return CPP_OAS_BY_YEAR[year]["cpp_max_benefit_65"]
-    # Future/unknown year: use latest known
     max_known = max(CPP_OAS_BY_YEAR.keys())
     return CPP_OAS_BY_YEAR[max_known]["cpp_max_benefit_65"]
 
@@ -169,26 +201,31 @@ def _age_factor(start_age: int) -> float:
 def compute_benefit_estimate(
     earnings: Sequence[EarningsEntry],
     start_age: int = 65,
+    plan: str = "cpp",
 ) -> CPPBenefitEstimate:
-    """Compute CPP retirement benefit estimates from earnings history.
+    """Compute CPP/QPP retirement benefit estimates from earnings history.
 
-    Pure function (DP#3): same (earnings, start_age) → same result.
+    Pure function (DP#3): same (earnings, start_age, plan) → same result.
 
     Algorithm:
     1. Filter valid years. Map year → (base_ratio, cpp2_ratio).
-    2. Determine contributory span: from first_data_year to last_data_year,
-       padded to _MIN_CONTRIBUTORY_SPAN years.
-    3. Fill missing years with zero ratios.
+    2. Determine contributory span: from first_data_year to last_data_year.
+       If shorter than _MIN_CONTRIBUTORY_SPAN, pad BEFORE first_data_year
+       (issue #390 — never zero-pad after the last known/projected year).
+    3. Fill missing years *inside* the span with zero ratios.
     4. Apply general dropout (17%, max 8) to the full-span ratio series.
     5. Average retained ratios.
-    6. Multiply average by max_benefit_65 (year-versioned, DP#20).
+    6. Multiply average by max_benefit_65 (year-versioned, DP#20; QPP table
+       when plan="qpp").
     7. Apply age-adjustment factors for 60, 65, 70.
 
-    CPP2 tier computed in parallel on YMPE→YAMPE band earnings.
+    CPP2 tier computed in parallel on YMPE→YAMPE band earnings (CPP tables
+    even when plan="qpp" — shared ceilings; see module docstring).
 
     Args:
         earnings: List of EarningsEntry per contributory year.
-        start_age: Age at which to start CPP (60-70).
+        start_age: Age at which to start CPP/QPP (60-70).
+        plan: ``"cpp"`` (default) or ``"qpp"`` for the age-65 max benefit table.
 
     Returns:
         CPPBenefitEstimate with monthly benefit values.
@@ -224,19 +261,28 @@ def compute_benefit_estimate(
         return CPPBenefitEstimate()
 
     # ── Determine contributory span ────────────────────────────────────
+    # Issue #390: pad BEFORE first_year when the data span is short — never
+    # invent zero contributory years after the last known / projected year
+    # (callers extend through age 65 with incomes + salary_growth).
     first_year = min(all_entry_years)
     last_year = max(all_entry_years)
     data_span = last_year - first_year + 1
-    contrib_span = max(data_span, _MIN_CONTRIBUTORY_SPAN)
+    if data_span >= _MIN_CONTRIBUTORY_SPAN:
+        span_start = first_year
+        span_end = last_year
+    else:
+        span_end = last_year
+        span_start = span_end - _MIN_CONTRIBUTORY_SPAN + 1
+    contrib_span = span_end - span_start + 1
 
-    # Fill ratios over the full span (missing years → 0.0)
+    # Fill ratios over the full span (missing years inside → 0.0)
     base_ratios = [
         year_data.get(y, (0.0, 0.0))[0]
-        for y in range(first_year, first_year + contrib_span)
+        for y in range(span_start, span_end + 1)
     ]
     cpp2_ratios = [
         year_data.get(y, (0.0, 0.0))[1]
-        for y in range(first_year, first_year + contrib_span)
+        for y in range(span_start, span_end + 1)
     ]
 
     # ── Dropout ────────────────────────────────────────────────────────
@@ -244,7 +290,7 @@ def compute_benefit_estimate(
     cpp2_avg, _ = _dropout_average(cpp2_ratios)
 
     # ── Max benefit reference ──────────────────────────────────────────
-    max_benefit_65 = _max_benefit_for_year(last_year)
+    max_benefit_65 = _max_benefit_for_year(last_year, plan=plan)
     cpp2_max = _cpp2_max_benefit(last_year)
 
     # ── Compute benefits ───────────────────────────────────────────────
@@ -284,3 +330,113 @@ def _dropout_average(ratios: list) -> tuple:
         return 0.0, n_drop
 
     return sum(retained) / len(retained), n_drop
+
+# ── Earnings series construction (issue #390) ────────────────────────────────
+
+_PENSIONABLE_KINDS = frozenset({"employment", "self_employment"})
+
+
+def build_earnings_for_estimate(
+    *,
+    earnings_history: Optional[Sequence[Mapping]] = None,
+    incomes: Optional[Sequence[Mapping]] = None,
+    salary_growth: float = 0.0,
+    as_of_year: int,
+    birth_year: int,
+    end_age: int = 65,
+) -> List[EarningsEntry]:
+    """Build a contributory earnings series for ``compute_benefit_estimate``.
+
+    Pure (DP#3). Issue #390:
+
+    1. Seed from explicit ``earnings_history`` when present (wins year-by-year
+       over income-derived amounts).
+    2. Overlay dated ``incomes`` of kind employment / self_employment for
+       years not already covered by history (declared amount on the interval;
+       no reverse ``salary_growth`` into the past).
+    3. Extend through ``birth_year + end_age - 1`` using active employment
+       income at ``as_of_year``, grown forward with ``salary_growth``.
+       Fallback when no active income at as_of: last known series year,
+       grown the same way from that year.
+    4. Never invent zero years after the last known/projected year — that is
+       the contract with ``compute_benefit_estimate``'s backward pad.
+
+    Years after an income's ``to`` date are not projected from that income.
+    ``self_employment`` uses gross ``amount`` (estimator takes employment
+    income; T2125 netting is out of scope — issue #390).
+    """
+    by_year: dict[int, float] = {}
+
+    for raw in earnings_history or ():
+        year = raw.get("year")
+        if year is None:
+            continue
+        income = raw.get("employment_income")
+        if income is None:
+            continue
+        by_year[int(year)] = float(income)
+
+    pensionable = [
+        inc for inc in (incomes or ())
+        if inc.get("kind") in _PENSIONABLE_KINDS
+    ]
+    for inc in pensionable:
+        if not inc.get("from"):
+            continue
+        amount = float(inc["amount"])
+        start = int(str(inc["from"])[:4])
+        end_raw = inc.get("to")
+        # Inclusive calendar years overlapping [from, to). Null to = open
+        # through as_of_year; future years are filled by the projection step.
+        last = (int(str(end_raw)[:4]) - 1) if end_raw else as_of_year
+        for y in range(start, min(last, as_of_year) + 1):
+            by_year.setdefault(y, amount)
+
+    end_year = birth_year + end_age - 1
+
+    active_at_as_of = 0.0
+    open_ended = False
+    closed_future_ends: List[int] = []
+    for inc in pensionable:
+        if not inc.get("from"):
+            continue
+        start_s = str(inc["from"])
+        if start_s[:4].isdigit() and int(start_s[:4]) > as_of_year:
+            continue
+        end = inc.get("to")
+        if end is not None and str(end)[:10] <= f"{as_of_year}-12-31":
+            continue
+        active_at_as_of += float(inc["amount"])
+        if end is None:
+            open_ended = True
+        else:
+            closed_future_ends.append(int(str(end)[:4]) - 1)
+
+    growth = float(salary_growth) if salary_growth else 0.0
+
+    if active_at_as_of > 0:
+        by_year.setdefault(as_of_year, active_at_as_of)
+        project_until = end_year
+        if not open_ended and closed_future_ends:
+            project_until = min(end_year, max(closed_future_ends))
+        base_amount = active_at_as_of
+        growth_origin = as_of_year
+        first_project = as_of_year + 1
+    elif by_year:
+        last_known = max(by_year)
+        base_amount = by_year[last_known]
+        growth_origin = last_known
+        project_until = end_year
+        first_project = last_known + 1
+    else:
+        return []
+
+    for y in range(first_project, project_until + 1):
+        if y in by_year:
+            continue  # explicit history wins
+        by_year[y] = base_amount * ((1.0 + growth) ** (y - growth_origin))
+
+    return [
+        EarningsEntry(year=y, employment_income=amt)
+        for y, amt in sorted(by_year.items())
+    ]

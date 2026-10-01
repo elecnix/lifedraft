@@ -1,0 +1,361 @@
+#!/usr/bin/env python3
+"""Issue #390: always-on CPP/QPP estimate from incomes + salary_growth.
+
+When no Service Canada / Retraite Québec Statement is present, the contract
+path derives an age-65 monthly estimate from earnings_history and/or
+employment incomes, extending future years with assumptions.salary_growth
+instead of zero-padding after the last history year. A Statement always
+wins. Quebec residency selects QPP max-benefit tables (YMPE/CPP2 remain
+CPP-table-centric — documented).
+
+All test data is synthetic (DP#15).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import input_contract as ic
+from countries.canada.cpp_estimator import (
+    EarningsEntry,
+    build_earnings_for_estimate,
+    compute_benefit_estimate,
+)
+from countries.canada.retirement_transition import member_retirement_income
+from test_input_contract import _load_example, _two_generation_subset
+
+
+def _strip_statement(person: dict) -> None:
+    person.pop("entitlements", None)
+    benefits = person.get("benefits") or {}
+    benefits.pop("cpp", None)
+    if benefits:
+        person["benefits"] = benefits
+    else:
+        person.pop("benefits", None)
+
+
+def _primary(doc):
+    legacy = ic.to_internal_config(doc)
+    return next(m for m in legacy["family"]["members"] if m["role"] == "primary"), legacy
+
+
+class BuildEarningsSeries(unittest.TestCase):
+    """Pure helper: history + incomes + salary_growth overlay."""
+
+    def test_extends_past_last_history_with_growth(self):
+        history = [{"year": y, "employment_income": 80_000} for y in range(2000, 2021)]
+        entries = build_earnings_for_estimate(
+            earnings_history=history,
+            incomes=[{
+                "kind": "employment", "amount": 90_000,
+                "from": "2015-01-01", "to": None,
+            }],
+            salary_growth=0.02,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        years = [e.year for e in entries]
+        self.assertEqual(min(years), 2000)
+        # birth 1980 + 65 - 1 = 2044
+        self.assertEqual(max(years), 2044)
+        # History years unchanged.
+        self.assertEqual(
+            next(e.employment_income for e in entries if e.year == 2010),
+            80_000,
+        )
+        # Future year grown from as_of active income (90k @ 2%).
+        y2030 = next(e.employment_income for e in entries if e.year == 2030)
+        self.assertAlmostEqual(y2030, 90_000 * (1.02 ** 4), places=2)
+
+    def test_incomes_only_fills_from_interval_then_grows(self):
+        entries = build_earnings_for_estimate(
+            earnings_history=None,
+            incomes=[{
+                "kind": "employment", "amount": 100_000,
+                "from": "2015-01-01", "to": None,
+            }],
+            salary_growth=0.03,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        by_year = {e.year: e.employment_income for e in entries}
+        self.assertEqual(by_year[2015], 100_000)
+        self.assertEqual(by_year[2026], 100_000)
+        self.assertAlmostEqual(by_year[2028], 100_000 * (1.03 ** 2), places=2)
+        self.assertEqual(max(by_year), 2044)
+
+    def test_closed_income_does_not_project_past_to(self):
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment", "amount": 70_000,
+                "from": "2010-01-01", "to": "2028-01-01",
+            }],
+            salary_growth=0.02,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        years = [e.year for e in entries]
+        self.assertEqual(max(years), 2027)  # to year exclusive → 2027
+
+    def test_fallback_grows_last_history_when_no_active_income(self):
+        history = [{"year": y, "employment_income": 50_000} for y in range(1995, 2016)]
+        entries = build_earnings_for_estimate(
+            earnings_history=history,
+            incomes=[],  # retired from employment
+            salary_growth=0.02,
+            as_of_year=2026,
+            birth_year=1965,
+            end_age=65,
+        )
+        by_year = {e.year: e.employment_income for e in entries}
+        self.assertEqual(by_year[2015], 50_000)
+        # Grown from 2015 forward through 2029 (1965+65-1).
+        self.assertEqual(max(by_year), 2029)
+        self.assertAlmostEqual(by_year[2017], 50_000 * (1.02 ** 2), places=2)
+
+
+class EstimatorBackwardPad(unittest.TestCase):
+    """Issue #390: short careers pad BEFORE first year, not after last."""
+
+    def test_no_zero_pad_after_last_year(self):
+        # 30 years ending 2020 — old behavior padded 2021-2029 with zeros.
+        entries = [
+            EarningsEntry(year=y, employment_income=100_000)
+            for y in range(1991, 2021)
+        ]
+        est = compute_benefit_estimate(entries, start_age=65)
+        self.assertEqual(est.contributory_period_years, 40)
+        # With backward pad, average should be higher than forward-zero-pad
+        # because the 10 missing years sit before 1991 (still zeros, but the
+        # last data year is retained as the span end). Spot-check non-zero.
+        self.assertGreater(est.age_65_monthly, 0)
+
+    def test_extended_series_beats_truncated_zero_pad(self):
+        history = [
+            EarningsEntry(year=y, employment_income=100_000)
+            for y in range(2000, 2021)
+        ]
+        truncated = compute_benefit_estimate(history, start_age=65)
+        extended = build_earnings_for_estimate(
+            earnings_history=[
+                {"year": e.year, "employment_income": e.employment_income}
+                for e in history
+            ],
+            incomes=[{
+                "kind": "employment", "amount": 100_000,
+                "from": "2000-01-01", "to": None,
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        full = compute_benefit_estimate(extended, start_age=65)
+        self.assertGreater(full.age_65_monthly, truncated.age_65_monthly)
+
+
+class AlwaysOnFromIncomes(unittest.TestCase):
+    """No Statement + employment incomes → non-zero cpp_monthly_estimated."""
+
+    def test_incomes_alone_yield_estimate(self):
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        _strip_statement(p1)
+        p1.pop("earnings_history", None)
+        self.assertTrue(any(i["kind"] == "employment" for i in p1["incomes"]))
+        primary, _ = _primary(doc)
+        self.assertGreater(primary["cpp_monthly_estimated"], 0)
+        self.assertEqual(primary["cpp_benefit_source"], "estimated_from_incomes")
+        self.assertEqual(primary.get("cpp_start_age"), 65)
+
+    def test_salary_growth_changes_estimate(self):
+        """Growth only moves the estimate when earnings sit below YMPE
+        (above-YMPE careers are already ratio-capped)."""
+        def _estimate(growth: float) -> float:
+            doc = _two_generation_subset(_load_example())
+            p1 = next(p for p in doc["people"] if p["id"] == "p1")
+            _strip_statement(p1)
+            p1.pop("earnings_history", None)
+            # Below YMPE so future growth raises the average ratio.
+            for inc in p1["incomes"]:
+                if inc["kind"] == "employment":
+                    inc["amount"] = 40_000
+            doc["assumptions"]["salary_growth"] = growth
+            primary, _ = _primary(doc)
+            return primary["cpp_monthly_estimated"]
+
+        low = _estimate(0.0)
+        high = _estimate(0.05)
+        self.assertGreater(high, low)
+
+    def test_benefit_flows_at_claim_age(self):
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        _strip_statement(p1)
+        p1.pop("earnings_history", None)
+        primary, _ = _primary(doc)
+        # p1 born 1980; claim 65 => 2045.
+        before = member_retirement_income(
+            primary, 2043, oas_annual_max=8500, oas_clawback_threshold=90000)
+        at_claim = member_retirement_income(
+            primary, 2045, oas_annual_max=8500, oas_clawback_threshold=90000)
+        self.assertEqual(before.cpp, 0.0)
+        self.assertGreater(at_claim.cpp, 0.0)
+
+
+
+class BuildEarningsEdgeCases(unittest.TestCase):
+    def test_skips_history_rows_missing_year_or_income(self):
+        entries = build_earnings_for_estimate(
+            earnings_history=[
+                {"year": None, "employment_income": 50_000},
+                {"year": 2010, "employment_income": None},
+                {"year": 2011, "employment_income": 50_000},
+            ],
+            incomes=[],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1965,
+            end_age=65,
+        )
+        years = [e.year for e in entries]
+        self.assertIn(2011, years)
+        self.assertNotIn(2010, years)
+
+    def test_skips_income_without_from(self):
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment", "amount": 60_000,
+                "from": None, "to": None,
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        self.assertEqual(entries, [])
+
+    def test_skips_future_and_already_ended_incomes(self):
+        entries = build_earnings_for_estimate(
+            incomes=[
+                {"kind": "employment", "amount": 40_000,
+                 "from": "2030-01-01", "to": None},
+                {"kind": "employment", "amount": 30_000,
+                 "from": "2010-01-01", "to": "2020-01-01"},
+                {"kind": "employment", "amount": 55_000,
+                 "from": "2021-01-01", "to": None},
+            ],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        by_year = {e.year: e.employment_income for e in entries}
+        self.assertEqual(by_year[2026], 55_000)
+        # Ended income still overlays its [from, to) years.
+        self.assertEqual(by_year[2015], 30_000)
+        # Future-start income is not active and does not add on top of 55k.
+        self.assertEqual(by_year[2030], 55_000)
+
+    def test_history_wins_over_projected_year(self):
+        entries = build_earnings_for_estimate(
+            earnings_history=[
+                {"year": 2028, "employment_income": 12_000},
+                {"year": 2020, "employment_income": 50_000},
+            ],
+            incomes=[{
+                "kind": "employment", "amount": 50_000,
+                "from": "2020-01-01", "to": None,
+            }],
+            salary_growth=0.10,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        by_year = {e.year: e.employment_income for e in entries}
+        self.assertEqual(by_year[2028], 12_000)  # explicit history, not grown
+
+
+class StatementStillWins(unittest.TestCase):
+    def test_entitlements_ignore_incomes_estimate(self):
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1.pop("earnings_history", None)
+        p1["entitlements"] = {
+            "cpp": {"estimated_monthly_at_65": 1111,
+                    "as_of": "2026-01-01", "claim_age": 65},
+        }
+        primary, _ = _primary(doc)
+        self.assertEqual(primary["cpp_monthly_estimated"], 1111)
+        self.assertEqual(primary["cpp_benefit_source"], "statement")
+
+
+class QuebecPlanSelection(unittest.TestCase):
+    """QC residency uses QPP max-benefit table; YMPE stays CPP-centric."""
+
+    def test_qpp_plan_changes_max_benefit_path(self):
+        entries = [
+            EarningsEntry(year=y, employment_income=80_000)
+            for y in range(2000, 2045)
+        ]
+        cpp = compute_benefit_estimate(entries, start_age=65, plan="cpp")
+        qpp = compute_benefit_estimate(entries, start_age=65, plan="qpp")
+        # 2026 CPP max benefit (18092) != QPP (17334) — estimates diverge.
+        self.assertNotEqual(cpp.age_65_monthly, qpp.age_65_monthly)
+
+    def test_contract_path_selects_qpp_for_quebec_residency(self):
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        _strip_statement(p1)
+        p1.pop("earnings_history", None)
+        self.assertEqual(p1["residency"]["province"], "quebec")
+        primary_qc, _ = _primary(doc)
+
+        p1["residency"] = {"province": "ontario", "since": "1980-03-14"}
+        primary_on, _ = _primary(doc)
+        # Same earnings path; different max-benefit table => different estimate.
+        self.assertNotEqual(
+            primary_qc["cpp_monthly_estimated"],
+            primary_on["cpp_monthly_estimated"],
+        )
+        self.assertEqual(primary_qc["cpp_benefit_source"], "estimated_from_incomes")
+
+
+class QppMaxBenefitFallback(unittest.TestCase):
+    def test_qpp_year_before_table_uses_earliest_row(self):
+        from countries.canada.cpp_estimator import _max_benefit_for_year
+        # Exact table year.
+        self.assertEqual(_max_benefit_for_year(2026, plan="qpp"), 17334)
+        # 2020 is before the QPP table's 2023 floor → earliest row.
+        self.assertEqual(_max_benefit_for_year(2020, plan="qpp"), 15170)
+        # Future year after table → latest row.
+        self.assertEqual(_max_benefit_for_year(2035, plan="qpp"), 17334)
+
+
+class HistoryPlusGrowth(unittest.TestCase):
+    def test_history_source_provenance(self):
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        _strip_statement(p1)
+        p1["earnings_history"] = [
+            {"year": 1990 + i, "employment_income": 100_000} for i in range(35)
+        ]
+        primary, _ = _primary(doc)
+        self.assertGreater(primary["cpp_monthly_estimated"], 0)
+        self.assertEqual(
+            primary["cpp_benefit_source"], "estimated_from_earnings_history",
+        )
+        # Declared history length preserved (extension is ephemeral).
+        self.assertEqual(len(primary["earnings_history"]), 35)
+
+
+if __name__ == "__main__":
+    unittest.main()

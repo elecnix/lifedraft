@@ -107,18 +107,28 @@ class InPayAndPreClaimAreMutuallyExclusive(unittest.TestCase):
 
 
 class TestAbsenceIsNoOp(unittest.TestCase):
-    """The new optional leaf must be a pure no-op when undeclared: an absent
-    `entitlements` writes NONE of its keys, leaving the mapping byte-identical
-    to the pre-#650 output (DP#32: absence is not a coerced default)."""
+    """Absent `entitlements` must not invent Statement-derived keys (DP#32).
+
+    Issue #390 always-on estimation from employment incomes is a separate
+    path — neuter pensionable incomes here so this case isolates the
+    entitlements leaf.
+    """
 
     def test_absent_entitlement_sets_no_cpp_or_oas_keys(self):
         doc = _preclaim_doc()
         self.assertIsNone(_primary(doc).get("entitlements"))
+        # Keep income ids (decisions.income overrides) but remove pensionable
+        # kinds so #390 always-on does not set cpp keys from incomes.
+        for person in doc["people"]:
+            for inc in person.get("incomes", []):
+                if inc.get("kind") in ("employment", "self_employment"):
+                    inc["kind"] = "other"
         legacy = ic.to_internal_config(doc)
         primary = next(m for m in legacy["family"]["members"]
                        if m["role"] == "primary")
         for key in ("cpp_monthly_estimated", "cpp_start_age",
-                    "oas_start_age", "oas_defer_months"):
+                    "oas_start_age", "oas_defer_months",
+                    "cpp_benefit_source"):
             self.assertNotIn(key, primary)
 
     def test_mapping_identical_with_and_without_empty_entitlements(self):

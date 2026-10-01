@@ -560,56 +560,108 @@ def _map_member(doc: Dict, person_id: str, role: str,
         # it (65 = no deferral), never carried as a second, driftable field.
         member["oas_defer_months"] = (claim_age - 65) * 12
 
-    # Issue #389: wire earnings_history onto the JSON contract → optimize path.
-    # MemberRetirementData.from_dict already estimates when history is present
-    # and cpp_monthly_estimated is 0, but the simulate/optimize path reads the
-    # raw member dict (member_retirement_income), so the estimate must land
-    # here. Statement (benefits.cpp / entitlements.cpp) always wins — never
-    # blend. Full always-on incomes + salary_growth padding is #390.
+    # Issue #389 / #390: CPP/QPP estimate on the contract → optimize path.
+    # Statement (benefits.cpp / entitlements.cpp) always wins — never blend.
+    # When no Statement: build a contributory series from earnings_history
+    # and/or employment incomes, extend future years with salary_growth
+    # through age 65 (do not zero-pad after last history), then estimate.
     # DP#1/DP#32: birth_year comes from birth_date above (or is absent);
-    # never invent a hardcoded birth year — from_dict refuses absence loudly.
+    # never invent a hardcoded birth year.
+    # Always carry declared earnings_history for provenance / later tools,
+    # even when a Statement wins (issue #389 StatementPrecedence).
     earnings_history = p.get("earnings_history")
     if earnings_history:
         member["earnings_history"] = earnings_history
-        if "cpp_monthly_estimated" not in member:
+
+    if "cpp_monthly_estimated" in member:
+        # In-pay benefits.cpp or entitlements.cpp already set the amount.
+        member["cpp_benefit_source"] = "statement"
+    else:
+        has_pensionable_income = any(
+            inc.get("kind") in ("employment", "self_employment")
+            for inc in p.get("incomes", [])
+        )
+        if earnings_history or has_pensionable_income:
             birth_year = member.get("birth_year")
             if not birth_year:
                 raise ContractAdaptationError(
-                    f"person {person_id!r} declares earnings_history but has "
-                    f"no birth_date/birth_year (DP#1/DP#32). The CPP estimator "
-                    f"needs a real birth year to date the member; refusing "
-                    f"rather than inventing a fabricated birth year."
+                    f"person {person_id!r} needs a CPP/QPP estimate from "
+                    f"{'earnings_history' if earnings_history else 'incomes'} "
+                    f"but has no birth_date/birth_year (DP#1/DP#32). The "
+                    f"estimator needs a real birth year to date the member; "
+                    f"refusing rather than inventing a fabricated birth year."
                 )
-            from countries.canada.retirement import MemberRetirementData
-            estimated = MemberRetirementData.from_dict({
-                "role": role,
-                "birth_year": birth_year,
-                "cpp_start_age": member.get("cpp_start_age", 65),
-                "cpp_monthly_estimated": 0,
-                "earnings_history": earnings_history,
-            })
-            if estimated.cpp_monthly_estimated > 0:
-                member["cpp_monthly_estimated"] = estimated.cpp_monthly_estimated
-                member.setdefault("cpp_start_age", 65)
+            from countries.canada.cpp_estimator import (
+                build_earnings_for_estimate,
+                compute_benefit_estimate,
+            )
+            # assumptions.salary_growth is schema-required (DP#32: no .get-or).
+            salary_growth = float(doc["assumptions"]["salary_growth"])
+            as_of_year = int(as_of[:4])
+            # Contributory period ends at age 65, or earlier if the modeled
+            # retirement candidacy is before 65 (issue #390).
+            end_age = 65
+            for cand in doc["decisions"]["retirement_age"]:
+                if cand["person"] == person_id and cand.get("candidate_ages"):
+                    end_age = min(65, min(cand["candidate_ages"]))
+                    break
+            entries = build_earnings_for_estimate(
+                earnings_history=earnings_history,
+                incomes=p.get("incomes"),
+                salary_growth=salary_growth,
+                as_of_year=as_of_year,
+                birth_year=birth_year,
+                end_age=end_age,
+            )
+            if entries:
+                # residency.province is schema-required on every person (DP#32).
+                plan = (
+                    "qpp" if p["residency"]["province"] == "quebec" else "cpp"
+                )
+                start_age = member.get("cpp_start_age", 65)
+                estimate = compute_benefit_estimate(
+                    entries, start_age=start_age, plan=plan,
+                )
+                # Age-65 convention (issue #388): store base+CPP2; adjust once
+                # downstream in cpp_from_estimate.
+                cpp_monthly = (
+                    estimate.age_65_monthly + estimate.cpp2_age_65_monthly
+                )
+                if cpp_monthly > 0:
+                    member["cpp_monthly_estimated"] = cpp_monthly
+                    member.setdefault("cpp_start_age", 65)
+                    member["cpp_benefit_source"] = (
+                        "estimated_from_earnings_history"
+                        if earnings_history
+                        else "estimated_from_incomes"
+                    )
+                    # When the estimate was derived purely from incomes
+                    # (no declared history leaf), surface the projected
+                    # series for audits / VOI. Declared earnings_history
+                    # stays as the user supplied it (issue #389).
+                    if not earnings_history:
+                        member["earnings_history"] = [
+                            {"year": e.year,
+                             "employment_income": e.employment_income}
+                            for e in entries
+                        ]
 
-    # Issue #389: loud warning when a NEAR-RETIREMENT adult would still
-    # project cpp_income=0 — no Statement and no usable earnings_history
-    # estimate. Younger earners stay silent (absence remains a pure no-op
-    # for goldens that intentionally omit CPP, DP#32); the warning targets
-    # the silent-zero defect class where government income is about to
-    # matter, without inventing a number. Always-on incomes+salary_growth
-    # for every earner is #390.
+    # Issue #389/#390: loud warning when a NEAR-RETIREMENT adult would still
+    # project cpp_income=0 — no Statement, no usable history, and no
+    # pensionable incomes to estimate from. Younger earners without any
+    # CPP source stay silent (intentional omit, DP#32).
     if "cpp_monthly_estimated" not in member:
         age = _age_at(p.get("birth_date"), as_of)
         if age is not None and age >= 50:
             logger.warning(
                 "person %r (age %s) is near retirement but has no "
-                "benefits.cpp / entitlements.cpp and no usable "
-                "earnings_history estimate, so cpp_monthly_estimated is "
+                "benefits.cpp / entitlements.cpp, no usable "
+                "earnings_history, and no employment/self_employment "
+                "incomes to estimate from, so cpp_monthly_estimated is "
                 "unset (cpp_income=0 for the horizon). Provide a Service "
-                "Canada / Retraite Québec Statement as entitlements.cpp, or "
-                "people[].earnings_history for the CPP estimator (issue #389; "
-                "always-on incomes+salary_growth is #390).",
+                "Canada / Retraite Québec Statement as entitlements.cpp, "
+                "people[].earnings_history, or active employment incomes "
+                "(issues #389/#390).",
                 person_id, age,
             )
 

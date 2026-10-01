@@ -13,8 +13,8 @@ passes it through, the estimator sets `cpp_monthly_estimated` (age-65 +
 CPP2) when no Statement is present, a Statement still wins, and a loud
 warning fires when CPP would stay zero despite employment income.
 
-All test data is synthetic (DP#15). Full always-on incomes + salary_growth
-future years is #390 and is deliberately out of scope here.
+All test data is synthetic (DP#15). Always-on incomes + salary_growth
+future years is #390 (see test_issue_390_cpp_estimate_from_incomes.py).
 """
 
 from __future__ import annotations
@@ -107,6 +107,7 @@ class StatementPrecedence(unittest.TestCase):
         primary, _ = _primary_member(doc)
         self.assertEqual(primary["cpp_monthly_estimated"], 1300)
         self.assertEqual(primary["cpp_start_age"], 67)
+        self.assertEqual(primary["cpp_benefit_source"], "statement")
         # History is still carried for provenance / later tools.
         self.assertIn("earnings_history", primary)
 
@@ -132,7 +133,11 @@ class SilentZeroWarned(unittest.TestCase):
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
         p1.pop("entitlements", None)
         p1.pop("earnings_history", None)
-        # Age 55 as of 2026-07-12 — near retirement, no Statement/history.
+        # Issue #390: strip employment incomes too — otherwise always-on
+        # estimation would set cpp_monthly_estimated and silence the warn.
+        for _inc in p1.get("incomes", []):
+            _inc["kind"] = "other"
+        # Age 55 as of 2026-07-12 — near retirement, no Statement/history/incomes.
         p1["birth_date"] = "1971-03-14"
 
         with self.assertLogs("contract_people", level="WARNING") as cm:
@@ -144,11 +149,17 @@ class SilentZeroWarned(unittest.TestCase):
         )
 
     def test_younger_earner_without_cpp_does_not_warn(self):
-        """Golden-example ages (~mid-40s) intentionally omit CPP; silence."""
+        """Mid-40s with no CPP source stay silent (intentional omit, DP#32).
+
+        Strip incomes so #390 always-on does not invent an estimate — this
+        locks the warning gate's age floor, not the estimator itself.
+        """
         doc = _two_generation_subset(_load_example())
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
         p1.pop("entitlements", None)
         p1.pop("earnings_history", None)
+        for _inc in p1.get("incomes", []):
+            _inc["kind"] = "other"
         try:
             with self.assertLogs("contract_people", level="WARNING") as cm:
                 ic.to_internal_config(doc)
@@ -177,15 +188,21 @@ class SilentZeroWarned(unittest.TestCase):
 
 
 class AbsentHistoryIsNoOp(unittest.TestCase):
-    """Absent earnings_history must not invent keys for households that
-    intentionally omit CPP (beyond the warning)."""
+    """Absent earnings_history AND absent pensionable incomes must not invent
+    CPP keys for households that intentionally omit CPP (beyond the warning).
+
+    Issue #390: employment incomes alone trigger always-on estimation — strip
+    them here so this case remains the intentional-omit no-op.
+    """
 
     def test_absent_history_sets_no_cpp_keys(self):
         doc = _two_generation_subset(_load_example())
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
         self.assertIsNone(p1.get("earnings_history"))
         self.assertIsNone(p1.get("entitlements"))
-        # Suppress expected #389 warning for this absence check.
+        for _inc in p1.get("incomes", []):
+            _inc["kind"] = "other"
+        # Suppress expected #389/#390 warning for this absence check.
         logging.getLogger("contract_people").setLevel(logging.ERROR)
         try:
             legacy = ic.to_internal_config(doc)
@@ -194,7 +211,7 @@ class AbsentHistoryIsNoOp(unittest.TestCase):
         primary = next(m for m in legacy["family"]["members"]
                        if m["role"] == "primary")
         for key in ("cpp_monthly_estimated", "cpp_start_age",
-                    "earnings_history"):
+                    "earnings_history", "cpp_benefit_source"):
             self.assertNotIn(key, primary)
 
 
