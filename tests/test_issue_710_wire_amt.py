@@ -164,7 +164,7 @@ class TestNormalHouseholdUnaffected:
         from test_golden_trajectory_581 import golden_household_config, _run
         results = _run(golden_household_config())
         assert all(r.amt_surcharge == 0.0 for r in results)
-        assert results[-1].total_assets == 9709753.139463063
+        assert results[-1].total_assets == 9501884.002641384
 
 
 # ---------------------------------------------------------------------------

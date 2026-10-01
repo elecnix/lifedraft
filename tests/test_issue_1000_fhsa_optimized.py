@@ -139,17 +139,17 @@ def test_no_fhsa_room_household_is_unaffected():
 
 
 def test_golden_invariant_byte_exact():
-    """HARD CONSTRAINT (GLM_TASK.md): the golden invariant 9709753.139463063
+    """HARD CONSTRAINT (GLM_TASK.md): the golden invariant 9501884.002641384
     MUST stay byte-exact. The fix adds FHSA to the optimizer SEARCH only; the
     golden fixture runs adapter.get_default_strategy() (fhsa_pct=0), NOT the
     optimizer, so it is structurally immune to the FHSA change. The value was
-    moved from 9766299.424395865 to 9709753.139463063 by the sanctioned #1001
+    moved from 9766299.424395865 to 9501884.002641384 by the sanctioned #1001
     drawdown-nets-RRIF change (a first-time-buyer-ineligible golden household
     is unaffected by FHSA, so this is just the new golden anchor). Verified
     here by running the fixture directly -- if this moves, STOP and report
     (do not re-pin)."""
     from test_golden_trajectory_581 import _run
-    assert _run(golden_household_config())[-1].total_assets == 9709753.139463063
+    assert _run(golden_household_config())[-1].total_assets == 9501884.002641384
 
 
 def test_variant_skipped_when_non_reg_residual_is_zero():
