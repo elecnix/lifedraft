@@ -282,7 +282,15 @@ def _map_first_home_purchases(doc: Dict, child_ids: set,
                 f"refused rather than silently dropped (DP#32). "
                 f"Declared members: {sorted(valid)}."
             )
-        out.append({"buyer": buyer, "year": int(purchase["year"])})
+        mapped = {"buyer": buyer, "year": int(purchase["year"])}
+        # Issue #359: the declared HBP withdrawal rides along ONLY when it is
+        # declared -- an absent leaf leaves no key behind, so the fold's own
+        # min(RRSP, $60k) default still applies (DP#32: absence is not a value
+        # to default here, and "no key" is what lets the pre-#359 behaviour stay
+        # byte-identical).
+        if "hbp_amount" in purchase:
+            mapped["hbp_amount"] = purchase["hbp_amount"]
+        out.append(mapped)
     return out
 
 
