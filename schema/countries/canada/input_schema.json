@@ -110,7 +110,7 @@
         "earnings_history": {
           "type": "array",
           "items": { "$ref": "#/$defs/earnings_entry" },
-          "description": "Issue #389: optional CPP/QPP contributory earnings history. When present and the person has no in-pay benefits.cpp and no pre-claim entitlements.cpp (Service Canada / Retraite Québec Statement), contract_people._map_member runs cpp_estimator.compute_benefit_estimate and sets cpp_monthly_estimated (age-65 monthly, incl. CPP2) so omitting a Statement no longer silently yields cpp_income=0 for the whole horizon. A Statement (benefits.cpp or entitlements.cpp) always wins — the estimator is never blended with it. Full always-on derivation from incomes + salary_growth future years is #390."
+          "description": "Issue #389/#390: optional CPP/QPP contributory earnings history. When the person has no in-pay benefits.cpp and no pre-claim entitlements.cpp (Service Canada / Retraite Québec Statement), contract_people._map_member always derives an age-65 monthly estimate (incl. CPP2) via cpp_estimator: from this history when present, otherwise from employment/self_employment incomes, extending future years through age 65 with assumptions.salary_growth (never zero-padding after the last known/projected year). A Statement always wins — never blended. Provenance lands on cpp_benefit_source (statement | estimated_from_earnings_history | estimated_from_incomes). Quebec residency selects QPP max-benefit tables; YMPE/YAMPE/CPP2 remain CPP-table-centric."
         }
       }
     },
