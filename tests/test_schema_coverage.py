@@ -238,13 +238,22 @@ DEAD_ALLOWLIST = {
     # reaching the internal config at all. Both citations "passed" only because
     # the cited KEYWORD still appeared in the file -- which is exactly the
     # failure mode that epic makes impossible now.
-    "people[].relationships[].from": ("#644", "was cited to `for r in people[primary_id].get("
-        "\"relationships\", [])` -- a line that iterates the relationship LIST and then reads only "
-        "r[\"type\"] and r[\"person\"]. The date a relationship STARTED is parsed and reaches no "
-        "decision: the engine has no rule keyed on when a couple married."),
-    "people[].relationships[].to": ("#644", "see people[].relationships[].from above -- same false "
-        "citation, same non-consumption. (A relationship's END date would matter for a separation "
-        "rule; there isn't one.)"),
+    # Issue #360 scope one changed these two from "parsed and ignored" to "read,
+    # and REFUSED on". They stay allowlisted because the guard's CONSUMED side
+    # requires the leaf's value to reach the internal CONFIG
+    # (test_contract_reachability.py::ConsumedCitationsAreBehaviourallyTrue),
+    # and a refused union never gets that far -- the contract does not become an
+    # internal config at all. Keeping them here with the live reason, rather than
+    # the old "reaches no decision", which stopped being true.
+    "people[].relationships[].from": ("#360", "read by contract_people._refuse_dated_union, which "
+        "REFUSES a spouse_of union starting after as_of rather than modelling a marriage that has "
+        "not happened (DP#32). The value decides; it never reaches the internal config, because "
+        "that contract cannot be priced. Modelling the union per-year is #360 scope two."),
+    "people[].relationships[].to": ("#360", "read by contract_people._refuse_dated_union, which "
+        "REFUSES a spouse_of union ending on or before as_of rather than applying spousal "
+        "splitting, a spousal RRSP, couple GIS tables and a survivor estate to two separated people "
+        "(DP#32). Same reason as .from above: the value decides, and never reaches the internal "
+        "config. A separation rule is #360 scope two."),
     "people[].death_date": ("#600", "no legacy consumer -- Phase 2c's estate/mortality wiring."),
     "people[].residency.province": ("#600", "legacy has one household-wide tax.province, not "
         "per-person -- Phase 2c/#598 follow-up."),
