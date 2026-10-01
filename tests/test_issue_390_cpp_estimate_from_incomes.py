@@ -420,6 +420,45 @@ class BuildEarningsGuards(unittest.TestCase):
         self.assertEqual(entries, [])
 
 
+class ProjectedEarningsKey(unittest.TestCase):
+    def test_incomes_only_uses_cpp_estimated_earnings_key(self):
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        _strip_statement(p1)
+        p1.pop("earnings_history", None)
+        primary, _ = _primary(doc)
+        self.assertNotIn("earnings_history", primary)
+        self.assertIn("cpp_estimated_earnings", primary)
+        self.assertGreater(len(primary["cpp_estimated_earnings"]), 0)
+
+    def test_declared_history_not_replaced_by_projection(self):
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        _strip_statement(p1)
+        hist = [{"year": 1990 + i, "employment_income": 100_000} for i in range(35)]
+        p1["earnings_history"] = hist
+        primary, _ = _primary(doc)
+        self.assertEqual(len(primary["earnings_history"]), 35)
+        self.assertNotIn("cpp_estimated_earnings", primary)
+
+
+class ClosedIncomeJan1(unittest.TestCase):
+    def test_to_on_jan_1_last_project_year_is_prior(self):
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment", "amount": 70_000,
+                "from": "2020-01-01", "to": "2028-01-01",
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+            as_of_date="2026-07-12",
+        )
+        years = [e.year for e in entries]
+        self.assertEqual(max(years), 2027)  # [..., 2028-01-01) → through 2027
+
+
 class MissingResidencyRefuses(unittest.TestCase):
     def test_estimate_without_residency_raises(self):
         from contract_people import _map_member

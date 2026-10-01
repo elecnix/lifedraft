@@ -649,10 +649,10 @@ def _map_member(doc: Dict, person_id: str, role: str,
                     member.setdefault("cpp_start_age", 65)
                 # When the estimate was derived purely from incomes
                 # (no declared history leaf), surface the projected
-                # series for audits / VOI. Declared earnings_history
-                # stays as the user supplied it (issue #389).
+                # series under a DISTINCT key so it cannot be mistaken
+                # for a user-supplied earnings_history (Cite #390).
                 if not earnings_history:
-                    member["earnings_history"] = [
+                    member["cpp_estimated_earnings"] = [
                         {"year": e.year,
                          "employment_income": e.employment_income}
                         for e in entries

@@ -436,7 +436,8 @@ def build_earnings_for_estimate(
             open_ended = True
         else:
             to_s = str(end)[:10]
-            # Last calendar year overlapping [from, to).
+            # Last calendar year overlapping [from, to). to on Jan 1 of Y
+            # means the last overlapping year is Y-1 (half-open).
             last_y = int(to_s[:4]) - (0 if to_s[5:10] > "01-01" else 1)
             closed_future_ends.append(last_y)
 
