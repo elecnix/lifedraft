@@ -169,6 +169,8 @@ class TestMemberRetirementData:
             MemberRetirementData.from_dict({'role': 'primary', 'birth_year': 0})
         with pytest.raises(ValueError, match="must be an int"):
             MemberRetirementData.from_dict({'role': 'primary', 'birth_year': '1985'})
+        with pytest.raises(ValueError, match="bool"):
+            MemberRetirementData.from_dict({'role': 'primary', 'birth_year': True})
         # Whole-number floats (JSON 1985.0) coerce; fractional years refuse.
         m = MemberRetirementData.from_dict({'role': 'primary', 'birth_year': 1985.0})
         assert m.birth_year == 1985

@@ -805,9 +805,10 @@ class MemberRetirementData:
         fails loudly — never invent a fabricated birth year.
         """
         birth_year = data.get('birth_year')
-        # DP#1/DP#32: require a real int year. Reject absent, 0 (not a birth
-        # year — elsewhere 0 is an "unset" sentinel), and non-ints that would
-        # only TypeError later in year - birth_year arithmetic.
+        # DP#1/DP#32: require a real calendar year. Reject absent / non-numeric /
+        # bool (bool is an int subclass — never treat True/False as a year) /
+        # zero (the 'unset' sentinel elsewhere). Whole-number floats (JSON
+        # 1985.0) coerce to int; fractional years refuse.
         if birth_year is None:
             raise ValueError(
                 "MemberRetirementData.from_dict: birth_year is required "
@@ -815,21 +816,25 @@ class MemberRetirementData:
                 "become a confident wrong age; pass the member's real "
                 "birth_year (derived from birth_date on the contract)."
             )
-        # Accept a whole-number float (JSON may decode 1985 as 1985.0) by
-        # coercing only when the value is an exact calendar year.
-        if isinstance(birth_year, bool) or not isinstance(birth_year, (int, float)):
+        if type(birth_year) is bool:
             raise ValueError(
                 f"MemberRetirementData.from_dict: birth_year must be an int "
-                f"calendar year (DP#1/DP#32) — got {birth_year!r} "
-                f"({type(birth_year).__name__})."
+                f"calendar year (DP#1/DP#32) — got {birth_year!r} (bool). "
+                f"True/False are not birth years."
             )
-        if isinstance(birth_year, float):
+        if type(birth_year) is float:
             if not birth_year.is_integer():
                 raise ValueError(
                     f"MemberRetirementData.from_dict: birth_year must be a "
                     f"whole calendar year (DP#1/DP#32) — got {birth_year!r}."
                 )
             birth_year = int(birth_year)
+        elif type(birth_year) is not int:
+            raise ValueError(
+                f"MemberRetirementData.from_dict: birth_year must be an int "
+                f"calendar year (DP#1/DP#32) — got {birth_year!r} "
+                f"({type(birth_year).__name__})."
+            )
         if birth_year <= 0:
             raise ValueError(
                 f"MemberRetirementData.from_dict: birth_year must be a "
