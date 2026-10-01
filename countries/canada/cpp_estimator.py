@@ -403,11 +403,9 @@ def build_earnings_for_estimate(
             continue
         # Calendar year Y overlaps [from, to) when
         # from < (Y+1)-01-01 and (to is null or to > Y-01-01).
+        # Loop starts at start_year, so from is never after year_end_excl.
         for y in range(start, as_of_year + 1):
             year_start = f"{y}-01-01"
-            year_end_excl = f"{y + 1}-01-01"
-            if start_s[:10] >= year_end_excl:
-                continue
             if end_raw is not None and str(end_raw)[:10] <= year_start:
                 continue
             by_year.setdefault(y, amount)
@@ -428,6 +426,8 @@ def build_earnings_for_estimate(
         if inc.get("amount") is None:
             continue
         end = inc.get("to")
+        if end is not None and not str(end)[:4].isdigit():
+            continue  # same guard as the overlay loop
         # Half-open [from, to): inactive when to <= as_of.
         if end is not None and str(end)[:10] <= as_of[:10]:
             continue
@@ -435,8 +435,6 @@ def build_earnings_for_estimate(
         if end is None:
             open_ended = True
         else:
-            if not str(end)[:4].isdigit():
-                continue
             to_s = str(end)[:10]
             # Last calendar year overlapping [from, to).
             last_y = int(to_s[:4]) - (0 if to_s[5:10] > "01-01" else 1)

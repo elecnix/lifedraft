@@ -391,6 +391,50 @@ class QuebecPlanSelection(unittest.TestCase):
         self.assertEqual(primary_qc["cpp_benefit_source"], "estimated_from_incomes")
 
 
+class BuildEarningsGuards(unittest.TestCase):
+    def test_skips_non_digit_to_in_overlay(self):
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment", "amount": 60_000,
+                "from": "2015-01-01", "to": "not-a-date",
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        self.assertEqual(entries, [])
+
+    def test_skips_active_income_with_non_digit_to(self):
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment", "amount": 60_000,
+                "from": "2015-01-01", "to": "June 2030",
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+            as_of_date="2026-07-12",
+        )
+        self.assertEqual(entries, [])
+
+
+class MissingResidencyRefuses(unittest.TestCase):
+    def test_estimate_without_residency_raises(self):
+        from contract_people import _map_member
+        from contract_errors import ContractAdaptationError
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1.pop("entitlements", None)
+        p1.pop("benefits", None)
+        p1.pop("earnings_history", None)
+        p1["residency"] = None
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _map_member(doc, "p1", "primary", {})
+        self.assertIn("residency.province", str(ctx.exception))
+
+
 class QppMaxBenefitFallback(unittest.TestCase):
     def test_qpp_year_before_table_uses_earliest_row(self):
         from countries.canada.cpp_estimator import _max_benefit_for_year
