@@ -230,6 +230,32 @@ class BuildEarningsEdgeCases(unittest.TestCase):
         self.assertIn(2011, years)
         self.assertNotIn(2010, years)
 
+    def test_skips_income_missing_amount(self):
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment",
+                "from": "2015-01-01", "to": None,
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        self.assertEqual(entries, [])
+
+    def test_skips_non_numeric_from(self):
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment", "amount": 60_000,
+                "from": "June 2026", "to": None,
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+        )
+        self.assertEqual(entries, [])
+
     def test_skips_income_without_from(self):
         entries = build_earnings_for_estimate(
             incomes=[{

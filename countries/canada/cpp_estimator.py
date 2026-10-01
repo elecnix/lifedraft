@@ -263,7 +263,10 @@ def compute_benefit_estimate(
     # ── Determine contributory span ────────────────────────────────────
     # Issue #390: pad BEFORE first_year when the data span is short — never
     # invent zero contributory years after the last known / projected year
-    # (callers extend through age 65 with incomes + salary_growth).
+    # (callers extend through age 65 with incomes + salary_growth). For a
+    # series that is still short of 40 years after that extension, the same
+    # count of zero-ratio years is used either way; placing them before the
+    # career keeps "after last year" free of fabricated zeros.
     first_year = min(all_entry_years)
     last_year = max(all_entry_years)
     data_span = last_year - first_year + 1
@@ -355,9 +358,10 @@ def build_earnings_for_estimate(
        years not already covered by history (declared amount on the interval;
        no reverse ``salary_growth`` into the past).
     3. Extend through ``birth_year + end_age - 1`` using active employment
-       income at ``as_of_year``, grown forward with ``salary_growth``.
-       Fallback when no active income at as_of: last known series year,
-       grown the same way from that year.
+       income at ``as_of_year``, grown forward with ``salary_growth`` —
+       but never past a closed income's ``to`` date when every active
+       income is closed (no open-ended job). Fallback when no active
+       income at as_of: last known series year, grown the same way.
     4. Never invent zero years after the last known/projected year — that is
        the contract with ``compute_benefit_estimate``'s backward pad.
 
@@ -383,11 +387,19 @@ def build_earnings_for_estimate(
     for inc in pensionable:
         if not inc.get("from"):
             continue
-        amount = float(inc["amount"])
-        start = int(str(inc["from"])[:4])
+        amount_raw = inc.get("amount")
+        if amount_raw is None:
+            continue
+        start_s = str(inc["from"])
+        if not start_s[:4].isdigit():
+            continue
+        amount = float(amount_raw)
+        start = int(start_s[:4])
         end_raw = inc.get("to")
         # Inclusive calendar years overlapping [from, to). Null to = open
         # through as_of_year; future years are filled by the projection step.
+        if end_raw is not None and not str(end_raw)[:4].isdigit():
+            continue
         last = (int(str(end_raw)[:4]) - 1) if end_raw else as_of_year
         for y in range(start, min(last, as_of_year) + 1):
             by_year.setdefault(y, amount)
@@ -401,7 +413,11 @@ def build_earnings_for_estimate(
         if not inc.get("from"):
             continue
         start_s = str(inc["from"])
-        if start_s[:4].isdigit() and int(start_s[:4]) > as_of_year:
+        if not start_s[:4].isdigit():
+            continue
+        if int(start_s[:4]) > as_of_year:
+            continue
+        if inc.get("amount") is None:
             continue
         end = inc.get("to")
         if end is not None and str(end)[:10] <= f"{as_of_year}-12-31":
@@ -410,6 +426,8 @@ def build_earnings_for_estimate(
         if end is None:
             open_ended = True
         else:
+            if not str(end)[:4].isdigit():
+                continue
             closed_future_ends.append(int(str(end)[:4]) - 1)
 
     growth = float(salary_growth) if salary_growth else 0.0

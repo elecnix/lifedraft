@@ -618,33 +618,36 @@ def _map_member(doc: Dict, person_id: str, role: str,
                 plan = (
                     "qpp" if p["residency"]["province"] == "quebec" else "cpp"
                 )
-                start_age = member.get("cpp_start_age", 65)
+                # Always request the age-65 estimate (issue #388). Claim-age
+                # adjustment happens once in cpp_from_estimate from
+                # cpp_start_age; do not bake it into the stored monthly.
                 estimate = compute_benefit_estimate(
-                    entries, start_age=start_age, plan=plan,
+                    entries, start_age=65, plan=plan,
                 )
-                # Age-65 convention (issue #388): store base+CPP2; adjust once
-                # downstream in cpp_from_estimate.
                 cpp_monthly = (
                     estimate.age_65_monthly + estimate.cpp2_age_65_monthly
                 )
+                source = (
+                    "estimated_from_earnings_history"
+                    if earnings_history
+                    else "estimated_from_incomes"
+                )
+                # Provenance even when the estimate is 0 — distinguishes
+                # 'estimated zero' from 'never estimated' (Cite #390).
+                member["cpp_benefit_source"] = source
                 if cpp_monthly > 0:
                     member["cpp_monthly_estimated"] = cpp_monthly
                     member.setdefault("cpp_start_age", 65)
-                    member["cpp_benefit_source"] = (
-                        "estimated_from_earnings_history"
-                        if earnings_history
-                        else "estimated_from_incomes"
-                    )
-                    # When the estimate was derived purely from incomes
-                    # (no declared history leaf), surface the projected
-                    # series for audits / VOI. Declared earnings_history
-                    # stays as the user supplied it (issue #389).
-                    if not earnings_history:
-                        member["earnings_history"] = [
-                            {"year": e.year,
-                             "employment_income": e.employment_income}
-                            for e in entries
-                        ]
+                # When the estimate was derived purely from incomes
+                # (no declared history leaf), surface the projected
+                # series for audits / VOI. Declared earnings_history
+                # stays as the user supplied it (issue #389).
+                if not earnings_history:
+                    member["earnings_history"] = [
+                        {"year": e.year,
+                         "employment_income": e.employment_income}
+                        for e in entries
+                    ]
 
     # Issue #389/#390: loud warning when a NEAR-RETIREMENT adult would still
     # project cpp_income=0 — no Statement, no usable history, and no
