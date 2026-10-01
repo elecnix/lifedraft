@@ -566,14 +566,24 @@ def _map_member(doc: Dict, person_id: str, role: str,
     # raw member dict (member_retirement_income), so the estimate must land
     # here. Statement (benefits.cpp / entitlements.cpp) always wins — never
     # blend. Full always-on incomes + salary_growth padding is #390.
+    # DP#1/DP#32: birth_year comes from birth_date above (or is absent);
+    # never invent 1979 — from_dict refuses a missing year loudly.
     earnings_history = p.get("earnings_history")
     if earnings_history:
         member["earnings_history"] = earnings_history
         if "cpp_monthly_estimated" not in member:
+            birth_year = member.get("birth_year")
+            if not birth_year:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares earnings_history but has "
+                    f"no birth_date/birth_year (DP#1/DP#32). The CPP estimator "
+                    f"needs a real birth year to date the member; refusing "
+                    f"rather than inventing 1979 (or any other person)."
+                )
             from countries.canada.retirement import MemberRetirementData
             estimated = MemberRetirementData.from_dict({
                 "role": role,
-                "birth_year": member.get("birth_year", 1979),
+                "birth_year": birth_year,
                 "cpp_start_age": member.get("cpp_start_age", 65),
                 "cpp_monthly_estimated": 0,
                 "earnings_history": earnings_history,

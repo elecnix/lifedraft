@@ -220,9 +220,9 @@ def find_birth_year_person_specific_defaults(root: str = ROOT) -> List[Finding]:
     silently gets a plausible-but-wrong person (DP#32: absence must fail
     loudly, not default to a real-looking value).
 
-    Returns raw findings; the test module allowlists the one known, separately
-    tracked instance (``retirement.py``'s widely-relied-upon default, see
-    ``test_dp13_birth_year_defaults.py``).
+    Returns raw findings; the test module's ``_ALLOWLIST`` is empty after the
+    ``MemberRetirementData.birth_year=1979`` carve-out was removed (#389 /
+    DP#32). See ``test_dp13_birth_year_defaults.py``.
     """
     findings: List[Finding] = []
     for relpath in iter_source_files(root):

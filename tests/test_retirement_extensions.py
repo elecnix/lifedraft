@@ -63,7 +63,7 @@ class TestMemberRetirementData:
 
     def test_oas_with_deferral(self):
         """OAS deferred by 60 months (5 years) = 36% increase."""
-        member = MemberRetirementData(oas_defer_months=60)
+        member = MemberRetirementData(birth_year=1960, oas_defer_months=60)
         expected = OAS_ANNUAL_MAX * (1 + 60 * 0.006)
         assert member.oas_annual == pytest.approx(expected)
 
@@ -112,6 +112,7 @@ class TestMemberRetirementData:
     def test_employer_match(self):
         """3% match on $130K = $3,900."""
         member = MemberRetirementData(
+            birth_year=1979,
             employer_rrsp_match_pct=0.03,
             employer_rrsp_match_max=3900,
         )
@@ -121,6 +122,7 @@ class TestMemberRetirementData:
     def test_employer_match_capped(self):
         """Match capped at maximum."""
         member = MemberRetirementData(
+            birth_year=1979,
             employer_rrsp_match_pct=0.03,
             employer_rrsp_match_max=3900,
         )
@@ -150,11 +152,21 @@ class TestMemberRetirementData:
         assert exported['employer_rrsp_match_pct'] == 0.03
 
     def test_from_dict_defaults(self):
-        """Missing fields should use defaults."""
-        data = {'role': 'spouse'}
+        """Missing optional fields use defaults; birth_year remains required."""
+        data = {'role': 'spouse', 'birth_year': 1980}
         member = MemberRetirementData.from_dict(data)
+        assert member.birth_year == 1980
         assert member.cpp_start_age == 65
         assert member.rrif_conversion_age == 71
+
+    def test_from_dict_missing_birth_year_fails_loudly(self):
+        """DP#1/DP#32: omitting birth_year must not invent 1979."""
+        with pytest.raises(ValueError, match="birth_year is required"):
+            MemberRetirementData.from_dict({'role': 'spouse'})
+        with pytest.raises(ValueError, match="birth_year is required"):
+            MemberRetirementData.from_dict({'role': 'primary', 'birth_year': 0})
+        with pytest.raises(ValueError, match="birth_year is required"):
+            MemberRetirementData.from_dict({'role': 'primary', 'birth_year': None})
 
 
 # =============================================================================
@@ -277,7 +289,7 @@ class TestScenario123OASClawbackDetailed:
 
     def test_strategy_defer_oas_to_70(self):
         """Deferring OAS to 70: 0.6% increase per month, 36% higher."""
-        member = MemberRetirementData(oas_defer_months=60)
+        member = MemberRetirementData(birth_year=1960, oas_defer_months=60)
         oas_at_70 = member.oas_annual
         base = OAS_ANNUAL_MAX
         expected_increase = base * 0.36  # 60 months × 0.6%
@@ -311,6 +323,7 @@ class TestScenario61FullFamilyOptimization:
     def test_employer_match_calculation(self):
         """3% match on $130K = $3,900."""
         member = MemberRetirementData(
+            birth_year=1979,
             employer_rrsp_match_pct=0.03,
             employer_rrsp_match_max=3900,
         )
@@ -319,8 +332,8 @@ class TestScenario61FullFamilyOptimization:
 
     def test_combined_cpp_benefit(self):
         """Primary at $1,250/mo + Spouse at $667/mo = $23,004/yr."""
-        primary = MemberRetirementData(cpp_monthly_estimated=1250)
-        spouse = MemberRetirementData(cpp_monthly_estimated=667)
+        primary = MemberRetirementData(birth_year=1979, cpp_monthly_estimated=1250)
+        spouse = MemberRetirementData(birth_year=1980, cpp_monthly_estimated=667)
         combined = primary.cpp_annual + spouse.cpp_annual
         assert combined == pytest.approx(23004, abs=1)
 

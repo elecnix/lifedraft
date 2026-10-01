@@ -29,6 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from countries.canada.retirement_transition import member_retirement_income
+from countries.canada.retirement import MemberRetirementData
+from contract_errors import ContractAdaptationError
 from test_input_contract import _load_example, _two_generation_subset
 import contract_schema
 
@@ -194,6 +196,53 @@ class AbsentHistoryIsNoOp(unittest.TestCase):
         for key in ("cpp_monthly_estimated", "cpp_start_age",
                     "earnings_history"):
             self.assertNotIn(key, primary)
+
+
+
+class MissingBirthYearFailsLoudly(unittest.TestCase):
+    """DP#1/DP#32 / #389 follow-up: never invent birth_year=1979."""
+
+    def test_from_dict_without_birth_year_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            MemberRetirementData.from_dict({
+                "role": "primary",
+                "cpp_monthly_estimated": 0,
+                "earnings_history": [
+                    {"year": 2000, "employment_income": 80_000},
+                ],
+            })
+        self.assertIn("birth_year is required", str(ctx.exception))
+        self.assertNotIn("1979", str(ctx.exception))
+
+    def test_from_dict_does_not_silently_default_to_1979(self):
+        """Even a partial dict must not round-trip as birth_year=1979."""
+        with self.assertRaises(ValueError):
+            MemberRetirementData.from_dict({"role": "primary"})
+
+    def test_contract_earnings_history_without_birth_date_refuses(self):
+        """_map_member with earnings_history but no birth_date must not invent
+        1979 — ContractAdaptationError (map_members also refuses adults
+        without DOB; this exercises the estimator path directly)."""
+        from contract_people import _map_member
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1["birth_date"] = None
+        p1["earnings_history"] = [
+            {"year": 1990 + i, "employment_income": 100_000} for i in range(35)
+        ]
+        p1.pop("entitlements", None)
+        p1.pop("benefits", None)
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _map_member(doc, "p1", "primary", {})
+        msg = str(ctx.exception)
+        self.assertIn("earnings_history", msg)
+        self.assertTrue(
+            "birth_year" in msg or "birth_date" in msg,
+            msg=f"expected birth_year/birth_date in: {msg}",
+        )
+        # Must refuse — not silently produce a member dated to 1979.
+        # (The error text may mention 1979 as the thing it refused to invent.)
+
 
 
 if __name__ == "__main__":

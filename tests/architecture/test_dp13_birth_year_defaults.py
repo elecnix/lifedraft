@@ -29,23 +29,11 @@ that reads as a real person's birth year -- unless the source line carries a
 - ``= 1979`` / ``= 1960`` / ``= 1962`` with no marker: inside the range,
   no marker. **Fails.** This is the smell #741 is about.
 
-## The one allowlisted instance
+## Allowlist
 
-``countries/canada/retirement.py``'s ``MemberRetirementData.birth_year`` defaults
-to ``1979`` with only a ``# DP#1`` comment. It is a real violation of this
-rule. It is allowlisted here, with a citation, because:
-
-  - The DP#15 guard's own docstring (``test_dp15_no_personal_data.py``)
-    already notes this default is relied upon as generic fixture data in
-    well over a hundred call sites, and that changing it "needs its own
-    verified change, not a name-swap" -- it is out of scope for #741 (which
-    names only ``claiming_age_optimizer.py`` and ``cpp_sharing.py``) and was
-    deliberately not touched by this fix.
-  - The allowlist is citation-gated (``test_allowlisted_entries_cite_a_reason``)
-    and drift-gated (``test_allowlist_has_no_stale_entries``): if the field
-    is ever removed or its default moves out of ``[1900, 2010]``, the entry
-    goes stale and the build fails until someone removes it -- so the
-    carve-out cannot silently outlive the violation.
+``_ALLOWLIST`` is empty. The prior ``MemberRetirementData.birth_year=1979``
+carve-out was removed when #389 made ``birth_year`` a required field
+(``from_dict`` refuses absence loudly — DP#1/DP#32 / #756 longevity).
 
 Growing this allowlist to make a NEW ``= 19xx`` default go green is exactly
 how the original bugs got in (AGENTS.md: "When a guard fires, fix the code
@@ -57,20 +45,11 @@ from __future__ import annotations
 import repo_scan
 
 
-# The one known, separately-tracked instance. See the module docstring for
-# why this is allowlisted rather than fixed in #741, and the two tests below
-# for what keeps the carve-out honest.
-_ALLOWLIST = {
-    ("countries/canada/retirement.py", "birth_year: int = 1979"): {
-        "reason": (
-            "MemberRetirementData.birth_year=1979 is relied upon as generic "
-            "fixture data in 100+ call sites (per the DP#15 guard's own "
-            "note); remediation needs its own verified change and is out of "
-            "scope for #741, which names only claiming_age_optimizer.py and "
-            "cpp_sharing.py. Track separately; do not grow this allowlist."
-        ),
-    },
-}
+# Empty on purpose: the prior MemberRetirementData.birth_year=1979 carve-out
+# was removed with the #389 follow-up (birth_year is now a required field;
+# from_dict refuses absence loudly — DP#1/DP#32). Do not grow this allowlist
+# to make a NEW =19xx default go green (AGENTS.md: fix the code).
+_ALLOWLIST: dict = {}
 
 
 def test_no_person_specific_birth_year_default():
