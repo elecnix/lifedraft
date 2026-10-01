@@ -37,6 +37,7 @@ import contract_schema
 import input_contract
 from contract_errors import ContractAdaptationError
 from contract_people import _find_primary_and_spouse
+from contract_people import _find_primary_and_spouse
 
 
 def _couple_doc() -> dict:
@@ -138,6 +139,55 @@ class OnlyTheCoupleActuallyFormedIsChecked(unittest.TestCase):
                 rel["to"] = "2020-06-01"
         with self.assertRaises(ContractAdaptationError):
             _find_primary_and_spouse(doc)
+
+
+class CoupleDiscoveryFallbacks(unittest.TestCase):
+    """The two DISCOVERY fallbacks in ``_find_primary_and_spouse``.
+
+    ``decisions.horizon.person`` names the primary in every real document, so the
+    "no horizon person" and "spouse only found by the reciprocal edge" paths are
+    reached by no ordinary contract -- and nothing pinned them, which is how a
+    baseline can drift when the suite's collection order changes. They are
+    behaviour, not dead code: a document whose horizon names someone the engine
+    cannot find, or whose primary declares no ``spouse_of`` edge but whose spouse
+    declares one back, must still form the right couple.
+    """
+
+    def test_a_horizon_person_the_engine_cannot_find_falls_back_to_a_declared_spouse(self):
+        doc = _couple_doc()
+        doc["decisions"]["horizon"]["person"] = "nobody_declared"  # schema-valid id, absent person
+        primary_id, spouse_id = _find_primary_and_spouse(doc)
+        # p1 is the first person declaring a spouse_of edge, so the fallback
+        # finds the same couple the horizon person would have named.
+        self.assertEqual(primary_id, "p1")
+        self.assertEqual(spouse_id, "p2")
+
+    def test_a_primary_without_its_own_edge_finds_the_spouse_reciprocally(self):
+        """A document may declare the union from EITHER side. The shipped example
+        declares p1 -> p2 only; a household whose spouse declares the edge back
+        at the primary (and the primary declares none) must still form the
+        couple, via the reciprocal scan."""
+        doc = _couple_doc()
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p2 = next(p for p in doc["people"] if p["id"] == "p2")
+        p1["relationships"] = [r for r in p1["relationships"] if r["type"] != "spouse_of"]
+        p2["relationships"] = list(p2["relationships"]) + [
+            {"type": "spouse_of", "person": "p1", "from": "2008-06-21", "to": None},
+        ]
+        primary_id, spouse_id = _find_primary_and_spouse(doc)
+        self.assertEqual(primary_id, "p1")
+        self.assertEqual(spouse_id, "p2")
+
+    def test_a_document_with_no_union_at_all_forms_a_single_adult(self):
+        """The last fallback: no spouse_of edge anywhere, so the first person is
+        the primary and there is no spouse (a genuinely single household)."""
+        doc = _couple_doc()
+        for person in doc["people"]:
+            person["relationships"] = [r for r in person["relationships"]
+                                       if r["type"] != "spouse_of"]
+        primary_id, spouse_id = _find_primary_and_spouse(doc)
+        self.assertIsNotNone(primary_id)
+        self.assertIsNone(spouse_id)
 
 
 class DatedUnionIsRefused(unittest.TestCase):
