@@ -176,10 +176,6 @@ KNOWN_UNREACHED: dict[str, str] = {
         "#745 — CPP/OAS claiming-age optimizer (#291's subject). The engine takes "
         "the claiming age as an input instead of optimizing it."
     ),
-    "countries.canada.cpp_estimator": (
-        "#745 — CPP benefit estimation from an earnings history. The engine reads "
-        "`cpp_monthly_estimated` from the contract instead."
-    ),
     "countries.canada.renewal_model": (
         "#745 — mortgage renewal-path modelling; superseded in practice by "
         "`rate_model`'s rate paths, but never deleted (DP#9)."

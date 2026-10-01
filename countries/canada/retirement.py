@@ -714,9 +714,12 @@ class MemberRetirementData:
     DP#4: role-based names, not person names.
     DP#28: eligibility is date-computed from birth_year.
     DP#16: auto-include when any field is non-zero.
+    DP#1/DP#32: ``birth_year`` is REQUIRED — never invent a person (a prior
+    silent person-specific default dated every age wrong for any other
+    household; see #756 / #389 follow-up).
     """
+    birth_year: int                   # DP#1/DP#32: required; no silent person default
     role: str = "primary"             # 'primary' or 'spouse'
-    birth_year: int = 1979           # DP#1: store date, not age
     cpp_start_age: int = 65         # 60-70 range
     cpp_monthly_estimated: float = 0.0  # Monthly CPP at age 65 (base+CPP2); age-adjusted in cpp_from_estimate
     oas_start_age: int = 65         # 65-70 (can defer 0-60 months)
@@ -797,7 +800,48 @@ class MemberRetirementData:
         issue #388: store the age-65 monthly only (base + CPP2). Age
         adjustment for cpp_start_age happens once in cpp_from_estimate,
         which treats cpp_monthly_estimated as the Statement-at-65 amount.
+
+        DP#1/DP#32: ``birth_year`` is required. A missing or zero value
+        fails loudly — never invent a fabricated birth year.
         """
+        birth_year = data.get('birth_year')
+        # DP#1/DP#32: require a real calendar year. Reject absent / non-numeric /
+        # bool (bool is an int subclass — never treat True/False as a year) /
+        # zero (the 'unset' sentinel elsewhere). Whole-number floats (JSON
+        # 1985.0) coerce to int; fractional years refuse.
+        if birth_year is None:
+            raise ValueError(
+                "MemberRetirementData.from_dict: birth_year is required "
+                "(DP#1/DP#32) — got None. A missing birth date must not "
+                "become a confident wrong age; pass the member's real "
+                "birth_year (derived from birth_date on the contract)."
+            )
+        if type(birth_year) is bool:
+            raise ValueError(
+                f"MemberRetirementData.from_dict: birth_year must be an int "
+                f"calendar year (DP#1/DP#32) — got {birth_year!r} (bool). "
+                f"True/False are not birth years."
+            )
+        if type(birth_year) is float:
+            if not birth_year.is_integer():
+                raise ValueError(
+                    f"MemberRetirementData.from_dict: birth_year must be a "
+                    f"whole calendar year (DP#1/DP#32) — got {birth_year!r}."
+                )
+            birth_year = int(birth_year)
+        elif type(birth_year) is not int:
+            raise ValueError(
+                f"MemberRetirementData.from_dict: birth_year must be an int "
+                f"calendar year (DP#1/DP#32) — got {birth_year!r} "
+                f"({type(birth_year).__name__})."
+            )
+        if birth_year <= 0:
+            raise ValueError(
+                f"MemberRetirementData.from_dict: birth_year must be a "
+                f"positive calendar year (DP#1/DP#32) — got {birth_year!r}. "
+                f"Zero is the 'unset' sentinel used elsewhere, not a person."
+            )
+
         earnings_history_raw = data.get('earnings_history', None)
         cpp_monthly = data.get('cpp_monthly_estimated', 0)
 
@@ -817,8 +861,8 @@ class MemberRetirementData:
             cpp_monthly = estimate.age_65_monthly + estimate.cpp2_age_65_monthly
 
         return cls(
+            birth_year=birth_year,
             role=data.get('role', 'primary'),
-            birth_year=data.get('birth_year', 1979),
             cpp_start_age=data.get('cpp_start_age', 65),
             cpp_monthly_estimated=cpp_monthly,
             oas_start_age=data.get('oas_start_age', 65),

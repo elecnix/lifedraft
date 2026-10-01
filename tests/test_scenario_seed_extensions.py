@@ -117,7 +117,7 @@ class TestDesignPrinciples:
 
     def test_dp4_role_based_names(self):
         """DP#4: Use 'primary'/'spouse', not person names."""
-        member = MemberRetirementData(role="primary")
+        member = MemberRetirementData(birth_year=1985, role="primary")
         assert member.role == "primary"
 
     def test_dp8_compose_through_data(self):
@@ -364,7 +364,7 @@ class TestScenario5x12xRetirement:
     def test_scenario_123_oas_deferral_benefit(self):
         """§12.3: Defer OAS to 70 → 36% higher payment."""
         oas_at_65 = OAS_ANNUAL_MAX
-        member = MemberRetirementData(oas_defer_months=60)
+        member = MemberRetirementData(birth_year=1960, oas_defer_months=60)
         oas_at_70 = member.oas_annual
         increase = (oas_at_70 - oas_at_65) / oas_at_65
         assert increase == pytest.approx(0.36, abs=0.01)
@@ -382,6 +382,7 @@ class TestScenario6xLifeEvents:
         # Primary at $130K, spouse at $50K
         # Employer RRSP match: 3% on $130K = $3,900
         primary = MemberRetirementData(
+            birth_year=1985,
             employer_rrsp_match_pct=0.03,
             employer_rrsp_match_max=3900,
         )
