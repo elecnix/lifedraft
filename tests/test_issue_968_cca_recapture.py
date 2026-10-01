@@ -35,7 +35,7 @@ Acceptance (per the issue):
   - Money conservation holds (the sale-year run invariants, wired into
     ``FamilySimulation.run`` via ``trajectory_invariants``, enforce this on
     every run here).
-  - The golden invariant ``9709753.139463063`` is byte-exact (no rental sale /
+  - The golden invariant ``9501884.002641384`` is byte-exact (no rental sale /
     no CCA -> unchanged by construction -- verified separately in
     ``test_golden_trajectory_581``).
 

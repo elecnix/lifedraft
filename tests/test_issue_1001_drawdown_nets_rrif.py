@@ -239,6 +239,6 @@ def test_golden_terminal_rose_above_pre_fix_value():
         f"(the bug lowered wealth); got #1001-ON={terminal_1001_on!r}, "
         f"#1001-OFF={terminal_1001_off!r}")
     # Re-pin to the exact new value (moved by #1046's RESP funding).
-    assert terminal_1001_on == pytest.approx(9709753.139463063), (
-        f"golden terminal re-pin: expected 9709753.139463063, "
+    assert terminal_1001_on == pytest.approx(9501884.002641384), (
+        f"golden terminal re-pin: expected 9501884.002641384, "
         f"got {terminal_1001_on!r}")

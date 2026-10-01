@@ -197,10 +197,11 @@ class TestGoldenNoSmithManoeuvreIsByteExact:
         # terminal YearResult.total_assets. The expected value is the
         # documented golden invariant (AGENTS.md), computed not stored.
         # It was 9_816_435.13530067 before main's #1046 (RESP annual cap)
-        # moved it to 9_709_753.139463063 -- a change on main, NOT this PR
-        # (this PR touches zero existing files the golden household reads).
+        # moved it to 9_709_753.139463063, and #384 (the neutral default
+        # strategy replacing the implicit Smith Manoeuvre) moved it again to
+        # 9_501_884.002641384.
         results = _golden_run(golden_household_config())
-        assert results[-1].total_assets == pytest.approx(9_709_753.139463063)
+        assert results[-1].total_assets == pytest.approx(9_501_884.002641384)
 
 
 # ============================================================================
