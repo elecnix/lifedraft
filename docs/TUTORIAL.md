@@ -821,8 +821,12 @@ must not move). A few concrete triggers in this codebase:
 - **RESP / CESG / QESI** — appears when an `accounts[]` entry of `kind: "resp"`
   is declared (with its `resp` sub-object: `subscribers`, `beneficiaries`,
   `contributions_total`, `cesg_received`, `qesi_received`, `clb_received`),
-  and a beneficiary child has `room.resp` set. The grant *rates* and lifetime
-  maxima are never config — they stay as code tables in
+  and a beneficiary child has `room.resp` set. Each `beneficiaries[]` entry
+  carries that child's own history from the ESDC/promoter statement
+  (contributions, basic and additional CESG, QESI, CLB, and the pre-age-15
+  facts of the 16-17 test); the account totals must equal their sum, or the
+  document is refused (issue #295). The grant *rates*, lifetime maxima and
+  unused grant room are never config — they stay as code tables in
   `countries/canada/resp_rules.py` (DP#2/DP#12). Remove the RESP account and
   the module does not run.
 - **FHSA / HBP** — appears when an `accounts[]` entry of `kind: "fhsa"` is

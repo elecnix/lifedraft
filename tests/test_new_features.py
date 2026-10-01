@@ -62,7 +62,8 @@ def _make_state(
         fhsa_room=fhsa_room,
         fhsa_lifetime_remaining=fhsa_lifetime_remaining,
         resp_eligible_children=resp_eligible_children,
-        resp_annual_match_cap=750,
+        # Issue #295: the household cap (was a per-child 750 x eligible).
+        resp_grant_matched_cap=750 * resp_eligible_children,
         annual_savings=40000,
         bracket_gap=bracket_gap,
     )
