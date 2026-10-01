@@ -714,9 +714,9 @@ class MemberRetirementData:
     DP#4: role-based names, not person names.
     DP#28: eligibility is date-computed from birth_year.
     DP#16: auto-include when any field is non-zero.
-    DP#1/DP#32: ``birth_year`` is REQUIRED — never invent a person (the prior
-    silent default of 1979 dated every age wrong for any other household;
-    see #756 / #389 follow-up).
+    DP#1/DP#32: ``birth_year`` is REQUIRED — never invent a person (a prior
+    silent person-specific default dated every age wrong for any other
+    household; see #756 / #389 follow-up).
     """
     birth_year: int                   # DP#1/DP#32: required; no silent person default
     role: str = "primary"             # 'primary' or 'spouse'
@@ -802,7 +802,7 @@ class MemberRetirementData:
         which treats cpp_monthly_estimated as the Statement-at-65 amount.
 
         DP#1/DP#32: ``birth_year`` is required. A missing or zero value
-        fails loudly — never invent 1979 (or any other person).
+        fails loudly — never invent a fabricated birth year.
         """
         birth_year = data.get('birth_year')
         if not birth_year:

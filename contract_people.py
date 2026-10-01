@@ -567,7 +567,7 @@ def _map_member(doc: Dict, person_id: str, role: str,
     # here. Statement (benefits.cpp / entitlements.cpp) always wins — never
     # blend. Full always-on incomes + salary_growth padding is #390.
     # DP#1/DP#32: birth_year comes from birth_date above (or is absent);
-    # never invent 1979 — from_dict refuses a missing year loudly.
+    # never invent a hardcoded birth year — from_dict refuses absence loudly.
     earnings_history = p.get("earnings_history")
     if earnings_history:
         member["earnings_history"] = earnings_history
@@ -578,7 +578,7 @@ def _map_member(doc: Dict, person_id: str, role: str,
                     f"person {person_id!r} declares earnings_history but has "
                     f"no birth_date/birth_year (DP#1/DP#32). The CPP estimator "
                     f"needs a real birth year to date the member; refusing "
-                    f"rather than inventing 1979 (or any other person)."
+                    f"rather than inventing a fabricated birth year."
                 )
             from countries.canada.retirement import MemberRetirementData
             estimated = MemberRetirementData.from_dict({

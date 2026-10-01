@@ -112,7 +112,7 @@ class TestMemberRetirementData:
     def test_employer_match(self):
         """3% match on $130K = $3,900."""
         member = MemberRetirementData(
-            birth_year=1979,
+            birth_year=1985,
             employer_rrsp_match_pct=0.03,
             employer_rrsp_match_max=3900,
         )
@@ -122,7 +122,7 @@ class TestMemberRetirementData:
     def test_employer_match_capped(self):
         """Match capped at maximum."""
         member = MemberRetirementData(
-            birth_year=1979,
+            birth_year=1985,
             employer_rrsp_match_pct=0.03,
             employer_rrsp_match_max=3900,
         )
@@ -160,7 +160,7 @@ class TestMemberRetirementData:
         assert member.rrif_conversion_age == 71
 
     def test_from_dict_missing_birth_year_fails_loudly(self):
-        """DP#1/DP#32: omitting birth_year must not invent 1979."""
+        """DP#1/DP#32: omitting birth_year must not invent a fabricated year."""
         with pytest.raises(ValueError, match="birth_year is required"):
             MemberRetirementData.from_dict({'role': 'spouse'})
         with pytest.raises(ValueError, match="birth_year is required"):
@@ -323,7 +323,7 @@ class TestScenario61FullFamilyOptimization:
     def test_employer_match_calculation(self):
         """3% match on $130K = $3,900."""
         member = MemberRetirementData(
-            birth_year=1979,
+            birth_year=1985,
             employer_rrsp_match_pct=0.03,
             employer_rrsp_match_max=3900,
         )
@@ -332,7 +332,7 @@ class TestScenario61FullFamilyOptimization:
 
     def test_combined_cpp_benefit(self):
         """Primary at $1,250/mo + Spouse at $667/mo = $23,004/yr."""
-        primary = MemberRetirementData(birth_year=1979, cpp_monthly_estimated=1250)
+        primary = MemberRetirementData(birth_year=1985, cpp_monthly_estimated=1250)
         spouse = MemberRetirementData(birth_year=1980, cpp_monthly_estimated=667)
         combined = primary.cpp_annual + spouse.cpp_annual
         assert combined == pytest.approx(23004, abs=1)

@@ -31,9 +31,10 @@ that reads as a real person's birth year -- unless the source line carries a
 
 ## Allowlist
 
-``_ALLOWLIST`` is empty. The prior ``MemberRetirementData.birth_year=1979``
-carve-out was removed when #389 made ``birth_year`` a required field
-(``from_dict`` refuses absence loudly — DP#1/DP#32 / #756 longevity).
+``_ALLOWLIST`` is empty. The prior ``MemberRetirementData.birth_year``
+person-specific default carve-out was removed when #389 made
+``birth_year`` a required field (``from_dict`` refuses absence loudly —
+DP#1/DP#32 / #756 longevity).
 
 Growing this allowlist to make a NEW ``= 19xx`` default go green is exactly
 how the original bugs got in (AGENTS.md: "When a guard fires, fix the code
@@ -45,10 +46,11 @@ from __future__ import annotations
 import repo_scan
 
 
-# Empty on purpose: the prior MemberRetirementData.birth_year=1979 carve-out
-# was removed with the #389 follow-up (birth_year is now a required field;
-# from_dict refuses absence loudly — DP#1/DP#32). Do not grow this allowlist
-# to make a NEW =19xx default go green (AGENTS.md: fix the code).
+# Empty on purpose: the prior MemberRetirementData person-specific default
+# carve-out was removed with the #389 follow-up (birth_year is now a
+# required field; from_dict refuses absence loudly — DP#1/DP#32). Do not
+# grow this allowlist to make a NEW person-year default go green
+# (AGENTS.md: fix the code).
 _ALLOWLIST: dict = {}
 
 

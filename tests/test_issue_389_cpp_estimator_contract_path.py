@@ -200,7 +200,7 @@ class AbsentHistoryIsNoOp(unittest.TestCase):
 
 
 class MissingBirthYearFailsLoudly(unittest.TestCase):
-    """DP#1/DP#32 / #389 follow-up: never invent birth_year=1979."""
+    """DP#1/DP#32 / #389 follow-up: never invent a fabricated birth year."""
 
     def test_from_dict_without_birth_year_raises(self):
         with self.assertRaises(ValueError) as ctx:
@@ -211,18 +211,20 @@ class MissingBirthYearFailsLoudly(unittest.TestCase):
                     {"year": 2000, "employment_income": 80_000},
                 ],
             })
-        self.assertIn("birth_year is required", str(ctx.exception))
-        self.assertNotIn("1979", str(ctx.exception))
+        msg = str(ctx.exception)
+        self.assertIn("birth_year is required", msg)
+        # Error must describe the requirement, not substitute a person year.
+        self.assertNotRegex(msg, r"\b19[0-9]{2}\b")
 
-    def test_from_dict_does_not_silently_default_to_1979(self):
-        """Even a partial dict must not round-trip as birth_year=1979."""
+    def test_from_dict_without_birth_year_does_not_invent_a_person(self):
+        """A partial dict must raise — never construct with a fabricated year."""
         with self.assertRaises(ValueError):
             MemberRetirementData.from_dict({"role": "primary"})
 
     def test_contract_earnings_history_without_birth_date_refuses(self):
-        """_map_member with earnings_history but no birth_date must not invent
-        1979 — ContractAdaptationError (map_members also refuses adults
-        without DOB; this exercises the estimator path directly)."""
+        """_map_member with earnings_history but no birth_date must refuse
+        loudly (ContractAdaptationError). map_members also refuses adults
+        without DOB; this exercises the estimator path directly."""
         from contract_people import _map_member
         doc = _two_generation_subset(_load_example())
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
@@ -233,15 +235,15 @@ class MissingBirthYearFailsLoudly(unittest.TestCase):
         p1.pop("entitlements", None)
         p1.pop("benefits", None)
         with self.assertRaises(ContractAdaptationError) as ctx:
-            _map_member(doc, "p1", "primary", {})
+            member = _map_member(doc, "p1", "primary", {})
         msg = str(ctx.exception)
         self.assertIn("earnings_history", msg)
         self.assertTrue(
             "birth_year" in msg or "birth_date" in msg,
             msg=f"expected birth_year/birth_date in: {msg}",
         )
-        # Must refuse — not silently produce a member dated to 1979.
-        # (The error text may mention 1979 as the thing it refused to invent.)
+        # Must not have silently produced a dated member.
+        self.assertNotIn("cpp_monthly_estimated", locals().get("member", {}) or {})
 
 
 
