@@ -22,10 +22,13 @@ accounts, properties and liabilities all resolve one.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
 from contract_errors import ContractAdaptationError, ContractValidationError
+
+logger = logging.getLogger(__name__)
 
 
 def _people_by_id(doc: Dict) -> Dict[str, Dict]:
@@ -114,6 +117,10 @@ def _needs_adult_compute(doc: Dict, person_id: str, person: Dict) -> bool:
     # so it must trip the adult-compute boundary exactly as an in-pay benefit.
     entitlements = person.get("entitlements", {})
     if any(entitlements.get(k) for k in ("cpp", "oas")):
+        return True
+    # Issue #389: contributory earnings history drives a CPP estimate that
+    # `_map_child` would silently drop -- trip the adult-compute boundary.
+    if person.get("earnings_history"):
         return True
     if _future_employment_segments(person, doc["as_of"]):
         return True
@@ -552,6 +559,49 @@ def _map_member(doc: Dict, person_id: str, role: str,
         # DP#32: state the claim age ONCE. The deferral bonus is DERIVED from
         # it (65 = no deferral), never carried as a second, driftable field.
         member["oas_defer_months"] = (claim_age - 65) * 12
+
+    # Issue #389: wire earnings_history onto the JSON contract → optimize path.
+    # MemberRetirementData.from_dict already estimates when history is present
+    # and cpp_monthly_estimated is 0, but the simulate/optimize path reads the
+    # raw member dict (member_retirement_income), so the estimate must land
+    # here. Statement (benefits.cpp / entitlements.cpp) always wins — never
+    # blend. Full always-on incomes + salary_growth padding is #390.
+    earnings_history = p.get("earnings_history")
+    if earnings_history:
+        member["earnings_history"] = earnings_history
+        if "cpp_monthly_estimated" not in member:
+            from countries.canada.retirement import MemberRetirementData
+            estimated = MemberRetirementData.from_dict({
+                "role": role,
+                "birth_year": member.get("birth_year", 1979),
+                "cpp_start_age": member.get("cpp_start_age", 65),
+                "cpp_monthly_estimated": 0,
+                "earnings_history": earnings_history,
+            })
+            if estimated.cpp_monthly_estimated > 0:
+                member["cpp_monthly_estimated"] = estimated.cpp_monthly_estimated
+                member.setdefault("cpp_start_age", 65)
+
+    # Issue #389: loud warning when a NEAR-RETIREMENT adult would still
+    # project cpp_income=0 — no Statement and no usable earnings_history
+    # estimate. Younger earners stay silent (absence remains a pure no-op
+    # for goldens that intentionally omit CPP, DP#32); the warning targets
+    # the silent-zero defect class where government income is about to
+    # matter, without inventing a number. Always-on incomes+salary_growth
+    # for every earner is #390.
+    if "cpp_monthly_estimated" not in member:
+        age = _age_at(p.get("birth_date"), as_of)
+        if age is not None and age >= 50:
+            logger.warning(
+                "person %r (age %s) is near retirement but has no "
+                "benefits.cpp / entitlements.cpp and no usable "
+                "earnings_history estimate, so cpp_monthly_estimated is "
+                "unset (cpp_income=0 for the horizon). Provide a Service "
+                "Canada / Retraite Québec Statement as entitlements.cpp, or "
+                "people[].earnings_history for the CPP estimator (issue #389; "
+                "always-on incomes+salary_growth is #390).",
+                person_id, age,
+            )
 
     for cand in doc["decisions"]["retirement_age"]:  # both schema-required
         if cand["person"] == person_id and cand["candidate_ages"]:

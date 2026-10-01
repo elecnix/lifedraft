@@ -94,6 +94,27 @@
       "description": "Contribution room is a PERSON-level entitlement, not an account-level one (a person's RRSP room is one pool shared across every RRSP/spousal-RRSP they own or contribute to — putting it on the account, as the old schema's per-bucket totals implied, double-counts a person with two RRSPs at different institutions). This is why account.room does not exist in this schema (migration-plan.md, hard decision #2)."
     },
 
+    "earnings_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["year", "employment_income"],
+      "properties": {
+        "year": { "type": "integer", "minimum": 1966, "maximum": 2100, "description": "Issue #389 / #365: calendar year of contributory (pensionable) earnings. DP#1: store the year, never an age." },
+        "employment_income": { "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }], "description": "Pensionable employment / self-employment earnings for that year (pre-YMPE cap). null = a year known to have zero contributory earnings (distinct from omitting the year, which the estimator also treats as zero inside the contributory span)." }
+      },
+      "description": "Issue #389: one year of CPP/QPP contributory earnings history for the optional benefit estimator (countries/canada/cpp_estimator.py)."
+    },
+
+    "person": {
+      "properties": {
+        "earnings_history": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/earnings_entry" },
+          "description": "Issue #389: optional CPP/QPP contributory earnings history. When present and the person has no in-pay benefits.cpp and no pre-claim entitlements.cpp (Service Canada / Retraite Québec Statement), contract_people._map_member runs cpp_estimator.compute_benefit_estimate and sets cpp_monthly_estimated (age-65 monthly, incl. CPP2) so omitting a Statement no longer silently yields cpp_income=0 for the whole horizon. A Statement (benefits.cpp or entitlements.cpp) always wins — the estimator is never blended with it. Full always-on derivation from incomes + salary_growth future years is #390."
+        }
+      }
+    },
+
     "benefit_claim": {
       "properties": {
         "cpp": {
