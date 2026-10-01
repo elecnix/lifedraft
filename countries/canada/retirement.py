@@ -815,12 +815,21 @@ class MemberRetirementData:
                 "become a confident wrong age; pass the member's real "
                 "birth_year (derived from birth_date on the contract)."
             )
-        if not isinstance(birth_year, int) or isinstance(birth_year, bool):
+        # Accept a whole-number float (JSON may decode 1985 as 1985.0) by
+        # coercing only when the value is an exact calendar year.
+        if isinstance(birth_year, bool) or not isinstance(birth_year, (int, float)):
             raise ValueError(
                 f"MemberRetirementData.from_dict: birth_year must be an int "
                 f"calendar year (DP#1/DP#32) — got {birth_year!r} "
                 f"({type(birth_year).__name__})."
             )
+        if isinstance(birth_year, float):
+            if not birth_year.is_integer():
+                raise ValueError(
+                    f"MemberRetirementData.from_dict: birth_year must be a "
+                    f"whole calendar year (DP#1/DP#32) — got {birth_year!r}."
+                )
+            birth_year = int(birth_year)
         if birth_year <= 0:
             raise ValueError(
                 f"MemberRetirementData.from_dict: birth_year must be a "
