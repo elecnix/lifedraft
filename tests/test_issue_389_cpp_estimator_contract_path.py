@@ -13,8 +13,8 @@ passes it through, the estimator sets `cpp_monthly_estimated` (age-65 +
 CPP2) when no Statement is present, a Statement still wins, and a loud
 warning fires when CPP would stay zero despite employment income.
 
-All test data is synthetic (DP#15). Full always-on incomes + salary_growth
-future years is #390 and is deliberately out of scope here.
+All test data is synthetic (DP#15). Always-on incomes + salary_growth
+future years is #390 (see test_issue_390_cpp_estimate_from_incomes.py).
 """
 
 from __future__ import annotations
@@ -107,6 +107,7 @@ class StatementPrecedence(unittest.TestCase):
         primary, _ = _primary_member(doc)
         self.assertEqual(primary["cpp_monthly_estimated"], 1300)
         self.assertEqual(primary["cpp_start_age"], 67)
+        self.assertEqual(primary["cpp_benefit_source"], "statement")
         # History is still carried for provenance / later tools.
         self.assertIn("earnings_history", primary)
 
@@ -132,7 +133,11 @@ class SilentZeroWarned(unittest.TestCase):
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
         p1.pop("entitlements", None)
         p1.pop("earnings_history", None)
-        # Age 55 as of 2026-07-12 — near retirement, no Statement/history.
+        # Issue #390: strip employment incomes too — otherwise always-on
+        # estimation would set cpp_monthly_estimated and silence the warn.
+        for _inc in p1.get("incomes", []):
+            _inc["kind"] = "other"
+        # Age 55 as of 2026-07-12 — near retirement, no Statement/history/incomes.
         p1["birth_date"] = "1971-03-14"
 
         with self.assertLogs("contract_people", level="WARNING") as cm:
@@ -144,11 +149,20 @@ class SilentZeroWarned(unittest.TestCase):
         )
 
     def test_younger_earner_without_cpp_does_not_warn(self):
-        """Golden-example ages (~mid-40s) intentionally omit CPP; silence."""
+        """Age floor: under 50 with no CPP source stays silent (DP#32).
+
+        Keep pensionable incomes neutered so always-on (#390) cannot set an
+        estimate — silence must come from the age gate, not from a
+        non-zero estimate. Pair with the age>=50 warning test above.
+        """
         doc = _two_generation_subset(_load_example())
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
         p1.pop("entitlements", None)
         p1.pop("earnings_history", None)
+        for _inc in p1.get("incomes", []):
+            _inc["kind"] = "other"
+        # Explicit mid-40s (example p1 is ~46 as of 2026-07-12; pin it).
+        p1["birth_date"] = "1980-03-14"
         try:
             with self.assertLogs("contract_people", level="WARNING") as cm:
                 ic.to_internal_config(doc)
@@ -157,8 +171,31 @@ class SilentZeroWarned(unittest.TestCase):
             msgs = []
         self.assertFalse(
             any("cpp_income=0" in msg for msg in msgs),
-            msg=f"mid-career earners must stay silent: {msgs}",
+            msg=f"under-50 with no CPP source must stay silent: {msgs}",
         )
+
+    def test_mid_career_with_incomes_estimate_does_not_warn(self):
+        """#390 always-on: mid-career with employment incomes gets an
+        estimate, so the silent-zero warning must not fire."""
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1.pop("entitlements", None)
+        p1.pop("earnings_history", None)
+        p1["birth_date"] = "1980-03-14"
+        try:
+            with self.assertLogs("contract_people", level="WARNING") as cm:
+                ic.to_internal_config(doc)
+            msgs = cm.output
+        except AssertionError:
+            msgs = []
+        self.assertFalse(
+            any("person 'p1'" in msg and "cpp_income=0" in msg for msg in msgs),
+            msg=f"estimated earner must not warn: {msgs}",
+        )
+        primary = next(
+            m for m in ic.to_internal_config(doc)["family"]["members"]
+            if m["role"] == "primary")
+        self.assertGreater(primary["cpp_monthly_estimated"], 0)
 
     def test_no_warning_for_person_with_estimate(self):
         doc = _doc_with_history()
@@ -177,15 +214,21 @@ class SilentZeroWarned(unittest.TestCase):
 
 
 class AbsentHistoryIsNoOp(unittest.TestCase):
-    """Absent earnings_history must not invent keys for households that
-    intentionally omit CPP (beyond the warning)."""
+    """Absent earnings_history AND absent pensionable incomes must not invent
+    CPP keys for households that intentionally omit CPP (beyond the warning).
+
+    Issue #390: employment incomes alone trigger always-on estimation — strip
+    them here so this case remains the intentional-omit no-op.
+    """
 
     def test_absent_history_sets_no_cpp_keys(self):
         doc = _two_generation_subset(_load_example())
         p1 = next(p for p in doc["people"] if p["id"] == "p1")
         self.assertIsNone(p1.get("earnings_history"))
         self.assertIsNone(p1.get("entitlements"))
-        # Suppress expected #389 warning for this absence check.
+        for _inc in p1.get("incomes", []):
+            _inc["kind"] = "other"
+        # Suppress expected #389/#390 warning for this absence check.
         logging.getLogger("contract_people").setLevel(logging.ERROR)
         try:
             legacy = ic.to_internal_config(doc)
@@ -194,7 +237,7 @@ class AbsentHistoryIsNoOp(unittest.TestCase):
         primary = next(m for m in legacy["family"]["members"]
                        if m["role"] == "primary")
         for key in ("cpp_monthly_estimated", "cpp_start_age",
-                    "earnings_history"):
+                    "earnings_history", "cpp_benefit_source"):
             self.assertNotIn(key, primary)
 
 
