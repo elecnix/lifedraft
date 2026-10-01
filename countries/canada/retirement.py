@@ -805,12 +805,27 @@ class MemberRetirementData:
         fails loudly — never invent a fabricated birth year.
         """
         birth_year = data.get('birth_year')
-        if not birth_year:
+        # DP#1/DP#32: require a real int year. Reject absent, 0 (not a birth
+        # year — elsewhere 0 is an "unset" sentinel), and non-ints that would
+        # only TypeError later in year - birth_year arithmetic.
+        if birth_year is None:
             raise ValueError(
-                f"MemberRetirementData.from_dict: birth_year is required "
-                f"(DP#1/DP#32) — got {birth_year!r}. A missing birth date "
-                f"must not become a confident wrong age; pass the member's "
-                f"real birth_year (derived from birth_date on the contract)."
+                "MemberRetirementData.from_dict: birth_year is required "
+                "(DP#1/DP#32) — got None. A missing birth date must not "
+                "become a confident wrong age; pass the member's real "
+                "birth_year (derived from birth_date on the contract)."
+            )
+        if not isinstance(birth_year, int) or isinstance(birth_year, bool):
+            raise ValueError(
+                f"MemberRetirementData.from_dict: birth_year must be an int "
+                f"calendar year (DP#1/DP#32) — got {birth_year!r} "
+                f"({type(birth_year).__name__})."
+            )
+        if birth_year <= 0:
+            raise ValueError(
+                f"MemberRetirementData.from_dict: birth_year must be a "
+                f"positive calendar year (DP#1/DP#32) — got {birth_year!r}. "
+                f"Zero is the 'unset' sentinel used elsewhere, not a person."
             )
 
         earnings_history_raw = data.get('earnings_history', None)

@@ -164,9 +164,11 @@ class TestMemberRetirementData:
         with pytest.raises(ValueError, match="birth_year is required"):
             MemberRetirementData.from_dict({'role': 'spouse'})
         with pytest.raises(ValueError, match="birth_year is required"):
-            MemberRetirementData.from_dict({'role': 'primary', 'birth_year': 0})
-        with pytest.raises(ValueError, match="birth_year is required"):
             MemberRetirementData.from_dict({'role': 'primary', 'birth_year': None})
+        with pytest.raises(ValueError, match="positive calendar year"):
+            MemberRetirementData.from_dict({'role': 'primary', 'birth_year': 0})
+        with pytest.raises(ValueError, match="must be an int"):
+            MemberRetirementData.from_dict({'role': 'primary', 'birth_year': '1985'})
 
 
 # =============================================================================

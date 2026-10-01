@@ -234,16 +234,16 @@ class MissingBirthYearFailsLoudly(unittest.TestCase):
         ]
         p1.pop("entitlements", None)
         p1.pop("benefits", None)
+        # assertRaises proves _map_member did not return a member — no
+        # successful result to inspect (a locals()-based check is vacuous).
         with self.assertRaises(ContractAdaptationError) as ctx:
-            member = _map_member(doc, "p1", "primary", {})
+            _map_member(doc, "p1", "primary", {})
         msg = str(ctx.exception)
         self.assertIn("earnings_history", msg)
         self.assertTrue(
             "birth_year" in msg or "birth_date" in msg,
             msg=f"expected birth_year/birth_date in: {msg}",
         )
-        # Must not have silently produced a dated member.
-        self.assertNotIn("cpp_monthly_estimated", locals().get("member", {}) or {})
 
 
 
