@@ -159,9 +159,8 @@ def _max_benefit_for_year(year: int, plan: str = "cpp") -> float:
             max_known = max(_QPP_MAX_BENEFIT_65.keys())
             if year > max_known:
                 return _QPP_MAX_BENEFIT_65[max_known]
-            min_known = min(_QPP_MAX_BENEFIT_65.keys())
-            return _QPP_MAX_BENEFIT_65[min_known]
-        # Empty QPP table: fall through to CPP rather than invent 0.
+            # Before the QPP table: fall through to CPP historical maxima
+            # rather than inventing a 2023 QPP value for 1990 (Cite #390).
     if year in CPP_OAS_BY_YEAR:
         return CPP_OAS_BY_YEAR[year]["cpp_max_benefit_65"]
     max_known = max(CPP_OAS_BY_YEAR.keys())
@@ -347,6 +346,7 @@ def build_earnings_for_estimate(
     as_of_year: int,
     birth_year: int,
     end_age: int = 65,
+    as_of_date: Optional[str] = None,
 ) -> List[EarningsEntry]:
     """Build a contributory earnings series for ``compute_benefit_estimate``.
 
@@ -355,20 +355,23 @@ def build_earnings_for_estimate(
     1. Seed from explicit ``earnings_history`` when present (wins year-by-year
        over income-derived amounts).
     2. Overlay dated ``incomes`` of kind employment / self_employment for
-       years not already covered by history (declared amount on the interval;
-       no reverse ``salary_growth`` into the past).
+       years not already covered by history (declared amount on calendar
+       years that overlap half-open ``[from, to)``; no reverse
+       ``salary_growth`` into the past).
     3. Extend through ``birth_year + end_age - 1`` using active employment
-       income at ``as_of_year``, grown forward with ``salary_growth`` —
-       but never past a closed income's ``to`` date when every active
-       income is closed (no open-ended job). Fallback when no active
-       income at as_of: last known series year, grown the same way.
+       income at ``as_of``, grown forward with ``salary_growth`` — but never
+       past a closed income's ``to`` when every active income is closed.
+       Fallback when no active income at as_of: last known series year,
+       grown the same way.
     4. Never invent zero years after the last known/projected year — that is
        the contract with ``compute_benefit_estimate``'s backward pad.
 
-    Years after an income's ``to`` date are not projected from that income.
-    ``self_employment`` uses gross ``amount`` (estimator takes employment
-    income; T2125 netting is out of scope — issue #390).
+    ``as_of_date`` (ISO ``YYYY-MM-DD``) is the snapshot for half-open
+    ``[from, to)`` activity checks; defaults to Dec 31 of ``as_of_year``.
+    ``self_employment`` uses gross ``amount`` (T2125 netting out of scope).
     """
+    as_of = as_of_date or f"{as_of_year}-12-31"
+
     by_year: dict[int, float] = {}
 
     for raw in earnings_history or ():
@@ -396,12 +399,17 @@ def build_earnings_for_estimate(
         amount = float(amount_raw)
         start = int(start_s[:4])
         end_raw = inc.get("to")
-        # Inclusive calendar years overlapping [from, to). Null to = open
-        # through as_of_year; future years are filled by the projection step.
         if end_raw is not None and not str(end_raw)[:4].isdigit():
             continue
-        last = (int(str(end_raw)[:4]) - 1) if end_raw else as_of_year
-        for y in range(start, min(last, as_of_year) + 1):
+        # Calendar year Y overlaps [from, to) when
+        # from < (Y+1)-01-01 and (to is null or to > Y-01-01).
+        for y in range(start, as_of_year + 1):
+            year_start = f"{y}-01-01"
+            year_end_excl = f"{y + 1}-01-01"
+            if start_s[:10] >= year_end_excl:
+                continue
+            if end_raw is not None and str(end_raw)[:10] <= year_start:
+                continue
             by_year.setdefault(y, amount)
 
     end_year = birth_year + end_age - 1
@@ -415,12 +423,13 @@ def build_earnings_for_estimate(
         start_s = str(inc["from"])
         if not start_s[:4].isdigit():
             continue
-        if int(start_s[:4]) > as_of_year:
+        if start_s[:10] > as_of[:10]:
             continue
         if inc.get("amount") is None:
             continue
         end = inc.get("to")
-        if end is not None and str(end)[:10] <= f"{as_of_year}-12-31":
+        # Half-open [from, to): inactive when to <= as_of.
+        if end is not None and str(end)[:10] <= as_of[:10]:
             continue
         active_at_as_of += float(inc["amount"])
         if end is None:
@@ -428,7 +437,10 @@ def build_earnings_for_estimate(
         else:
             if not str(end)[:4].isdigit():
                 continue
-            closed_future_ends.append(int(str(end)[:4]) - 1)
+            to_s = str(end)[:10]
+            # Last calendar year overlapping [from, to).
+            last_y = int(to_s[:4]) - (0 if to_s[5:10] > "01-01" else 1)
+            closed_future_ends.append(last_y)
 
     growth = float(salary_growth) if salary_growth else 0.0
 

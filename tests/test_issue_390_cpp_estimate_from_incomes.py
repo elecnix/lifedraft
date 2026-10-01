@@ -230,6 +230,42 @@ class BuildEarningsEdgeCases(unittest.TestCase):
         self.assertIn(2011, years)
         self.assertNotIn(2010, years)
 
+    def test_to_on_year_end_still_active_mid_year(self):
+        """to=YYYY-12-31 remains active for an as_of earlier that year."""
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment", "amount": 70_000,
+                "from": "2020-01-01", "to": "2026-12-31",
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+            as_of_date="2026-07-12",
+        )
+        by_year = {e.year: e.employment_income for e in entries}
+        self.assertEqual(by_year[2026], 70_000)
+        # Closed at year-end 2026 → no projection into 2027+.
+        self.assertEqual(max(by_year), 2026)
+
+    def test_overlay_includes_year_overlapping_half_open_to(self):
+        entries = build_earnings_for_estimate(
+            incomes=[{
+                "kind": "employment", "amount": 50_000,
+                "from": "2020-01-01", "to": "2026-01-01",
+            }],
+            salary_growth=0.0,
+            as_of_year=2026,
+            birth_year=1980,
+            end_age=65,
+            as_of_date="2026-07-12",
+        )
+        by_year = {e.year: e.employment_income for e in entries}
+        # [2020-01-01, 2026-01-01) overlaps 2025; inactive at as_of 2026-07-12
+        # so 2026+ come from last-known fallback growth, not active income.
+        self.assertEqual(by_year[2025], 50_000)
+        self.assertEqual(max(by_year), 2044)
+
     def test_skips_income_missing_amount(self):
         entries = build_earnings_for_estimate(
             incomes=[{
@@ -360,9 +396,11 @@ class QppMaxBenefitFallback(unittest.TestCase):
         from countries.canada.cpp_estimator import _max_benefit_for_year
         # Exact table year.
         self.assertEqual(_max_benefit_for_year(2026, plan="qpp"), 17334)
-        # 2020 is before the QPP table's 2023 floor → earliest row.
-        self.assertEqual(_max_benefit_for_year(2020, plan="qpp"), 15170)
-        # Future year after table → latest row.
+        # Before QPP table → fall through to CPP historical (not 2023 QPP).
+        before = _max_benefit_for_year(2020, plan="qpp")
+        cpp_2020ish = _max_benefit_for_year(2020, plan="cpp")
+        self.assertEqual(before, cpp_2020ish)
+        # Future year after table → latest QPP row.
         self.assertEqual(_max_benefit_for_year(2035, plan="qpp"), 17334)
 
 

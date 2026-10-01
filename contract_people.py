@@ -612,12 +612,21 @@ def _map_member(doc: Dict, person_id: str, role: str,
                 as_of_year=as_of_year,
                 birth_year=birth_year,
                 end_age=end_age,
+                as_of_date=as_of,
             )
             if entries:
-                # residency.province is schema-required on every person (DP#32).
-                plan = (
-                    "qpp" if p["residency"]["province"] == "quebec" else "cpp"
-                )
+                # residency.province is schema-required (DP#32). Refuse with
+                # ContractAdaptationError rather than KeyError when a direct
+                # unit-test call omits it (same pattern as birth_year).
+                residency = p.get("residency")
+                if not isinstance(residency, dict) or "province" not in residency:
+                    raise ContractAdaptationError(
+                        f"person {person_id!r} needs a CPP/QPP estimate but "
+                        f"has no residency.province (DP#32). Quebec residency "
+                        f"selects QPP max-benefit tables; refusing rather than "
+                        f"guessing a plan."
+                    )
+                plan = "qpp" if residency["province"] == "quebec" else "cpp"
                 # Always request the age-65 estimate (issue #388). Claim-age
                 # adjustment happens once in cpp_from_estimate from
                 # cpp_start_age; do not bake it into the stored monthly.
