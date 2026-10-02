@@ -548,8 +548,14 @@ def _contribution_in_hbp_window(ctx: FidelityContext) -> bool:
         return False
     prop = cfg.get('property')
     heloc = prop.get('heloc') if isinstance(prop, dict) else None
-    if not (isinstance(heloc, dict) and heloc.get('readvanceable')) and not (
-            isinstance(prop, dict) and prop.get('has_heloc')):
+    # A readvanceable line is what funds the sleeve, so it -- and NOT a bare
+    # `has_heloc` -- is what makes the engine model an HBP withdrawal at all.
+    # The `has_heloc` disjunct that used to sit here made the caveat fire for any
+    # household with a HELOC, claiming a 90-day gap the engine never priced: the
+    # very "reports a gap that is not there" failure the fail-open guard
+    # elsewhere in this module exists to prevent (and it contradicted this
+    # function's own docstring).
+    if not (isinstance(heloc, dict) and heloc.get('readvanceable')):
         return False
     purchases = cfg.get('first_home_purchases')
     if not purchases:
