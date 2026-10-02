@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 
 HBP_MAX_WITHDRAWAL = 60000         # 2024+ increased from $35k to $60k
 HBP_REPAYMENT_YEARS = 15           # Must repay over 15 years
-HBP_REPAYMENT_START_DELAY = 2      # Start repaying 3rd year after withdrawal
+HBP_REPAYMENT_START_DELAY = 1      # 2nd year after withdrawal (CRA / ITA s.146.01(4))
 HBP_ANNUAL_MIN_REPAYMENT_PCT = 1.0 / HBP_REPAYMENT_YEARS  # ~6.67% per year
 
 # 89-day rule: RRSP contributions made within 89 days BEFORE an HBP
@@ -50,7 +50,8 @@ HBP_MIN_CONTRIBUTION_DAYS = 90  # property must be in the RRSP 90 days before wi
 # DP#20: Temporary repayment relief for the 2022-2025 federal budget measure.
 # Withdrawals made between 2022-01-01 and 2025-12-31 get a 5-year grace
 # period (repayment starts the 5th year after withdrawal) instead of the
-# normal 3rd year. Modelled as a year-versioned start-delay table.
+# normal 2nd year. Modelled as a year-versioned start-delay table --
+# the relief is exactly three years more than the normal delay.
 # Source: Budget 2024 / Department of Finance; CRA "Repay the funds...".
 # https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/rrsps-related-plans/what-home-buyers-plan/repay-funds-withdrawn-rrsp-s-under-home-buyers-plan.html
 HBP_RELIEF_START_DELAY = 4         # relief: 5th year after withdrawal
@@ -171,9 +172,11 @@ class HBPAccount:
     def repayment_start_year(self) -> int:
         """Year by which repayments must start.
 
-        Normally repayment begins the 3rd calendar year after withdrawal.
-        E.g., withdraw in 2026 → first repayment due for the 2028 tax year
-        (start year 2029).
+        Normally repayment begins the SECOND calendar year after the withdrawal
+        year: withdraw in 2026 and the first instalment falls in 2028 (CRA's own
+        example is a 2020 withdrawal repaying from 2022; ITA s.146.01(4) gives
+        the same). This used to be the third year, which let every non-relief
+        household sit through year 2 of the HBP for free (#349).
 
         DP#20: Withdrawals in 2022-2025 receive the temporary federal
         relief that defers the start to the 5th year after withdrawal.

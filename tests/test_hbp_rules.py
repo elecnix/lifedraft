@@ -50,9 +50,15 @@ class TestHBPConstants(unittest.TestCase):
         """HBP must be repaid over 15 years (ITA s.146.4)."""
         self.assertEqual(HBP_REPAYMENT_YEARS, 15)
 
-    def test_repayment_start_delay_is_2(self):
-        """Repayment starts the 3rd year after withdrawal (2-year delay)."""
-        self.assertEqual(HBP_REPAYMENT_START_DELAY, 2)
+    def test_repayment_start_delay_is_1(self):
+        """Repayment starts the SECOND year after withdrawal (1-year delay).
+
+        Issue #349: this was 2, which put the first instalment in the third
+        year and let every non-relief household sit through HBP year 2 free of
+        charge. CRA's page gives a 2020 withdrawal repaying from 2022, and
+        ITA s.146.01(4) agrees.
+        """
+        self.assertEqual(HBP_REPAYMENT_START_DELAY, 1)
 
     def test_annual_min_repayment_pct(self):
         """Annual minimum = 1/15 ≈ 6.67% of withdrawal."""
@@ -130,9 +136,13 @@ class TestRepaymentSchedule(unittest.TestCase):
         self.assertAlmostEqual(hbp.annual_min_repayment(), 35000 / 15, places=2)
 
     def test_repayment_start_year_withdrawal_2026(self):
-        """Withdraw in 2026 → first repayment in 2029 (2026 + 2 + 1)."""
+        """Withdraw in 2026 -> first repayment in 2028 (2026 + 1 + 1, #349).
+
+        2026 is outside the 2022-2025 relief window, so the NORMAL rule applies:
+        the second year after the withdrawal year (CRA; ITA s.146.01(4)).
+        """
         hbp = HBPAccount(withdrawal=35000, withdrawal_year=2026)
-        self.assertEqual(hbp.repayment_start_year(), 2029)
+        self.assertEqual(hbp.repayment_start_year(), 2028)
 
     def test_repayment_start_year_withdrawal_2025(self):
         """Withdraw in 2025 → 5-year relief → first repayment in 2030 (#308)."""
@@ -151,16 +161,16 @@ class TestRepaymentSchedule(unittest.TestCase):
         self.assertEqual(len(schedule), 15)
 
     def test_generate_schedule_first_year(self):
-        """First payment year matches repayment_start_year()."""
+        """First payment year matches repayment_start_year(): 2026 -> 2028 (#349)."""
         hbp = HBPAccount(withdrawal=60000, withdrawal_year=2026)
         schedule = hbp.generate_repayment_schedule()
-        self.assertEqual(schedule[0]['year'], 2029)
+        self.assertEqual(schedule[0]['year'], 2028)
 
     def test_generate_schedule_last_year(self):
-        """Last payment year = start + 14."""
+        """Last payment year = start + 14 (#349: start is 2028, not 2029)."""
         hbp = HBPAccount(withdrawal=60000, withdrawal_year=2026)
         schedule = hbp.generate_repayment_schedule()
-        self.assertEqual(schedule[-1]['year'], 2029 + 14)
+        self.assertEqual(schedule[-1]['year'], 2028 + 14)
 
     def test_generate_schedule_outstanding_ends_zero(self):
         """After all payments, outstanding balance is zero."""
@@ -458,7 +468,7 @@ class TestHBPSummary(unittest.TestCase):
         self.assertEqual(s['repaid'], 0.0)
         self.assertEqual(s['outstanding'], 60000)
         self.assertAlmostEqual(s['annual_min_repayment'], 4000)
-        self.assertEqual(s['repayment_start_year'], 2029)
+        self.assertEqual(s['repayment_start_year'], 2028)  # #349: second year
 
     def test_summary_after_partial_repayment(self):
         """Summary after partial repayment shows reduced outstanding."""
@@ -539,7 +549,7 @@ class TestFHSAToHBPTransitions(unittest.TestCase):
         hbp = HBPAccount(withdrawal=60000, withdrawal_year=2030)
         schedule = hbp.generate_repayment_schedule()
         self.assertEqual(len(schedule), 15)
-        self.assertEqual(schedule[0]['year'], 2033)  # 2030 + 2 + 1
+        self.assertEqual(schedule[0]['year'], 2032)  # #349: 2030 + 1 + 1
 
     def test_double_deduction_strategy_fhsa_contribution(self):
         """FHSA contribution creates a deduction; HBP withdrawal is tax-free."""
@@ -586,8 +596,8 @@ class TestFHSAToHBPTransitions(unittest.TestCase):
         self.assertEqual(len(sched_p), 15)
         self.assertEqual(len(sched_s), 15)
         # Different start years
-        self.assertEqual(sched_p[0]['year'], 2029)
-        self.assertEqual(sched_s[0]['year'], 2030)
+        self.assertEqual(sched_p[0]['year'], 2028)  # #349: 2026 + 1 + 1
+        self.assertEqual(sched_s[0]['year'], 2029)  # #349: 2027 + 1 + 1
         # Different min payments
         self.assertAlmostEqual(sched_p[0]['min_payment'], 4000)
         self.assertAlmostEqual(sched_s[0]['min_payment'], 3000)
@@ -742,19 +752,23 @@ class TestHBPEdgeCases(unittest.TestCase):
     def test_early_repayment_before_start_year(self):
         """Repayment before start year is allowed (no enforcement)."""
         hbp = HBPAccount(withdrawal=60000, withdrawal_year=2026)
-        # Repayment start year is 2029, but paying in 2027
+        # Repayment start year is 2028 (#349), but paying in 2027
         result = hbp.make_repayment(4000, year=2027)
         self.assertEqual(result['amount_repaid'], 4000)
         self.assertEqual(hbp.repaid, 4000)
 
     def test_repayment_schedule_with_different_years(self):
         """Schedule generates correctly for non-relief withdrawal years."""
-        # 2026 and 2030 are outside the 2022-2025 relief window → normal 3rd-year start.
+        # 2026 and 2030 are outside the 2022-2025 relief window -> the NORMAL
+        # rule, i.e. the SECOND year after the withdrawal year (#349; CRA, ITA
+        # s.146.01(4)). Asserted against the start year the account publishes,
+        # so this test cannot drift away from the rule it is checking.
         for wy in [2026, 2030]:
             hbp = HBPAccount(withdrawal=60000, withdrawal_year=wy)
             schedule = hbp.generate_repayment_schedule()
             self.assertEqual(len(schedule), 15)
-            self.assertEqual(schedule[0]['year'], wy + 3)
+            self.assertEqual(schedule[0]['year'], hbp.repayment_start_year())
+            self.assertEqual(schedule[0]['year'], wy + 2)
 
     def test_hbp_account_is_dataclass(self):
         """HBPAccount is a dataclass (DP#8: compose through data)."""
@@ -819,16 +833,19 @@ class TestHBPRepaymentRelief(unittest.TestCase):
         self.assertEqual(repayment_start_delay_for_year(2023), HBP_RELIEF_START_DELAY)
 
     def test_non_relief_year_uses_standard_delay(self):
-        """A 2026 withdrawal uses the standard 2-year delay (3rd-year start)."""
-        self.assertEqual(repayment_start_delay_for_year(2026), 2)
+        """A 2026 withdrawal uses the standard 1-year delay: the SECOND year (#349)."""
+        self.assertEqual(repayment_start_delay_for_year(2026), 1)
+        # ... and the delay really is one year less than the relief's three-years-more.
+        self.assertEqual(
+            repayment_start_delay_for_year(2024) - repayment_start_delay_for_year(2026), 3)
 
     def test_relief_boundary_2022_included(self):
         """2022 is the first relief year (edge)."""
         self.assertEqual(repayment_start_delay_for_year(2022), HBP_RELIEF_START_DELAY)
 
     def test_relief_boundary_2021_excluded(self):
-        """2021 (just before the window) is standard (edge)."""
-        self.assertEqual(repayment_start_delay_for_year(2021), 2)
+        """2021 (just before the window) is standard (edge), so the second year (#349)."""
+        self.assertEqual(repayment_start_delay_for_year(2021), 1)
 
     def test_relief_start_year_for_2023_withdrawal(self):
         """2023 withdrawal → repayment starts 2028 (2023 + 4 + 1)."""
