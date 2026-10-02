@@ -438,37 +438,3 @@ class TheCaveatNeedsAModelledWithdrawal(unittest.TestCase):
     def test_a_readvanceable_line_still_fires(self):
         self.assertTrue(_active(CAVEAT_ID, self._ctx_heloc(True)))
 
-
-class TheCaveatNeedsAModelledWithdrawal(unittest.TestCase):
-    """It must not fire for a HELOC that funds no HBP withdrawal.
-
-    Only a READVANCEABLE line funds the sleeve, so only a readvanceable line
-    makes the engine perform a withdrawal whose 90-day rule goes unpriced. A
-    bare `has_heloc` is not that: with one, the caveat claimed a gap for a
-    household that never had an HBP withdrawal at all.
-    """
-
-    def _ctx_heloc(self, readvanceable):
-        heloc = {"readvanceable": readvanceable, "capitalize_interest": True,
-                 "limit": 150000.0, "rate": 0.0545, "rate_type": "variable",
-                 "deductibility": {"investment_portion": 0.0,
-                                   "personal_portion": 1.0},
-                 "collateral": "principal_residence"}
-        return _ctx(contributions=[{"date": "2024-12-20", "amount": 8000.0}],
-                    first_home_purchases=[{"buyer": "p1", "year": 2025}]) \
-            .__class__(cfg={
-                "property": {"heloc": heloc, "heloc_rate": 0.0545,
-                             "has_heloc": True},
-                "first_home_purchases": [{"buyer": "p1", "year": 2025}],
-                "family": {"members": [{"role": "primary",
-                                        "rrsp_contributions": [
-                                            {"date": "2024-12-20",
-                                             "amount": 8000.0}]}]}},
-                objective_name="min_shortfall")
-
-    def test_a_heloc_that_cannot_fund_the_sleeve_does_not_fire(self):
-        self.assertFalse(_active(CAVEAT_ID, self._ctx_heloc(False)))
-
-    def test_a_readvanceable_line_still_fires(self):
-        self.assertTrue(_active(CAVEAT_ID, self._ctx_heloc(True)))
-
