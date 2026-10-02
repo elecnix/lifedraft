@@ -231,7 +231,16 @@ class BuildEarningsEdgeCases(unittest.TestCase):
         self.assertNotIn(2010, years)
 
     def test_to_on_year_end_still_active_mid_year(self):
-        """to=YYYY-12-31 remains active for an as_of earlier that year."""
+        """to=YYYY-12-31 remains active for an as_of earlier that year.
+
+        Issue #415: the ACTIVE half of this assertion is unchanged -- a `to` of
+        Dec 31 does not close the income before the as_of, so 2026 is still
+        earned. The AMOUNT is now day-counted, because `amount` is an annual
+        RATE (schema/defs/people.json) and `to` is exclusive: this window
+        covers 2026-01-01 through 2026-12-30, which is 364 of 365 days. The
+        assertion used to pin a whole annual rate onto a year the window only
+        covers to within a day -- the ~2x overstatement #415 was filed for.
+        """
         entries = build_earnings_for_estimate(
             incomes=[{
                 "kind": "employment", "amount": 70_000,
@@ -244,7 +253,7 @@ class BuildEarningsEdgeCases(unittest.TestCase):
             as_of_date="2026-07-12",
         )
         by_year = {e.year: e.employment_income for e in entries}
-        self.assertEqual(by_year[2026], 70_000)
+        self.assertAlmostEqual(by_year[2026], 70_000 * 364 / 365)
         # Closed at year-end 2026 → no projection into 2027+.
         self.assertEqual(max(by_year), 2026)
 

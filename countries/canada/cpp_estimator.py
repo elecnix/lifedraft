@@ -45,6 +45,11 @@ References:
 from dataclasses import dataclass
 from typing import List, Mapping, Optional, Sequence
 
+# Issue #415: the one spelling of what a dated [from, to) window means. Core
+# and jurisdiction-neutral, so a Canada module importing it is the right
+# direction of dependency (DP#25).
+from income_window import covers_date, overlaps_year, parse_date, year_fraction
+
 from countries.canada.cpp_data import cpp_parameters
 from countries.canada.retirement import (
     CPP_EARLY_START_PENALTY,
@@ -260,6 +265,15 @@ def _dropout_average(ratios: list) -> tuple:
 
 _PENSIONABLE_KINDS = frozenset({"employment", "self_employment"})
 
+# Issue #415, second finding: this set includes ``self_employment``, and
+# ``contract_people._active_employment_income``'s ``kind != "employment"`` filter
+# does not. A self-employment-only earner therefore gets a FOLD income base of
+# $0 and a NON-ZERO CPP base -- same person, same day, measured. That is a
+# question about which KINDS are pensionable, not about what a dated window
+# means, so it is deliberately out of scope for income_window.py and is filed as
+# a follow-up on #415 rather than quietly reconciled here. Documented at both
+# sites so the disagreement is recorded, not accidental.
+
 
 def build_earnings_for_estimate(
     *,
@@ -329,12 +343,13 @@ def build_earnings_for_estimate(
         end_raw = inc.get("to")
         if end_raw is not None and not str(end_raw)[:4].isdigit():
             continue
+        window_from = parse_date(str(inc["from"]))
+        window_to = parse_date(str(end_raw)) if end_raw is not None else None
         # Calendar year Y overlaps [from, to) when
         # from < (Y+1)-01-01 and (to is null or to > Y-01-01).
         # Loop starts at start_year, so from is never after year_end_excl.
         for y in range(start, as_of_year + 1):
-            year_start = f"{y}-01-01"
-            if end_raw is not None and str(end_raw)[:10] <= year_start:
+            if not overlaps_year(window_from, window_to, y):
                 continue
             # Concurrent pensionable incomes in the SAME calendar year are
             # ADDED, not raced: a household with employment + self-employment
@@ -344,7 +359,18 @@ def build_earnings_for_estimate(
             # states is left alone, so history still wins outright.
             if y in history_years:
                 continue
-            by_year[y] = by_year.get(y, 0.0) + amount
+            # Issue #415: `amount` is an ANNUAL RATE (schema/defs/people.json,
+            # $defs/income.amount: "Annual gross amount in effect over
+            # [from, to)"). Crediting the whole rate to a year the window only
+            # touches in part overstates that year's pensionable earnings -- up
+            # to 198% of the real figure for a job that started on July 1 --
+            # and CPP contribution years are CALENDAR years, so the year that is
+            # wrong is the year the CRA would actually see a short one. The
+            # same day-count weight the fold already applies to this window
+            # (simulation._income_components_for_year), now from one shared
+            # primitive so the two cannot drift apart again.
+            by_year[y] = by_year.get(y, 0.0) + amount * year_fraction(
+                window_from, window_to, y)
 
     end_year = birth_year + end_age - 1
 
@@ -364,8 +390,13 @@ def build_earnings_for_estimate(
         end = inc.get("to")
         if end is not None and not str(end)[:4].isdigit():
             continue  # same guard as the overlay loop
-        # Half-open [from, to): inactive when to <= as_of.
-        if end is not None and str(end)[:10] <= as_of[:10]:
+        # Half-open [from, to): inactive when to <= as_of. income_window states
+        # that convention once; asking it as a question rather than restating
+        # the comparison is what stopped #415's two readers disagreeing on the
+        # boundary instant.
+        if not covers_date(parse_date(start_s[:10]),
+                          parse_date(str(end)[:10]) if end is not None else None,
+                          parse_date(as_of[:10])):
             continue
         active_at_as_of += float(inc["amount"])
         if end is None:
