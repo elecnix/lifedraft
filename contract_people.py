@@ -78,6 +78,15 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
         if primary_id is None:
             primary_id = next(iter(people))
 
+    # Issue #360: this engine forms ONE couple, so a person who declares edges to
+    # MORE THAN ONE distinct partner makes "which union is this?" ambiguous --
+    # and the dates that decide eligibility are per-edge. Picking the first would
+    # silently model one union while the document declares several (DP#33: a
+    # declaration is a lens, not a blindfold). Refused, loudly, naming the
+    # partners. The ORDINARY reciprocal declaration (p1 -> p2 AND p2 -> p1) is
+    # one partner, not two, and stays legal.
+    _refuse_multiple_partners(people[primary_id])
+
     spouse_id = None
     for r in people[primary_id].get("relationships", []):
         if r["type"] == "spouse_of":
@@ -92,6 +101,34 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
                     _refuse_dated_union(doc, pid, r)
                     break
     return primary_id, spouse_id
+
+
+def _refuse_multiple_partners(person: Dict) -> None:
+    """Refuse a person declaring ``spouse_of`` edges to more than ONE partner.
+
+    This engine forms a single couple (``_find_primary_and_spouse``), so with
+    two distinct partners the engine would silently pick the first edge while the
+    document declares two unions -- and the DATED-union eligibility check is
+    per-edge, so which union's dates were consulted would be an accident of
+    ordering rather than a declared fact.
+
+    Declaring the SAME union from both sides (p1 -> p2 and p2 -> p1, which the
+    shipped example does) is one partner and stays legal: the check counts
+    DISTINCT partners, not edges.
+    """
+    partners = sorted({r["person"] for r in person.get("relationships", [])
+                       if r["type"] == "spouse_of"})
+    if len(partners) > 1:
+        raise ContractAdaptationError(
+            f"person {person['id']!r} declares spouse_of unions with "
+            f"{partners}. This engine forms ONE couple per household (a "
+            f"documented Phase-1 limitation), and the dated-union eligibility "
+            f"test reads one union's dates -- so with several unions the engine "
+            f"would silently model whichever edge came first (issue #360; "
+            f"DP#33 -- a declaration is a lens, not a blindfold). Declare a "
+            f"single union, or wait for the dated household-status work in "
+            f"#360 scope two."
+        )
 
 
 def _refuse_dated_union(doc: Dict, person_id: str, rel: Dict) -> None:

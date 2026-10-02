@@ -190,6 +190,50 @@ class CoupleDiscoveryFallbacks(unittest.TestCase):
         self.assertIsNone(spouse_id)
 
 
+class SeveralDeclaredUnionsAreRefused(unittest.TestCase):
+    """This engine forms ONE couple, so two DISTINCT partners makes "which union
+    is this?" ambiguous -- and the dated eligibility check reads one union's
+    dates. Review surfaced this on both paths: only the first edge was checked,
+    and the reciprocal scan validated the side it happened to use."""
+
+    @staticmethod
+    def _second_partner(doc: dict, person_id: str = "p1") -> None:
+        person = next(p for p in doc["people"] if p["id"] == person_id)
+        person["relationships"] = list(person["relationships"]) + [
+            {"type": "spouse_of", "person": "p2", "from": "2008-06-21", "to": None},
+            {"type": "spouse_of", "person": "ca", "from": "2015-01-01", "to": "2020-06-01"},
+        ]
+
+    def test_a_person_with_two_distinct_partners_is_refused(self):
+        doc = _couple_doc()
+        self._second_partner(doc)
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _find_primary_and_spouse(doc)
+        message = str(ctx.exception)
+        self.assertIn("ca", message)      # names the partners
+        self.assertIn("p2", message)
+
+    def test_declaring_the_same_union_from_both_sides_stays_legal(self):
+        """The ORDINARY reciprocal declaration (p1 -> p2 and p2 -> p1) is ONE
+        partner, not two -- refusing it would break every household that states
+        the union on both sides."""
+        doc = _couple_doc()
+        p2 = next(p for p in doc["people"] if p["id"] == "p2")
+        p2["relationships"] = list(p2["relationships"]) + [
+            {"type": "spouse_of", "person": "p1", "from": "2008-06-21", "to": None},
+        ]
+        self.assertEqual(_find_primary_and_spouse(doc), ("p1", "p2"))
+
+    def test_a_duplicate_edge_to_the_same_partner_is_not_two_unions(self):
+        """Two edges naming the SAME partner are one union stated twice."""
+        doc = _couple_doc()
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1["relationships"] = list(p1["relationships"]) + [
+            {"type": "spouse_of", "person": "p2", "from": "2008-06-21", "to": None},
+        ]
+        self.assertEqual(_find_primary_and_spouse(doc), ("p1", "p2"))
+
+
 class TheAsOfBoundaryIsDeliberate(unittest.TestCase):
     """Both edges of ``as_of`` are CONVENTIONS, and a review flagged both as
     suspicious -- so they are pinned here rather than left incidental.
