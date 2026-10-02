@@ -550,9 +550,12 @@ class TaxDataProvider:
         data = self._load_year(year, country, "federal")
         if data.cpp_max_benefit_65 > 0:
             return data.cpp_max_benefit_65
-        if year in _OAS_FALLBACK_BY_YEAR:
-            return _OAS_FALLBACK_BY_YEAR[year].get("cpp_max_benefit_65", 0)
-        return 14448  # DP#13: 2024 fallback
+        raise ValueError(
+            f"No CPP maximum benefit at 65 for {country} in {year}: the "
+            f"schedule loaded for that year carries no ceiling. Absence of a "
+            f"sourced figure is not a zero benefit — refusing rather than "
+            f"answering with the 2024 literal (issue #416, DP#32)."
+        )
 
     def get_gis_max_single(self, year: int, country: str = "canada") -> float:
         """Get the GIS annual maximum for a single pensioner (DP#12/DP#20, issue #330).

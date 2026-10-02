@@ -112,6 +112,28 @@ class TestProjectionCarriesBenefitCeilings(unittest.TestCase):
         )
         self.assertGreater(value, 18092)  # escalated above the 2026 value
 
+    def test_an_unsourced_ceiling_is_refused_not_defaulted(self):
+        """With the projection carrying the field, the literal is unreachable.
+
+        Once every covered year answers with an indexed ceiling, the old
+        ``return 14448`` had no reachable input left: the *only* way to reach
+        it was the projection dropping the field. So a schedule that genuinely
+        carries no ceiling must refuse loudly rather than be handed the 2024
+        figure for a year nobody sourced (DP#32).
+
+        Driven through the provider's public registration API, not by
+        hand-building internal state.
+        """
+        provider = TaxDataProvider(auto_register=True)
+        provider.register_year(TaxYearData(
+            year=2030, country="canada", province="federal",
+            source="fallback",
+        ))
+        with self.assertRaises(ValueError) as ctx:
+            provider.get_cpp_max_benefit_65(2030)
+        self.assertIn("2030", str(ctx.exception))
+        self.assertNotIn("14448", str(ctx.exception))
+
     def test_provider_and_retirement_agree_beyond_the_last_schedule(self):
         """Two live values for one year is the defect; they must converge.
 
