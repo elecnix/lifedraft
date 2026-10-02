@@ -383,38 +383,6 @@ def _map_first_home_purchases(doc: Dict, child_ids: set,
                 f"would refuse (issue #357; DP#32: refused, not silently granted). "
                 f"Model the RRSP withdrawal as an ordinary taxable one instead."
             )
-
-        as_of_year = int(str(doc["as_of"])[:4])
-        people_by_id = {p["id"]: p for p in doc["people"]}
-        buyer_person = people_by_id[buyer]
-        own_years = _owned_residence_years(buyer_person, as_of_year)
-        # Issue #357: the HBP test also counts a home the PARTNER owned and the
-        # buyer lived in during the relationship (ITA s.146.01(1)).
-        partner_years: List[int] = []
-        for rel in _declared_list(buyer_person, "relationships"):
-            if rel.get("type") == "spouse_of":
-                partner = people_by_id.get(rel["person"])
-                if partner is not None:
-                    partner_years = _owned_residence_years(partner, as_of_year)
-        eligible = is_first_time_home_buyer(
-            year, own_years=own_years, partner_years=partner_years,
-            relationship_start_year=_spouse_relationship_start_year(buyer_person))
-        if not eligible:
-            lookback = sorted(set(range(year - 4, year + 1)))
-            raise ContractAdaptationError(
-                f"first_home_purchases declares buyer={buyer!r} buying in {year}, but "
-                f"that person is not a FIRST-TIME home buyer: under ITA s.146.01(1) "
-                f"the Home Buyers' Plan and under ITA s.146.6(1) a tax-free FHSA "
-                f"qualifying withdrawal both require that they did not live in the "
-                f"4-calendar-year lookback {lookback[0]}-{lookback[-1]} in a home "
-                f"they (or their partner, during the relationship) owned. Declared "
-                f"ownership years: buyer {own_years}, partner {partner_years}. The "
-                f"engine would otherwise hand them a non-taxable $60,000 RRSP "
-                f"withdrawal and a tax-free FHSA drain that CRA and Revenu Quebec "
-                f"would refuse (issue #357; DP#32: refused, not silently granted). "
-                f"Model the RRSP withdrawal as an ordinary taxable one instead."
-            )
-
         mapped = {"buyer": buyer, "year": year}
         # Issue #359: the declared HBP withdrawal rides along ONLY when it is
         # declared -- an absent leaf leaves no key behind, so the fold's own
