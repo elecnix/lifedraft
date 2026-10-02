@@ -43,6 +43,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import contract_people
 import input_contract
 import model_fidelity
 from contract_errors import ContractAdaptationError, ContractValidationError
@@ -268,6 +269,132 @@ class TheUnrepricedWindowIsDisclosed(unittest.TestCase):
                          "figure with the opposite sign in the headline")
         self.assertEqual(approx.issue, '#359')
         self.assertTrue(approx.biased_figure)
+
+
+class AnImpossibleDateIsNotAUsableDate(unittest.TestCase):
+    """A date that is int-parsable but not a real calendar date.
+
+    `_declared_date` split "2024-13-01" and called `int()` on all three parts.
+    Month 13 parses fine, so the tuple `(2024, 13, 1)` escaped the handler, and
+    the `date(*made)` call in the predicate raised ValueError on it.
+
+    That raise never reached a report -- `is_active` fails OPEN on purpose
+    (DP#32) -- so the observed defect was not a crash. It was that the caveat
+    returned True for ANY malformed date: a targeted disclosure turned into a
+    false alarm on every household carrying one, and it reported a gap that
+    was not there. These tests pin the honest reading -- no calendar day is
+    named, so it cannot be placed in a window, so the entry is unusable.
+    """
+
+    def test_the_helper_rejects_an_impossible_month(self):
+        self.assertIsNone(model_fidelity._declared_date("2024-13-01"))
+
+    def test_the_helper_rejects_an_impossible_day(self):
+        self.assertIsNone(model_fidelity._declared_date("2024-02-31"))
+
+    def test_the_caveat_does_not_raise_on_an_impossible_date(self):
+        ctx = _ctx(contributions=[{"date": "2024-13-01", "amount": 8000.0}],
+                   first_home_purchases=[{"buyer": "p1", "year": 2025}])
+        self.assertFalse(_active(CAVEAT_ID, ctx))
+
+    def test_an_impossible_date_does_not_hide_a_usable_one(self):
+        """The unusable entry is skipped; the usable one still gets reported."""
+        ctx = _ctx(contributions=[{"date": "2024-13-01", "amount": 8000.0},
+                                  {"date": "2024-12-20", "amount": 8000.0}],
+                   first_home_purchases=[{"buyer": "p1", "year": 2025}])
+        self.assertTrue(_active(CAVEAT_ID, ctx))
+
+    def test_a_real_date_still_parses(self):
+        self.assertEqual(model_fidelity._declared_date("2024-12-20"),
+                         (2024, 12, 20))
+
+
+class ANonNumericContributionAmountIsRefused(unittest.TestCase):
+    """DP#32 at the boundary: a mistyped amount is a loud refusal, not a crash.
+
+    Measured before the fix, at the MAPPER (which is the layer that can reach
+    these -- the schema types `amount` as money and requires `date`, so the
+    contract path never gets there):
+
+        amount="eight thousand" -> ValueError: could not convert string to float
+        amount=None            -> TypeError: float() argument must be ...
+        an entry with no 'date' -> KeyError: 'date'
+
+    The tests call `contract_people._map_member` directly for exactly that
+    reason. Driving `to_internal_config` instead would have passed on the
+    schema's refusal and proved nothing about this guard -- which is the trap
+    AGENTS.md warns about in "reimplementing the engine in the test", in its
+    mirror image: passing on someone else's guard.
+    """
+
+    def _map(self, amount, *, date="2024-12-20"):
+        doc = _doc()
+        _declare_contribution(doc, "p1", date, amount)
+        person = next(p for p in doc["people"] if p["id"] == "p1")
+        return contract_people._map_member(doc, "p1", "primary", person)
+
+    def _map_raw(self, entry):
+        """An entry that never became schema-valid in the first place."""
+        doc = _doc()
+        person = next(p for p in doc["people"] if p["id"] == "p1")
+        person["rrsp_contributions"] = [entry]
+        return contract_people._map_member(doc, "p1", "primary", person)
+
+    def test_a_non_numeric_amount_is_refused_not_crashed(self):
+        with self.assertRaises(ContractAdaptationError) as caught:
+            self._map("eight thousand")
+        message = str(caught.exception)
+        self.assertIn("p1", message)
+        self.assertIn("rrsp_contributions[0]", message)
+
+    def test_a_none_amount_is_refused(self):
+        with self.assertRaises(ContractAdaptationError):
+            self._map(None)
+
+    def test_a_missing_date_is_refused_not_a_keyerror(self):
+        """The refusal message quotes the date. A missing one must be refused,
+        not raise KeyError while building the message that would explain it."""
+        with self.assertRaises(ContractAdaptationError) as caught:
+            self._map_raw({"amount": 8000.0})
+        self.assertIn("date", str(caught.exception))
+
+    def test_a_non_object_entry_is_refused(self):
+        with self.assertRaises(ContractAdaptationError):
+            self._map_raw("8000")
+
+    def test_the_refusal_names_the_offending_entry(self):
+        """A list of contributions is a list of separate assertions: the second
+        bad one must not be blamed on the first."""
+        doc = _doc()
+        person = next(p for p in doc["people"] if p["id"] == "p1")
+        person["rrsp_contributions"] = [
+            {"date": "2024-12-20", "amount": 8000.0},
+            {"date": "2024-12-21", "amount": "eight thousand"},
+        ]
+        with self.assertRaises(ContractAdaptationError) as caught:
+            contract_people._map_member(doc, "p1", "primary", person)
+        self.assertIn("rrsp_contributions[1]", str(caught.exception))
+
+    def test_a_valid_amount_still_maps(self):
+        member = self._map(8000.0)
+        self.assertEqual(member["rrsp_contributions"],
+                         [{"date": "2024-12-20", "amount": 8000.0}])
+
+
+class TheContractPathIsAlreadyRefusedByTheSchema(unittest.TestCase):
+    """Why the mapper guard above is defence in depth, not the primary guard.
+
+    Recorded so the mapper tests are not mistaken for the only coverage, and so
+    nobody 'simplifies' the mapper on the belief that it carries the check.
+    """
+
+    def test_the_schema_refuses_each_of_them_first(self):
+        for amount in ("eight thousand", None, -1.0):
+            with self.subTest(amount=amount):
+                doc = _doc()
+                _declare_contribution(doc, "p1", "2024-12-20", amount)
+                with self.assertRaises(ContractValidationError):
+                    input_contract.to_internal_config(doc)
 
 
 if __name__ == '__main__':  # pragma: no cover

@@ -705,8 +705,38 @@ def _map_member(doc: Dict, person_id: str, role: str,
     # and a negative amount is refused rather than carried.
     contributions = p.get("rrsp_contributions")
     if contributions is not None:
-        for contribution in contributions:
-            if float(contribution["amount"]) < 0.0:
+        # Each entry is checked in its own right, and each refusal says which
+        # person and which entry: a list of contributions is a list of separate
+        # assertions, and blaming the wrong one costs more than the crash did.
+        # The schema types `amount` as money and requires `date`, so on the
+        # contract path none of this is reachable -- it is the last line before
+        # the fold for a hand-built internal config, and an unparseable entry
+        # must still be refused rather than raised out of float() (DP#32).
+        for index, contribution in enumerate(contributions):
+            entry = f"rrsp_contributions[{index}]"
+            if not isinstance(contribution, dict):
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares {entry} as "
+                    f"{contribution!r}; each entry must be an object carrying a "
+                    f"date and an amount (issue #359; DP#32)."
+                )
+            if contribution.get("date") is None:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares {entry} with no date. ITA "
+                    f"s.146.01(2)(a) turns on WHEN the contribution was made, so "
+                    f"an undated contribution cannot be carried (issue #359)."
+                )
+            try:
+                amount = float(contribution["amount"])
+            except (TypeError, ValueError) as exc:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares {entry} with an amount of "
+                    f"{contribution['amount']!r} on {contribution['date']}, which "
+                    f"is not a number ({exc}). A contribution is an amount of "
+                    f"money; an unreadable one is refused, not guessed at "
+                    f"(issue #359; DP#32)."
+                ) from exc
+            if amount < 0.0:
                 raise ContractAdaptationError(
                     f"person {person_id!r} declares an rrsp_contribution of "
                     f"{contribution['amount']} on {contribution['date']}. An RRSP "
@@ -714,7 +744,8 @@ def _map_member(doc: Dict, person_id: str, role: str,
                     f"not a withdrawal (issue #359; DP#32 -- refused, not coerced)."
                 )
         member["rrsp_contributions"] = [
-            {"date": c["date"], "amount": float(c["amount"])} for c in contributions
+            {"date": c["date"], "amount": float(c["amount"])}
+            for c in contributions
         ]
 
     if "cpp_monthly_estimated" in member:

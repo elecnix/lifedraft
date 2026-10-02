@@ -506,10 +506,24 @@ HBP_CONTRIBUTION_WINDOW_DAYS = 90
 
 
 def _declared_date(value):
-    """``(year, month, day)`` for an ISO ``YYYY-MM-DD`` string, or None."""
+    """``(year, month, day)`` for an ISO ``YYYY-MM-DD`` string, or None.
+
+    The parts are CONSTRUCTED into a date here, not just split. Splitting alone
+    accepts "2024-13-01": three `int()` calls that all succeed, so the tuple
+    `(2024, 13, 1)` escaped and the crash surfaced later, at the `date(*made)`
+    call in the predicate below. That call sits inside `Approximation.is_active`,
+    whose DP#32 guard fails OPEN, so nothing was ever reported as crashing --
+    the caveat simply returned True for any malformed date, reporting a gap
+    that was not there and papering over the one that was (a caveat that fires
+    unconditionally is noise, and this one documents itself as targeted).
+    `findings_for` has no such guard, so the same shape would take a report down.
+
+    An impossible date is not a usable date: there is no calendar day it names,
+    so it cannot be placed in a window, and None is the honest answer.
+    """
     try:
         y, m, d = (int(part) for part in str(value)[:10].split("-"))
-        return (y, m, d)
+        return (date(y, m, d).year, date(y, m, d).month, date(y, m, d).day)
     except (ValueError, TypeError):
         return None
 
