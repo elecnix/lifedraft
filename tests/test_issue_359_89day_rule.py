@@ -258,9 +258,14 @@ class TheUnrepricedWindowIsDisclosed(unittest.TestCase):
     def test_it_says_which_way_it_biases(self):
         approx = next(a for a in model_fidelity.all_approximations()
                       if a.id == CAVEAT_ID)
-        # The deduction is NOT applied, so taxable income is too high: tax
-        # OVERstated.
+        # The deduction is NOT applied, so the taxable income feeding it is too
+        # LOW and the tax they PAY is too HIGH: OVERSTATES, naming the tax.
         self.assertEqual(approx.direction, Direction.OVERSTATES)
+        self.assertIn("tax PAID", approx.biased_figure)
+        self.assertNotIn("UNDERSTATED --", approx.biased_figure,
+                         "one figure, one direction: the taxable-income "
+                         "consequence belongs in the detail, not as a second "
+                         "figure with the opposite sign in the headline")
         self.assertEqual(approx.issue, '#359')
         self.assertTrue(approx.biased_figure)
 

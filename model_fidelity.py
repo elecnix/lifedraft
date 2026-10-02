@@ -587,8 +587,9 @@ register(Approximation(
              "deduction to the extent the post-withdrawal balance falls below the "
              "contribution, and the engine carries the declared contribution "
              "without applying that rule"),
-    biased_figure=("federal and Quebec taxable income, UNDERSTATED -- the "
-                   "disallowed deduction is still being claimed"),
+    biased_figure=("federal and Quebec tax PAID, overstated -- a deduction CRA "
+                   "would deny is still being claimed (so the taxable income "
+                   "feeding it is correspondingly UNDERSTATED)"),
     direction=Direction.OVERSTATES,
     detail=("countries/canada/hbp_rules.deductible_contribution_before_hbp "
             "implements the rule and still has no production caller. The reason is "
