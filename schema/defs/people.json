@@ -11,8 +11,8 @@
       "additionalProperties": false,
       "required": ["from", "to"],
       "properties": {
-        "from": { "$ref": "#/$defs/date", "description": "First calendar year this ownership began." },
-        "to": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "Last calendar year this ownership ended, or null if still held." }
+        "from": { "$ref": "#/$defs/date", "description": "When this ownership began. The engine uses its CALENDAR YEAR for the eligibility arithmetic, so a mid-year start disqualifies that whole year (issue #357)." },
+        "to": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }], "description": "When this ownership ended, or null if it is still held. The engine uses its CALENDAR YEAR; a span ending mid-year disqualifies that whole year (issue #357)." }
       },
       "description": "One span of owned principal-residence years (issue #357)."
     },
