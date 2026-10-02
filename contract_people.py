@@ -134,10 +134,17 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
             )
         for pid in reciprocals:
             spouse_id = pid
+            # EVERY edge that formed this pairing is date-checked, not just the
+            # first. Breaking after the first made the answer depend on EDGE
+            # ORDER: a partner declaring the same union twice, once ongoing and
+            # once ended, was accepted in one order and refused in the other
+            # (measured: `[ongoing, ended]` -> LOADED, `[ended, ongoing]` ->
+            # REFUSED). An ended union hidden behind an ongoing one would be
+            # modelled as a couple, which is the DP#32 failure this layer
+            # exists to prevent.
             for r in people[pid].get("relationships", []):
                 if r["type"] == "spouse_of" and r["person"] == primary_id:
                     _refuse_dated_union(doc, pid, r)
-                    break
     # Issue #384 review: the multiple-partner refusal used to run on the PRIMARY
     # only, before the spouse was resolved -- so a document whose SPOUSE declared
     # two distinct partners (and whose primary declared one) loaded silently, and

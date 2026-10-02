@@ -574,5 +574,50 @@ class ADateThatIsNotAUsableDateIsRefused(unittest.TestCase):
             _find_primary_and_spouse(
                 self._union("2026-12-01", frm="2026-7-1"))
         self.assertIn("not a", str(ctx.exception))
+
+
+class EveryEdgeThatFormsTheCoupleIsChecked(unittest.TestCase):
+    """A partner declaring the same union TWICE must not hide a dated end.
+
+    The reciprocal scan broke out of its inner loop after the FIRST edge, so
+    the answer depended on edge order: `[ongoing, ended]` loaded while
+    `[ended, ongoing]` refused. Same family as the edge-vs-partner counting bug
+    this layer already fixed -- both let an edge escape by being second.
+    """
+
+    def _doc(self, rels):
+        doc = copy.deepcopy(_couple_doc())
+        doc["as_of"] = "2026-01-05"
+        for p in doc["people"]:
+            if p["id"] == "p1":
+                p["relationships"] = []
+            elif p["id"] == "p2":
+                p["relationships"] = []
+        doc["people"].append({"id": "p2", "birth_date": "1980-01-01",
+                              "relationships": rels})
+        return doc
+
+    @staticmethod
+    def _edge(to):
+        r = {"type": "spouse_of", "person": "p1", "from": "2008-06-21"}
+        if to is not None:
+            r["to"] = to
+        return r
+
+    def test_an_ended_edge_after_an_ongoing_one_is_refused(self):
+        """The load-bearing case: this used to LOAD."""
+        with self.assertRaises(ContractAdaptationError):
+            _find_primary_and_spouse(
+                self._doc([self._edge(None), self._edge("2020-01-01")]))
+
+    def test_the_answer_does_not_depend_on_edge_order(self):
+        for rels in ([self._edge("2020-01-01"), self._edge(None)],
+                     [self._edge(None), self._edge("2020-01-01")]):
+            with self.assertRaises(ContractAdaptationError):
+                _find_primary_and_spouse(self._doc(rels))
+
+    def test_a_single_ongoing_edge_still_resolves(self):
+        self.assertEqual(_find_primary_and_spouse(self._doc([self._edge(None)])),
+                         ("p1", "p2"))
 if __name__ == "__main__":
     unittest.main()
