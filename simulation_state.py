@@ -515,6 +515,13 @@ def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
             hbp_out = ceiling
         else:
             hbp_out = float(hbp_amount)
+            if not math.isfinite(hbp_out):
+                raise ContractAdaptationError(
+                    f"first_home_purchase declares hbp_amount={hbp_out} for the "
+                    f"{calendar_year} purchase. An HBP withdrawal must be FINITE: "
+                    f"a NaN passes every numeric guard and would propagate a NaN "
+                    f"balance into the down payment (issue #359; DP#32)."
+                )
             if hbp_out < 0.0:
                 raise ContractAdaptationError(
                     f"first_home_purchase declares hbp_amount={hbp_out} for the "

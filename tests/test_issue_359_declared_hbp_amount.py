@@ -133,6 +133,76 @@ class OutOfRangeAmountIsRefused(unittest.TestCase):
         self.assertIn("20000", message.replace(",", ""))
 
 
+class ImpossibleAmountsAreRefusedAtTheBoundary(unittest.TestCase):
+    """Review findings on #397: a refusal raised inside the per-year fold can be
+    SWALLOWED -- the optimizer wraps strategy evaluation in
+    ``except Exception: score = -inf``, so a doomed declaration could rank a
+    strategy last instead of being reported. Every statically-decidable
+    impossibility is therefore refused at INGESTION, where it cannot be lost.
+
+    (The OTHER ceiling -- the buyer's own LIVE RRSP balance -- is only knowable in
+    the fold, so that check stays there, covered by
+    ``OutOfRangeAmountIsRefused.test_above_the_buyers_own_rrsp_is_refused``.)
+    """
+
+    def test_a_nan_amount_is_refused(self):
+        """NaN passes EVERY numeric comparison -- ``nan < 0`` and
+        ``nan > ceiling`` are both False -- so it previously sailed through the
+        fold's guards and landed as a NaN RRSP balance that propagated into the
+        down payment and every downstream total (DP#32)."""
+        with self.assertRaises(ContractAdaptationError):
+            _run(_declare(_doc(), hbp_amount=float("nan")))
+
+    def test_the_fold_also_refuses_a_non_finite_amount_called_directly(self):
+        """Belt-and-braces: ingestion refuses NaN/inf, but the step is also
+        public and an INTERNAL config can be built by hand (every test that does
+        so bypasses the boundary). Without this guard a hand-built config would
+        carry a NaN into the down payment exactly as the contract path did."""
+        for bad in (float("nan"), float("inf")):
+            with self.assertRaises(ContractAdaptationError):
+                _apply_first_home_to_account(_acc(65_000.0), True, 2026, bad)
+
+    def test_an_infinite_amount_is_refused(self):
+        """inf would otherwise drive the sleeve-style growth clamp to a zeroed
+        pot rather than being refused."""
+        with self.assertRaises(ContractAdaptationError):
+            _run(_declare(_doc(), hbp_amount=float("inf")))
+
+    def test_an_amount_above_the_statutory_maximum_is_refused_at_ingestion(self):
+        """Pinned at the MAPPING boundary, not merely "somewhere": a refusal
+        raised inside the per-year fold can be swallowed by the optimizer's
+        ``except Exception: score = -inf``, which would rank the strategy last
+        instead of reporting the bad declaration. Asserting through ``_run``
+        would pass either way, because the fold refuses too -- so this calls
+        ``to_internal_config`` directly, which never reaches a fold."""
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _map(_declare(_doc(), hbp_amount=70_000.0))
+        self.assertIn(str(int(HBP_MAX_WITHDRAWAL)), str(ctx.exception).replace(",", ""))
+
+    def test_a_declared_zero_is_honoured_not_treated_as_absent(self):
+        """DP#32's zero trap, checked explicitly: ``hbp_amount: 0`` means the
+        household wants NO HBP withdrawal, and must not be read as an absent leaf
+        that silently becomes min(RRSP, $60,000)."""
+        entry = _map(_declare(_doc(), hbp_amount=0.0))["family"]["first_home_purchases"][0]
+        self.assertIn("hbp_amount", entry, "a declared 0.0 must stay a present key")
+        self.assertEqual(entry["hbp_amount"], 0.0)
+
+        out = _apply_first_home_to_account(_acc(65_000.0), True, 2026, 0.0)
+        self.assertEqual(out["hbp"]["withdrawal"], 0.0)
+        self.assertEqual(out["rrsp_balance"], 65_000.0,
+                         "a declared 0.0 must leave the whole RRSP alone")
+
+    def test_a_declared_zero_leaves_more_in_the_rrsp_than_the_default(self):
+        """... and the observable consequence, so the test above cannot pass while
+        the fold quietly substituted the maximum."""
+        config = SimulationConfig.from_dict(_map(_declare(_doc())))
+        index = 2028 - config.start_year          # purchase year - projection start
+        zero = _run(_declare(_doc(), hbp_amount=0.0))[index].primary_rrsp
+        default = _run(_declare(_doc()))[index].primary_rrsp
+        self.assertGreater(zero, default,
+                           "hbp_amount: 0 was replaced by the min(RRSP, $60k) default")
+
+
 class TheContractCarriesTheAmount(unittest.TestCase):
     """The mapping: a declared amount reaches the engine, an absent one leaves
     no key behind (DP#32: absence is not a value to default)."""
