@@ -436,6 +436,68 @@ register(Approximation(
 ))
 
 
+def _sleeve_fee_undeclared(ctx: FidelityContext) -> bool:
+    """Fires only when a readvanceable sleeve is IN PLAY and no fee was declared.
+
+    Two conditions, both necessary:
+
+    * a readvanceable HELOC -- the only facility that can fund the Smith
+      Manoeuvre pot (the schema does not permit ``readvanceable`` on any other
+      liability kind), so without one there is no sleeve to compound fee-free;
+    * no declared ``investment_mer`` on that line (#381). A declared fee -- and
+      a declared **zero** is a value, not an absence (DP#32) -- means there is
+      nothing left to disclose.
+
+    Fails OPEN: a context too thin to judge reports the caveat rather than
+    hiding it, per the DP#32 rule the other predicates here follow.
+    """
+    cfg = ctx.cfg
+    if not isinstance(cfg, dict) or not isinstance(cfg.get('property'), dict):
+        # No property facts at all: there is no readvanceable line, therefore no
+        # sleeve, therefore no fee-free sleeve to disclose. Staying SILENT is the
+        # honest answer here, not the optimistic one: the claim this caveat makes
+        # is "your sleeve compounds fee-free", and with no sleeve in evidence the
+        # claim would be unsupported -- a caveat nobody can act on trains readers
+        # to skip caveats. (Fail OPEN applies to a predicate that cannot
+        # EVALUATE a fact it otherwise knows, which `Approximation.is_active`
+        # already handles by catching; an absent fact is simply absent.)
+        return False
+    prop = cfg['property']
+    heloc = prop.get('heloc')
+    if not isinstance(heloc, dict):
+        return False
+    if not heloc.get('readvanceable') and not prop.get('has_heloc'):
+        return False
+    # A DECLARED fee -- including a declared 0.0, which is a value, not an
+    # absence (DP#32) -- leaves nothing to disclose.
+    return 'investment_mer' not in heloc
+
+
+register(Approximation(
+    id='sm_sleeve_fee_free_when_undeclared',
+    summary=("The Smith Manoeuvre sleeve -- money BORROWED TO INVEST -- is held "
+             "fee-free unless the household declares its MER "
+             "(liabilities[kind=heloc].investment_mer, #381). Funds and ETFs pay "
+             "a MER like any other holding, so the omission overstates the "
+             "sleeve, and the error GROWS with the horizon"),
+    biased_figure=("terminal assets and the Smith Manoeuvre's ranked benefit, both "
+                   "overstated by the un-compounded fee"),
+    direction=Direction.OVERSTATES,
+    detail=("rules_leverage.apply_sm_investment_growth grows ws.new_sm_investment at "
+            "the shared taxable after-tax rate less any DECLARED "
+            "config.sm_investment_mer. With no declared fee the growth factor is "
+            "the full rate, so a borrowed-to-invest sleeve compounds as if it were "
+            "a fee-free deposit. Declare the line's investment_mer to price it "
+            "(the #291 per-account convention: the fee is paid inside the fund, out "
+            "of the total return, so it comes out of capital appreciation at its "
+            "full rate) and this caveat stops firing. Absence is a no-op by "
+            "design (DP#32) -- it is an UNDECLARED input, not a zero -- so the "
+            "honest treatment is disclosure, which is what this is."),
+    issue='#381',
+    applies=_sleeve_fee_undeclared,
+))
+
+
 def _after_tax_estate_objective_active(ctx: FidelityContext) -> bool:
     # Only fires for the objectives whose figure these defaults actually
     # shape -- the after-tax-estate family (max + its #1009 min mirror).
