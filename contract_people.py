@@ -777,6 +777,77 @@ def _map_member(doc: Dict, person_id: str, role: str,
     if earnings_history:
         member["earnings_history"] = earnings_history
 
+    # Issue #359: DECLARED, DATED RRSP contributions are a separate fact from
+    # the engine's own model-generated annual allocation
+    # (`apply_contributions` books p_rrsp_actual = min(income, room), which has
+    # no date). ITA s.146.01(2)(a) turns on a contribution MADE less than 90
+    # days before an HBP withdrawal, so it has to carry its date. Carried only
+    # when declared (DP#32: no key, not an empty list standing in for silence),
+    # and a negative amount is refused rather than carried.
+    contributions = p.get("rrsp_contributions")
+    if contributions is not None:
+        # Each entry is checked in its own right, and each refusal says which
+        # person and which entry: a list of contributions is a list of separate
+        # assertions, and blaming the wrong one costs more than the crash did.
+        # The schema types `amount` as money and requires `date`, so on the
+        # contract path none of this is reachable -- it is the last line before
+        # the fold for a hand-built internal config, and an unparseable entry
+        # must still be refused rather than raised out of float() (DP#32).
+        validated: list = []
+        for index, contribution in enumerate(contributions):
+            entry = f"rrsp_contributions[{index}]"
+            if not isinstance(contribution, dict):
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares {entry} as "
+                    f"{contribution!r}; each entry must be an object carrying a "
+                    f"date and an amount (issue #359; DP#32)."
+                )
+            # Read each key ONCE, into a local, and quote the local from here
+            # on. A refusal that quotes `contribution["date"]` while raising
+            # about a missing `date` is a message that can raise on its way out,
+            # which is the worst place for that: the reader gets a KeyError
+            # instead of the sentence explaining it. (After the isinstance guard,
+            # never before: `.get()` on a string entry raises AttributeError and
+            # would replace a clean refusal with a crash.)
+            raw_date = contribution.get("date")
+            raw_amount = contribution.get("amount")
+            if raw_date is None:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares {entry} with no date. ITA "
+                    f"s.146.01(2)(a) turns on WHEN the contribution was made, so "
+                    f"an undated contribution cannot be carried (issue #359)."
+                )
+            if raw_amount is None:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares {entry} on {raw_date!r} with "
+                    f"no amount. A contribution is an amount of money; an entry "
+                    f"that states when but not how much is incomplete, and a "
+                    f"missing key is not a zero amount (issue #359; DP#32)."
+                )
+            try:
+                amount = float(raw_amount)
+            except (TypeError, ValueError) as exc:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares {entry} with an amount of "
+                    f"{raw_amount!r} on {raw_date!r}, which is not a number "
+                    f"({exc}). A contribution is an amount of money; an unreadable "
+                    f"one is refused, not guessed at (issue #359; DP#32)."
+                ) from exc
+            if amount < 0.0:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares an rrsp_contribution of "
+                    f"{raw_amount} on {raw_date}. An RRSP contribution cannot be "
+                    f"negative; that is a mistyped amount, not a withdrawal "
+                    f"(issue #359; DP#32 -- refused, not coerced)."
+                )
+            validated.append({"date": raw_date, "amount": amount})
+        # Built from what was VALIDATED, not re-read from the raw list: one
+        # pass that parses, one that emits. A second pass re-indexing `c["date"]`
+        # and re-running `float()` outside the guard above is unreachable today
+        # (the loop raises on anything malformed) but is a hole a later edit
+        # could open, and it re-does work whose result is already in hand.
+        member["rrsp_contributions"] = validated
+
     if "cpp_monthly_estimated" in member:
         # In-pay benefits.cpp or entitlements.cpp already set the amount.
         member["cpp_benefit_source"] = "statement"
