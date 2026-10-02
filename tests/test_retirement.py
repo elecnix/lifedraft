@@ -255,11 +255,19 @@ class TestYearVersionedOAS(unittest.TestCase):
         self.assertEqual(result['threshold'], 80000)
         self.assertEqual(result['net_oas'], 7000 - 0.15 * 20000)
 
-    def test_oas_unknown_year(self):
-        """Unknown year falls back to 2026 defaults."""
-        result = oas_clawback(100000, year=2019)
-        # Should use default constants
-        self.assertEqual(result['threshold'], 95323)
+    def test_oas_year_before_the_first_schedule_is_refused(self):
+        """#346: a year with no schedule is REFUSED, not answered with 2026.
+
+        This test used to assert the opposite -- that ``year=2019`` came back
+        with the 2026 clawback threshold of $95,323 -- which is the silent
+        substitution the issue is about. The earliest schedule is 2023, so a
+        2019 request has no sourced answer and must say so.
+        """
+        from tax_data import UnsupportedTaxYearError
+
+        with self.assertRaises(UnsupportedTaxYearError) as ctx:
+            oas_clawback(100000, year=2019)
+        self.assertIn('before 2023', str(ctx.exception))
 
     def test_cpp_year_2026(self):
         """2026 CPP max benefit at 65."""

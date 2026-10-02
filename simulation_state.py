@@ -2014,8 +2014,9 @@ class YearInputs:
     # age 71, LIF min/max factor lookups). `year` is a 0-based projection index;
     # the locked-in-account rules are date-computed from birth_year and therefore
     # need the absolute calendar year, not the index. Callers in the live run
-    # loop pass calendar_year=start_year+year. When None, falls back to `year`
-    # so direct unit-test callers that already pass a calendar year keep working.
+    # loop pass calendar_year=start_year+year. When None it resolves to
+    # config.start_year + year (#346); a caller that wants a DIFFERENT calendar
+    # year -- a unit test steering a dated gate directly -- passes it.
     calendar_year: Optional[int] = None
     # Issue #758: the retirement-phase flag + effective retirement spending
     # target, forwarded to apply_solvency so it charges the RETIREMENT spending
@@ -2271,11 +2272,18 @@ def simulate_year_pure(
         )
 
     # Issue #343: resolve the absolute calendar year for date-computed gates.
-    # `year` is a 0-based projection index, but the CRI/LIRA→LIF conversion gate
-    # (and LIF withdrawal factor lookups) are date-computed from birth_year and
-    # need the calendar year. When callers don't supply calendar_year (e.g. unit
-    # tests that pass a calendar year directly as `year`), fall back to `year`.
-    cal_year = calendar_year if calendar_year is not None else year
+    # `year` is a 0-based projection index (see this function's own docstring),
+    # but the CRI/LIRA→LIF conversion gate (and LIF withdrawal factor lookups)
+    # are date-computed from birth_year and need the calendar year. The index
+    # alone is not a year, so it resolves against the run's own start_year --
+    # `config.start_year + year`, the same arithmetic FamilySimulation's fold
+    # does at simulation.py:1703. #343 originally read the index as a calendar
+    # year, on the assumption that callers "pass a calendar year directly as
+    # `year`"; every in-tree production caller supplies calendar_year
+    # explicitly, so the fallback only ever reached direct unit-test callers,
+    # where a projection index of 0 asked the tax provider for calendar year 0
+    # and was answered with whatever year it happened to pick (issue #346).
+    cal_year = calendar_year if calendar_year is not None else config.start_year + year
 
     # ── Issue #584/DP#10/DP#26: rules as a registry ──
     # Everything below WAS ~680 lines of inline government-program logic.

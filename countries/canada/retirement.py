@@ -36,7 +36,7 @@ from tax_calculator import (
     marginal_rate, tax_on_income,
     effective_tax_rate,
 )
-from tax_data import default_tax_provider
+from tax_data import default_tax_provider, UnsupportedTaxYearError
 
 
 # =============================================================================
@@ -82,6 +82,11 @@ def _year_versioned_lookup(year: int, fallback_key: str,
         val = getattr(provider, provider_method)(year)
         if val > 0:
             return val
+    except UnsupportedTaxYearError:
+        # DP#32 (#346): the provider's own refusal names the earliest year it
+        # can answer for. Re-raise it -- the generic "Unknown year {year}"
+        # below names no boundary and points the reader at the wrong table.
+        raise
     except Exception:
         pass
     raise ValueError(f"Unknown year {year} for {label}. Update CPP_OAS_BY_YEAR or TaxDataProvider.")

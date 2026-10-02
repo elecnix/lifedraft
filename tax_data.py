@@ -44,6 +44,23 @@ _OAS_FALLBACK_BY_YEAR: Dict[int, dict] = {}
 _FALLBACK_BUILDERS: List[Callable[[], list]] = []
 
 
+class UnsupportedTaxYearError(Exception):
+    """A tax year the provider has no schedule for was requested (DP#32).
+
+    The base is ``Exception`` and nothing narrower, deliberately. The obvious
+    spelling -- ``ValueError`` -- is caught and replaced with a hardcoded
+    fallback at a dozen points on the tax path (e.g.
+    ``countries/canada/income_type.py``'s ``except (ValueError,
+    AttributeError)``, ``countries/canada/tax_calc.py``'s ``except
+    (ValueError, IndexError)``), so a ``ValueError`` refusal never reaches
+    the caller: it becomes the very silent substitution it was meant to
+    replace. A type outside those tuples reaches the top; the
+    ``except Exception: score = -inf`` ranking blocks re-raise it
+    explicitly, as ``optimizer.py`` already does for its own typed
+    refusals (issue #346).
+    """
+
+
 def register_oas_fallback(by_year: Dict[int, dict]) -> None:
     """Register year-keyed OAS fallback amounts from a jurisdiction module.
 
@@ -729,7 +746,14 @@ class TaxDataProvider:
 
     def _load_year_uncached(self, year: int, country: str,
                             province: str) -> TaxYearData:
-        """Resolve tax data for a year. Tries cache → fallback → projection."""
+        """Resolve tax data for a year. Tries cache → fallback → projection.
+
+        A year EARLIER than the earliest schedule is refused (#346): there is
+        no sourced regime to answer it with, and the nearest year returned
+        under the requested year's own number is the silent plausible-but-wrong
+        answer DP#32 forbids. Forward of the last schedule the DP#20 projection
+        still applies -- refusing 2030 would break every multi-year run.
+        """
         key = f"{country}:{province}:{year}"
 
         # Try exact match in fallbacks
@@ -741,19 +765,25 @@ class TaxDataProvider:
         if cached is not None:
             return self._parse_cached(cached)
 
-        # Try nearest year and project if beyond (DP#20)
+        # Beyond the last schedule, project forward (DP#20)
         available = self.available_years(country, province)
         if available:
+            if year < available[0]:
+                raise UnsupportedTaxYearError(
+                    f"No tax data for {country}/{province} before "
+                    f"{available[0]}: year {year} was requested. Historical "
+                    f"tax regimes are not modelled; set the document's as_of "
+                    f"to {available[0]} or later, or add a sourced schedule "
+                    f"for {year}."
+                )
             nearest = min(available, key=lambda y: abs(y - year))
             nearest_key = f"{country}:{province}:{nearest}"
             if nearest_key in self._fallbacks:
-                base_data = self._fallbacks[nearest_key]
-                if year > nearest:
-                    return self._project_from_base(base_data, year)
-                return base_data
+                return self._project_from_base(self._fallbacks[nearest_key],
+                                               year)
 
         raise ValueError(f"No tax data for {country}/{province}/{year}")
-    
+
     def _project_from_base(self, base: TaxYearData, target_year: int,
                              indexation_rate: float = None) -> TaxYearData:
         """Project future tax data from a base year using indexation.

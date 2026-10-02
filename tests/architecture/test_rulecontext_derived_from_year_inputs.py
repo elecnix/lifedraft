@@ -38,6 +38,7 @@ import types
 import pytest
 
 from rule_registry import RULE_CONTEXT_EXPLICIT_FIELDS, RuleContext
+from simulation_config import SimulationConfig
 from simulation_state import YearInputs
 
 
@@ -151,13 +152,33 @@ def test_prior_gis_countable_income_is_required():
         RuleContext.from_year_inputs(_sentinel_inputs(), year=7)
 
 
-def test_calendar_year_none_falls_back_to_the_index():
-    """``YearInputs`` documents None as "use the 0-based index" (#343)."""
+def test_calendar_year_none_resolves_against_the_start_year():
+    """``YearInputs`` leaves calendar_year None as "not supplied" (#346).
+
+    #343 resolved None to the bare projection index, on the assumption that
+    callers "pass a calendar year directly as ``year``". A 0-based index is
+    not a year: an index of 0 asked the tax provider for calendar year 0 and
+    was silently answered with whichever schedule it picked nearest (the
+    defect #346 fixes). An unsupplied calendar year is now
+    ``config.start_year + year`` -- the same arithmetic the fold does -- and
+    a caller that genuinely wants a different year passes it.
+    """
     values = {f.name: f"<{f.name}>" for f in dataclasses.fields(YearInputs)}
     values["calendar_year"] = None
+    values["config"] = SimulationConfig(start_year=2026)
     ctx = RuleContext.from_year_inputs(YearInputs(**values), year=42,
                                        prior_gis_countable_income=None)
-    assert ctx.calendar_year == 42
+    assert ctx.calendar_year == 2068
+
+
+def test_calendar_year_supplied_wins_over_the_index():
+    """An explicit calendar_year is the caller's statement, not a default."""
+    values = {f.name: f"<{f.name}>" for f in dataclasses.fields(YearInputs)}
+    values["calendar_year"] = 2021
+    values["config"] = SimulationConfig(start_year=2026)
+    ctx = RuleContext.from_year_inputs(YearInputs(**values), year=42,
+                                       prior_gis_countable_income=None)
+    assert ctx.calendar_year == 2021
 
 
 def test_projection_refuses_a_missing_input_field_loudly():
