@@ -100,6 +100,15 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
                     spouse_id = pid
                     _refuse_dated_union(doc, pid, r)
                     break
+    # Issue #384 review: the multiple-partner refusal used to run on the PRIMARY
+    # only, before the spouse was resolved -- so a document whose SPOUSE declared
+    # two distinct partners (and whose primary declared one) loaded silently, and
+    # the #357 eligibility gate then read only the FIRST edge's history. Verified:
+    # with no new adult introduced, such a document produced NO refusal at all.
+    # The couple is resolved now, so check both members: either one declaring two
+    # unions makes "which union is this?" ambiguous.
+    if spouse_id is not None:
+        _refuse_multiple_partners(people[spouse_id])
     return primary_id, spouse_id
 
 

@@ -234,6 +234,64 @@ class SeveralDeclaredUnionsAreRefused(unittest.TestCase):
         self.assertEqual(_find_primary_and_spouse(doc), ("p1", "p2"))
 
 
+class BothMembersAreCheckedForMultiplePartners(unittest.TestCase):
+    """The refusal must reach the SPOUSE, not just the primary.
+
+    `_refuse_multiple_partners` originally ran on `people[primary_id]` only, and
+    BEFORE the spouse was resolved -- so a document whose SPOUSE declared two
+    distinct partners, while its primary declared one, loaded silently, and the
+    #357 eligibility gate then read only the first edge's history. Measured
+    before the fix: with no new adult introduced (so nothing else could refuse
+    it), such a document produced NO refusal at all.
+
+    The second partner here is an EXISTING declared person, deliberately: adding
+    a new one would trip the unrelated N-adult placement refusal (#698/#901) and
+    mask what this test is about.
+    """
+
+    @staticmethod
+    def _spouse_with_two_partners():
+        doc = _couple_doc()
+        p2 = next(p for p in doc["people"] if p["id"] == "p2")
+        # The shipped example declares the union ONE WAY (p1 -> p2), so p2 has
+        # no spouse_of edge at all. Give it two: the reciprocal one back to p1,
+        # plus a second partner -- which is the ambiguous shape under test.
+        p2["relationships"] = list(p2.get("relationships", [])) + [
+            {"type": "spouse_of", "person": "p1", "from": "2008-06-21", "to": None},
+            {"type": "spouse_of", "person": "ca", "from": "2021-01-01", "to": None},
+        ]
+        return doc
+
+    def test_a_spouse_with_two_partners_is_refused(self):
+        doc = self._spouse_with_two_partners()
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _find_primary_and_spouse(doc)
+        message = str(ctx.exception)
+        self.assertIn("p2", message)
+        self.assertIn("ca", message, "the refusal must name the SECOND partner")
+
+    def test_the_primary_still_gets_checked(self):
+        """The original case, kept so the fix cannot regress the side that
+        already worked."""
+        doc = _couple_doc()
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1["relationships"] = list(p1["relationships"]) + [
+            {"type": "spouse_of", "person": "ca", "from": "2021-01-01", "to": None},
+        ]
+        with self.assertRaises(ContractAdaptationError):
+            _find_primary_and_spouse(doc)
+
+    def test_the_reciprocal_declaration_stays_legal(self):
+        """One union stated from both sides is ONE partner, not two: p1 -> p2 and
+        p2 -> p1 must keep loading, or the fix would break the ordinary case."""
+        doc = _couple_doc()
+        p2 = next(p for p in doc["people"] if p["id"] == "p2")
+        p2["relationships"] = list(p2.get("relationships", [])) + [
+            {"type": "spouse_of", "person": "p1", "from": "2008-06-21", "to": None},
+        ]
+        self.assertEqual(_find_primary_and_spouse(doc), ("p1", "p2"))
+
+
 class TheAsOfBoundaryIsDeliberate(unittest.TestCase):
     """Both edges of ``as_of`` are CONVENTIONS, and a review flagged both as
     suspicious -- so they are pinned here rather than left incidental.
