@@ -201,8 +201,13 @@ def _two_generation_doc(first_home_purchases):
 
 class TestFirstHomePurchaseReachesConfigViaContract(unittest.TestCase):
     """The declared first_home_purchases[] block reaches the internal config
-    through the real adapter, and a buyer who is not a declared child is refused
-    loudly (DP#32), not silently dropped."""
+    through the real adapter, and a buyer matching NO declared member is
+    refused loudly (DP#32), not silently dropped.
+
+    Issue #373: this used to say "a buyer who is not a declared child", which
+    contradicted the very next test in this class -- an ADULT buyer is accepted
+    (#931 routes them to the household FHSA store and their own RRSP slot). The
+    refusal is for an id that matches no declared member."""
 
     def test_a_valid_child_buyer_reaches_the_internal_config(self):
         from input_contract import to_internal_config
