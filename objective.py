@@ -336,8 +336,27 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     # DP#16/issue #232: Compute retirement income from CPP + OAS + pension + LIF
     # Per issue #232: the placeholder retirement_income=0 understates the marginal
     # rate applied to capital gains. Use actual CPP/OAS/pension data from config.
-    cpp_monthly_for_cg = primary.get('cpp_monthly_estimated', 0)
-    cpp_annual_for_cg = cpp_monthly_for_cg * 12 if cpp_monthly_for_cg > 0 else 0
+    #
+    # Issue #414: the CPP term is the fold's OWN output for the final year
+    # (``YearResult.cpp_income``), not a second derivation from the member
+    # dict. It used to be ``primary['cpp_monthly_estimated'] * 12`` -- the raw
+    # statement-at-65 figure with no age factor, no claim-age gate and no
+    # retirement gate -- while the fold pays ``cpp_from_estimate``: x1.42 at a
+    # claim age of 70, x0.64 at 60, $0 until ``cpp_start_age`` is reached. The
+    # two disagreed by up to 42% of the member's CPP in BOTH directions, and
+    # the wrong one was the denominator base of the marginal rate applied to
+    # the terminal capital gain, so it moved ``net_benefit`` and therefore the
+    # optimizer's RANKING. Reading the row the fold already computed makes the
+    # fold the single reader of the key on this path (DP#26), and it answers
+    # the household question the row already answers: ``cpp_income`` is the
+    # family's combined CPP/QPP, matching the COMBINED brackets
+    # ``marginal_rate`` prices against, where the old read saw only the
+    # primary's half.
+    #
+    # ``getattr(..., 0.0)`` matches the ``lif_withdrawal`` idiom two lines
+    # down: a hand-built YearResult predating the field prices $0, and the
+    # dataclass default is a real 0.0, so this never coerces a supplied value.
+    cpp_annual_for_cg = getattr(final, 'cpp_income', 0.0)
     _assumptions = cfg.get('assumptions', {})
     # dict.get's default is eager; membership defers the fallback (#248)
     oas_annual_for_cg = (_assumptions['oas_annual'] if 'oas_annual' in _assumptions

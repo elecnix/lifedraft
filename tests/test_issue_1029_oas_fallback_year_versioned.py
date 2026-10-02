@@ -27,8 +27,9 @@ def _final_year_result():
     only when the income crosses a bracket edge, so the non-reg gain is sized
     from the live brackets (not a frozen number) to put the income halfway
     between ``edge - 8908`` and ``edge - 8500``: 0, 8500 and 8908 of OAS then
-    land in different brackets. Retirement income here is CPP 14,400 (the
-    fixture's 1,200/month) + LIF withdrawal 5,000."""
+    land in different brackets. Retirement income here is CPP 14,400
+    (``cpp_income``, issue #414 -- what the fold wrote for the year) plus a
+    LIF withdrawal of 5,000."""
     from tax_data import default_tax_provider
     from year_result import YearResult
     edge = default_tax_provider().get_combined_brackets()[0]['max']
@@ -46,6 +47,13 @@ def _final_year_result():
         non_reg_balance=non_reg_balance,
         non_reg_acb=non_reg_balance - gain,
         resp_balance=0,
+        # Issue #414: the CG leg's CPP term is the FOLD's number, read off the
+        # row, not a second derivation from the member dict's
+        # ``cpp_monthly_estimated``. This hand-built row therefore has to carry
+        # the 14,400 the projection would have written (1,200/month) -- before
+        # #414 the fixture got it from ``_cfg``'s member dict instead, which is
+        # exactly the second reader this issue removes.
+        cpp_income=14_400,
         lif_withdrawal=5000,
         lif_balance=50000,
         lira_balance=0,
@@ -53,8 +61,10 @@ def _final_year_result():
 
 
 def _cfg(oas_annual=None, start_year=2026, birth_year=1979):
+    # Issue #414: no ``cpp_monthly_estimated`` here. The CG leg's CPP term is
+    # read off ``YearResult.cpp_income`` (the fold's own number), so a member
+    # dict key would be a dead write in this fixture.
     member = {'role': 'primary', 'gross_income': 130000,
-              'cpp_monthly_estimated': 1200,
               'oas_start_age': 65,
               'pension_income_annual': 0}
     if birth_year is not None:
