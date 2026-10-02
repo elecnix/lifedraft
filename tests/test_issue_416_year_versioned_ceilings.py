@@ -15,6 +15,12 @@ B. The Quebec and Ontario ``year_2025`` records declared
    ``cpp_max_pensionable=68500``, the 2024 ceiling, beside a correct 2025
    ``cpp2_max_pensionable=81200`` on the same row. Federal says 71300.
 
+C. ``CPP_OAS_BY_YEAR[2023]['cpp2_max_pensionable']`` was 68500, naming a
+   second ceiling for a year before CPP2 existed (``_CPP2_START_YEAR`` is
+   2024). Both the federal and the Quebec 2023 records say 66600 — YMPE2 =
+   YMPE, an empty band — so ``cpp2_benefit`` paid a full CPP2 maximum off a
+   $1,900 band that was never legislated.
+
 These tests drive the real provider and the real fold entry points; none of
 them rebuilds engine state by hand.
 """
@@ -24,7 +30,7 @@ import unittest
 from countries.canada.self_employed_contributions import (
     compute_cpp2_contribution,
 )
-from countries.canada import retirement
+from countries.canada import cpp_estimator, retirement
 from tax_data import TaxDataProvider, TaxYearData
 
 # The ceilings the projection must carry (issue #416, Bug A).
@@ -215,6 +221,62 @@ class TestProjectionRoundTripsKnownYears(unittest.TestCase):
         base = provider._load_year_uncached(2026, "canada", "federal")
         self.assertEqual(
             provider._project_from_base(base, 2030).source, "projected")
+
+
+class TestPreCPP2YearHasNoSecondBand(unittest.TestCase):
+    """Bug C: the 2023 row named a CPP2 band that was never legislated.
+
+    CPP2 began in 2024. In 2023 there is no second ceiling, so the band
+    (YMPE2 - YMPE) is empty. The table carried 68500 - a band of $1,900
+    that never existed - which the federal record, the Quebec record and
+    the estimator's own ``_CPP2_START_YEAR`` guard all contradict.
+    """
+
+    def test_2023_second_ceiling_equals_the_first(self):
+        """YMPE2 = YMPE in 2023, so the band is empty and the ratio is 0."""
+        row = retirement.CPP_OAS_BY_YEAR[2023]
+        self.assertEqual(
+            row["cpp2_max_pensionable"], row["cpp_max_pensionable"],
+            "2023 declares a second ceiling above the YMPE, but CPP2 had "
+            "not started — the band must be empty",
+        )
+
+    def test_2023_row_agrees_with_the_provider_records(self):
+        """The table must not contradict the provider for the same year."""
+        provider = TaxDataProvider(auto_register=True)
+        table = retirement.CPP_OAS_BY_YEAR[2023]["cpp2_max_pensionable"]
+        for province in ("federal", "quebec"):
+            self.assertEqual(
+                provider._load_year_uncached(2023, "canada", province)
+                .cpp2_max_pensionable,
+                table,
+                f"{province} 2023 record disagrees with CPP_OAS_BY_YEAR",
+            )
+
+    def test_cpp2_benefit_is_zero_for_a_year_before_cpp2_existed(self):
+        """The public function must not pay CPP2 for a pre-CPP2 year."""
+        self.assertLess(2023, cpp_estimator._CPP2_START_YEAR)
+        self.assertEqual(
+            retirement.cpp2_benefit(
+                19_000, years_contributing=40, start_age=65, year=2023,
+            ),
+            0.0,
+            "2023 pays a CPP2 benefit for a program that did not exist",
+        )
+
+    def test_the_second_band_opens_in_its_first_real_year(self):
+        """Guard the fix: 2024 must still have a positive band."""
+        for year in (2024, 2025, 2026):
+            row = retirement.CPP_OAS_BY_YEAR[year]
+            self.assertGreater(
+                row["cpp2_max_pensionable"], row["cpp_max_pensionable"],
+                f"{year} lost its second ceiling",
+            )
+
+    def test_estimator_second_ceiling_is_unchanged_for_2023(self):
+        """The estimator was already guarded; the data fix must not move it."""
+        self.assertEqual(cpp_estimator._yampe_for_year(2023), 66_600)
+        self.assertEqual(cpp_estimator._cpp2_max_benefit(2023), 0.0)
 
 
 if __name__ == "__main__":
