@@ -190,7 +190,7 @@ _WRITER = {"input_contract.py"} | {
     f"contract_{_part}.py" for _part in (
         "accounts", "assumptions", "decisions", "errors", "estate",
         "liabilities", "people", "principal", "property", "schema",
-        "transfers",
+        "transaction_costs", "transfers",
     )
 }
 # ``config_serde.py`` is the other half of the same pure loader: the
