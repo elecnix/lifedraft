@@ -405,6 +405,49 @@ class DatedUnionIsRefused(unittest.TestCase):
         # (the ongoing one loads -- asserted by OngoingUnionStillLoads above; the
         # point is that the dated one no longer silently produces it)
 
+class AnAmbiguousReciprocalScanIsRefused(unittest.TestCase):
+    """Two people naming the same partner who names nobody: refuse, not pick.
 
-if __name__ == "__main__":  # pragma: no cover
+    The scan used to break out of its INNER loop only, so the LAST edge won and
+    the other partner was dropped without a word. This is the one level the
+    defect is reachable at: `_needs_adult_compute` trips on ANY `spouse_of`
+    edge, so `admit_people` refuses the leftover by name on the contract path.
+    """
+
+    def _doc(self, partners):
+        """p1 declares no partner; each named person points at p1."""
+        doc = _couple_doc()
+        for p in doc["people"]:
+            if p["id"] == "p1":
+                p["relationships"] = [r for r in p["relationships"]
+                                      if r["type"] != "spouse_of"]
+            elif p["id"] == "p2":
+                p["relationships"] = []
+        for pid in partners:
+            doc["people"].append({
+                "id": pid,
+                "birth_date": "1980-01-01",
+                "relationships": [{"type": "spouse_of", "person": "p1"}],
+            })
+        return doc
+
+    def test_a_single_reciprocal_partner_still_resolves(self):
+        """One partner is not ambiguous and must keep resolving -- refusing here
+        would be a regression in the ordinary case."""
+        self.assertEqual(_find_primary_and_spouse(self._doc(["p2"])),
+                         ("p1", "p2"))
+
+    def test_two_reciprocal_partners_are_refused(self):
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _find_primary_and_spouse(self._doc(["p2", "p3"]))
+        message = str(ctx.exception)
+        self.assertIn("p2", message)
+        self.assertIn("p3", message)
+
+    def test_the_refusal_names_the_primary(self):
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _find_primary_and_spouse(self._doc(["p2", "p3"]))
+        self.assertIn("'p1'", str(ctx.exception))
+
+if __name__ == "__main__":
     unittest.main()

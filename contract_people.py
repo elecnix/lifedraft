@@ -94,10 +94,44 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
             _refuse_dated_union(doc, primary_id, r)
             break
     if spouse_id is None:
-        for pid, p in people.items():
-            for r in p.get("relationships", []):
+        # Issue #360: this scan used to `break` out of the INNER loop only, so the
+        # outer loop kept going and the LAST edge pointing at the primary won.
+        # Measured: with `p2 -> p1` and `p3 -> p1` it returned ('p1', 'p3') and
+        # dropped p2 without a word.
+        #
+        # Adding a `break` would make that deterministic and still arbitrary --
+        # "which union is this?" would be answered by document order. Two people
+        # naming the same partner while that partner names nobody makes the
+        # document ambiguous, so it is REFUSED, naming all of them, exactly as
+        # `_refuse_multiple_partners` does for the other direction of the same
+        # ambiguity.
+        #
+        # Not reachable through the validated contract path today: whichever
+        # partner is not chosen still holds a `spouse_of` edge, and
+        # `_needs_adult_compute` trips on ANY such edge, so `admit_people`
+        # refuses the leftover by name. This is a latent trap, not a live wrong
+        # answer, and it is fixed because the guard that happens to mask it is
+        # incidental -- relaxing the N-adult boundary would unmask it silently.
+        reciprocals = sorted(
+            pid
+            for pid, p in people.items()
+            for r in p.get("relationships", [])
+            if r["type"] == "spouse_of" and r["person"] == primary_id
+        )
+        if len(reciprocals) > 1:
+            raise ContractAdaptationError(
+                f"person {primary_id!r} is named as the spouse of more than one "
+                f"person ({', '.join(reciprocals)}) while declaring no partner of "
+                f"their own. This engine forms ONE couple, so which union it "
+                f"models would be decided by document order rather than by "
+                f"anything declared (issue #360; DP#33 -- a declaration is a lens, "
+                f"not a blindfold). Declare the union on {primary_id!r} itself, "
+                f"or leave only one partner."
+            )
+        for pid in reciprocals:
+            spouse_id = pid
+            for r in people[pid].get("relationships", []):
                 if r["type"] == "spouse_of" and r["person"] == primary_id:
-                    spouse_id = pid
                     _refuse_dated_union(doc, pid, r)
                     break
     # Issue #384 review: the multiple-partner refusal used to run on the PRIMARY
