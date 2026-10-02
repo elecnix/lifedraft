@@ -559,8 +559,14 @@ CONSUMED = {
     "people[].incomes[].id": ("contract_decisions.py", "person_income_ids = {"),
     "people[].incomes[].kind": ("contract_people.py", "if inc[\"kind\"] != \"employment\":"),
     "people[].incomes[].amount": ("contract_people.py", "total += inc[\"amount\"]"),
-    "people[].incomes[].from": ("contract_people.py", "if inc[\"from\"] and inc[\"from\"] > as_of:"),
-    "people[].incomes[].to": ("contract_people.py", "if inc[\"to\"] and inc[\"to\"] < as_of:"),
+    # Issue #415: `_active_employment_income` used to compare the stored ISO
+    # strings inline (`inc["from"] > as_of`, `inc["to"] < as_of`). It now parses
+    # each bound once and asks income_window's half-open `covers_date`, which is
+    # where the comparison lives for every reader of this window. The leaves are
+    # still consumed HERE -- the parse below is this contract_people function
+    # reading them -- so the citations point at the reads, not at the old text.
+    "people[].incomes[].from": ("contract_people.py", "window_from = _date.fromisoformat(inc[\"from\"])"),
+    "people[].incomes[].to": ("contract_people.py", "window_to = _date.fromisoformat(inc[\"to\"]) if inc[\"to\"] else None"),
     # Issue #767: employment-contract terms on an employment income. The
     # consumed scalar leaves drive the recovery-date clamp / notice-segment
     # model; scope/geography/probation_end are declared contract context that
