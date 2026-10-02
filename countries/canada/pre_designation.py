@@ -53,6 +53,25 @@ def period_years(period: Dict, as_of_year: int) -> Set[int]:
 
     ``to = None`` means the designation is still in effect as of the document's
     ``as_of`` (not yet closed out), so it runs through ``as_of_year``.
+
+    Issue #415: this function reads ``to`` as INCLUSIVE and does NOT use
+    ``income_window``, deliberately. Two reasons, both measured:
+
+    1. A PRE designation is a whole-YEAR-granularity election under ITA
+       s.40(2)(b) -- the statute counts designated YEARS -- so an inclusive
+       year range is the defensible reading of this program's own unit, not a
+       second spelling of the income window's date arithmetic.
+    2. The end-date semantics genuinely differ. Here, ``to = None`` means the
+       designation is STILL IN EFFECT as of ``as_of_year`` and therefore STOPS
+       at ``as_of_year``; an open-ended income window runs forward forever.
+       Routing this through income_window's open-ended window would make a
+       never-closed-out designation run forever too, silently widening every
+       exempt year after ``as_of_year``.
+
+    The two readings diverge only when ``to`` lands exactly on Jan 1 (measured:
+    ``to = 2026-01-01`` yields ``{2026}`` here and nothing under half-open).
+    Unifying would change the exemption fraction for any such period, which is
+    a tax outcome #415 is not chartered to move -- filed there as a follow-up.
     """
     start = _year(period["from"])
     end = as_of_year if period["to"] is None else _year(period["to"])

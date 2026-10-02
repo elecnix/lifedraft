@@ -213,13 +213,37 @@ def _age_at(birth_date: Optional[str], as_of: str) -> Optional[int]:
 
 
 def _active_employment_income(person: Dict, as_of: str) -> float:
+    """Employment income in effect ON the snapshot date -- a boundary question,
+    asked half-open.
+
+    Issue #415. This used to skip an income only when ``inc["to"] < as_of``, so
+    an income whose ``to`` IS ``as_of`` stayed active here: the fold grew that
+    salary across the entire horizon, paying a job that had ended on the
+    snapshot date (measured: still paying in 2035 for a job that ended
+    2026-03-31). ``income_window.covers_date`` answers ``from <= on < to``, which
+    is what ``schema/defs/people.json``'s own ``[from, to)`` notation means, and
+    the other two readers of that same window (the CPP overlay and the fold's
+    day-count blend) already treated ``to == as_of`` as over.
+
+    The scalar is not cosmetic: it becomes ``member["gross_income"]`` here, then
+    ``SimulationConfig._primary_income`` (``simulation.py``), then the
+    ``base_amount`` every year's income is grown from.
+
+    ``kind`` is restricted to ``employment`` on purpose and unchanged -- see
+    #415's second finding, where this exclusion and the CPP estimator's
+    ``_PENSIONABLE_KINDS`` disagree about ``self_employment``.
+    """
+    from datetime import date as _date
+    from income_window import covers_date
+
+    on = _date.fromisoformat(as_of)
     total = 0.0
     for inc in person.get("incomes", []):
         if inc["kind"] != "employment":
             continue
-        if inc["from"] and inc["from"] > as_of:
-            continue
-        if inc["to"] and inc["to"] < as_of:
+        window_from = _date.fromisoformat(inc["from"])
+        window_to = _date.fromisoformat(inc["to"]) if inc["to"] else None
+        if not covers_date(window_from, window_to, on):
             continue
         total += inc["amount"]
     return total
