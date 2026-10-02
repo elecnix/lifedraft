@@ -1,0 +1,126 @@
+"""Issue #307: the benefit-side CPP2 ceiling must be the CRA's published AYMPE.
+
+The CPP2 pension estimate is sized against the band between the year's
+Maximum Pensionable Earnings (YMPE) and the year's Additional Maximum
+Pensionable Earnings (AYMPE), a.k.a. the second earnings ceiling. The benefit
+side carried figures the CRA never published, so the band was too narrow and
+the estimated CPP2 pension for an earner between the true and the stored
+ceiling was overstated.
+
+Source for every figure below (AYMPE, 4% rate, maximum employee contribution):
+https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/calculating-deductions/making-deductions/second-additional-cpp-contribution-rates-maximums.html
+"""
+
+import pytest
+
+from countries.canada.cpp_estimator import EarningsEntry, _yampe_for_year, compute_benefit_estimate
+from countries.canada.retirement import (
+    CPP2_MAX_BENEFIT,
+    CPP2_MAX_PENSIONABLE,
+    CPP_MAX_PENSIONABLE,
+    CPP_OAS_BY_YEAR,
+    cpp2_benefit,
+)
+
+# CRA "Second additional CPP (CPP2) contribution rates and maximums", table
+# "CPP2 contribution rates and maximums": 2026 $85,000 / 4% / $416,
+# 2025 $81,200 / 4% / $396, 2024 $73,200 / 4% / $188.
+CRA_AYMPE = {2024: 73200, 2025: 81200, 2026: 85000}
+
+CPP2_START_YEAR = 2024
+
+
+def _published_range(year: int) -> float:
+    """Earnings band CPP2 contributions accrue over, per the CRA ceilings."""
+    return CRA_AYMPE[year] - CPP_OAS_BY_YEAR[year]["cpp_max_pensionable"]
+
+
+class TestBenefitSideCeiling:
+    def test_2024_aympe_is_the_published_ceiling(self):
+        assert CPP_OAS_BY_YEAR[2024]["cpp2_max_pensionable"] == CRA_AYMPE[2024]
+
+    def test_2025_aympe_is_the_published_ceiling(self):
+        assert CPP_OAS_BY_YEAR[2025]["cpp2_max_pensionable"] == CRA_AYMPE[2025]
+
+    def test_2026_aympe_is_the_published_ceiling(self):
+        assert CPP_OAS_BY_YEAR[2026]["cpp2_max_pensionable"] == CRA_AYMPE[2026]
+
+    def test_every_second_ceiling_year_is_pinned(self):
+        """A new row past the CPP2 start year needs a sourced figure, not a guess."""
+        unverified = sorted(
+            year for year in CPP_OAS_BY_YEAR
+            if year >= CPP2_START_YEAR and year not in CRA_AYMPE
+        )
+        assert unverified == []
+
+    def test_module_fallback_is_the_2026_ceiling(self):
+        """CPP2_MAX_PENSIONABLE is declared in the "CPP 2026 parameters" block."""
+        assert CPP2_MAX_PENSIONABLE == CRA_AYMPE[2026]
+
+    def test_2024_band_is_4700(self):
+        """CRA: 4% of the 2024 band is the $188 maximum employee contribution."""
+        assert _published_range(2024) * 0.04 == pytest.approx(188, abs=0.005)
+
+    def test_2025_band_is_9900(self):
+        """CRA: 4% of the 2025 band is the $396 maximum employee contribution."""
+        assert _published_range(2025) * 0.04 == pytest.approx(396, abs=0.005)
+
+    def test_2026_band_is_10400(self):
+        """CRA: 4% of the 2026 band is the $416 maximum employee contribution."""
+        assert _published_range(2026) * 0.04 == pytest.approx(416, abs=0.005)
+
+    def test_agrees_with_the_contribution_side(self):
+        """Both sides read the same statutory ceiling (issue #307).
+
+        2026 is the exception: the contribution-side row still carries 81,900
+        and is corrected in #315, which cannot be asserted here without
+        pinning a known-wrong number. It is pinned to the CRA figure above.
+        """
+        from tax_data import default_tax_provider
+
+        provider = default_tax_provider()
+        for year in (2024, 2025):
+            assert (CPP_OAS_BY_YEAR[year]["cpp2_max_pensionable"]
+                    == provider.get_cpp2_max_pensionable(year))
+
+
+class TestCPP2BenefitProRation:
+    """cpp2_benefit() sizes the pension against YMPE→AYMPE, so an earner under
+    the second ceiling must be pro-rated, not handed the maximum."""
+
+    def test_full_band_gets_the_maximum(self):
+        assert cpp2_benefit(
+            _published_range(2026), start_age=65, year=2026
+        ) == pytest.approx(CPP2_MAX_BENEFIT, rel=1e-9)
+
+    def test_earnings_500_below_the_ceiling_are_pro_rated(self):
+        band = _published_range(2026)
+        below = band - 500
+        benefit = cpp2_benefit(below, start_age=65, year=2026)
+        assert benefit == pytest.approx(CPP2_MAX_BENEFIT * below / band, rel=1e-9)
+        assert benefit < CPP2_MAX_BENEFIT
+
+    def test_earnings_above_the_ceiling_are_capped(self):
+        band = _published_range(2026)
+        assert cpp2_benefit(
+            band + 50000, start_age=65, year=2026
+        ) == pytest.approx(CPP2_MAX_BENEFIT, rel=1e-9)
+
+
+class TestEstimatorUsesThePublishedCeiling:
+    def test_yampe_matches_cra_for_every_second_ceiling_year(self):
+        for year, published in CRA_AYMPE.items():
+            assert _yampe_for_year(year) == published
+
+    def test_estimate_below_the_ceiling_is_pro_rated(self):
+        """An earner at $84,500 in 2026 did not reach the $85,000 ceiling."""
+        at_ceiling = compute_benefit_estimate(
+            [EarningsEntry(year=2026, employment_income=85000)], start_age=65
+        )
+        below_ceiling = compute_benefit_estimate(
+            [EarningsEntry(year=2026, employment_income=84500)], start_age=65
+        )
+        assert at_ceiling.cpp2_age_65_monthly > below_ceiling.cpp2_age_65_monthly > 0
+        band = _published_range(2026)
+        assert (below_ceiling.cpp2_age_65_monthly / at_ceiling.cpp2_age_65_monthly
+                == pytest.approx((band - 500) / band, rel=0.01))
