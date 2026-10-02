@@ -21,9 +21,11 @@ dropped zero (DP#32).
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional
 
 from contract_errors import ContractAdaptationError
+from countries.canada.hbp_rules import HBP_MAX_WITHDRAWAL
 
 
 def _map_private_loans(doc: Dict) -> List[Dict[str, Any]]:
@@ -282,7 +284,85 @@ def _map_first_home_purchases(doc: Dict, child_ids: set,
                 f"refused rather than silently dropped (DP#32). "
                 f"Declared members: {sorted(valid)}."
             )
-        out.append({"buyer": buyer, "year": int(purchase["year"])})
+        year = int(purchase["year"])
+        # Issue #359 (review finding): two entries for the SAME buyer in the SAME
+        # year are ambiguous -- the fold resolves them by a dict comprehension, so
+        # the LAST declared amount would silently win and the earlier one vanish
+        # (DP#32: a dropped value must fail loudly, not be overridden). Refused,
+        # naming both.
+        for other in out:
+            if other["buyer"] == buyer and other["year"] == year:
+                raise ContractAdaptationError(
+                    f"first_home_purchases declares TWO entries for buyer={buyer!r} "
+                    f"in {year}. One buyer can make one first-home purchase per "
+                    f"year, and the fold resolves duplicates by taking the last "
+                    f"declared amount -- so the earlier figure would silently "
+                    f"disappear (issue #359; DP#32 -- refused, not overridden). "
+                    f"Keep a single entry for this buyer and year."
+                )
+        mapped = {"buyer": buyer, "year": year}
+        # Issue #359: the declared HBP withdrawal rides along ONLY when it is
+        # declared -- an absent leaf leaves no key behind, so the fold's own
+        # min(RRSP, $60k) default still applies (DP#32: absence is not a value
+        # to default here, and "no key" is what lets the pre-#359 behaviour stay
+        # byte-identical).
+        if "hbp_amount" in purchase:
+            amount = purchase["hbp_amount"]
+            # Issue #359 (review finding on this stack): a NON-FINITE amount must
+            # be refused HERE, not carried. NaN passes every numeric comparison
+            # (`nan < 0.0` and `nan > ceiling` are both False), so it would sail
+            # through the fold's guards and land as a NaN RRSP balance that
+            # propagates into the down payment and every downstream total
+            # (DP#32: refused, never coerced). `inf` would instead drive the
+            # growth clamp to a zeroed pot.
+            # Issue #359 (review finding): `math.isfinite` raises a bare
+            # TypeError on anything that is not a real number, so a string, a
+            # null, a list or an object would escape the mapper as a traceback
+            # instead of the refusal every neighbouring guard produces. Refused
+            # here, NOT coerced: the mapped entry carries `cf["amount"]`
+            # downstream, so quietly turning "5000" into 5000.0 would let a
+            # string travel on while the guards above reasoned about a number.
+            #
+            # `bool` is refused explicitly because it IS an int in Python:
+            # without this, `true` would become a withdrawal of exactly $1.00,
+            # which is the quietest possible way to print a wrong number.
+            if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+                raise ContractAdaptationError(
+                    f"first_home_purchases declares hbp_amount={amount!r} for "
+                    f"buyer={buyer!r} in {year}. An HBP withdrawal is a NUMBER of "
+                    f"dollars and {type(amount).__name__} is not one: "
+                    f"{amount!r} would raise a TypeError inside the guard meant "
+                    f"to refuse it, so the run would die on a traceback instead "
+                    f"of telling the household what to fix. Declare the amount as "
+                    f"a number (issue #359; DP#32 -- refused, not coerced)."
+                )
+            if not math.isfinite(amount):
+                raise ContractAdaptationError(
+                    f"first_home_purchases declares hbp_amount={amount!r} for "
+                    f"buyer={buyer!r} in {year}. An HBP withdrawal must be a "
+                    f"FINITE, non-negative amount: a non-finite value passes "
+                    f"every numeric comparison and would propagate a NaN balance "
+                    f"into the down payment and every later year (issue #359; "
+                    f"DP#32 -- refused, not coerced)."
+                )
+            # ... and the STATUTORY ceiling is decidable here, where a refusal
+            # cannot be swallowed: the fold raises inside a per-year step, and
+            # the optimizer wraps strategy evaluation in `except Exception:
+            # score = -inf`, so a refusal raised there can rank a strategy last
+            # instead of being reported (review finding). The OTHER ceiling --
+            # the buyer's own live RRSP balance -- is only knowable in the fold,
+            # so that check stays there.
+            if amount > HBP_MAX_WITHDRAWAL:
+                raise ContractAdaptationError(
+                    f"first_home_purchases declares hbp_amount={amount} for "
+                    f"buyer={buyer!r} in {year}, above the Home Buyers' Plan "
+                    f"maximum of ${HBP_MAX_WITHDRAWAL:,.0f} (CRA). The maximum is "
+                    f"a ceiling, not a target: a declared amount must not exceed "
+                    f"it (issue #359; DP#32 -- refused at the boundary, so no "
+                    f"per-year fold can swallow it)."
+                )
+            mapped["hbp_amount"] = amount
+        out.append(mapped)
     return out
 
 
