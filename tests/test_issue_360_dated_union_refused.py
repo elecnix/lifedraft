@@ -292,6 +292,9 @@ class BothMembersAreCheckedForMultiplePartners(unittest.TestCase):
         self.assertEqual(_find_primary_and_spouse(doc), ("p1", "p2"))
 
 
+from datetime import date, timedelta
+
+
 class TheAsOfBoundaryIsDeliberate(unittest.TestCase):
     """Both edges of ``as_of`` are CONVENTIONS, and a review flagged both as
     suspicious -- so they are pinned here rather than left incidental.
@@ -337,8 +340,13 @@ class TheAsOfBoundaryIsDeliberate(unittest.TestCase):
         """The other side of the first boundary: one day later is a different
         answer, and it must not be swept in with the equal case."""
         doc = self._ongoing_union(_couple_doc())
-        year, month, day = (int(x) for x in doc["as_of"].split("-"))
-        later = f"{year}-12-31" if (month, day) != (12, 31) else f"{year}-01-01"
+        # the ACTUAL next day, not "some date later". The old fixture picked
+        # 12-31, or 01-01 when as_of was already 12-31 -- so it could land BEFORE
+        # as_of, where the union has already ended and this test would fail (or,
+        # worse, pass) for the wrong reason. A boundary test has to sit exactly
+        # one day past the boundary or it is not testing the boundary.
+        later = (date(*(int(x) for x in doc["as_of"].split("-")))
+                 + timedelta(days=1)).isoformat()
         for _person, rel in _spouse_edges(doc):
             rel["to"] = later
         primary_id, spouse_id = _find_primary_and_spouse(doc)
@@ -449,5 +457,45 @@ class AnAmbiguousReciprocalScanIsRefused(unittest.TestCase):
             _find_primary_and_spouse(self._doc(["p2", "p3"]))
         self.assertIn("'p1'", str(ctx.exception))
 
+
+class ADuplicatedEdgeIsOnePartner(unittest.TestCase):
+    """Cite caught a regression in the reciprocal refusal: it counted EDGES.
+
+    A person declaring the same union twice is one partner, not two. The first
+    version refused that legal document and announced "(p2, p2)" as though the
+    same person were two.
+    """
+
+    def _doc(self, edges):
+        doc = _couple_doc()
+        for p in doc["people"]:
+            if p["id"] == "p1":
+                p["relationships"] = [r for r in p["relationships"]
+                                      if r["type"] != "spouse_of"]
+            elif p["id"] == "p2":
+                p["relationships"] = []
+        for pid, times in edges.items():
+            doc["people"].append({
+                "id": pid,
+                "birth_date": "1980-01-01",
+                "relationships": [{"type": "spouse_of", "person": "p1"}] * times,
+            })
+        return doc
+
+    def test_one_partner_declaring_the_edge_twice_still_resolves(self):
+        self.assertEqual(_find_primary_and_spouse(self._doc({"p2": 2})),
+                         ("p1", "p2"))
+
+    def test_two_distinct_partners_are_still_refused(self):
+        """Counting distinct partners must not have weakened the refusal."""
+        with self.assertRaises(ContractAdaptationError):
+            _find_primary_and_spouse(self._doc({"p2": 1, "p3": 1}))
+
+    def test_the_refusal_does_not_repeat_one_person(self):
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _find_primary_and_spouse(self._doc({"p2": 2, "p3": 2}))
+        message = str(ctx.exception)
+        self.assertIn("(p2, p3)", message)
+        self.assertNotIn("(p2, p2)", message)
 if __name__ == "__main__":
     unittest.main()

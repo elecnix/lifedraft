@@ -112,11 +112,15 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
         # refuses the leftover by name. This is a latent trap, not a live wrong
         # answer, and it is fixed because the guard that happens to mask it is
         # incidental -- relaxing the N-adult boundary would unmask it silently.
+        # DISTINCT partners, not edges. A person who declares the same union
+        # twice is still one partner -- `_refuse_multiple_partners` counts a set
+        # for exactly that reason, and counting edges here refused a legal
+        # one-way declaration while announcing "(p2, p2)" as two people.
         reciprocals = sorted(
-            pid
-            for pid, p in people.items()
-            for r in p.get("relationships", [])
-            if r["type"] == "spouse_of" and r["person"] == primary_id
+            {pid
+             for pid, p in people.items()
+             for r in p.get("relationships", [])
+             if r["type"] == "spouse_of" and r["person"] == primary_id}
         )
         if len(reciprocals) > 1:
             raise ContractAdaptationError(
