@@ -190,6 +190,59 @@ class CoupleDiscoveryFallbacks(unittest.TestCase):
         self.assertIsNone(spouse_id)
 
 
+class TheAsOfBoundaryIsDeliberate(unittest.TestCase):
+    """Both edges of ``as_of`` are CONVENTIONS, and a review flagged both as
+    suspicious -- so they are pinned here rather than left incidental.
+
+    The engine compares DATES, not instants: a union that ENDS on ``as_of`` has
+    already ended at that date (the separation has occurred, so this is not a
+    couple to model), while one that STARTS on ``as_of`` has already begun (so it
+    is). Read the other way round, each of those documents would be accepted or
+    refused for the wrong reason, and neither reading is discoverable from the
+    engine.
+    """
+
+    def _ongoing_union(self, doc: dict) -> dict:
+        for _person, rel in _spouse_edges(doc):
+            if rel.get("from") is not None:
+                rel["from"] = "2008-06-21"
+            if rel.get("to") is not None:
+                rel["to"] = None
+        return doc
+
+    def test_a_union_ending_exactly_on_as_of_is_refused(self):
+        """``to == as_of``: the separation has happened at the snapshot date, so
+        modelling them as a couple would grant spousal splitting and a survivor
+        estate on the day the union ended."""
+        doc = self._ongoing_union(_couple_doc())
+        as_of = doc["as_of"]
+        for _person, rel in _spouse_edges(doc):
+            rel["to"] = as_of
+        with self.assertRaises(ContractAdaptationError):
+            _find_primary_and_spouse(doc)
+
+    def test_a_union_starting_exactly_on_as_of_is_accepted(self):
+        """``from == as_of``: they married on the snapshot date, so they ARE a
+        couple at as_of and the engine models exactly what the document states."""
+        doc = self._ongoing_union(_couple_doc())
+        as_of = doc["as_of"]
+        for _person, rel in _spouse_edges(doc):
+            rel["from"] = as_of
+        primary_id, spouse_id = _find_primary_and_spouse(doc)
+        self.assertEqual((primary_id, spouse_id), ("p1", "p2"))
+
+    def test_a_union_ending_the_day_after_as_of_is_still_ongoing(self):
+        """The other side of the first boundary: one day later is a different
+        answer, and it must not be swept in with the equal case."""
+        doc = self._ongoing_union(_couple_doc())
+        year, month, day = (int(x) for x in doc["as_of"].split("-"))
+        later = f"{year}-12-31" if (month, day) != (12, 31) else f"{year}-01-01"
+        for _person, rel in _spouse_edges(doc):
+            rel["to"] = later
+        primary_id, spouse_id = _find_primary_and_spouse(doc)
+        self.assertEqual((primary_id, spouse_id), ("p1", "p2"))
+
+
 class DatedUnionIsRefused(unittest.TestCase):
     """Scope one of #360: a union the engine cannot honour fails loudly."""
 
