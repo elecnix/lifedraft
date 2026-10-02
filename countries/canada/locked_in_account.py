@@ -59,6 +59,7 @@ Usage:
 from dataclasses import dataclass, replace
 from typing import Dict, Optional, Tuple
 
+from countries.canada.cpp_data import ympe_for_year
 from countries.canada.retirement import _get_rrif_rates
 from countries.canada.account_models import _apply_growth
 
@@ -66,16 +67,8 @@ from countries.canada.account_models import _apply_growth
 # =============================================================================
 # YMPE — Year-versioned data (DP#12, DP#20)
 # =============================================================================
-
-YMPE_BY_YEAR = {
-    2020: 58700,
-    2021: 61600,
-    2022: 64900,
-    2023: 66600,
-    2024: 68500,
-    2025: 71300,  # Official: https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/cpp-contribution-rates-maximums-exemptions.html
-    2026: 74600,  # Official: https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/cpp-contribution-rates-maximums-exemptions.html
-}
+# YMPE is not restated here. cpp_data.py owns the year-versioned ceiling and
+# the rule for a year with no row; this module asks it.
 
 # Mandatory LIF-conversion backstop: a CRI/LIRA must be transferred to a
 # LIF/FRV (or used to buy a life annuity) by December 31 of the year the
@@ -658,22 +651,18 @@ def compute_lif_withdrawal_range(balance: float, age: int, year: int,
     }
 
 
-def get_ympe(year: int) -> int:
+def get_ympe(year: int) -> float:
     """Get YMPE for a given year.
 
-    DP#12, DP#20: YMPE is year-versioned data.
+    DP#12, DP#20: YMPE is year-versioned data, owned by ``cpp_data``.
 
     Args:
         year: Calendar year
 
     Returns:
-        YMPE for that year, or nearest available year
+        YMPE for that year, or the nearest year that has a published maximum
     """
-    if year in YMPE_BY_YEAR:
-        return YMPE_BY_YEAR[year]
-    available = sorted(YMPE_BY_YEAR.keys())
-    nearest = min(available, key=lambda y: abs(y - year))
-    return YMPE_BY_YEAR[nearest]
+    return ympe_for_year(year)
 
 
 # =============================================================================

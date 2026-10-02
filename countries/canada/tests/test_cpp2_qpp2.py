@@ -22,16 +22,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 
 import unittest
 
+from countries.canada.cpp_data import cpp_parameters
 from countries.canada.cpp_sharing import (
-    CPP2_MAX_PENSIONABLE_2026,
     CPP_BASIC_EXEMPTION,
     CPP_EARLY_PENALTY_PER_MONTH,
     CPP_LATE_BONUS_PER_MONTH,
-    CPP_MAX_BENEFIT_65_2026,
-    CPP_MAX_PENSIONABLE_2026,
     CPPSharingInput,
     optimize_cpp_sharing,
 )
+
+# The 2026 ceilings live in one place (countries.canada.cpp_data); a federal
+# module must not restate them.
+CPP_MAX_PENSIONABLE_2026 = cpp_parameters(2026).ympe
+CPP2_MAX_PENSIONABLE_2026 = cpp_parameters(2026).yampe
+CPP_MAX_BENEFIT_65_2026 = cpp_parameters(2026).max_benefit_65
 from tax_data import TaxDataProvider
 
 
@@ -390,7 +394,7 @@ class TestSurvivorBenefits(unittest.TestCase):
         If survivor's own CPP + survivor benefit > max CPP, the survivor
         benefit is reduced.
         """
-        from countries.canada.cpp_sharing import CPP_MAX_BENEFIT_65_2026, compute_survivor_benefit
+        from countries.canada.cpp_sharing import compute_survivor_benefit
         result = compute_survivor_benefit(
             deceased_cpp_annual=15000,
             survivor_age=67,

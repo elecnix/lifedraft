@@ -130,11 +130,20 @@ class TestDTCYearVersioned(unittest.TestCase):
 class TestCPP2InCppSharing(unittest.TestCase):
     """Test that cpp_sharing.py uses TaxDataProvider instead of hardcoded CPP2."""
 
-    def test_cpp2_constant_deprecated(self):
-        """CPP2_MAX_PENSIONABLE_2026 should be marked as deprecated."""
-        from countries.canada.cpp_sharing import CPP2_MAX_PENSIONABLE_2026
-        # Still exists for backward compat, but should be marked deprecated
-        self.assertAlmostEqual(CPP2_MAX_PENSIONABLE_2026, 81900)
+    def test_cpp_sharing_has_no_restated_cpp2_ceiling(self):
+        """cpp_sharing keeps no hardcoded CPP2 ceiling of its own.
+
+        The ``*_2026`` ceiling constants are gone; the year-versioned
+        interface (countries.canada.cpp_data) owns them. tests/architecture/
+        test_cpp_data_single_source.py enforces the absence mechanically.
+        """
+        import countries.canada.cpp_sharing as cpp_sharing
+        for name in ("CPP_MAX_PENSIONABLE_2026", "CPP_MAX_BENEFIT_65_2026",
+                     "CPP2_MAX_PENSIONABLE_2026", "QPP_MAX_PENSIONABLE_2026",
+                     "QPP_MAX_BENEFIT_65_2026"):
+            self.assertFalse(hasattr(cpp_sharing, name), name)
+        from countries.canada.cpp_data import cpp_parameters
+        self.assertAlmostEqual(cpp_parameters(2026).yampe, 81900)
 
     def test_cpp_sharing_input_uses_year_data(self):
         """CPPSharingInput can get CPP2 max from TaxDataProvider."""

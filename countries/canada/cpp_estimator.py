@@ -9,10 +9,11 @@ and age-adjustment factors for start ages 60/65/70. Handles CPP2
 
 Design:
 - DP#3: Pure functions — same inputs → same outputs. No globals.
-- DP#10: One module per program — CPP estimator lives here.
-- DP#20: Uses year-versioned getters from retirement.py for 2023+.
-- DP#25: Imports from retirement.py (data layer) and core — never
-  imports from simulation or optimization layers.
+- DP#10: One module per program — CPP estimator lives here; the year-versioned
+  ceilings live in cpp_data.py, which this module reads and never restates.
+- DP#20: Ceilings come from cpp_parameters(year, plan).
+- DP#25: Imports from cpp_data.py / retirement.py (data layer) and core —
+  never imports from simulation or optimization layers.
 - DP#15: No personal data in defaults. All example data uses round numbers.
 
 Callers that supply a contributory earnings series (explicit
@@ -44,10 +45,10 @@ References:
 from dataclasses import dataclass
 from typing import List, Mapping, Optional, Sequence
 
+from countries.canada.cpp_data import cpp_parameters
 from countries.canada.retirement import (
     CPP_EARLY_START_PENALTY,
     CPP_LATE_START_BONUS,
-    CPP_OAS_BY_YEAR,
 )
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -61,37 +62,11 @@ _MAX_DROPOUT_YEARS = 8
 # Without this, a single-year entry would appear as a full career at YMPE.
 _MIN_CONTRIBUTORY_SPAN = 40
 
-# CPP2 (second additional) introduced in 2024.
-_CPP2_START_YEAR = 2024
-
-# ── Historical YMPE table (1966–2022) ────────────────────────────────────────
-# Fallback for years not covered by CPP_OAS_BY_YEAR (2023+).
-# Source: Service Canada / CRA historical YMPE tables.
-_HISTORICAL_YMPE: dict = {
-    1966: 5000, 1967: 5000, 1968: 5100, 1969: 5200, 1970: 5300,
-    1971: 5400, 1972: 5500, 1973: 5600, 1974: 6600, 1975: 7400,
-    1976: 8300, 1977: 9300, 1978: 10400, 1979: 11700, 1980: 13100,
-    1981: 14700, 1982: 16500, 1983: 18500, 1984: 20800, 1985: 23400,
-    1986: 25800, 1987: 25900, 1988: 26500, 1989: 27700, 1990: 28900,
-    1991: 30500, 1992: 32200, 1993: 33400, 1994: 34400, 1995: 34900,
-    1996: 35400, 1997: 35800, 1998: 36900, 1999: 37400, 2000: 37600,
-    2001: 38300, 2002: 39100, 2003: 39900, 2004: 40500, 2005: 41100,
-    2006: 42100, 2007: 43700, 2008: 44900, 2009: 46300, 2010: 47200,
-    2011: 48300, 2012: 50100, 2013: 51100, 2014: 52500, 2015: 53600,
-    2016: 54900, 2017: 55300, 2018: 55900, 2019: 57400, 2020: 58700,
-    2021: 61600, 2022: 64900,
-}
-
-# ── QPP max retirement benefit at 65 (issue #390) ────────────────────────────
-# Year-versioned Retraite Québec maxima. Used only when plan="qpp".
-# Source: countries/canada/provinces/quebec/tax_data.py (DP#20 / DP#52).
-# YMPE/YAMPE/CPP2 remain on the CPP tables above (shared ceilings).
-_QPP_MAX_BENEFIT_65: dict = {
-    2023: 15170,
-    2024: 17334,
-    2025: 17334,
-    2026: 17334,
-}
+# ── Ceilings ─────────────────────────────────────────────────────────────────
+# YMPE, YAMPE, the age-65 maximum and the CPP2 age-65 maximum are answered by
+# countries/canada/cpp_data.py — one year-versioned interface, one documented
+# rule for a year with no row. Nothing in this module holds a ceiling table or
+# re-derives a fallback (DP#10, DP#12, DP#20).
 
 
 # ── Dataclasses ──────────────────────────────────────────────────────────────
@@ -124,58 +99,7 @@ class CPPBenefitEstimate:
     dropout_years: int = 0
 
 
-# ── Year-level lookup helpers ────────────────────────────────────────────────
 
-def _ympe_for_year(year: int) -> float:
-    """Get YMPE for a given year."""
-    if year in CPP_OAS_BY_YEAR:
-        return CPP_OAS_BY_YEAR[year]["cpp_max_pensionable"]
-    if year in _HISTORICAL_YMPE:
-        return _HISTORICAL_YMPE[year]
-    # Future year: extrapolate at 2%/yr from latest historical
-    max_known = max(_HISTORICAL_YMPE.keys())
-    return _HISTORICAL_YMPE[max_known] * (1.02 ** (year - max_known))
-
-
-def _yampe_for_year(year: int) -> float:
-    """Get YAMPE (CPP2 max pensionable) for a given year."""
-    if year < _CPP2_START_YEAR:
-        return _ympe_for_year(year)
-    if year in CPP_OAS_BY_YEAR and "cpp2_max_pensionable" in CPP_OAS_BY_YEAR[year]:
-        return CPP_OAS_BY_YEAR[year]["cpp2_max_pensionable"]
-    return _ympe_for_year(year) * 1.14
-
-
-def _max_benefit_for_year(year: int, plan: str = "cpp") -> float:
-    """Get max CPP/QPP retirement benefit at 65, with fallback.
-
-    ``plan="qpp"`` (issue #390) uses Retraite Québec maxima when known;
-    falls back to the latest QPP row, then to CPP if the QPP table is empty.
-    """
-    if plan == "qpp":
-        if year in _QPP_MAX_BENEFIT_65:
-            return _QPP_MAX_BENEFIT_65[year]
-        if _QPP_MAX_BENEFIT_65:
-            max_known = max(_QPP_MAX_BENEFIT_65.keys())
-            if year > max_known:
-                return _QPP_MAX_BENEFIT_65[max_known]
-            # Before the QPP table: fall through to CPP historical maxima
-            # rather than inventing a 2023 QPP value for 1990 (Cite #390).
-    if year in CPP_OAS_BY_YEAR:
-        return CPP_OAS_BY_YEAR[year]["cpp_max_benefit_65"]
-    max_known = max(CPP_OAS_BY_YEAR.keys())
-    return CPP_OAS_BY_YEAR[max_known]["cpp_max_benefit_65"]
-
-
-def _cpp2_max_benefit(year: int) -> float:
-    """Get max CPP2 annual benefit at 65, with fallback."""
-    if year < _CPP2_START_YEAR:
-        return 0.0
-    if year in CPP_OAS_BY_YEAR and "cpp2_max_benefit" in CPP_OAS_BY_YEAR[year]:
-        return CPP_OAS_BY_YEAR[year]["cpp2_max_benefit"]
-    # Future year: use latest known
-    max_known = max(CPP_OAS_BY_YEAR.keys())
-    return CPP_OAS_BY_YEAR[max_known].get("cpp2_max_benefit", 0.0)
 
 
 # ── Age adjustment ───────────────────────────────────────────────────────────
@@ -239,17 +163,15 @@ def compute_benefit_estimate(
         all_entry_years.add(entry.year)
         if entry.employment_income is None:
             continue
-        ympe = _ympe_for_year(entry.year)
-        if ympe <= 0:
-            continue
-
         income = entry.employment_income
-        base_ratio = min(max(income, 0.0), ympe) / ympe
+        params = cpp_parameters(entry.year, plan)
+        if params.ympe <= 0:
+            continue
+        base_ratio = min(max(income, 0.0), params.ympe) / params.ympe
 
-        yampe = _yampe_for_year(entry.year)
-        cpp2_range = yampe - ympe
+        cpp2_range = params.yampe - params.ympe
         if cpp2_range > 0:
-            above_ympe = max(0.0, min(income - ympe, cpp2_range))
+            above_ympe = max(0.0, min(income - params.ympe, cpp2_range))
             cpp2_ratio = above_ympe / cpp2_range
         else:
             cpp2_ratio = 0.0
@@ -292,8 +214,9 @@ def compute_benefit_estimate(
     cpp2_avg, _ = _dropout_average(cpp2_ratios)
 
     # ── Max benefit reference ──────────────────────────────────────────
-    max_benefit_65 = _max_benefit_for_year(last_year, plan=plan)
-    cpp2_max = _cpp2_max_benefit(last_year)
+    reference = cpp_parameters(last_year, plan)
+    max_benefit_65 = reference.max_benefit_65
+    cpp2_max = reference.max_cpp2_benefit
 
     # ── Compute benefits ───────────────────────────────────────────────
     base_65_annual = base_avg * max_benefit_65
