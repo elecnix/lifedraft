@@ -696,6 +696,27 @@ def _map_member(doc: Dict, person_id: str, role: str,
     if earnings_history:
         member["earnings_history"] = earnings_history
 
+    # Issue #359: DECLARED, DATED RRSP contributions are a separate fact from
+    # the engine's own model-generated annual allocation
+    # (`apply_contributions` books p_rrsp_actual = min(income, room), which has
+    # no date). ITA s.146.01(2)(a) turns on a contribution MADE less than 90
+    # days before an HBP withdrawal, so it has to carry its date. Carried only
+    # when declared (DP#32: no key, not an empty list standing in for silence),
+    # and a negative amount is refused rather than carried.
+    contributions = p.get("rrsp_contributions")
+    if contributions is not None:
+        for contribution in contributions:
+            if float(contribution["amount"]) < 0.0:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares an rrsp_contribution of "
+                    f"{contribution['amount']} on {contribution['date']}. An RRSP "
+                    f"contribution cannot be negative; that is a mistyped amount, "
+                    f"not a withdrawal (issue #359; DP#32 -- refused, not coerced)."
+                )
+        member["rrsp_contributions"] = [
+            {"date": c["date"], "amount": float(c["amount"])} for c in contributions
+        ]
+
     if "cpp_monthly_estimated" in member:
         # In-pay benefits.cpp or entitlements.cpp already set the amount.
         member["cpp_benefit_source"] = "statement"

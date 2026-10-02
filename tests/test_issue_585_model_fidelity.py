@@ -449,6 +449,11 @@ _CODE_ANCHORS = {
     # applies a DECLARED sleeve fee. If that rule stops applying `mer`, the caveat
     # has nothing left to describe and must go with it -- the disclosure cannot
     # outlive the behaviour it discloses.
+    # Issue #359: the 89-day caveat is anchored to the RULE it says is not yet
+    # re-priced. If that rule ever gains a production caller, the disclosure is
+    # no longer true and must go with it.
+    'rrsp_contribution_in_hbp_window_not_repriced': (
+        'countries/canada/hbp_rules.py', 'def deductible_contribution_before_hbp('),
     'sm_sleeve_fee_free_when_undeclared': (
         'rules_leverage.py', 'config.sm_investment_mer'),
     'terminal_wealth_is_pretax': (

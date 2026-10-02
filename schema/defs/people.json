@@ -460,8 +460,35 @@
           "items": {
             "$ref": "#/$defs/study_period"
           }
+        },
+        "rrsp_contributions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rrsp_contribution"
+          },
+          "uniqueItems": true,
+          "description": "Issue #359, acceptance test (2): OPTIONAL DATED RRSP contributions this person made. A CONTRIBUTION IS NOT INCOME -- it is not taxed and does not appear in people[].incomes[]; declaring it there would be a category error. It is also not the engine's own annual allocation: `apply_contributions` books p_rrsp_actual = min(income, room), a MODEL-GENERATED allocation with no date, and ITA s.146.01(2)(a) targets a DECLARED contribution -- so this is a separate fact, deliberately not folded into that one. OMIT it and nothing changes (DP#32: absence is not zero). Today the engine CARRIES these contributions but does NOT yet re-price a contribution made less than 90 days before a Home Buyers' Plan withdrawal; a model_fidelity caveat discloses that, and the re-pricing needs the fold reordering described on issue #359. Enter the contribution as made, so the deduction it claims is the one CRA assesses."
         }
       }
+    },
+    "rrsp_contribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "date",
+        "amount"
+      ],
+      "properties": {
+        "date": {
+          "$ref": "#/$defs/date",
+          "description": "When the contribution was MADE -- a DATE, not a year (DP#1, DP#28): ITA s.146.01(2)(a) turns on the 90-DAY gap to the HBP withdrawal."
+        },
+        "amount": {
+          "$ref": "#/$defs/money",
+          "description": "The amount contributed."
+        }
+      },
+      "description": "One DECLARED RRSP contribution, dated (issue #359)."
     }
   }
 }

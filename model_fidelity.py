@@ -45,6 +45,7 @@ inward).
 """
 
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum
 from typing import Callable, Dict, List, Optional
 
@@ -495,6 +496,114 @@ register(Approximation(
             "honest treatment is disclosure, which is what this is."),
     issue='#381',
     applies=_sleeve_fee_undeclared,
+))
+
+
+#: ITA s.146.01(2)(a): a contribution made within this many days before an
+#: HBP withdrawal loses its deduction to the extent the post-withdrawal balance
+#: falls below it. The same constant the rule itself uses.
+HBP_CONTRIBUTION_WINDOW_DAYS = 90
+
+
+def _declared_date(value):
+    """``(year, month, day)`` for an ISO ``YYYY-MM-DD`` string, or None."""
+    try:
+        y, m, d = (int(part) for part in str(value)[:10].split("-"))
+        return (y, m, d)
+    except (ValueError, TypeError):
+        return None
+
+
+def _contribution_in_hbp_window(ctx: FidelityContext) -> bool:
+    """Fires only when a DECLARED contribution sits inside the 90-day window
+    before a modelled HBP withdrawal -- the case the engine does not re-price.
+
+    Both facts are required, and both are compared as DATES (DP#1/DP#28):
+
+    * a declared ``family.members[].rrsp_contributions`` entry, and
+    * a first_home_purchase whose withdrawal the engine actually modelled (a
+      readvanceable heloc, since only that facility can fund the sleeve).
+
+    A contribution with no ``date`` cannot be placed in the window at all, so it
+    is NOT reported -- that would be a claim the engine cannot support. An
+    unparseable date is treated the same conservative way. Contexts too thin to
+    judge report nothing rather than guessing.
+    """
+    cfg = ctx.cfg
+    if not isinstance(cfg, dict):
+        return False
+    prop = cfg.get('property')
+    heloc = prop.get('heloc') if isinstance(prop, dict) else None
+    if not (isinstance(heloc, dict) and heloc.get('readvanceable')) and not (
+            isinstance(prop, dict) and prop.get('has_heloc')):
+        return False
+    purchases = cfg.get('first_home_purchases')
+    if not purchases:
+        return False
+    family = cfg.get('family')
+    members = family.get('members') if isinstance(family, dict) else None
+    if not isinstance(members, list):
+        return False
+    contributions = []
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        declared = member.get('rrsp_contributions')
+        # DP#32: presence is tested explicitly. `or []` would also swallow a
+        # DECLARED EMPTY list, and here that would read as "nothing declared" --
+        # the opposite of what a stated-but-empty list means.
+        if not isinstance(declared, list):
+            continue
+        for entry in declared:
+            if isinstance(entry, dict):
+                contributions.append(_declared_date(entry.get('date')))
+    if not any(contributions):
+        return False
+    # The withdrawal is modelled at YEAR granularity, so the earliest calendar
+    # day of a purchase year bounds the window conservatively: a contribution
+    # inside 90 days of THAT day is the widest reading, and anything further
+    # out is definitely outside the window.
+    for purchase in purchases:
+        year = purchase.get('year') if isinstance(purchase, dict) else None
+        if year is None:
+            continue
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            continue
+        for made in contributions:
+            if made is None:
+                continue
+            delta = (date(year, 1, 1) - date(*made)).days
+            if 0 <= delta < HBP_CONTRIBUTION_WINDOW_DAYS:
+                return True
+    return False
+
+
+register(Approximation(
+    id='rrsp_contribution_in_hbp_window_not_repriced',
+    summary=("An RRSP contribution made less than 90 days before a Home Buyers' "
+             "Plan withdrawal is not re-priced: ITA s.146.01(2)(a) denies the "
+             "deduction to the extent the post-withdrawal balance falls below the "
+             "contribution, and the engine carries the declared contribution "
+             "without applying that rule"),
+    biased_figure=("federal and Quebec taxable income, UNDERSTATED -- the "
+                   "disallowed deduction is still being claimed"),
+    direction=Direction.OVERSTATES,
+    detail=("countries/canada/hbp_rules.deductible_contribution_before_hbp "
+            "implements the rule and still has no production caller. The reason is "
+            "structural, not an omission: simulation_state.py runs the registered "
+            "fold (contributions -> rrsp_ledger -> rrsp_deduction, which also "
+            "computes the year's tax) BEFORE the first-home step that performs the "
+            "HBP withdrawal, so rrsp_balance_after_withdrawal -- the value the rule "
+            "needs -- does not exist when the deduction is claimed. Re-pricing "
+            "therefore needs either that step hoisted ahead of the fold (blocked: "
+            "it reads ws.new_rrsp_bal, which the contributions rule produces) or a "
+            "second pass that re-claims the deduction and recomputes the year. "
+            "Issue #359 carries the ordering analysis; until then this caveat "
+            "discloses the gap rather than leaving it silent."),
+    issue='#359',
+    applies=_contribution_in_hbp_window,
 ))
 
 
