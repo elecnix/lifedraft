@@ -133,6 +133,56 @@ class OutOfRangeAmountIsRefused(unittest.TestCase):
         self.assertIn("20000", message.replace(",", ""))
 
 
+class NonNumericAmountIsRefusedNotCrashed(unittest.TestCase):
+    """A review finding: ``float("abc")`` raised a bare ``ValueError`` out of the
+    step, which reads as a crash rather than a refusal.
+
+    On the CONTRACT path the schema's ``type: number`` already rejects a
+    non-numeric amount, so this is the hand-built-internal-config path -- and
+    there it should refuse with the same loud, naming shape as every other
+    impossible declaration (DP#32), not raise a conversion error.
+    """
+
+    def test_a_non_numeric_amount_is_refused_at_the_step(self):
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _apply_first_home_to_account(_acc(65_000.0), True, 2026, "abc")
+        self.assertIn("abc", str(ctx.exception))
+
+    def test_the_schema_still_refuses_it_on_the_contract_path(self):
+        from contract_errors import ContractValidationError
+        with self.assertRaises((ContractValidationError, ContractAdaptationError)):
+            _run(_declare(_doc(), hbp_amount="abc"))
+
+
+class ADeclaredAmountAboveAnEmptyPrrpIsRefused(unittest.TestCase):
+    """A declared amount the buyer's pot cannot cover is REFUSED, not clipped.
+
+    This is a decision, pinned so it is not accidental: the ceiling is
+    ``min(RRSP, $60,000)``, so a declared amount above an empty or drained pot is
+    refused with both numbers in the message, and the household is told what they
+    can actually take. Clipping instead would silently understate the down
+    payment AND overstate the RRSP left sheltered -- the exact failure the leaf
+    exists to prevent (DP#32). A household whose pot is genuinely empty should
+    omit the leaf, which withdraws nothing by design.
+    """
+
+    def test_declaring_more_than_an_empty_pot_refuses(self):
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _apply_first_home_to_account(_acc(0.0), True, 2026, 60_000.0)
+        message = str(ctx.exception)
+        # The message names BOTH numbers the household needs: what they declared
+        # and what the pot can actually carry.
+        self.assertIn("60000", message.replace(",", "").replace(".0", ""))
+        self.assertIn("0.00", message)
+
+    def test_omitting_the_leaf_on_an_empty_pot_withdraws_nothing(self):
+        """The contrast: the historical default on an empty pot is a NO-OP of 0,
+        which is correct -- there is nothing to withdraw."""
+        out = _apply_first_home_to_account(_acc(0.0), True, 2026)
+        self.assertEqual(out["hbp"]["withdrawal"], 0.0)
+        self.assertEqual(out["rrsp_balance"], 0.0)
+
+
 class ADuplicatePurchaseIsRefused(unittest.TestCase):
     """Two entries for the SAME buyer and year are ambiguous, and the fold
     resolves them by taking the LAST declared amount -- so the earlier figure

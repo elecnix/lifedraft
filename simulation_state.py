@@ -514,7 +514,21 @@ def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
         if hbp_amount is None:
             hbp_out = ceiling
         else:
-            hbp_out = float(hbp_amount)
+            # A non-numeric amount raises a bare ValueError out of float(),
+            # which reads as a crash rather than a refusal. On the CONTRACT path
+            # the schema's `type: number` already rejects it, so this is the
+            # hand-built-internal-config path (which bypasses validation) -- and
+            # there it should still refuse with the same loud, naming shape
+            # (DP#32), not raise a conversion error (issue #359 review).
+            try:
+                hbp_out = float(hbp_amount)
+            except (TypeError, ValueError) as exc:
+                raise ContractAdaptationError(
+                    f"first_home_purchase declares hbp_amount={hbp_amount!r} for "
+                    f"the {calendar_year} purchase, which is not a number. An HBP "
+                    f"withdrawal is an amount in dollars (issue #359; DP#32: "
+                    f"refused, not coerced -- and not a raw conversion error)."
+                ) from exc
             if not math.isfinite(hbp_out):
                 raise ContractAdaptationError(
                     f"first_home_purchase declares hbp_amount={hbp_out} for the "
