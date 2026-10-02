@@ -721,38 +721,45 @@ def _map_member(doc: Dict, person_id: str, role: str,
                     f"{contribution!r}; each entry must be an object carrying a "
                     f"date and an amount (issue #359; DP#32)."
                 )
-            if contribution.get("date") is None:
+            # Read each key ONCE, into a local, and quote the local from here
+            # on. A refusal that quotes `contribution["date"]` while raising
+            # about a missing `date` is a message that can raise on its way out,
+            # which is the worst place for that: the reader gets a KeyError
+            # instead of the sentence explaining it. (After the isinstance guard,
+            # never before: `.get()` on a string entry raises AttributeError and
+            # would replace a clean refusal with a crash.)
+            raw_date = contribution.get("date")
+            raw_amount = contribution.get("amount")
+            if raw_date is None:
                 raise ContractAdaptationError(
                     f"person {person_id!r} declares {entry} with no date. ITA "
                     f"s.146.01(2)(a) turns on WHEN the contribution was made, so "
                     f"an undated contribution cannot be carried (issue #359)."
                 )
-            if contribution.get("amount") is None:
+            if raw_amount is None:
                 raise ContractAdaptationError(
-                    f"person {person_id!r} declares {entry} on "
-                    f"{contribution['date']} with no amount. A contribution is an "
-                    f"amount of money; an entry that states when but not how much "
-                    f"is incomplete, and a missing key is not a zero amount "
-                    f"(issue #359; DP#32)."
+                    f"person {person_id!r} declares {entry} on {raw_date!r} with "
+                    f"no amount. A contribution is an amount of money; an entry "
+                    f"that states when but not how much is incomplete, and a "
+                    f"missing key is not a zero amount (issue #359; DP#32)."
                 )
             try:
-                amount = float(contribution["amount"])
+                amount = float(raw_amount)
             except (TypeError, ValueError) as exc:
                 raise ContractAdaptationError(
                     f"person {person_id!r} declares {entry} with an amount of "
-                    f"{contribution['amount']!r} on {contribution['date']}, which "
-                    f"is not a number ({exc}). A contribution is an amount of "
-                    f"money; an unreadable one is refused, not guessed at "
-                    f"(issue #359; DP#32)."
+                    f"{raw_amount!r} on {raw_date!r}, which is not a number "
+                    f"({exc}). A contribution is an amount of money; an unreadable "
+                    f"one is refused, not guessed at (issue #359; DP#32)."
                 ) from exc
             if amount < 0.0:
                 raise ContractAdaptationError(
                     f"person {person_id!r} declares an rrsp_contribution of "
-                    f"{contribution['amount']} on {contribution['date']}. An RRSP "
-                    f"contribution cannot be negative; that is a mistyped amount, "
-                    f"not a withdrawal (issue #359; DP#32 -- refused, not coerced)."
+                    f"{raw_amount} on {raw_date}. An RRSP contribution cannot be "
+                    f"negative; that is a mistyped amount, not a withdrawal "
+                    f"(issue #359; DP#32 -- refused, not coerced)."
                 )
-            validated.append({"date": contribution["date"], "amount": amount})
+            validated.append({"date": raw_date, "amount": amount})
         # Built from what was VALIDATED, not re-read from the raw list: one
         # pass that parses, one that emits. A second pass re-indexing `c["date"]`
         # and re-running `float()` outside the guard above is unreachable today
