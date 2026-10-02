@@ -237,8 +237,8 @@ def get_cpp_max_benefit_65(year: int) -> float:
 CPP_OAS_BY_YEAR = {
     2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 68500, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 188, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
     2024: {"cpp_max_pensionable": 68500, "cpp2_max_pensionable": 73200, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8291, "oas_annual_max_75plus": 9118, "oas_clawback_threshold": 87068, "gis_max_single": 1616, "gis_max_coupled": 9739},
-    2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81200, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8381, "oas_annual_max_75plus": 9218, "oas_clawback_threshold": 90997, "gis_max_single": 1657, "gis_max_coupled": 9987},
-    2026: {"cpp_max_pensionable": 74600, "cpp2_max_pensionable": 85000, "cpp_max_benefit_65": 18092, "cpp2_max_benefit": 800, "oas_annual_max": 8908, "oas_annual_max_75plus": 9800, "oas_clawback_threshold": 95323, "gis_max_single": 1726, "gis_max_coupled": 10384},
+    2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81200, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 396, "oas_annual_max": 8381, "oas_annual_max_75plus": 9218, "oas_clawback_threshold": 90997, "gis_max_single": 1657, "gis_max_coupled": 9987},
+    2026: {"cpp_max_pensionable": 74600, "cpp2_max_pensionable": 85000, "cpp_max_benefit_65": 18092, "cpp2_max_benefit": 416, "oas_annual_max": 8908, "oas_annual_max_75plus": 9800, "oas_clawback_threshold": 95323, "gis_max_single": 1726, "gis_max_coupled": 10384},
 }
 OAS_CLAWBACK_RATE = 0.15        # 15% recovery tax on income above threshold
 
@@ -274,7 +274,10 @@ CPP_MAX_PENSIONABLE = 74600       # YMPE (Year's Maximum Pensionable Earnings)
 CPP2_MAX_PENSIONABLE = 85000      # YAMPE 2026 (second additional CPP, above YMPE) — CRA
 CPP2_BENEFIT_RATE = 0.0025        # CPP2 accrual rate per year of contribution
 CPP_MAX_BENEFIT_65 = 18092        # Maximum CPP retirement at 65: $1,507.65×12 (Service Canada, 2026-01)
-CPP2_MAX_BENEFIT = 800            # Maximum CPP2 retirement benefit (2026)
+CPP2_MAX_BENEFIT = 416            # Maximum CPP2 retirement benefit at 65 (2026): 4% x the
+                                  # 2026 CPP2 band (85,000 - 74,600 = 10,400). Previously 800,
+                                  # which implied a 7.69% accrual rate against a statutory 4% --
+                                  # a pension larger than the maximum anyone could have contributed.
 CPP_EARLY_START_PENALTY = 0.006   # 0.6% per month before 65 (max 36% at 60)
 CPP_LATE_START_BONUS = 0.007      # 0.7% per month after 65 (max 42% at 70)
 

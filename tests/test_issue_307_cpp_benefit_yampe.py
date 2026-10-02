@@ -124,3 +124,63 @@ class TestEstimatorUsesThePublishedCeiling:
         band = _published_range(2026)
         assert (below_ceiling.cpp2_age_65_monthly / at_ceiling.cpp2_age_65_monthly
                 == pytest.approx((band - 500) / band, rel=0.01))
+
+# ---------------------------------------------------------------------------
+# Issue #411 follow-on (raised by Cite on PR #411): the same rows also carry
+# cpp2_max_benefit, the maximum CPP2 pension at 65 for a full-range earner.
+# Correcting the ceiling without correcting this left the rows internally
+# inconsistent with the statutory 4% rate.
+# ---------------------------------------------------------------------------
+
+CPP2_RATE = 0.04
+
+
+class TestCpp2MaxBenefitMatchesStatutoryRate:
+    """cpp2_max_benefit is 4% of the year's CPP2 band, by definition.
+
+    cpp2_benefit() returns max_benefit * (capped_earnings / (AYMPE - YMPE)),
+    so for an earner at the full ceiling the stored value IS the annual
+    pension. Since the statutory CPP2 rate is 4%, that value must be exactly
+    4% of the band. Anything above 4% is arithmetically impossible: nobody can
+    draw a CPP2 pension larger than the maximum they could have contributed.
+    """
+
+    @pytest.mark.parametrize("year", [2024, 2025, 2026])
+    def test_implied_rate_is_the_statutory_four_percent(self, year):
+        row = CPP_OAS_BY_YEAR[year]
+        band = row["cpp2_max_pensionable"] - row["cpp_max_pensionable"]
+        assert band > 0
+        implied = row["cpp2_max_benefit"] / band
+        assert implied == pytest.approx(CPP2_RATE, abs=1e-9), (
+            f"{year}: cpp2_max_benefit {row['cpp2_max_benefit']} over a band of "
+            f"{band} implies {implied:.4%}, not the statutory {CPP2_RATE:.0%}"
+        )
+
+    @pytest.mark.parametrize("year,expected", [(2024, 188), (2025, 396), (2026, 416)])
+    def test_values_match_the_cra_published_maximum_contribution(self, year, expected):
+        """4% of band reproduces the CRA's published maximum employee contribution.
+
+        CRA "Second additional CPP (CPP2) contribution rates and maximums":
+        2024 $188, 2025 $396, 2026 $416. These are 100% of the maximum
+        contribution, and the maximum CPP2 pension at 65 is 100% of that.
+        """
+        assert CPP_OAS_BY_YEAR[year]["cpp2_max_benefit"] == expected
+
+    def test_module_default_matches_the_2026_row(self):
+        """The unknown-year fallback is labelled 2026, so it must equal 2026."""
+        assert CPP2_MAX_BENEFIT == CPP_OAS_BY_YEAR[2026]["cpp2_max_benefit"]
+        assert CPP2_MAX_BENEFIT == 416
+
+    @pytest.mark.parametrize("year,expected", [(2024, 188), (2025, 396), (2026, 416)])
+    def test_full_range_earner_receives_exactly_the_stored_maximum(self, year, expected):
+        """End to end: an earner at the ceiling gets the maximum, via the real fold."""
+        row = CPP_OAS_BY_YEAR[year]
+        band = row["cpp2_max_pensionable"] - row["cpp_max_pensionable"]
+        benefit = cpp2_benefit(
+            earnings_above_ympe=band, years_contributing=40, start_age=65, year=year
+        )
+        assert benefit == pytest.approx(expected, abs=0.01)
+
+    def test_2025_is_no_longer_the_2024_value(self):
+        """Regression guard for the specific defect Cite reported."""
+        assert CPP_OAS_BY_YEAR[2025]["cpp2_max_benefit"] != CPP_OAS_BY_YEAR[2024]["cpp2_max_benefit"]
