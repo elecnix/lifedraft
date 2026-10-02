@@ -712,6 +712,7 @@ def _map_member(doc: Dict, person_id: str, role: str,
         # contract path none of this is reachable -- it is the last line before
         # the fold for a hand-built internal config, and an unparseable entry
         # must still be refused rather than raised out of float() (DP#32).
+        validated: list = []
         for index, contribution in enumerate(contributions):
             entry = f"rrsp_contributions[{index}]"
             if not isinstance(contribution, dict):
@@ -751,10 +752,13 @@ def _map_member(doc: Dict, person_id: str, role: str,
                     f"contribution cannot be negative; that is a mistyped amount, "
                     f"not a withdrawal (issue #359; DP#32 -- refused, not coerced)."
                 )
-        member["rrsp_contributions"] = [
-            {"date": c["date"], "amount": float(c["amount"])}
-            for c in contributions
-        ]
+            validated.append({"date": contribution["date"], "amount": amount})
+        # Built from what was VALIDATED, not re-read from the raw list: one
+        # pass that parses, one that emits. A second pass re-indexing `c["date"]`
+        # and re-running `float()` outside the guard above is unreachable today
+        # (the loop raises on anything malformed) but is a hole a later edit
+        # could open, and it re-does work whose result is already in hand.
+        member["rrsp_contributions"] = validated
 
     if "cpp_monthly_estimated" in member:
         # In-pay benefits.cpp or entitlements.cpp already set the amount.

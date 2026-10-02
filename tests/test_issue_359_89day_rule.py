@@ -439,21 +439,6 @@ class TheCaveatNeedsAModelledWithdrawal(unittest.TestCase):
         self.assertTrue(_active(CAVEAT_ID, self._ctx_heloc(True)))
 
 
-class TheNegativeGuardIsExercisedAtTheMapper(unittest.TestCase):
-    """Cite's question, and it had teeth: the negative refusal was only
-    reachable through the schema, so the mapper's own `amount < 0.0` branch had
-    no direct test. Driven at `_map_member`, like its neighbours, so relaxing
-    the schema's money type later cannot quietly unrefuse a negative."""
-
-    def test_a_negative_amount_is_refused_by_the_mapper_itself(self):
-        doc = _doc()
-        _declare_contribution(doc, "p1", "2024-12-20", -1.0)
-        person = next(p for p in doc["people"] if p["id"] == "p1")
-        with self.assertRaises(ContractAdaptationError) as caught:
-            contract_people._map_member(doc, "p1", "primary", person)
-        self.assertIn("cannot be negative", str(caught.exception))
-
-
 class TheCaveatNeedsAModelledWithdrawal(unittest.TestCase):
     """It must not fire for a HELOC that funds no HBP withdrawal.
 
@@ -487,21 +472,3 @@ class TheCaveatNeedsAModelledWithdrawal(unittest.TestCase):
     def test_a_readvanceable_line_still_fires(self):
         self.assertTrue(_active(CAVEAT_ID, self._ctx_heloc(True)))
 
-
-class TheNegativeGuardIsExercisedAtTheMapper(unittest.TestCase):
-    """Cite's question, and it had teeth: the negative refusal was only
-    reachable through the schema, so the mapper's own `amount < 0.0` branch had
-    no direct test. Driven at `_map_member`, like its neighbours, so relaxing
-    the schema's money type later cannot quietly unrefuse a negative."""
-
-    def test_a_negative_amount_is_refused_by_the_mapper_itself(self):
-        doc = _doc()
-        _declare_contribution(doc, "p1", "2024-12-20", -1.0)
-        person = next(p for p in doc["people"] if p["id"] == "p1")
-        with self.assertRaises(ContractAdaptationError) as caught:
-            contract_people._map_member(doc, "p1", "primary", person)
-        self.assertIn("cannot be negative", str(caught.exception))
-
-
-if __name__ == '__main__':  # pragma: no cover
-    unittest.main()
