@@ -358,6 +358,15 @@ class ANonNumericContributionAmountIsRefused(unittest.TestCase):
             self._map_raw({"amount": 8000.0})
         self.assertIn("date", str(caught.exception))
 
+    def test_a_missing_amount_is_refused_not_a_keyerror(self):
+        """The mirror of the missing-date case, and the one gap left when the
+        other five shapes were closed: `float(contribution["amount"])` indexed
+        the key, and `except (TypeError, ValueError)` does not catch KeyError.
+        Caught by Cite on the commit that added the guard."""
+        with self.assertRaises(ContractAdaptationError) as caught:
+            self._map_raw({"date": "2024-12-20"})
+        self.assertIn("amount", str(caught.exception))
+
     def test_a_non_object_entry_is_refused(self):
         with self.assertRaises(ContractAdaptationError):
             self._map_raw("8000")

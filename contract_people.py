@@ -726,6 +726,14 @@ def _map_member(doc: Dict, person_id: str, role: str,
                     f"s.146.01(2)(a) turns on WHEN the contribution was made, so "
                     f"an undated contribution cannot be carried (issue #359)."
                 )
+            if contribution.get("amount") is None:
+                raise ContractAdaptationError(
+                    f"person {person_id!r} declares {entry} on "
+                    f"{contribution['date']} with no amount. A contribution is an "
+                    f"amount of money; an entry that states when but not how much "
+                    f"is incomplete, and a missing key is not a zero amount "
+                    f"(issue #359; DP#32)."
+                )
             try:
                 amount = float(contribution["amount"])
             except (TypeError, ValueError) as exc:
