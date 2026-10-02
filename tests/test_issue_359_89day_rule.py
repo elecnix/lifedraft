@@ -260,8 +260,7 @@ class TheUnrepricedWindowIsDisclosed(unittest.TestCase):
                       if a.id == CAVEAT_ID)
         # The deduction is NOT applied, so taxable income is too high: tax
         # OVERstated.
-        self.assertEqual(approx.direction, Direction.UNDERSTATES if False
-                         else Direction.OVERSTATES)
+        self.assertEqual(approx.direction, Direction.OVERSTATES)
         self.assertEqual(approx.issue, '#359')
         self.assertTrue(approx.biased_figure)
 
