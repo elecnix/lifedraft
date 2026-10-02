@@ -285,6 +285,21 @@ def _map_first_home_purchases(doc: Dict, child_ids: set,
                 f"Declared members: {sorted(valid)}."
             )
         year = int(purchase["year"])
+        # Issue #359 (review finding): two entries for the SAME buyer in the SAME
+        # year are ambiguous -- the fold resolves them by a dict comprehension, so
+        # the LAST declared amount would silently win and the earlier one vanish
+        # (DP#32: a dropped value must fail loudly, not be overridden). Refused,
+        # naming both.
+        for other in out:
+            if other["buyer"] == buyer and other["year"] == year:
+                raise ContractAdaptationError(
+                    f"first_home_purchases declares TWO entries for buyer={buyer!r} "
+                    f"in {year}. One buyer can make one first-home purchase per "
+                    f"year, and the fold resolves duplicates by taking the last "
+                    f"declared amount -- so the earlier figure would silently "
+                    f"disappear (issue #359; DP#32 -- refused, not overridden). "
+                    f"Keep a single entry for this buyer and year."
+                )
         mapped = {"buyer": buyer, "year": year}
         # Issue #359: the declared HBP withdrawal rides along ONLY when it is
         # declared -- an absent leaf leaves no key behind, so the fold's own

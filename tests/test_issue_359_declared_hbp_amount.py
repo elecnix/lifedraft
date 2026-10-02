@@ -133,6 +133,35 @@ class OutOfRangeAmountIsRefused(unittest.TestCase):
         self.assertIn("20000", message.replace(",", ""))
 
 
+class ADuplicatePurchaseIsRefused(unittest.TestCase):
+    """Two entries for the SAME buyer and year are ambiguous, and the fold
+    resolves them by taking the LAST declared amount -- so the earlier figure
+    would silently vanish (DP#32: a dropped value must fail loudly)."""
+
+    def test_two_entries_for_one_buyer_and_year_are_refused(self):
+        doc = _doc()
+        doc["first_home_purchases"] = [
+            {"buyer": "p1", "year": 2028, "hbp_amount": 10_000.0},
+            {"buyer": "p1", "year": 2028, "hbp_amount": 50_000.0},
+        ]
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _map(doc)
+        message = str(ctx.exception)
+        self.assertIn("TWO entries", message)
+        self.assertIn("2028", message)
+
+    def test_the_same_buyer_in_different_years_is_fine(self):
+        """The check is (buyer, year) -- buying again later is a different
+        purchase, not a duplicate entry."""
+        doc = _doc()
+        doc["first_home_purchases"] = [
+            {"buyer": "p1", "year": 2028, "hbp_amount": 10_000.0},
+            {"buyer": "p1", "year": 2035, "hbp_amount": 20_000.0},
+        ]
+        cfg = _map(doc)
+        self.assertEqual(len(cfg["family"]["first_home_purchases"]), 2)
+
+
 class ImpossibleAmountsAreRefusedAtTheBoundary(unittest.TestCase):
     """Review findings on #397: a refusal raised inside the per-year fold can be
     SWALLOWED -- the optimizer wraps strategy evaluation in
@@ -196,10 +225,17 @@ class ImpossibleAmountsAreRefusedAtTheBoundary(unittest.TestCase):
         """... and the observable consequence, so the test above cannot pass while
         the fold quietly substituted the maximum."""
         config = SimulationConfig.from_dict(_map(_declare(_doc())))
-        index = 2028 - config.start_year          # purchase year - projection start
-        zero = _run(_declare(_doc(), hbp_amount=0.0))[index].primary_rrsp
-        default = _run(_declare(_doc()))[index].primary_rrsp
-        self.assertGreater(zero, default,
+        # YearResult.year is the 1-indexed OFFSET from the projection start, so
+        # the purchase year (2028) sits at offset 3 when start_year is 2026 --
+        # i.e. index 3 - 1. Reading index (2028 - start_year) == 2 is the year
+        # AFTER the purchase; the comparison still held there, which is exactly
+        # why a test can pass while measuring the wrong year.
+        offset = 2028 - config.start_year + 1
+        zero_row = _run(_declare(_doc(), hbp_amount=0.0))[offset - 1]
+        default_row = _run(_declare(_doc()))[offset - 1]
+        self.assertEqual(zero_row.year, offset,
+                         "the row read must BE the purchase year")
+        self.assertGreater(zero_row.primary_rrsp, default_row.primary_rrsp,
                            "hbp_amount: 0 was replaced by the min(RRSP, $60k) default")
 
 
