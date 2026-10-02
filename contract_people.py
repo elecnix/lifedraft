@@ -178,6 +178,41 @@ def _refuse_multiple_partners(person: Dict) -> None:
         )
 
 
+def _as_date(value, person_id: str, rel: Dict) -> _date:
+    """Parse a declared date for COMPARISON, refusing an unusable one.
+
+    The union checks used to compare `str(value)[:10]` TEXTUALLY. `$defs.date`
+    is `{"type": "string", "format": "date"}` with no `pattern`, and `format` is
+    not enforced by the validator, so `2026-7-1` is ACCEPTED input -- and
+    lexicographically `"2026-7-1" > "2026-12-01"`. Two consequences, one loud
+    and one silent:
+
+    - an unpadded `from` SPURIOUSLY refuses a valid union;
+    - an unpadded `to` MISSES the refusal, so a union that ended before the
+      snapshot is modelled as an ongoing couple and granted spousal income
+      splitting, a spousal RRSP, couple GIS tables and a survivor estate.
+
+    Measured against `_find_primary_and_spouse` with `as_of = 2026-01-05`:
+
+        to=2026-01-01  padded   -> REFUSED   (correct)
+        to=2026-1-1    unpadded -> LOADED    (wrong)
+
+    Parsing also refuses an impossible date such as `2026-02-30`, which the
+    schema accepts and which would otherwise compare as text (DP#32: refused,
+    never coerced).
+    """
+    try:
+        return _date.fromisoformat(str(value)[:10])
+    except ValueError as exc:
+        raise ContractAdaptationError(
+            f"person {person_id!r} declares a spouse_of union with "
+            f"{rel.get('person')!r} carrying the date {value!r}, which is not a "
+            f"usable date ({exc}). A union's start and end decide whether this "
+            f"household is a couple at as_of, so an unreadable date cannot be "
+            f"compared (issue #360; DP#32 -- refused, not coerced)."
+        ) from exc
+
+
 def _refuse_dated_union(doc: Dict, person_id: str, rel: Dict) -> None:
     """Refuse the ``spouse_of`` edge the couple is FORMED from when its union is
     not ongoing at ``as_of``.
@@ -198,9 +233,10 @@ def _refuse_dated_union(doc: Dict, person_id: str, rel: Dict) -> None:
     no fact is being silently dropped on this run.
     """
     as_of = doc["as_of"]
+    snapshot = _as_date(as_of, person_id, rel)
     start = rel.get("from")
     end = rel.get("to")
-    if start is not None and str(start)[:10] > str(as_of)[:10]:
+    if start is not None and _as_date(start, person_id, rel) > snapshot:
         raise ContractAdaptationError(
             f"person {person_id!r} declares a spouse_of union with "
             f"{rel['person']!r} starting {start!r}, which is AFTER the "
@@ -213,7 +249,7 @@ def _refuse_dated_union(doc: Dict, person_id: str, rel: Dict) -> None:
             f"ongoing, or wait for the dated couple status work in #360 "
             f"scope two."
         )
-    if end is not None and str(end)[:10] <= str(as_of)[:10]:
+    if end is not None and _as_date(end, person_id, rel) <= snapshot:
         raise ContractAdaptationError(
             f"person {person_id!r} declares a spouse_of union with "
             f"{rel['person']!r} ending {end!r}, which is on or before the "

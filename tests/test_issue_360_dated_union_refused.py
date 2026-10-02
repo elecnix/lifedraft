@@ -497,5 +497,82 @@ class ADuplicatedEdgeIsOnePartner(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("(p2, p3)", message)
         self.assertNotIn("(p2, p2)", message)
+
+
+class ADateThatIsNotAUsableDateIsRefused(unittest.TestCase):
+    """Cite's question at contract_people.py:203, and the silent half was real.
+
+    The union checks compared `str(value)[:10]` TEXTUALLY. `$defs.date` is
+    `{"type": "string", "format": "date"}` with no `pattern`, and `format` is not
+    enforced, so "2026-7-1" is ACCEPTED input -- and "2026-7-1" > "2026-12-01"
+    as text. The dangerous half was the `to` comparison: a union that ended
+    before the snapshot was MODELLED AS ONGOING, granted spousal income
+    splitting, a spousal RRSP, couple GIS tables and a survivor estate.
+
+    These now refuse loudly, which is the DP#32 answer: a date that cannot be
+    read cannot decide whether this household is a couple today.
+    """
+
+    def _union(self, as_of, frm=None, to=None):
+        doc = copy.deepcopy(_couple_doc())
+        doc["as_of"] = as_of
+        for _person, rel in _spouse_edges(doc):
+            if frm is None:
+                rel.pop("from", None)
+            else:
+                rel["from"] = frm
+            if to is None:
+                rel.pop("to", None)
+            else:
+                rel["to"] = to
+        return doc
+
+    def test_a_padded_end_before_as_of_is_refused(self):
+        """The control: this has always been refused, and must stay so."""
+        with self.assertRaises(ContractAdaptationError):
+            _find_primary_and_spouse(
+                self._union("2026-01-05", to="2026-01-01"))
+
+    def test_an_unpadded_end_before_as_of_is_refused_too(self):
+        """The silent failure: this used to LOAD."""
+        with self.assertRaises(ContractAdaptationError):
+            _find_primary_and_spouse(
+                self._union("2026-01-05", to="2026-1-1"))
+
+    def test_an_unpadded_end_exactly_on_as_of_is_refused(self):
+        """The documented convention must not depend on zero-padding."""
+        with self.assertRaises(ContractAdaptationError):
+            _find_primary_and_spouse(
+                self._union("2026-01-05", to="2026-1-5"))
+
+    def test_an_unpadded_start_is_refused_as_unreadable_not_as_future(self):
+        """The loud-and-wrong direction.
+
+        This used to be refused with the message "starting 2026-7-1, which is
+        AFTER the document's as_of 2026-12-01" -- which is simply false; July
+        precedes December. It is still refused, because "2026-7-1" is not an
+        RFC 3339 full-date, but now for the true reason: the date cannot be
+        read. A refusal that states a falsehood is worse than no refusal,
+        because the household looks it up, finds the claim wrong, and stops
+        trusting the rest."""
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _find_primary_and_spouse(self._union("2026-12-01", frm="2026-7-1"))
+        message = str(ctx.exception)
+        self.assertIn("not a usable date", message)
+        self.assertNotIn("AFTER", message)
+
+    def test_an_impossible_date_is_refused(self):
+        """`2026-02-30` satisfies the schema too, and must not compare as text."""
+        with self.assertRaises(ContractAdaptationError):
+            _find_primary_and_spouse(
+                self._union("2026-01-05", to="2026-02-30"))
+
+    def test_the_refusal_says_the_date_is_unusable(self):
+        """A refusal must not claim the union starts AFTER as_of when the real
+        problem is that the date cannot be read."""
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            _find_primary_and_spouse(
+                self._union("2026-12-01", frm="2026-7-1"))
+        self.assertIn("not a", str(ctx.exception))
 if __name__ == "__main__":
     unittest.main()
