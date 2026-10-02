@@ -405,3 +405,187 @@ def build_earnings_for_estimate(
         EarningsEntry(year=y, employment_income=amt)
         for y, amt in sorted(by_year.items())
     ]
+
+
+# ── Plan resolution + one-call person estimate (issue #364 refactor) ────────
+#
+# The contract adapter (``contract_people.py``) used to OWN the CPP policy:
+# which plan a province runs, how the age-65 base and the CPP2 tier aggregate
+# into one monthly figure, what the provenance vocabulary is, and where the
+# contributory period ends when a household models an early retirement. All
+# four are program facts, so they live HERE (DP#10) and the adapter makes a
+# single call that it maps.
+
+#: Claim age the estimate is stored at. Issue #388: the adapter stores the
+#: age-65 figure and the engine applies any start-age adjustment once, from
+#: ``cpp_start_age``.
+DEFAULT_CLAIM_AGE = 65
+
+#: Provinces whose contributory plan is the Quebec Pension Plan rather than
+#: the federal CPP. Keyed on the contract's ``residency.province`` value,
+#: case-insensitively. Adding a province is a data edit here, not a code
+#: change in the ingestion layer.
+QPP_PROVINCES = frozenset({"quebec"})
+
+#: Provenance labels the estimator assigns. ``statement`` is NOT one of them:
+#: it is written by the adapter when a Service Canada / Retraite Québec
+#: Statement supplied the amount, and the estimator never sees one.
+SOURCE_FROM_EARNINGS_HISTORY = "estimated_from_earnings_history"
+SOURCE_FROM_INCOMES = "estimated_from_incomes"
+
+
+@dataclass(frozen=True)
+class CPPEstimateRefusal:
+    """One reason the estimator cannot answer for a person.
+
+    Carried as DATA rather than raised: the caller owns the exception type its
+    layer speaks in (``ContractAdaptationError`` in the ingestion layer). What
+    it must not do is decide *whether* the answer exists — that is this
+    module's call (DP#32: absence fails loudly, and the loudness is the
+    domain's to declare).
+    """
+
+    reason: str
+    #: The absent input, in this module's vocabulary. A caller that reads a
+    #: different document names where its own document DECLARES that input;
+    #: it does not re-derive the reason.
+    missing: str
+    #: Why the answer is impossible — the part that must survive into the
+    #: caller's exception (DP#32: a refusal is a feature, and a paraphrase
+    #: of one is not).
+    detail: str
+
+
+@dataclass(frozen=True)
+class CPPPersonEstimate:
+    """The estimator's whole answer for one person.
+
+    ``refusals`` non-empty means ``monthly`` and ``source`` are NOT answers —
+    the caller must raise rather than map a plausible number.
+    """
+
+    plan: str
+    monthly: float
+    source: str
+    earnings: List[EarningsEntry]
+    refusals: List[CPPEstimateRefusal]
+
+
+def _refusal(reason: str, missing: str, detail: str) -> CPPPersonEstimate:
+    """A refusal-shaped result. ``plan`` is empty: no plan was determined."""
+    return CPPPersonEstimate(
+        plan="", monthly=0.0, source="", earnings=[],
+        refusals=[CPPEstimateRefusal(
+            reason=reason, missing=missing, detail=detail,
+        )],
+    )
+
+
+def resolve_plan(province: str) -> str:
+    """Which contributory plan a province runs: ``"qpp"`` or ``"cpp"``."""
+    return "qpp" if str(province).strip().lower() in QPP_PROVINCES else "cpp"
+
+
+def contributory_end_age(earliest_retirement_age: Optional[int] = None) -> int:
+    """Age the contributory series stops at.
+
+    Age 65 in general; earlier when the household models a retirement before
+    it. ``None`` means "no modeled retirement for this person", which is an
+    ABSENCE of a constraint, not a constraint of 65 spelled differently —
+    both branches agree, so the two are stated once here.
+    """
+    if earliest_retirement_age is None:
+        return DEFAULT_CLAIM_AGE
+    return min(DEFAULT_CLAIM_AGE, int(earliest_retirement_age))
+
+
+def estimate_person_cpp(
+    *,
+    province: Optional[str],
+    birth_year: Optional[int],
+    earnings_history: Optional[Sequence[Mapping]] = None,
+    incomes: Optional[Sequence[Mapping]] = None,
+    salary_growth: float = 0.0,
+    as_of_year: int,
+    as_of_date: Optional[str] = None,
+    earliest_retirement_age: Optional[int] = None,
+) -> CPPPersonEstimate:
+    """Answer "what is this person's monthly contributory benefit at 65?".
+
+    The one call the ingestion layer makes (DP#10). It owns, in order:
+    the plan the province runs, the end of the contributory period, the
+    earnings series, the base+CPP2 aggregation, and the provenance label.
+
+    Refuses — loudly, with a reason — on two absences the caller cannot
+    paper over: no real birth year to date the series against (DP#1) and no
+    province to select a plan from. An empty earnings series is NOT a
+    refusal: it is an answer of zero with a stated provenance, because the
+    caller already decided the person has a pensionable source.
+    """
+    if birth_year is None:
+        return _refusal(
+            "missing_birth_year",
+            "birth_year",
+            "the estimator needs a real birth year to date the member; "
+            "refusing rather than inventing a fabricated birth year",
+        )
+    if province is None or not str(province).strip():
+        return _refusal(
+            "missing_province",
+            "province",
+            "Quebec residency selects QPP max-benefit tables; refusing "
+            "rather than guessing a plan",
+        )
+
+    plan = resolve_plan(province)
+    entries = build_earnings_for_estimate(
+        earnings_history=earnings_history,
+        incomes=incomes,
+        salary_growth=salary_growth,
+        as_of_year=as_of_year,
+        birth_year=birth_year,
+        end_age=contributory_end_age(earliest_retirement_age),
+        as_of_date=as_of_date,
+    )
+    if not entries:
+        # No series to estimate from: the honest answer is zero, and the
+        # provenance still travels so "estimated zero" stays
+        # distinguishable from "never estimated" (issue #390). Not a refusal
+        # -- the caller already established the person has a pensionable
+        # source; there is simply nothing projectable to build a series from.
+        return CPPPersonEstimate(
+            plan=plan,
+            monthly=0.0,
+            source=(SOURCE_FROM_EARNINGS_HISTORY if earnings_history
+                    else SOURCE_FROM_INCOMES),
+            earnings=[],
+            refusals=[],
+        )
+
+    # Age-65 convention (issue #388): always request the age-65 figure and
+    # let the engine apply the start-age adjustment once, from
+    # ``cpp_start_age``. The CPP2 tier is a SEPARATE component and is summed,
+    # never discarded.
+    estimate = compute_benefit_estimate(entries, start_age=DEFAULT_CLAIM_AGE,
+                                        plan=plan)
+    return CPPPersonEstimate(
+        plan=plan,
+        monthly=age_65_monthly_total(estimate),
+        source=(SOURCE_FROM_EARNINGS_HISTORY if earnings_history
+                else SOURCE_FROM_INCOMES),
+        earnings=entries,
+        refusals=[],
+    )
+
+
+def age_65_monthly_total(estimate: CPPBenefitEstimate) -> float:
+    """The ONE aggregation rule: base tier at 65 plus the CPP2 tier at 65.
+
+    CPP2 is a SEPARATE component with its own ceiling, so summing the two
+    age-65 fields is the whole definition of "this person's monthly
+    contributory benefit at 65". It lived inline in two call sites
+    (``contract_people.py`` and ``countries/canada/retirement.py``), which is
+    how the two drifted apart. Stated once, here, in the module that owns
+    the tiers (DP#10).
+    """
+    return estimate.age_65_monthly + estimate.cpp2_age_65_monthly
