@@ -330,5 +330,66 @@ class TheAmountReachesTheTrajectory(unittest.TestCase):
         self.assertGreater(small, large)
 
 
+class ANonNumericAmountIsRefusedAtIngestion(unittest.TestCase):
+    """Cite's finding, and it was real.
+
+    `_apply_first_home_to_account` already refused a non-numeric amount, and
+    `test_a_non_numeric_amount_is_refused_at_the_step` pins that. But the
+    INGESTION mapper is a different function, and `math.isfinite` there raised a
+    bare TypeError on a string, a null, a list or an object -- so the household
+    got a traceback instead of a sentence.
+    """
+
+    def _ingest(self, value):
+        # imported here, not at module scope: this mapper is not part of the
+        # module's existing public surface and a sibling test imports its
+        # symbols the same way
+        from contract_transfers import _map_first_home_purchases
+        doc = copy.deepcopy(_doc())
+        doc["first_home_purchases"] = [
+            {"buyer": "p1", "year": 2026, "hbp_amount": value}
+        ]
+        adults = {p["id"] for p in doc["people"]}
+        return _map_first_home_purchases(doc, set(), adults)
+
+    def test_a_numeric_amount_still_ingests(self):
+        """The control: refusing must not break the ordinary declared amount."""
+        self.assertIsInstance(self._ingest(30000.0), list)
+
+    def test_a_declared_zero_still_ingests(self):
+        """Zero is a value, not an absence -- it must survive (DP#32)."""
+        self.assertIsInstance(self._ingest(0), list)
+
+    def test_a_string_amount_is_refused(self):
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            self._ingest("abc")
+        self.assertIn("abc", str(ctx.exception))
+
+    def test_a_null_amount_is_refused(self):
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            self._ingest(None)
+        self.assertIn("None", str(ctx.exception))
+
+    def test_a_list_amount_is_refused(self):
+        with self.assertRaises(ContractAdaptationError):
+            self._ingest([])
+
+    def test_an_object_amount_is_refused(self):
+        with self.assertRaises(ContractAdaptationError):
+            self._ingest({"amount": 1})
+
+    def test_a_boolean_amount_is_refused(self):
+        """bool IS an int in Python, so `true` would become a withdrawal of
+        exactly $1.00 -- the quietest way to print a wrong number."""
+        for value in (True, False):
+            with self.assertRaises(ContractAdaptationError):
+                self._ingest(value)
+
+    def test_the_refusal_names_the_buyer_and_year(self):
+        with self.assertRaises(ContractAdaptationError) as ctx:
+            self._ingest("abc")
+        message = str(ctx.exception)
+        self.assertIn("p1", message)
+        self.assertIn("2026", message)
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

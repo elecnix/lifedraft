@@ -315,6 +315,27 @@ def _map_first_home_purchases(doc: Dict, child_ids: set,
             # propagates into the down payment and every downstream total
             # (DP#32: refused, never coerced). `inf` would instead drive the
             # growth clamp to a zeroed pot.
+            # Issue #359 (review finding): `math.isfinite` raises a bare
+            # TypeError on anything that is not a real number, so a string, a
+            # null, a list or an object would escape the mapper as a traceback
+            # instead of the refusal every neighbouring guard produces. Refused
+            # here, NOT coerced: the mapped entry carries `cf["amount"]`
+            # downstream, so quietly turning "5000" into 5000.0 would let a
+            # string travel on while the guards above reasoned about a number.
+            #
+            # `bool` is refused explicitly because it IS an int in Python:
+            # without this, `true` would become a withdrawal of exactly $1.00,
+            # which is the quietest possible way to print a wrong number.
+            if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+                raise ContractAdaptationError(
+                    f"first_home_purchases declares hbp_amount={amount!r} for "
+                    f"buyer={buyer!r} in {year}. An HBP withdrawal is a NUMBER of "
+                    f"dollars and {type(amount).__name__} is not one: "
+                    f"{amount!r} would raise a TypeError inside the guard meant "
+                    f"to refuse it, so the run would die on a traceback instead "
+                    f"of telling the household what to fix. Declare the amount as "
+                    f"a number (issue #359; DP#32 -- refused, not coerced)."
+                )
             if not math.isfinite(amount):
                 raise ContractAdaptationError(
                     f"first_home_purchases declares hbp_amount={amount!r} for "
