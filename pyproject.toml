@@ -84,7 +84,7 @@ py-modules = [
     "contract_people", "contract_principal", "contract_property",
     "contract_schema", "contract_transaction_costs", "contract_transfers",
     "deployment_lag", "deployment_schedule",
-    "decumulation", "dp_optimizer", "input_contract", "jurisdiction",
+    "decumulation", "dp_optimizer", "income_window", "input_contract", "jurisdiction",
     "jurisdiction_providers", "liquidation_waterfall", "loop",
     "make_retirement_input", "member_config", "model_fidelity", "module_registry",
     "money", "monte_carlo_optimizer", "net_benefit_legs", "next_action",
