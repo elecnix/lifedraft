@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import input_contract
 from contract_errors import ContractAdaptationError
+from simulation_state import apply_child_first_home_purchases
 from countries.canada.fhsa import FHSAAccount
 from countries.canada.hbp_rules import is_first_time_home_buyer
 
@@ -92,6 +93,70 @@ class ADeclaredSpanIsExpandedNotTrusted(unittest.TestCase):
         # waved through by an empty year list.
         with self.assertRaises(ContractAdaptationError):
             input_contract.to_internal_config(copy.deepcopy(doc))
+
+
+class TheGateAppliesToWhicheverMemberBuys(unittest.TestCase):
+    """The eligibility test is about the BUYER, so it must reach a CHILD buyer
+    as well as an adult -- the first-home instruments are the same two for
+    either, and the mapper gates every entry, not just adult ones."""
+
+    @staticmethod
+    def _doc_with_buyer(buyer: str, years):
+        with open(_EXAMPLE) as fh:
+            doc = json.load(fh)
+        person = next(p for p in doc["people"] if p["id"] == buyer)
+        person["owned_principal_residence_history"] = [
+            {"from": "2024-01-01", "to": "2026-06-30"},
+        ]
+        doc["first_home_purchases"] = [{"buyer": buyer, "year": 2028}]
+        return doc
+
+    def test_a_child_buyer_inside_the_lookback_is_refused(self):
+        with self.assertRaises(ContractAdaptationError):
+            input_contract.to_internal_config(self._doc_with_buyer("ca", None))
+
+    def test_an_adult_buyer_inside_the_lookback_is_refused(self):
+        with self.assertRaises(ContractAdaptationError):
+            input_contract.to_internal_config(self._doc_with_buyer("p1", None))
+
+    def test_history_OUTSIDE_the_lookback_still_loads(self):
+        """The complement, and the case my first probe got wrong: 2020-2023 is
+        outside a 2028 purchase's 2024-2028 window, so that household IS a
+        first-time buyer and must load. A test that only ever checks the refusal
+        would pass while the gate rejected everyone."""
+        with open(_EXAMPLE) as fh:
+            doc = json.load(fh)
+        person = next(p for p in doc["people"] if p["id"] == "ca")
+        person["owned_principal_residence_history"] = [
+            {"from": "2020-01-01", "to": "2023-12-31"},
+        ]
+        doc["first_home_purchases"] = [{"buyer": "ca", "year": 2028}]
+        cfg = input_contract.to_internal_config(doc)
+        self.assertEqual(cfg["family"]["first_home_purchases"][0]["buyer"], "ca")
+
+
+class ANoneYearListIsAbsenceNotACrash(unittest.TestCase):
+    """``prior_residence_years`` is only WRITTEN when non-empty, so its absence
+    is "nothing declared" and must stay a no-op. A hand-built internal config can
+    carry an explicit ``None`` there, and ``tuple(None)`` raised a bare TypeError
+    out of the fold -- a crash rather than the absence it is."""
+
+    @staticmethod
+    def _accounts():
+        return [{"fhsa_balance": 0.0, "fhsa_lifetime_remaining": 0.0,
+                 "rrsp_balance": 0.0, "non_reg_balance": 0.0, "non_reg_acb": 0.0}]
+
+    def test_an_explicit_none_does_not_crash_the_child_fold(self):
+        out = apply_child_first_home_purchases(
+            self._accounts(), [{"id": "ca"}],
+            [{"buyer": "ca", "year": 2028, "prior_residence_years": None}], 2028)
+        self.assertEqual(out[0]["rrsp_balance"], 0.0)
+
+    def test_a_declared_list_is_still_used(self):
+        out = apply_child_first_home_purchases(
+            self._accounts(), [{"id": "ca"}],
+            [{"buyer": "ca", "year": 2028, "prior_residence_years": [2024]}], 2028)
+        self.assertEqual(out[0]["rrsp_balance"], 0.0)   # no crash, no purchase funding
 
 
 class TheEligibilityArithmetic(unittest.TestCase):

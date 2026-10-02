@@ -457,7 +457,7 @@ def apply_child_first_home_purchases(accounts: list, children: list,
                         if int(p['year']) == calendar_year}
     # Issue #357: the buyer's DECLARED owned-residence years (child fold's own
     # copy; absent unless declared).
-    hbp_years_by_buyer = {p['buyer']: tuple(p['prior_residence_years'])
+    hbp_years_by_buyer = {p['buyer']: _declared_years(p)
                           for p in first_home_purchases
                           if int(p['year']) == calendar_year
                           and 'prior_residence_years' in p}
@@ -474,6 +474,21 @@ def apply_child_first_home_purchases(accounts: list, children: list,
             calendar_year, hbp_amount_by_buyer.get(child_id),
             hbp_years_by_buyer.get(child_id, ())))
     return out
+
+
+def _declared_years(purchase: dict) -> tuple:
+    """The buyer's declared owned-residence years for one purchase entry.
+
+    DP#32, explicitly: ``prior_residence_years`` is only present when the mapper
+    wrote a NON-EMPTY list, so its absence is "nothing declared" and must stay a
+    no-op. A hand-built internal config can carry an explicit ``None`` there (the
+    contract path cannot), and ``tuple(None)`` raised a bare TypeError out of the
+    fold -- a crash rather than the absence it actually is. Presence is tested
+    explicitly, never with ``or ()``, which would also swallow a declared EMPTY
+    list (issue #357 review finding).
+    """
+    years = purchase.get('prior_residence_years')
+    return () if years is None else tuple(years)
 
 
 def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
@@ -643,7 +658,7 @@ def apply_adult_first_home_purchases(prior_adult_hbp: dict,
     # Issue #357: the buyer's DECLARED owned-residence years, absent unless
     # declared (the mapper refuses an ineligible purchase, so a year list here
     # corroborates eligibility and feeds the FHSA rule).
-    hbp_years_by_buyer = {p['buyer']: tuple(p['prior_residence_years'])
+    hbp_years_by_buyer = {p['buyer']: _declared_years(p)
                           for p in first_home_purchases
                           if int(p['year']) == calendar_year
                           and p['buyer'] in slot_of
