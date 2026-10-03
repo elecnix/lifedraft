@@ -36,6 +36,12 @@ progress.md
 # (It carries no personal data: file paths and integer line counts only -- DP#15.)
 !tools/coverage_baseline.json
 !tools/perf_baseline.json
+# The unwired-public-symbol ratchet baseline (#417) is the same kind of thing:
+# the guard's only record of the CURRENT known-dead set, and the thing it
+# compares against. Untracked, it would be absent on a fresh CI checkout and
+# every test in test_unreached_public_symbols.py would die on FileNotFoundError
+# rather than on the thing it exists to catch. Carries symbol names only (DP#15).
+!tests/architecture/unreached_surface_baseline.json
 !package.json
 !.pi/chains/*.chain.json
 !requirements.txt

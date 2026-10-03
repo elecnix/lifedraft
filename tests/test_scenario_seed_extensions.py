@@ -23,9 +23,10 @@ LifeEvent/apply_life_events half) coverage that used to live here is gone,
 along with the countries/canada/rental.py module and the SimulationConfig
 *_data fields that fed it -- none had a production caller (#593's
 DEAD_ALLOWLIST); a feature that never ran is not a feature. §1.1/§1.5/§1.6's
-debt_swap_analysis/cash_dam_analysis and §6.1's MemberRetirementData.
-employer_match are unaffected -- both live in countries/canada/debt.py and
-countries/canada/retirement.py respectively, not rental.py.
+debt_swap_analysis/cash_dam_analysis. The same fate, later, met
+MemberRetirementData (#417): the employer_match leaf whose only would-be
+consumer was that class is now cited in test_schema_coverage as
+unwired-and-removed.
 """
 
 import pytest
@@ -43,10 +44,10 @@ from return_model import (
     build_return_model, build_return_model_from_config,
 )
 from countries.canada.retirement import (
-    MemberRetirementData, RetirementState, DrawdownOptimizer,
     oas_clawback, cpp_benefit, rrif_minimum_withdrawal,
-    pension_splitting_available, OAS_ANNUAL_MAX,
+    pension_splitting_available, oas_amount_for_age, RetirementState,
 )
+from countries.canada.retirement_transition import is_retired, member_age
 from countries.canada.income_type import IncomeType, effective_tax_rate, wht_drag
 from countries.canada.debt import (
     DebtInstrument, DebtPurpose, HELOCTracing, debt_swap_analysis,
@@ -88,17 +89,6 @@ class TestSchemaRoundTrip:
         assert exported['accounts']['non_reg']['balance'] == 200000
         assert exported['accounts']['non_reg']['cost_basis'] == 150000
 
-    def test_member_retirement_round_trip(self):
-        """Member retirement data from_dict → to_dict round-trip."""
-        data = {
-            'role': 'primary', 'birth_year': 1979,
-            'cpp_start_age': 65, 'cpp_monthly_estimated': 1250,
-            'employer_rrsp_match_pct': 0.03, 'employer_rrsp_match_max': 3900,
-        }
-        member = MemberRetirementData.from_dict(data)
-        exported = member.to_dict()
-        assert exported['cpp_monthly_estimated'] == 1250
-        assert exported['employer_rrsp_match_max'] == 3900
 
 
 # =============================================================================
@@ -109,16 +99,10 @@ class TestDesignPrinciples:
     """Verify adherence to DESIGN_PRINCIPLES.md."""
 
     def test_dp1_store_dates_not_derived(self):
-        """DP#1: Store birth_year, not age."""
-        member = MemberRetirementData(birth_year=1979)
-        assert member.birth_year == 1979
-        # Age computed from date, not stored
-        assert member.age_in(2026) == 47
-
-    def test_dp4_role_based_names(self):
-        """DP#4: Use 'primary'/'spouse', not person names."""
-        member = MemberRetirementData(birth_year=1985, role="primary")
-        assert member.role == "primary"
+        """DP#1: a member carries birth_year; every age is derived from it."""
+        birth_year = 1979
+        assert member_age(birth_year, 2044) == 65
+        assert member_age(birth_year, 2043) == 64
 
     def test_dp8_compose_through_data(self):
         """DP#8: Strategies and models are data objects, not subclasses."""
@@ -157,11 +141,9 @@ class TestDesignPrinciples:
         assert roc_rate == 0
 
     def test_dp28_eligibility_date_computed(self):
-        """DP#28: Eligibility computed from dates, not stored booleans."""
-        member = MemberRetirementData(birth_year=1960)
-        # CPP eligibility computed from birth_year
-        assert member.is_cpp_eligible(2025) == True
-        assert member.is_cpp_eligible(2024) == False
+        """DP#28: eligibility is date-computed, not a stored boolean."""
+        assert is_retired(1960, 65, 2025) is True
+        assert is_retired(1960, 65, 2024) is False
 
     def test_dp30_simulator_models_consequences_not_decisions(self):
         """DP#30: Asset location recommendations model consequences."""
@@ -363,9 +345,8 @@ class TestScenario5x12xRetirement:
 
     def test_scenario_123_oas_deferral_benefit(self):
         """§12.3: Defer OAS to 70 → 36% higher payment."""
-        oas_at_65 = OAS_ANNUAL_MAX
-        member = MemberRetirementData(birth_year=1960, oas_defer_months=60)
-        oas_at_70 = member.oas_annual
+        oas_at_65 = oas_amount_for_age(65, year=2026)
+        oas_at_70 = oas_amount_for_age(65, year=2026, defer_months=60)
         increase = (oas_at_70 - oas_at_65) / oas_at_65
         assert increase == pytest.approx(0.36, abs=0.01)
 
@@ -377,17 +358,6 @@ class TestScenario5x12xRetirement:
 class TestScenario6xLifeEvents:
     """Integration tests for life event scenarios."""
 
-    def test_scenario_61_full_family_optimization(self):
-        """§6.1: Full family with employer match."""
-        # Primary at $130K, spouse at $50K
-        # Employer RRSP match: 3% on $130K = $3,900
-        primary = MemberRetirementData(
-            birth_year=1985,
-            employer_rrsp_match_pct=0.03,
-            employer_rrsp_match_max=3900,
-        )
-        match = primary.employer_match(130000)
-        assert match == 3900
 
     def test_scenario_62_new_job_raise(self):
         """§6.2: New job at $170K → higher MTR → RRSP more valuable."""

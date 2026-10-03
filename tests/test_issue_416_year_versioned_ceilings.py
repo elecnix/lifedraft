@@ -276,13 +276,21 @@ class TestPreCPP2YearHasNoSecondBand(unittest.TestCase):
             )
 
     def test_cpp2_benefit_is_zero_for_a_year_before_cpp2_existed(self):
-        """The public function must not pay CPP2 for a pre-CPP2 year."""
+        """The live path must not pay CPP2 for a pre-CPP2 year.
+
+        Issue #417 removed the unwired ``retirement.cpp2_benefit`` that this
+        assertion used to call, so the claim is now made against the path a
+        household actually reaches: the estimator, for earnings capped in a
+        year before CPP2 existed.
+        """
+        from countries.canada.cpp_estimator import EarningsEntry, compute_benefit_estimate
+
         self.assertLess(2023, cpp_data.CPP2_START_YEAR)
+        estimate = compute_benefit_estimate(
+            [EarningsEntry(year=2023, employment_income=80_000)], start_age=65,
+        )
         self.assertEqual(
-            retirement.cpp2_benefit(
-                19_000, years_contributing=40, start_age=65, year=2023,
-            ),
-            0.0,
+            estimate.cpp2_age_65_monthly, 0.0,
             "2023 pays a CPP2 benefit for a program that did not exist",
         )
 

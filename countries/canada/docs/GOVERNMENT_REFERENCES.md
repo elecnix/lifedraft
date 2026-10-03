@@ -143,7 +143,7 @@ RRSP dollar limits, TFSA limits, YMPE, YAMPE (updated annually by CRA):
 - **Second additional CPP (CPP2) rates and maximums**: https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/calculating-deductions/making-deductions/second-additional-cpp-contribution-rates-maximums.html
 - **CPP enhancement overview**: https://www.canada.ca/en/services/benefits/publicpensions/cpp/cpp-enhancement.html
 - **Key data**: YMPE2 (YAMPE) $81,900 for 2026, $81,200 for 2025; CPP2 rate 4% employee/employer, 8% self-employed
-- **Used by**: cpp_sharing.py (compute_cpp2_contribution, compute_cpp2_benefit), tax_data.py (cpp_rate, YMPE), retirement.py (CPP_OAS_BY_YEAR)
+- **Used by**: cpp_sharing.py (compute_cpp2_contribution), tax_data.py (cpp_rate, YMPE), retirement.py (CPP_OAS_BY_YEAR). The benefit side is priced on the live path by cpp_estimator.compute_benefit_estimate against CPP_OAS_BY_YEAR[year]['cpp2_max_benefit'] (#417).
 
 ## CPP/QPP Contribution Rates and Basic Exemption
 - **CRA CPP contribution rates**: https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/cpp-contributions.html

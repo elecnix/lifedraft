@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Issue #389: wire earnings_history / CPP estimator onto the contract path.
 
-`compute_benefit_estimate` and `MemberRetirementData.from_dict(...,
-earnings_history=...)` existed and were tested, but the JSON contract →
+`compute_benefit_estimate` existed and was tested, but the JSON contract →
 optimize path never mapped `earnings_history` (field absent from the Canada
 input schema) and never called the estimator. Omitting `entitlements.cpp`
 therefore silently yielded cpp_income=0 for the whole horizon even when a
@@ -29,7 +28,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import input_contract as ic
 from simulation_config import SimulationConfig
 from countries.canada.retirement_transition import member_retirement_income
-from countries.canada.retirement import MemberRetirementData
 from contract_errors import ContractAdaptationError
 from test_input_contract import _load_example, _two_generation_subset
 import contract_schema
@@ -51,6 +49,23 @@ def _doc_with_history():
     p1["earnings_history"] = [
         {"year": 1990 + i, "employment_income": 100_000} for i in range(35)
     ]
+    return doc
+
+
+def _doc_with_incomes():
+    """No Statement and no declared history: the adapter estimates from the
+    dated incomes and publishes the series it used under
+    ``cpp_estimated_earnings``, so a test can re-price it without rebuilding it."""
+    doc = _two_generation_subset(_load_example())
+    p1 = next(p for p in doc["people"] if p["id"] == "p1")
+    p1.pop("entitlements", None)
+    benefits = p1.get("benefits") or {}
+    benefits.pop("cpp", None)
+    if benefits:
+        p1["benefits"] = benefits
+    else:
+        p1.pop("benefits", None)
+    p1.pop("earnings_history", None)
     return doc
 
 
@@ -91,6 +106,77 @@ class EarningsHistoryReachesEngine(unittest.TestCase):
         cfg = SimulationConfig.from_dict(legacy)
         primary = next(m for m in cfg.family_members if m["role"] == "primary")
         self.assertGreater(primary["cpp_monthly_estimated"], 0)
+
+    def test_stored_monthly_includes_the_cpp2_tier(self):
+        """#388: the stored figure is base CPP **plus** CPP2, at age 65.
+
+        Dropping the CPP2 tier is silent — the household still gets a
+        plausible benefit, just short by the enhancement. So assert the
+        stored monthly exceeds the base tier and equals their sum.
+        """
+        from countries.canada.cpp_estimator import EarningsEntry, compute_benefit_estimate
+        doc = _doc_with_incomes()
+        # p1 is a Quebec resident in the example fixture, so the adapter prices
+        # the estimate off the QPP max-benefit tables. Assert the residency
+        # rather than assume it: a fixture change must fail here, not silently
+        # re-price the test against the wrong table.
+        self.assertEqual(
+            next(p for p in doc["people"] if p["id"] == "p1")["residency"]["province"],
+            "quebec",
+        )
+        primary, _ = _primary_member(doc)
+        # The series the adapter actually estimated from — production output,
+        # not a series this test rebuilds.
+        entries = [
+            EarningsEntry(year=e["year"], employment_income=e["employment_income"])
+            for e in primary["cpp_estimated_earnings"]
+        ]
+        estimate = compute_benefit_estimate(entries, start_age=65, plan="qpp")
+        self.assertGreater(estimate.cpp2_age_65_monthly, 0)
+        self.assertGreater(
+            primary["cpp_monthly_estimated"], estimate.age_65_monthly)
+        self.assertAlmostEqual(
+            primary["cpp_monthly_estimated"],
+            estimate.age_65_monthly + estimate.cpp2_age_65_monthly,
+            places=6,
+        )
+
+    def test_stored_monthly_is_the_age_65_amount_not_the_claim_age_amount(self):
+        """#388: claim-age adjustment happens once, in ``cpp_from_estimate``.
+
+        Storing the already-penalized claim-age figure would apply the early
+        reduction a second time.
+        """
+        from countries.canada.cpp_estimator import EarningsEntry, compute_benefit_estimate
+        from countries.canada.retirement_transition import cpp_from_estimate
+        primary, _ = _primary_member(_doc_with_incomes())
+        entries = [
+            EarningsEntry(year=e["year"], employment_income=e["employment_income"])
+            for e in primary["cpp_estimated_earnings"]
+        ]
+        estimate = compute_benefit_estimate(entries, start_age=65, plan="qpp")
+        self.assertAlmostEqual(
+            primary["cpp_monthly_estimated"],
+            estimate.age_65_monthly + estimate.cpp2_age_65_monthly,
+            places=6,
+        )
+        # Exactly one 0.6%/month early reduction (60 months → ×0.64). The
+        # double-adjusted figure — what the defect looked like — is the
+        # already-penalized age-60 total reduced a second time.
+        self.assertAlmostEqual(
+            cpp_from_estimate(primary["cpp_monthly_estimated"],
+                              start_age=60, claim_age=60),
+            (estimate.age_65_monthly + estimate.cpp2_age_65_monthly) * 12 * 0.64,
+            places=2,
+        )
+        double_adjusted = (
+            estimate.age_60_monthly + estimate.cpp2_age_60_monthly
+        ) * 12 * 0.64
+        self.assertGreater(
+            abs(double_adjusted - (estimate.age_65_monthly
+                                   + estimate.cpp2_age_65_monthly) * 12 * 0.64),
+            1000,
+        )
 
 
 class StatementPrecedence(unittest.TestCase):
@@ -245,25 +331,6 @@ class AbsentHistoryIsNoOp(unittest.TestCase):
 class MissingBirthYearFailsLoudly(unittest.TestCase):
     """DP#1/DP#32 / #389 follow-up: never invent a fabricated birth year."""
 
-    def test_from_dict_without_birth_year_raises(self):
-        with self.assertRaises(ValueError) as ctx:
-            MemberRetirementData.from_dict({
-                "role": "primary",
-                "cpp_monthly_estimated": 0,
-                "earnings_history": [
-                    {"year": 2000, "employment_income": 80_000},
-                ],
-            })
-        msg = str(ctx.exception)
-        self.assertIn("birth_year is required", msg)
-        # Error must describe the requirement, not substitute a person year.
-        self.assertNotRegex(msg, r"\b19[0-9]{2}\b")
-
-    def test_from_dict_without_birth_year_does_not_invent_a_person(self):
-        """A partial dict must raise — never construct with a fabricated year."""
-        with self.assertRaises(ValueError):
-            MemberRetirementData.from_dict({"role": "primary"})
-
     def test_contract_earnings_history_without_birth_date_refuses(self):
         """_map_member with earnings_history but no birth_date must refuse
         loudly (ContractAdaptationError). map_members also refuses adults
@@ -287,6 +354,9 @@ class MissingBirthYearFailsLoudly(unittest.TestCase):
             "birth_year" in msg or "birth_date" in msg,
             msg=f"expected birth_year/birth_date in: {msg}",
         )
+        # The refusal must not hand back a plausible-looking person: a
+        # substituted birth year is the DP#32 defect this guards.
+        self.assertNotRegex(msg, r"\bbirth_year\s*=\s*\d{4}\b")
 
 
 

@@ -163,7 +163,7 @@ from countries.canada.market_rates import (  # noqa: F401
 
 # Retirement projections (OAS, CPP, RRIF)
 from countries.canada.retirement import (  # noqa: F401
-    DrawdownOrder, MemberRetirementData, RetirementState, DrawdownOptimizer,
+    DrawdownOrder, RetirementState, DrawdownOptimizer,
     oas_clawback, cpp_benefit, rrif_minimum_withdrawal, pension_splitting_available,
     project_retirement,
     PensionIncomeType,  # DP#54: income type verification for pension splitting
@@ -203,7 +203,7 @@ from countries.canada.cpp_sharing import (  # noqa: F401
     cpp_sharing_eligibility, compute_sharing_ratio, compute_shared_benefits,
     cpp_sharing_tax_benefit, optimize_cpp_sharing,
     combined_cpp_and_pension_split, project_cpp_sharing,
-    compute_cpp2_contribution, compute_cpp2_benefit, compute_survivor_benefit,
+    compute_cpp2_contribution, compute_survivor_benefit,
     CPP_EARLIEST_START_AGE, CPP_STANDARD_AGE, CPP_LATEST_START_AGE,
     CPP_BASIC_EXEMPTION,
     CPP_EARLY_PENALTY_PER_MONTH, CPP_LATE_BONUS_PER_MONTH,
