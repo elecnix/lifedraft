@@ -138,10 +138,15 @@ class TestRetirementState(unittest.TestCase):
                                 non_reg_balance=200000)
         self.assertAlmostEqual(state.total_assets, 800000)
 
-    def test_compute_cpp(self):
+    def test_compute_taxable_income_prices_cpp(self):
         state = RetirementState(cpp_start_age=65, year=2026)
-        cpp = state.compute_cpp()
-        self.assertGreater(cpp, 0)
+        self.assertGreater(state.compute_taxable_income(), 0)
+
+    def test_compute_taxable_income_refuses_unset_year(self):
+        """DP#32: an unset year must fail loudly, not price a default-year CPP."""
+        state = RetirementState(cpp_start_age=65)
+        with self.assertRaises(ValueError):
+            state.compute_taxable_income()
 
 
 class TestDrawdownOptimizer(unittest.TestCase):

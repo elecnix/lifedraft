@@ -222,7 +222,8 @@ def find_birth_year_person_specific_defaults(root: str = ROOT) -> List[Finding]:
 
     Returns raw findings; the test module's ``_ALLOWLIST`` is empty after the
     ``MemberRetirementData`` person-specific default carve-out was removed
-    (#389 / DP#32). See ``test_dp13_birth_year_defaults.py``.
+    (#389 / DP#32) and that class itself was deleted as unwired (#417).
+    See ``test_dp13_birth_year_defaults.py``.
     """
     findings: List[Finding] = []
     for relpath in iter_source_files(root):
