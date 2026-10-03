@@ -82,22 +82,68 @@ def test_get_brackets_never_hands_back_another_years_thresholds(provider):
 def test_no_object_is_ever_returned_stamped_with_another_year(provider):
     """Acceptance: a result's ``.year`` must equal the requested year.
 
-    Asserted over every jurisdiction that carries a schedule, not just
-    Quebec, so adding a table for one province cannot re-open the hole for
-    another.
+    Split into the two directions that can each fail on their own. A single
+    loop over both directions tests only one of them: below the earliest
+    schedule the call now raises, so an ``except: continue`` skips every one
+    of those iterations and leaves ``EARLIEST`` comparing to itself -- the
+    sweep passes even when a pre-2023 request is answered with someone else's
+    schedule, which is the defect this issue exists for.
+
+    * Below the earliest schedule there must be NO object at all. Asserted for
+      every jurisdiction, so this direction can never go vacuous again.
+    * From the earliest schedule onward, forward projection included, any
+      object returned must carry the year that was actually asked for.
+
+    Over every jurisdiction that carries a schedule, so adding a table for one
+    province cannot re-open the hole for another.
     """
     for province in ('federal', 'quebec', 'ontario', 'alberta'):
-        for year in range(2010, EARLIEST + 1):
+        # Direction 1: no schedule exists, so there must be no object. If the
+        # refusal is ever replaced by a nearest-year fallback, this fails --
+        # it cannot be skipped, because pytest.raises fails when nothing is
+        # raised.
+        for year in range(2010, EARLIEST):
+            with pytest.raises((UnsupportedTaxYearError, ValueError)):
+                provider.get_year_data(year, 'canada', province)
+
+        # Direction 2: a schedule exists, so any answer must be stamped with
+        # the requested year. Forward years project and must carry their own.
+        for year in range(EARLIEST, EARLIEST + 12):
             try:
                 data = provider.get_year_data(year, 'canada', province)
             except (UnsupportedTaxYearError, ValueError):
-                # A refusal of either kind is an acceptable answer. (Ontario
-                # and Alberta carry no 2023 table at all, which already
-                # raised ValueError before this issue was filed.)
+                # Ontario and Alberta carry no schedule at all, which already
+                # raised before this issue was filed. Nothing to assert here.
                 continue
             assert data.year == year, (
                 f"{province}/{year} was answered with a {data.year} schedule"
             )
+
+
+def test_the_below_earliest_sweep_actually_exercises_its_iterations(provider):
+    """Non-vacuity guard for the direction-1 sweep above.
+
+    A sweep that silently skips every iteration still passes. This pins that
+    the loop body really runs by asserting the refusal count is what the year
+    range implies, so the next person to add an ``except: continue`` here sees
+    a test fail instead of a test that no longer checks anything.
+    """
+    years = list(range(2010, EARLIEST))
+    assert len(years) == EARLIEST - 2010, "the sweep range collapsed"
+    refusals = 0
+    for province in ('federal', 'quebec'):
+        for year in years:
+            try:
+                provider.get_year_data(year, 'canada', province)
+            except (UnsupportedTaxYearError, ValueError):
+                refusals += 1
+            else:
+                pytest.fail(
+                    f"{province}/{year} returned a schedule instead of refusing"
+                )
+    assert refusals == len(years) * 2, (
+        f"expected {len(years) * 2} refusals, got {refusals}"
+    )
 
 
 def test_refusal_repeats_from_the_memoized_path(provider):
