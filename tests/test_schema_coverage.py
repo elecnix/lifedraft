@@ -250,8 +250,9 @@ DEAD_ALLOWLIST = {
         "per-person -- Phase 2c/#598 follow-up."),
     "people[].residency.since": ("#600", "same as people[].residency.province."),
     "people[].incomes[].employer_rrsp_match": ("#595", "#595E's single surviving spelling of the "
-        "employer-match fact, but MemberRetirementData.employer_match() (its only would-be consumer) "
-        "itself has zero production callers -- nothing to map into yet."),
+        "employer-match fact. Its only would-be consumer was "
+        "MemberRetirementData.employer_match(), itself unwired, removed as dead code "
+        "in #417 — nothing to map into yet."),
     "people[].incomes[].employer_rrsp_match.into_account": ("#595", "see employer_rrsp_match above."),
     "people[].incomes[].employer_rrsp_match.max": ("#595", "see employer_rrsp_match above."),
     "people[].incomes[].employer_rrsp_match.pct": ("#595", "see employer_rrsp_match above."),

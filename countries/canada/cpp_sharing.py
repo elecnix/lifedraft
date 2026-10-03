@@ -37,7 +37,7 @@ Usage:
         CPPSharingInput, cpp_sharing_eligibility,
         compute_sharing_ratio, compute_shared_benefits,
         cpp_sharing_tax_benefit, optimize_cpp_sharing,
-        compute_cpp2_contribution, compute_cpp2_benefit,
+        compute_cpp2_contribution,
         compute_survivor_benefit,
     )
 
@@ -872,92 +872,6 @@ def compute_cpp2_contribution(
         "cpp2_rate": cpp2_rate,
         "basic_exemption": basic_exemption,
         "province": province,
-        "year": year,
-    }
-
-
-def compute_cpp2_benefit(
-    cpp2_average_earnings: float,
-    start_age: int = 65,
-    year: int = 2026,
-    provider: Optional['TaxDataProvider'] = None,
-) -> Dict:
-    """Compute CPP2/QPP2 enhanced retirement benefit.
-
-    Per DP#52: CPP2 contributions generate enhanced retirement benefits
-    above the standard CPP benefit. The enhanced benefit uses the same
-    1/40 accrual rate as the CPP enhancement (2019+).
-
-    Formula:
-    - CPP2 pensionable earnings = average earnings between YMPE and YAMPE
-    - CPP2 annual benefit = (cpp2_average_earnings / YAMPE) × YAMPE × 1/40 × 12
-    - Simplified: (cpp2_average_earnings / YAMPE) × max_cpp2_benefit
-
-    The max CPP2 benefit at 65 = (YAMPE - YMPE) × 1/40 × 12
-    For 2026: (81,900 - 74,600) × 0.025 × 12 = 2,190
-
-    Early/late start adjustments follow the same rules as CPP1:
-    - Before 65: 0.6% reduction per month (max 36% at 60)
-    - After 65: 0.7% increase per month (max 42% at 70)
-
-    Per DP#3: pure function. Same inputs → same outputs.
-    Per DP#20: year-versioned via TaxDataProvider.
-
-    References:
-        CPP enhancement overview: https://www.canada.ca/en/services/benefits/publicpensions/cpp/cpp-enhancement.html
-
-    Args:
-        cpp2_average_earnings: Average annual earnings in CPP2 band (between YMPE and YAMPE)
-        start_age: Age to start CPP2 benefit (60-70)
-        year: Taxation year for year-versioned data (DP#20)
-        provider: Optional TaxDataProvider override
-
-    Returns:
-        Dict with cpp2_annual_benefit, cpp2_monthly_benefit, start_age,
-        adjustment_factor, max_cpp2_benefit, cpp2_average_earnings
-    """
-    from tax_data import TaxDataProvider as _TDP
-
-    if provider is None:
-        provider = _TDP()
-
-    data = provider.get_year_data(year, "canada", "federal")
-    ympe = data.cpp_max_pensionable
-    yampe = data.cpp2_max_pensionable
-
-    # Max CPP2 benefit at age 65 = (YAMPE - YMPE) × 1/40 × 12
-    # The 1/40 accrual rate is the same as CPP enhancement (2019+)
-    cpp2_earnings_range = max(0, yampe - ympe)
-    max_cpp2_benefit_65 = cpp2_earnings_range * CPP2_ACCRUAL_RATE * 12
-
-    # Proportional benefit based on average earnings in CPP2 band
-    if yampe > 0 and cpp2_average_earnings > 0:
-        cpp2_base_benefit = (cpp2_average_earnings / yampe) * max_cpp2_benefit_65
-    else:
-        cpp2_base_benefit = 0.0
-
-    # Apply early/late start adjustment (same as CPP1)
-    start_age = max(CPP_EARLIEST_START_AGE, min(CPP_LATEST_START_AGE, start_age))
-    if start_age < CPP_STANDARD_AGE:
-        months_early = (CPP_STANDARD_AGE - start_age) * 12
-        adjustment = 1 - months_early * CPP_EARLY_PENALTY_PER_MONTH
-    elif start_age > CPP_STANDARD_AGE:
-        months_late = (start_age - CPP_STANDARD_AGE) * 12
-        adjustment = 1 + months_late * CPP_LATE_BONUS_PER_MONTH
-    else:
-        adjustment = 1.0
-
-    cpp2_annual_benefit = cpp2_base_benefit * adjustment
-
-    return {
-        "cpp2_annual_benefit": round(cpp2_annual_benefit, 2),
-        "cpp2_monthly_benefit": round(cpp2_annual_benefit / 12, 2),
-        "start_age": start_age,
-        "adjustment_factor": round(adjustment, 4),
-        "max_cpp2_benefit_65": round(max_cpp2_benefit_65, 2),
-        "cpp2_average_earnings": cpp2_average_earnings,
-        "ympe": ympe,
-        "yampe": yampe,
         "year": year,
     }
 

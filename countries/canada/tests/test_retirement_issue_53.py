@@ -1,15 +1,13 @@
 """Tests for retirement OAS 75+ enhancement, GIS, CPP2, and OAS deferral (Issue #53).
 
 Covers:
-- oas_amount_for_age: two-tier OAS (65-74 vs 75+)
+- oas_amount_for_age: two-tier OAS (65-74 vs 75+) and deferral (DP#28)
 - gis_benefit: Guaranteed Income Supplement for low-income seniors
-- cpp2_benefit: CPP2 benefits for earners above YMPE
-- MemberRetirementData.oas_annual_for_year: OAS deferral + age-based enhancement
-- DrawdownOptimizer integration with OAS deferral and 75+ enhancement
+- DrawdownOptimizer integration with the 75+ enhancement
 
 References:
     countries/canada/retirement.py
-    Issue #53: Retirement OAS 75+ enhancement, GIS, CPP2 benefits, OAS deferral
+    Issue #53: Retirement OAS 75+ enhancement, GIS benefits, OAS deferral
 """
 
 import pytest
@@ -21,9 +19,9 @@ from countries.canada.retirement import (
     OAS_ANNUAL_MAX, OAS_ANNUAL_MAX_75PLUS, OAS_CLAWBACK_THRESHOLD,
     GIS_ANNUAL_MAX_SINGLE, GIS_ANNUAL_MAX_COUPLED, GIS_INCOME_EXEMPTION,
     CPP_MAX_PENSIONABLE, CPP2_MAX_PENSIONABLE, CPP2_MAX_BENEFIT,
-    oas_clawback, oas_amount_for_age, gis_benefit, cpp2_benefit,
+    oas_clawback, oas_amount_for_age, gis_benefit,
     cpp_benefit, rrif_minimum_withdrawal,
-    MemberRetirementData, RetirementState, DrawdownOptimizer,
+    RetirementState, DrawdownOptimizer,
 )
 
 
@@ -139,124 +137,53 @@ class TestGISBenefit:
         assert result_2026['max_gis'] >= result_2024['max_gis']
 
 
-class TestCPP2Benefit:
-    """Test CPP2 (second additional CPP) benefits for earners above YMPE."""
-
-    def test_zero_earnings_above_ympe(self):
-        """No earnings above YMPE → no CPP2 benefit."""
-        assert cpp2_benefit(0, year=2026) == 0
-
-    def test_max_earnings_above_ympe(self):
-        """Maximum earnings above YMPE → maximum CPP2 benefit at 65."""
-        max_range = CPP2_MAX_PENSIONABLE - CPP_MAX_PENSIONABLE
-        benefit = cpp2_benefit(max_range, start_age=65, year=2026)
-        # Should be close to the maximum CPP2 benefit
-        assert benefit == pytest.approx(CPP2_MAX_BENEFIT, rel=0.01)
-
-    def test_half_earnings_above_ympe(self):
-        """Half the pensionable range → approximately half the max benefit."""
-        max_range = CPP2_MAX_PENSIONABLE - CPP_MAX_PENSIONABLE
-        benefit = cpp2_benefit(max_range / 2, start_age=65, year=2026)
-        expected = CPP2_MAX_BENEFIT * 0.50
-        assert benefit == pytest.approx(expected, rel=0.02)
-
-    def test_earnings_capped_at_ympe2(self):
-        """Earnings above YMPE2 are capped — no benefit beyond YMPE2."""
-        max_range = CPP2_MAX_PENSIONABLE - CPP_MAX_PENSIONABLE
-        # Earnings well above YMPE2 — should be same as max
-        benefit_capped = cpp2_benefit(max_range + 50000, start_age=65, year=2026)
-        benefit_max = cpp2_benefit(max_range, start_age=65, year=2026)
-        assert benefit_capped == pytest.approx(benefit_max, rel=0.01)
-
-    def test_early_start_penalty(self):
-        """CPP2 at age 60 has the same penalty as CPP1 (36% reduction)."""
-        max_range = CPP2_MAX_PENSIONABLE - CPP_MAX_PENSIONABLE
-        at_60 = cpp2_benefit(max_range, start_age=60, year=2026)
-        at_65 = cpp2_benefit(max_range, start_age=65, year=2026)
-        # 60 months early × 0.6% = 36% reduction
-        expected_ratio = 1 - 0.36
-        assert at_60 == pytest.approx(at_65 * expected_ratio, rel=0.01)
-
-    def test_late_start_bonus(self):
-        """CPP2 at age 70 has the same bonus as CPP1 (42% increase)."""
-        max_range = CPP2_MAX_PENSIONABLE - CPP_MAX_PENSIONABLE
-        at_70 = cpp2_benefit(max_range, start_age=70, year=2026)
-        at_65 = cpp2_benefit(max_range, start_age=65, year=2026)
-        # 60 months late × 0.7% = 42% increase
-        expected_ratio = 1 + 0.42
-        assert at_70 == pytest.approx(at_65 * expected_ratio, rel=0.01)
-
-    def test_year_versioned_cpp2(self):
-        """CPP2 benefit uses year-versioned maximum (DP#20)."""
-        max_range = CPP2_MAX_PENSIONABLE - CPP_MAX_PENSIONABLE
-        benefit_2026 = cpp2_benefit(max_range, start_age=65, year=2026)
-        assert benefit_2026 > 0
-
-    def test_cpp1_plus_cpp2(self):
-        """High earner (primary at $250k) gets both CPP1 and CPP2 benefits."""
-        max_range = CPP2_MAX_PENSIONABLE - CPP_MAX_PENSIONABLE
-        cpp1 = cpp_benefit(65, year=2026)
-        cpp2 = cpp2_benefit(max_range, start_age=65, year=2026)
-        total = cpp1 + cpp2
-        # Total should exceed CPP1 alone
-        assert total > cpp1
-        # CPP2 should be a meaningful addition
-        assert cpp2 > 0
-
-
-class TestOASDeferralIntegration:
-    """Test OAS deferral integration with drawdown optimizer."""
+class TestOASDeferral:
+    """OAS deferral (DP#28), driven through the pure function the contract path
+    reads (``contract_people`` sets ``oas_defer_months``; ``retirement_transition``
+    passes it to ``oas_amount_for_age``)."""
 
     def test_deferral_increases_oas(self):
         """Deferring OAS by 12 months increases benefit by 7.2%."""
-        member = MemberRetirementData(birth_year=1960, oas_defer_months=12)
-        base = OAS_ANNUAL_MAX
-        deferred = member.oas_annual
-        # 12 months × 0.6% = 7.2% increase
-        expected = base * 1.072
-        assert deferred == pytest.approx(expected, rel=0.01)
+        deferred = oas_amount_for_age(65, year=2026, defer_months=12)
+        assert deferred == pytest.approx(OAS_ANNUAL_MAX * 1.072, rel=0.01)
 
     def test_deferral_to_70(self):
         """Deferring OAS to age 70 (60 months) increases by 36%."""
-        member = MemberRetirementData(birth_year=1960, oas_defer_months=60)
-        base = OAS_ANNUAL_MAX
-        deferred = member.oas_annual
-        # 60 months × 0.6% = 36% increase
-        expected = base * 1.36
-        assert deferred == pytest.approx(expected, rel=0.01)
+        deferred = oas_amount_for_age(65, year=2026, defer_months=60)
+        assert deferred == pytest.approx(OAS_ANNUAL_MAX * 1.36, rel=0.01)
 
-    def test_oas_annual_for_year_age_75(self):
-        """OAS at age 75 combines enhancement and deferral."""
-        # Born 1950, year 2025 → age 75
-        member = MemberRetirementData(birth_year=1950, oas_defer_months=12)
-        oas_at_75 = member.oas_annual_for_year(2025)
-        # Base at 75 uses enhanced amount × deferral
+    def test_deferral_capped_at_60_months(self):
+        """Beyond 60 months the increase stops: statutory maximum deferral."""
+        at_60 = oas_amount_for_age(65, year=2026, defer_months=60)
+        at_120 = oas_amount_for_age(65, year=2026, defer_months=120)
+        assert at_120 == at_60
+
+    def test_deferral_and_age_75_enhancement_compose(self):
+        """The 75+ enhancement and the deferral increase multiply, not shadow."""
+        oas_at_75 = oas_amount_for_age(75, year=2025, defer_months=12)
         enhanced = oas_amount_for_age(75, year=2025)
-        expected = enhanced * 1.072  # 12 months deferred
-        assert oas_at_75 == pytest.approx(expected, rel=0.01)
+        assert oas_at_75 == pytest.approx(enhanced * 1.072, rel=0.01)
 
-    def test_oas_annual_for_year_no_deferral(self):
-        """OAS at age 65 with no deferral returns standard amount."""
-        member = MemberRetirementData(birth_year=1960, oas_defer_months=0)
-        oas_at_65 = member.oas_annual_for_year(2025)
-        assert oas_at_65 == pytest.approx(oas_amount_for_age(65, year=2025), rel=0.01)
+    def test_no_deferral_returns_age_amount(self):
+        """No deferral: the plain age-tiered amount."""
+        assert oas_amount_for_age(65, year=2025) == pytest.approx(
+            oas_amount_for_age(65, year=2025, defer_months=0), rel=0.01)
 
-    def test_drawdown_uses_deferred_oas(self):
-        """Drawdown optimizer uses deferred OAS amount when available."""
-        member = MemberRetirementData(birth_year=1955, oas_defer_months=24)
+
+class TestDrawdownUsesAgeTieredOAS:
+    def test_drawdown_reaches_oas(self):
+        """The optimizer's OAS leg resolves to a positive amount at 70."""
         state = RetirementState(
             age=70,
             rrif_balance=300000,
             tfsa_balance=50000,
             non_reg_balance=100000,
             annual_expenses=40000,
-            year=2025,  # Set year for year-versioned CPP/OAS lookups
-            members=[member],
+            year=2025,
         )
-        optimizer = DrawdownOptimizer(investment_return=0.05)
-        result = optimizer.optimize_year(state)
-        # Should use the deferred (higher) OAS amount
+        result = DrawdownOptimizer(investment_return=0.05).optimize_year(state)
         assert result['net_oas'] > 0
+
 
 
 class TestGISClawbackInteraction:

@@ -33,8 +33,9 @@ that reads as a real person's birth year -- unless the source line carries a
 
 ``_ALLOWLIST`` is empty. The prior ``MemberRetirementData.birth_year``
 person-specific default carve-out was removed when #389 made
-``birth_year`` a required field (``from_dict`` refuses absence loudly —
-DP#1/DP#32 / #756 longevity).
+``birth_year`` a required field, and that class was itself deleted as
+unwired in #417 — the live path refuses absence loudly in
+``contract_people._map_member`` (DP#1/DP#32 / #756 longevity).
 
 Growing this allowlist to make a NEW ``= 19xx`` default go green is exactly
 how the original bugs got in (AGENTS.md: "When a guard fires, fix the code
@@ -48,7 +49,8 @@ import repo_scan
 
 # Empty on purpose: the prior MemberRetirementData person-specific default
 # carve-out was removed with the #389 follow-up (birth_year is now a
-# required field; from_dict refuses absence loudly — DP#1/DP#32). Do not
+# required field; contract_people refuses absence loudly — DP#1/DP#32), and
+# the class itself was deleted as unwired in #417. Do not
 # grow this allowlist to make a NEW person-year default go green
 # (AGENTS.md: fix the code).
 _ALLOWLIST: dict = {}
