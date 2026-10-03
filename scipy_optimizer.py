@@ -37,6 +37,7 @@ from return_model import ReturnModel, FixedReturn
 from objective import ObjectiveFunction, MAX_NET_BENEFIT, objective_cfg
 from strategy import AllocationStrategy, StrategyEngine
 from strategy import list_strategies
+from tax_data import UnsupportedTaxYearError
 _STRATEGIES = list_strategies()
 STRATEGY_BALANCED = _STRATEGIES.get('balanced')
 
@@ -154,6 +155,11 @@ class ScipyOptimizer(Optimizer):
                 # Issue #290: score with the cfg of the config this candidate
                 # simulated, never an empty dict.
                 score = objective.evaluate(results, objective_cfg(config))
+            except UnsupportedTaxYearError:
+                # DP#32: a tax year the engine cannot model is a refusal, not
+                # a low score. Ranking it -inf would make a crashing run
+                # indistinguishable from a bad one.
+                raise
             except Exception:
                 score = float('-inf')
 
