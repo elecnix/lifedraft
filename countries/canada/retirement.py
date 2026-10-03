@@ -847,7 +847,7 @@ class MemberRetirementData:
 
         if earnings_history_raw and cpp_monthly == 0:
             from countries.canada.cpp_estimator import (
-                EarningsEntry, compute_benefit_estimate,
+                EarningsEntry, age_65_monthly_total, compute_benefit_estimate,
             )
             entries = [
                 EarningsEntry(year=e.get('year', 0),
@@ -857,8 +857,9 @@ class MemberRetirementData:
             start_age = data.get('cpp_start_age', 65)
             estimate = compute_benefit_estimate(entries, start_age=start_age)
             # Age-65 convention (issue #388): do not pre-apply start-age
-            # factors here; include CPP2 tier so it is not discarded.
-            cpp_monthly = estimate.age_65_monthly + estimate.cpp2_age_65_monthly
+            # factors here. The aggregation rule (base tier at 65 + the CPP2
+            # tier at 65) is stated once, in the module that owns the tiers.
+            cpp_monthly = age_65_monthly_total(estimate)
 
         return cls(
             birth_year=birth_year,

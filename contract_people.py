@@ -455,6 +455,15 @@ def _tuition_by_year(doc: Dict, p: Dict, role: str, person_id: str) -> Dict[int,
     return out
 
 
+_CPP_REFUSAL_CONTRACT_PATH = {
+    # The CPP module names the input it is missing in program vocabulary;
+    # this layer names where a person DECLARES that input in the contract.
+    # Two vocabularies, one message — neither layer re-derives the other.
+    "missing_birth_year": "birth_date/birth_year",
+    "missing_province": "residency.province",
+}
+
+
 def _map_member(doc: Dict, person_id: str, role: str,
                 registered_balances: Dict[str, Dict[str, float]]) -> Dict:
     people = _people_by_id(doc)
@@ -562,9 +571,10 @@ def _map_member(doc: Dict, person_id: str, role: str,
 
     # Issue #389 / #390: CPP/QPP estimate on the contract → optimize path.
     # Statement (benefits.cpp / entitlements.cpp) always wins — never blend.
-    # When no Statement: build a contributory series from earnings_history
-    # and/or employment incomes, extend future years with salary_growth
-    # through age 65 (do not zero-pad after last history), then estimate.
+    # When no Statement, ONE call into the CPP module answers it: the module
+    # picks the plan, builds the series, aggregates base+CPP2 and labels the
+    # provenance (DP#10). This adapter maps the answer and refuses; it does
+    # not decide what CPP means.
     # DP#1/DP#32: birth_year comes from birth_date above (or is absent);
     # never invent a hardcoded birth year.
     # Always carry declared earnings_history for provenance / later tools,
@@ -582,80 +592,70 @@ def _map_member(doc: Dict, person_id: str, role: str,
             for inc in p.get("incomes", [])
         )
         if earnings_history or has_pensionable_income:
-            birth_year = member.get("birth_year")
-            if not birth_year:
+            from countries.canada.cpp_estimator import (
+                DEFAULT_CLAIM_AGE,
+                estimate_person_cpp,
+            )
+            # Contract SHAPE stays here; program POLICY goes to the module.
+            # `residency` is read defensively so a direct unit-test call that
+            # omits it yields the module's `missing_province` refusal rather
+            # than a KeyError (the province is schema-required, DP#32).
+            residency = p.get("residency")
+            province = (residency.get("province")
+                        if isinstance(residency, dict) else None)
+            # The earliest modeled retirement is a DECISIONS fact; whether it
+            # shortens the contributory period is the module's rule, so the
+            # plain age crosses the seam and only the decision crosses here.
+            earliest_retirement = None
+            for cand in doc["decisions"]["retirement_age"]:
+                if cand["person"] == person_id and cand.get("candidate_ages"):
+                    earliest_retirement = min(cand["candidate_ages"])
+                    break
+            estimate = estimate_person_cpp(
+                province=province,
+                birth_year=member.get("birth_year"),
+                earnings_history=earnings_history,
+                incomes=p.get("incomes"),
+                # assumptions.salary_growth is schema-required (DP#32: no
+                # .get-or).
+                salary_growth=float(doc["assumptions"]["salary_growth"]),
+                as_of_year=int(as_of[:4]),
+                as_of_date=as_of,
+                earliest_retirement_age=earliest_retirement,
+            )
+            if estimate.refusals:
+                # The module cannot answer. Its reason becomes this layer's
+                # exception, so the refusal stays loud with the module's own
+                # substance intact (DP#32).
+                refusal = estimate.refusals[0]
+                declared_path = _CPP_REFUSAL_CONTRACT_PATH.get(
+                    refusal.reason, refusal.missing
+                )
                 raise ContractAdaptationError(
                     f"person {person_id!r} needs a CPP/QPP estimate from "
                     f"{'earnings_history' if earnings_history else 'incomes'} "
-                    f"but has no birth_date/birth_year (DP#1/DP#32). The "
-                    f"estimator needs a real birth year to date the member; "
-                    f"refusing rather than inventing a fabricated birth year."
+                    f"but has no {declared_path} (DP#1/DP#32). "
+                    f"{refusal.detail}."
                 )
-            from countries.canada.cpp_estimator import (
-                build_earnings_for_estimate,
-                compute_benefit_estimate,
-            )
-            # assumptions.salary_growth is schema-required (DP#32: no .get-or).
-            salary_growth = float(doc["assumptions"]["salary_growth"])
-            as_of_year = int(as_of[:4])
-            # Contributory period ends at age 65, or earlier if the modeled
-            # retirement candidacy is before 65 (issue #390).
-            end_age = 65
-            for cand in doc["decisions"]["retirement_age"]:
-                if cand["person"] == person_id and cand.get("candidate_ages"):
-                    end_age = min(65, min(cand["candidate_ages"]))
-                    break
-            entries = build_earnings_for_estimate(
-                earnings_history=earnings_history,
-                incomes=p.get("incomes"),
-                salary_growth=salary_growth,
-                as_of_year=as_of_year,
-                birth_year=birth_year,
-                end_age=end_age,
-                as_of_date=as_of,
-            )
-            if entries:
-                # residency.province is schema-required (DP#32). Refuse with
-                # ContractAdaptationError rather than KeyError when a direct
-                # unit-test call omits it (same pattern as birth_year).
-                residency = p.get("residency")
-                if not isinstance(residency, dict) or "province" not in residency:
-                    raise ContractAdaptationError(
-                        f"person {person_id!r} needs a CPP/QPP estimate but "
-                        f"has no residency.province (DP#32). Quebec residency "
-                        f"selects QPP max-benefit tables; refusing rather than "
-                        f"guessing a plan."
-                    )
-                plan = "qpp" if residency["province"] == "quebec" else "cpp"
-                # Always request the age-65 estimate (issue #388). Claim-age
-                # adjustment happens once in cpp_from_estimate from
-                # cpp_start_age; do not bake it into the stored monthly.
-                estimate = compute_benefit_estimate(
-                    entries, start_age=65, plan=plan,
-                )
-                cpp_monthly = (
-                    estimate.age_65_monthly + estimate.cpp2_age_65_monthly
-                )
-                source = (
-                    "estimated_from_earnings_history"
-                    if earnings_history
-                    else "estimated_from_incomes"
-                )
+            # No series means the module had nothing to estimate from: write
+            # nothing, exactly as before, and let the near-retirement warning
+            # below speak for the person.
+            if estimate.earnings:
                 # Provenance even when the estimate is 0 — distinguishes
                 # 'estimated zero' from 'never estimated' (Cite #390).
-                member["cpp_benefit_source"] = source
-                if cpp_monthly > 0:
-                    member["cpp_monthly_estimated"] = cpp_monthly
-                    member.setdefault("cpp_start_age", 65)
-                # When the estimate was derived purely from incomes
-                # (no declared history leaf), surface the projected
-                # series under a DISTINCT key so it cannot be mistaken
-                # for a user-supplied earnings_history (Cite #390).
+                member["cpp_benefit_source"] = estimate.source
+                if estimate.monthly > 0:
+                    member["cpp_monthly_estimated"] = estimate.monthly
+                    member.setdefault("cpp_start_age", DEFAULT_CLAIM_AGE)
+                # When the estimate was derived purely from incomes (no
+                # declared history leaf), surface the projected series under a
+                # DISTINCT key so it cannot be mistaken for a user-supplied
+                # earnings_history (Cite #390).
                 if not earnings_history:
                     member["cpp_estimated_earnings"] = [
                         {"year": e.year,
                          "employment_income": e.employment_income}
-                        for e in entries
+                        for e in estimate.earnings
                     ]
 
     # Issue #389/#390: loud warning when a NEAR-RETIREMENT adult would still
