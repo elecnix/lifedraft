@@ -530,15 +530,15 @@ class MissingResidencyRefuses(unittest.TestCase):
 
 class QppMaxBenefitFallback(unittest.TestCase):
     def test_qpp_year_before_table_falls_through_to_the_cpp_maximum(self):
-        from countries.canada.cpp_estimator import _max_benefit_for_year
+        from countries.canada.cpp_data import max_benefit_65_for_year
         # Exact table year.
-        self.assertEqual(_max_benefit_for_year(2026, plan="qpp"), 17334)
+        self.assertEqual(max_benefit_65_for_year(2026, plan="qpp"), 17334)
         # Before QPP table → fall through to CPP historical (not 2023 QPP).
-        before = _max_benefit_for_year(2020, plan="qpp")
-        cpp_2020ish = _max_benefit_for_year(2020, plan="cpp")
+        before = max_benefit_65_for_year(2020, plan="qpp")
+        cpp_2020ish = max_benefit_65_for_year(2020, plan="cpp")
         self.assertEqual(before, cpp_2020ish)
         # Future year after table → latest QPP row.
-        self.assertEqual(_max_benefit_for_year(2035, plan="qpp"), 17334)
+        self.assertEqual(max_benefit_65_for_year(2035, plan="qpp"), 17334)
 
 
 class HistoryPlusGrowth(unittest.TestCase):

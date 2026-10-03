@@ -30,7 +30,7 @@ import unittest
 from countries.canada.self_employed_contributions import (
     compute_cpp2_contribution,
 )
-from countries.canada import cpp_estimator, retirement
+from countries.canada import cpp_data, retirement
 from tax_data import TaxDataProvider, TaxYearData
 
 # The ceilings the projection must carry (issue #416, Bug A).
@@ -277,7 +277,7 @@ class TestPreCPP2YearHasNoSecondBand(unittest.TestCase):
 
     def test_cpp2_benefit_is_zero_for_a_year_before_cpp2_existed(self):
         """The public function must not pay CPP2 for a pre-CPP2 year."""
-        self.assertLess(2023, cpp_estimator._CPP2_START_YEAR)
+        self.assertLess(2023, cpp_data.CPP2_START_YEAR)
         self.assertEqual(
             retirement.cpp2_benefit(
                 19_000, years_contributing=40, start_age=65, year=2023,
@@ -297,8 +297,8 @@ class TestPreCPP2YearHasNoSecondBand(unittest.TestCase):
 
     def test_estimator_second_ceiling_is_unchanged_for_2023(self):
         """The estimator was already guarded; the data fix must not move it."""
-        self.assertEqual(cpp_estimator._yampe_for_year(2023), 66_600)
-        self.assertEqual(cpp_estimator._cpp2_max_benefit(2023), 0.0)
+        self.assertEqual(cpp_data.yampe_for_year(2023), 66_600)
+        self.assertEqual(cpp_data.max_cpp2_benefit_for_year(2023), 0.0)
 
 
 if __name__ == "__main__":
