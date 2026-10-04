@@ -130,11 +130,40 @@ def _derived_ceilings(tree: ast.AST):
                 yield node.lineno, name
 
 
+def _derived_by_operand(tree: ast.AST):
+    """Yield the lineno of a ceiling multiplied/divided/grown by a literal.
+
+    A numeric literal must be present on one side. Without that constraint
+    the rule flags *applications* of a ceiling — ``base_avg *
+    max_benefit_65``, ``ympe * threshold_pct``, ``above_ympe /
+    cpp2_range`` — which are correct code, not a ceiling being rebuilt. The
+    factor may sit on either side and any of ``*``, ``/``, ``**``.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp):
+            continue
+        if not isinstance(node.op, (ast.Mult, ast.Div, ast.Pow)):
+            continue
+        has_literal = any(
+            isinstance(side, ast.Constant)
+            and isinstance(side.value, (int, float))
+            and not isinstance(side.value, bool)
+            for side in (node.left, node.right)
+        )
+        if not has_literal:
+            continue
+        names = {n.id.lower() for n in ast.walk(node) if isinstance(n, ast.Name)}
+        if any(re.search(r"ympe|yampe|max_pensionable|max_benefit", name)
+               for name in names):
+            yield node.lineno
+
+
 # The two declaration rules, bound once into a registry so a self-test can
 # call them through a reference the module namespace cannot invalidate.
 _RULES = {
     "ceiling_assignments": _ceiling_assignments,
     "derived_ceilings": _derived_ceilings,
+    "derived_by_operand": _derived_by_operand,
 }
 
 
@@ -216,40 +245,17 @@ def test_no_consumer_re_derives_a_ceiling():
             continue
         with open(path, encoding="utf-8") as handle:
             tree = ast.parse(handle.read(), filename=path)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.BinOp):
-                continue
-            # Mult, Div and Pow: a ceiling multiplied by a factor, divided by
-            # an accrual rate, or grown by a power are the same defect, and
-            # the hardcoded factor can sit on either side (``ympe * 1.14`` /
-            # ``1.14 * ympe`` / ``ympe / 12``).
-            if not isinstance(node.op, (ast.Mult, ast.Div, ast.Pow)):
-                continue
-            operands = (node.left, node.right)
-            has_literal = any(
-                isinstance(side, ast.Constant)
-                and isinstance(side.value, (int, float))
-                and not isinstance(side.value, bool)
-                for side in operands
-            )
-            if not has_literal:
-                # No hardcoded factor, so this is an ordinary use of a
-                # ceiling the module obtained legitimately (``base_avg *
-                # max_benefit_65``, ``ympe * threshold_pct``), not a ceiling
-                # being rebuilt out of thin air.
-                continue
-            names = {n.id.lower() for n in ast.walk(node)
-                     if isinstance(n, ast.Name)}
-            if any(re.search(r"ympe|yampe|max_pensionable|max_benefit", name)
-                   for name in names):
-                offenders.append(f"{relpath}:{node.lineno}")
-
+        offenders.extend(
+            f"{relpath}:{lineno}" for lineno in _derived_by_operand(tree)
+        )
         # A ceiling BOUND to a ceiling name by arithmetic is a derivation even
         # when the operands are helper calls rather than names, so the operand
         # scan above cannot be routed around by one level of indirection:
         # ``cpp2_max_benefit = (yampe - ympe) * (1 / 40) * 12``.
-        for lineno, name in _derived_ceilings(tree):
-            offenders.append(f"{relpath}:{lineno}: {name} = <arithmetic>")
+        offenders.extend(
+            f"{relpath}:{lineno}: {name} = <arithmetic>"
+            for lineno, name in _derived_ceilings(tree)
+        )
     assert not offenders, (
         "A module derives a CPP/QPP ceiling by arithmetic. cpp_data owns the "
         "rule for a year with no row:\n  " + "\n  ".join(offenders)
@@ -310,11 +316,17 @@ def test_a_ceiling_restated_as_a_string_is_caught():
 
 
 def test_a_ceiling_derived_by_a_division_is_caught():
-    """Hole: only Mult and Pow were inspected; a division escaped."""
-    tree = ast.parse("band = ympe / 12\n")
-    assert any(
-        isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div) for n in ast.walk(tree)
-    ), "the Div shape must exist for this case to mean anything"
+    """Hole: only Mult and Pow were inspected; a division escaped.
+
+    Invokes the OPERAND rule, which is where ``ympe / 12`` is caught — the
+    earlier version of this case only asserted that a ``Div`` node existed in
+    a literal string, so removing ``ast.Div`` from the rule left it green.
+    """
+    src = "band = ympe / 12\n"
+    rule = _RULES["derived_by_operand"]
+    assert _findings_for(src, rule), (
+        "a ceiling divided by a literal must be reported by the operand rule"
+    )
 
 
 def test_a_ceiling_derived_through_a_helper_is_caught():

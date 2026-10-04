@@ -49,7 +49,7 @@ References:
 from dataclasses import dataclass
 from typing import Dict, Iterable, Tuple
 
-from countries.canada.retirement import CPP_OAS_BY_YEAR
+from countries.canada.retirement import CPP2_START_YEAR, CPP_OAS_BY_YEAR
 
 # The plans this module prices. QPP shares the contributory ceilings with
 # CPP and differs only in the age-65 maximum (DP#10, DP#7: the mechanism,
@@ -58,7 +58,6 @@ CPP_PLANS = ("cpp", "qpp")
 
 # The second additional plan (CPP2 / "enhanced" band) has no row before the
 # year it began. Before it, YAMPE == YMPE: there is no band to contribute in.
-CPP2_START_YEAR = 2024
 
 # ── Historical YMPE (1966–2022) ─────────────────────────────────────────────
 # Service Canada / CRA historical maxima. The engine models contributory
