@@ -141,11 +141,20 @@ def apply_tuition_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # SAME transfer mechanism: a TAXED member transfers their unused credit
     # (the new_cf above, i.e. what remained after applying to own tax); a
     # CHILD transfers their FULL credit (no own tax). Both capped at the
-    # credit on $5,000 of tuition (federal only, province=None) and floored at
-    # the supporter's REMAINING tax (tax after their own credit, before the
-    # transfer) -- non-refundable, no phantom refund.
+    # credit on $5,000 of tuition and floored at the supporter's REMAINING tax
+    # (tax after their own credit, before the transfer) -- non-refundable, no
+    # phantom refund.
+    #
+    # Issue #348: a TRANSFER is federal by statute, so the provincial credit
+    # never transfers -- but the SUPPORTER's province still sets the rate the
+    # federal portion is worth, because the Quebec abatement shrinks a Quebec
+    # taxpayer's federal credit by `provincial_abatement`. So this is
+    # `federal_only=True` with the household province, not `province=None`:
+    # for a non-Quebec supporter the two are identical, and for a Quebec one
+    # the cap is 626.25 rather than 750.
     transfer_cap = _tuition_tax_credit(
-        _FEDERAL_TUITION_TRANSFER_LIMIT, sim_year, tax_provider, province=None)
+        _FEDERAL_TUITION_TRANSFER_LIMIT, sim_year, tax_provider,
+        province=province, federal_only=True)
 
     primary_id = primary_member.get('id', '')
     spouse_id = spouse_member.get('id', '')
@@ -198,8 +207,13 @@ def apply_tuition_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
         # Federal credit on the child's tuition (federal only for transfer).
         # 0 when no new tuition this year, but the carry-forward from prior
         # years is still available for transfer (#784).
+        # Issue #348: federal only (the provincial credit does not transfer),
+        # but valued at the SUPPORTER's province rate, so a Quebec supporter's
+        # cap and their child's transferable credit are both abated rather than
+        # overstated by 16.5%.
         child_credit = _tuition_tax_credit(
-            child_tuition, sim_year, tax_provider, province=None) if child_tuition else 0.0
+            child_tuition, sim_year, tax_provider,
+            province=province, federal_only=True) if child_tuition else 0.0
         available = child_credit + child_cfs[i]
         if available <= 0.0:
             new_child_cfs[i] = 0.0
