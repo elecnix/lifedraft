@@ -230,7 +230,11 @@ def get_cpp_max_benefit_65(year: int) -> float:
 
 # DP#20: Year-versioned CPP/OAS defaults (fallback per DP#13)
 CPP_OAS_BY_YEAR = {
-    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 66600, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 188, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
+    # 2023 carries NO cpp2_max_benefit: CPP2 contributions began 2024-01-01, so
+    # a 2023 row that names one is carrying the 2024 figure backwards. The band
+    # (cpp2_max_pensionable == cpp_max_pensionable) is empty, which is the
+    # honest representation of "no second ceiling that year".
+    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 66600, "cpp_max_benefit_65": 14010, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
     2024: {"cpp_max_pensionable": 68500, "cpp2_max_pensionable": 73300, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8291, "oas_annual_max_75plus": 9118, "oas_clawback_threshold": 87068, "gis_max_single": 1616, "gis_max_coupled": 9739},
     2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8381, "oas_annual_max_75plus": 9218, "oas_clawback_threshold": 90997, "gis_max_single": 1657, "gis_max_coupled": 9987},
     2026: {"cpp_max_pensionable": 74600, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 18092, "cpp2_max_benefit": 800, "oas_annual_max": 8908, "oas_annual_max_75plus": 9800, "oas_clawback_threshold": 95323, "gis_max_single": 1726, "gis_max_coupled": 10384},
@@ -270,6 +274,9 @@ CPP2_MAX_PENSIONABLE = 81900      # YMPE2 (second additional CPP, above YMPE)
 CPP2_BENEFIT_RATE = 0.0025        # CPP2 accrual rate per year of contribution
 CPP_MAX_BENEFIT_65 = 18092        # Maximum CPP retirement at 65: $1,507.65×12 (Service Canada, 2026-01)
 CPP2_MAX_BENEFIT = 800            # Maximum CPP2 retirement benefit (2026)
+CPP2_START_YEAR = 2024             # CPP2 contributions began 2024-01-01. Owned
+                                  # here beside CPP_OAS_BY_YEAR so there is one
+                                  # definition; cpp_data imports it.
 CPP_EARLY_START_PENALTY = 0.006   # 0.6% per month before 65 (max 36% at 60)
 CPP_LATE_START_BONUS = 0.007      # 0.7% per month after 65 (max 42% at 70)
 
@@ -477,6 +484,15 @@ def cpp2_benefit(earnings_above_ympe: float, years_contributing: int = 40,
     """
     if year is None:
         raise ValueError("year parameter is required for cpp2_benefit (DP#9, DP#20: year-versioned data)")
+
+    # CPP2 contributions began 2024-01-01. A year before that has no
+    # enhancement to earn, so the honest answer is 0.0 — NOT a lookup: the
+    # 2023 row deliberately carries no cpp2_max_benefit (the row that held
+    # one named the 2024 figure), and reading a missing key would hand back
+    # CPP2_MAX_BENEFIT, the 2026 constant, for a 2023 year. Returning here
+    # also means the band arithmetic below can never scale that constant.
+    if year < CPP2_START_YEAR:
+        return 0.0
 
     # DP#20: Look up year-specific values
     if max_benefit is None:

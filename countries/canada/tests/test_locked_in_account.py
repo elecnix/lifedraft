@@ -34,7 +34,6 @@ from countries.canada.locked_in_account import (
     death_benefit_disposition,
     compute_lif_withdrawal_range,
     get_ympe,
-    YMPE_BY_YEAR,
     LIF_MAX_WITHDRAWAL_FACTORS,
     HARDSHIP_CATEGORIES,
     JURISDICTION_UNLOCK_CATEGORIES,
@@ -62,6 +61,16 @@ class TestYMPEYearVersioned(unittest.TestCase):
         ympe = get_ympe(2027)
         # Should use 2026 as nearest
         self.assertEqual(ympe, 74600)
+
+    def test_ympe_historical_year_answers_with_its_own_row(self):
+        """A year the historical table covers is not answered by a later row.
+
+        The table this module used to hold started at 2020, so a 2019 lookup
+        answered 58,700 — the 2020 row — for a year whose published maximum
+        was 57,400.
+        """
+        self.assertEqual(get_ympe(2019), 57400)
+        self.assertEqual(get_ympe(1975), 7400)
 
 
 class TestConversionGate(unittest.TestCase):

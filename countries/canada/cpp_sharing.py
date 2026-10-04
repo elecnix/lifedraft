@@ -65,16 +65,14 @@ from enum import Enum
 CPP_EARLIEST_START_AGE = 60
 CPP_STANDARD_AGE = 65
 CPP_LATEST_START_AGE = 70
-CPP_MAX_PENSIONABLE_2026 = 74600       # YMPE 2026 (Yearly Maximum Pensionable Earnings) — DEPRECATED: use TaxDataProvider (DP#20)
-CPP_MAX_BENEFIT_65_2026 = 18092        # Maximum CPP retirement pension at 65: $1,507.65 × 12 — DEPRECATED: use TaxDataProvider (DP#20)
-CPP2_MAX_PENSIONABLE_2026 = 81900     # YMPE2 for CPP2 (2026) — DEPRECATED: use TaxDataProvider.get_cpp2_max_pensionable(year) (DP#20, DP#12)
 CPP_BASIC_EXEMPTION = 3500            # Basic exemption
 CPP_EARLY_PENALTY_PER_MONTH = 0.006   # 0.6% per month before 65
 CPP_LATE_BONUS_PER_MONTH = 0.007      # 0.7% per month after 65
 
-# QPP 2026 parameters (same framework, Quebec-administered)
-QPP_MAX_PENSIONABLE_2026 = 74600      # Same YMPE — DEPRECATED: use TaxDataProvider (DP#20)
-QPP_MAX_BENEFIT_65_2026 = 17334       # QPP max benefit at 65 (2026) — DEPRECATED: use TaxDataProvider (DP#52)
+# The YMPE / YAMPE / age-65 maxima that used to sit here as ``*_2026``
+# constants are gone: they restated federal ceilings that countries/canada/
+# cpp_data.py already owns (DP#10, DP#20). Ask cpp_data.cpp_parameters(year)
+# for a ceiling, and the TaxDataProvider for a contribution rate.
 
 # ── Contribution rates (2026 defaults, DP#13, DP#52) ──
 CPP_RATE_2026 = 0.0595               # CPP employee contribution rate 5.95%

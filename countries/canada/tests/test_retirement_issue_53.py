@@ -279,5 +279,88 @@ class TestGISClawbackInteraction:
         assert result['countable_income'] >= 0
 
 
+class TestCPP2PreconditionsAndFallbacks:
+    """``cpp2_benefit``'s refusal and fallback paths, which the era-correct
+    tests never reached (issue #422 review).
+
+    Every existing test here calls ``cpp2_benefit(year=2026)`` -- a year that
+    IS in ``CPP_OAS_BY_YEAR``. So the ``year is None`` refusal, the
+    out-of-table fallback to the module constant, and the zero-earnings band
+    were unexercised: thin branches in the one function that computes a CPP2
+    benefit. They are pinned here rather than left to chance, because the
+    pre-2024 early return added in #422 changes which paths reach the lookup
+    below it.
+    """
+
+    def test_year_is_required(self):
+        from countries.canada.retirement import cpp2_benefit
+
+        with pytest.raises(ValueError, match="year parameter is required"):
+            cpp2_benefit(5_000, years_contributing=40, start_age=65, year=None)
+
+    @pytest.mark.parametrize("year", [2022, 2023])
+    def test_a_pre_cpp2_year_is_zero_before_any_lookup(self, year):
+        """2023 predates CPP2 entirely, so there is nothing to earn.
+
+        This is the guard that stops the 2026 constant being handed to a year
+        the program did not exist in.
+        """
+        from countries.canada.retirement import CPP2_START_YEAR, cpp2_benefit
+
+        assert CPP2_START_YEAR == 2024
+        assert cpp2_benefit(100_000, years_contributing=40,
+                            start_age=65, year=year) == 0.0
+
+    def test_a_pre_cpp2_year_ignores_an_explicit_max_benefit(self):
+        """An explicit argument cannot manufacture a benefit that cannot exist."""
+        from countries.canada.retirement import cpp2_benefit
+
+        assert cpp2_benefit(100_000, years_contributing=40, start_age=65,
+                            max_benefit=999_999.0, year=2023) == 0.0
+
+    def test_a_year_beyond_the_table_uses_the_module_constant(self):
+        """Out-of-table years carry forward the published constant.
+
+        2035 is past the last published row, so the ceilings come from the
+        year-versioned getters rather than the table and the maximum falls back
+        to CPP2_MAX_BENEFIT. Pinned so the fallback stays deliberate.
+        """
+        from countries.canada.retirement import (CPP2_MAX_BENEFIT,
+                                                 CPP_OAS_BY_YEAR, cpp2_benefit)
+
+        assert 2027 not in CPP_OAS_BY_YEAR
+        benefit = cpp2_benefit(100_000, years_contributing=40,
+                               start_age=65, year=2027)
+        assert 0.0 < benefit <= CPP2_MAX_BENEFIT
+
+    def test_a_distant_year_can_have_an_empty_band(self):
+        """Beyond a point the projected YMPE passes the 2026 YAMPE constant.
+
+        The out-of-table path caps the second ceiling at ``CPP2_MAX_PENSIONABLE``
+        (the 2026 figure), so a far-future year whose YMPE has grown past it has
+        a NEGATIVE band width and therefore no second-tier benefit. That is a
+        consequence of carrying a constant forward, recorded here rather than
+        left to be discovered as a silent zero.
+        """
+        from countries.canada.retirement import (CPP2_MAX_PENSIONABLE,
+                                                 get_cpp_max_pensionable,
+                                                 cpp2_benefit)
+
+        ympe_2035 = get_cpp_max_pensionable(2035)
+        assert ympe_2035 > CPP2_MAX_PENSIONABLE, (
+            "if this stops holding, the out-of-table YAMPE fallback needs a "
+            "sourced rule rather than the 2026 constant"
+        )
+        assert cpp2_benefit(100_000, years_contributing=40,
+                            start_age=65, year=2035) == 0.0
+
+    def test_no_earnings_above_ympe_yields_a_zero_ratio(self):
+        """Earnings at or below the YMPE earn no second-tier benefit."""
+        from countries.canada.retirement import cpp2_benefit
+
+        assert cpp2_benefit(0.0, years_contributing=40,
+                            start_age=65, year=2026) == 0.0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

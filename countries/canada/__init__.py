@@ -50,6 +50,14 @@ from countries.canada.provinces.ontario import (
     ontario_lift_credit,
 )
 
+# The QPP age-65 maxima are owned by the Quebec package (DP#10, DP#12).
+# cpp_data.py holds the year-versioned interface; Quebec holds the numbers, so
+# they are read out of Quebec's own records rather than restated in a federal
+# module (the drift this replaces: the estimator's hand-copied QPP table named
+# this file as its source and never imported it).
+from countries.canada.cpp_data import register_qpp_max_benefit_65
+register_qpp_max_benefit_65(QuebecTaxData.all_years())
+
 # ── Phase 1 leaf modules ────────────────────────────────
 # Bank of Canada rate data
 from countries.canada.boc_data import (  # noqa: F401
@@ -169,6 +177,14 @@ from countries.canada.retirement import (  # noqa: F401
     get_gis_max_single, get_gis_max_coupled,
 )
 
+# CPP/QPP year-versioned ceilings (YMPE, YAMPE, age-65 maxima) — the one
+# interface consumers read (DP#10, DP#12, DP#20).
+from countries.canada.cpp_data import (  # noqa: F401
+    CPPParameters, CPP_PLANS, cpp_parameters,
+    ympe_for_year, yampe_for_year,
+    max_benefit_65_for_year, max_cpp2_benefit_for_year,
+)
+
 # CPP estimator from contributory earnings history (issue #365)
 from countries.canada.cpp_estimator import (  # noqa: F401
     EarningsEntry, CPPBenefitEstimate, compute_benefit_estimate,
@@ -189,10 +205,8 @@ from countries.canada.cpp_sharing import (  # noqa: F401
     combined_cpp_and_pension_split, project_cpp_sharing,
     compute_cpp2_contribution, compute_cpp2_benefit, compute_survivor_benefit,
     CPP_EARLIEST_START_AGE, CPP_STANDARD_AGE, CPP_LATEST_START_AGE,
-    CPP_MAX_PENSIONABLE_2026, CPP_MAX_BENEFIT_65_2026,
-    CPP2_MAX_PENSIONABLE_2026, CPP_BASIC_EXEMPTION,
+    CPP_BASIC_EXEMPTION,
     CPP_EARLY_PENALTY_PER_MONTH, CPP_LATE_BONUS_PER_MONTH,
-    QPP_MAX_PENSIONABLE_2026, QPP_MAX_BENEFIT_65_2026,
     CPP_RATE_2026, QPP_RATE_2026, CPP2_RATE, CPP2_SELF_EMPLOYED_RATE,
     CPP2_ACCRUAL_RATE,
     CPP_SURVIVOR_RATE_65_PLUS, CPP_SURVIVOR_RATE_UNDER_65, QPP_SURVIVOR_RATE,
