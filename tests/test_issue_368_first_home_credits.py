@@ -48,7 +48,7 @@ def test_the_lowest_federal_rate_is_read_not_assumed():
     assert lowest_federal_rate(2026) == pytest.approx(0.14, abs=1e-9)
 
 
-def test_the_american_dollar_amount_is_data():
+def test_the_credited_dollar_amount_is_data():
     """$10,000 from 2022; $5,000 before (CRA 'Amounts for prior years')."""
     for year in (2023, 2024, 2025, 2026):
         assert home_buyers_amount_for_year(year) == 10_000
@@ -172,14 +172,47 @@ def test_the_credit_never_exceeds_the_duties_paid():
 
 @pytest.mark.parametrize("basis,expected", [
     (750_000, 5_875.00),          # at the threshold: no reduction yet
-    (800_000, 5_639.50),          # 50,000 x 2.35% = 1,175 off
+    (800_000, 4_700.00),          # 5,875 - (50,000 x 2.35%) = 5,875 - 1,175
     (1_000_000, 0.00),            # the issue's explicit nil point
     (1_200_000, 0.00),            # never negative
 ])
 def test_the_reduction_is_2_35_percent_of_the_basis_above_750000(basis, expected):
+    """2.35% of the basis ABOVE $750,000 -- not a percentage of the credit.
+
+    An earlier version of this case expected 5,639.50 at a $800,000 basis,
+    which is 5,875 x 0.96: a 4%-of-credit reduction the statute does not
+    contain. The implementation was right and the TEST was wrong, which is the
+    worse kind of error because a "fix" would have broken correct code.
+    """
     credit = quebec_homeownership_refundable_credit(
         2026, transfer_duties=8_500, duty_basis=basis)
     assert credit == pytest.approx(expected, abs=0.01)
+
+
+def test_a_projected_year_still_carries_the_credit():
+    """2027 has no year record; the projection must still carry the amounts.
+
+    Omitting these fields from ``_project_from_base`` is the defect issue #422
+    fixed for ``cpp_max_benefit_65``: a projected year reads 0.0 and a 2027
+    buyer silently gets nothing.
+    """
+    for year in (2027, 2030):
+        assert home_buyers_amount_for_year(year) == 10_000
+        assert federal_home_buyers_amount(year, province="ontario") > 0
+        assert quebec_home_buyers_credit(year, quebec_tax_payable=50_000) > 0
+        assert quebec_homeownership_refundable_credit(
+            year, transfer_duties=8_500, duty_basis=500_000) > 0
+
+
+def test_the_statutory_amounts_are_not_indexed_upward():
+    """Copied forward, never escalated.
+
+    These are legislated nominal figures, not indexed brackets: the CRA's
+    $10,000 and the bulletin's 2.35%/$750,000 do not rise with inflation.
+    Escalating them would invent a growth rate nobody published.
+    """
+    assert home_buyers_amount_for_year(2030) == 10_000
+    assert federal_home_buyers_amount(2030, province="ontario") > 0
 
 
 def test_the_refundable_credit_is_paid_even_with_zero_quebec_tax():
@@ -193,17 +226,31 @@ def test_the_refundable_credit_is_paid_even_with_zero_quebec_tax():
 # ── Eligibility: the spouse test the FHSA predicate lacks ───────────────────
 
 def test_an_undeclared_history_qualifies():
-    """Absent is not evidence against; the household is asserting first-time."""
-    assert is_first_home_buyer(1990, 2026) is True
+    """Absence is not evidence against; the household is asserting first-time."""
+    assert is_first_home_buyer(2026) is True
 
 
-def test_a_prior_home_in_the_four_year_window_disqualifies():
+def test_a_prior_home_in_the_window_disqualifies_the_buyer():
     """2026 acquisition: 2025, 2024, 2023, 2022 and 2026 are all in scope."""
     for prior in (2026, 2025, 2024, 2023, 2022):
-        assert is_first_home_buyer(1990, 2026, prior_home_years={prior}) is False, prior
+        assert is_first_home_buyer(2026, buyer_prior_home_years={prior}) is False, prior
+
+
+def test_the_spouses_history_disqualifies_on_its_own():
+    """The half of the test that is easy to omit.
+
+    Taking the two histories separately is what makes this impossible to skip:
+    an earlier version took ``birth_year``/``spouse_birth_year``, read
+    neither, and tested one merged set.
+    """
+    assert is_first_home_buyer(2026, buyer_prior_home_years=None,
+                               spouse_prior_home_years={2023}) is False
 
 
 def test_a_prior_home_outside_the_window_does_not_disqualify():
     """The window is four PRECEDING years plus the year of acquisition."""
-    assert is_first_home_buyer(1990, 2026, prior_home_years={2021}) is True
-    assert is_first_home_buyer(1990, 2026, prior_home_years={1990}) is True
+    assert is_first_home_buyer(2026, buyer_prior_home_years={2021}) is True
+    assert is_first_home_buyer(2026, buyer_prior_home_years={1990}) is True
+    assert is_first_home_buyer(
+        2026, buyer_prior_home_years={1990},
+        spouse_prior_home_years={1991}) is True

@@ -861,6 +861,25 @@ class TaxDataProvider:
             qc_fss_individual_second_threshold=round(base.qc_fss_individual_second_threshold * factor, 2) if base.qc_fss_individual_second_threshold else 0,
             qc_fss_individual_max=base.qc_fss_individual_max,
             qc_fss_individual_rate=base.qc_fss_individual_rate,
+            # ── First-home buyers' credits (issue #368) ──
+            # Every field here is a STATUTORY NOMINAL figure, so it is
+            # COPIED forward and NOT escalated by the indexation `factor`.
+            # These are legislated amounts (the CRA's $10,000, the Quebec
+            # $1,400, the bulletin 2026-2 duty bands and its 2.35% rate and
+            # $750,000 market-value threshold), not indexed brackets.
+            #
+            # Omitting them from this explicit field list is the exact defect
+            # issue #422 fixed for `cpp_max_benefit_65`: a year that is
+            # projected rather than tabulated would silently read 0.0, and a
+            # buyer purchasing in 2027 would get NO federal credit with
+            # nothing to say so. Copied, so the credit is the legislated one.
+            home_buyers_amount=base.home_buyers_amount,
+            qc_home_buyers_credit_max=base.qc_home_buyers_credit_max,
+            qc_homeownership_credit_full_rate_band=base.qc_homeownership_credit_full_rate_band,
+            qc_homeownership_credit_partial_band=base.qc_homeownership_credit_partial_band,
+            qc_homeownership_credit_partial_rate=base.qc_homeownership_credit_partial_rate,
+            qc_homeownership_credit_reduction_rate=base.qc_homeownership_credit_reduction_rate,
+            qc_homeownership_credit_reduction_threshold=base.qc_homeownership_credit_reduction_threshold,
             # ── Senior assistance / age credit / work premium / drug premium ──
             qc_senior_assistance_max_per_person=base.qc_senior_assistance_max_per_person,
             qc_senior_assistance_threshold_single=round(base.qc_senior_assistance_threshold_single * factor, 2) if base.qc_senior_assistance_threshold_single else 0,

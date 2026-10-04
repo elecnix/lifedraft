@@ -43,15 +43,15 @@ from typing import Optional
 
 from tax_data import TaxDataProvider
 
-# The four preceding calendar years are part of the first-time test for both
-# the federal amount and the Quebec refundable credit. Named so the window is
-# stated once rather than restated at each call site.
+# The CRA and the Quebec bulletin both test the year of acquisition plus the
+# FOUR preceding calendar years, so the window spans five. Named for the
+# lookback rather than the span, because "four preceding years" is the
+# statutory phrase -- but the window below is deliberately year+1.
 FIRST_TIME_LOOKBACK_YEARS = 4
 
-# The CRA lists the federal amount as $5,000 before 2022 and $10,000 from 2022
-# (bulletin: "Amounts for prior years"). Carried as DATA on the year record;
-# this is only the pre-2022 default used when a record predates the change and
-# therefore carries no value.
+# The CRA lists the federal amount as $5,000 before 2022 and $10,000 from 2022.
+# For those earlier years there is no year record to carry a value, so the
+# legislated pre-2022 amount is stated here rather than invented per call.
 PRE_2022_HOME_BUYERS_AMOUNT = 5_000.0
 
 
@@ -68,9 +68,9 @@ def _is_quebec(province: Optional[str]) -> bool:
 def _quebec_record(year: int, provider: TaxDataProvider):
     """The Quebec year record, for either the long or the short province key.
 
-    The contract accepts both ``quebec`` and ``qc`` for a province, and the
-    provider registers the long key, so passing the caller's string through
-    unchanged would look up a record that does not exist for the short form.
+    The contract accepts both ``quebec`` and ``qc``, and the package registers
+    the short form as an alias, so both already resolve. Normalising here keeps
+    one spelling at the call sites; it is tidiness, not a fix.
     """
     return provider.get_year_data(year, "canada", "quebec")
 
@@ -241,31 +241,35 @@ def quebec_homeownership_refundable_credit(
 
 
 def is_first_home_buyer(
-    birth_year: Optional[int],
     year: int,
-    spouse_birth_year: Optional[int] = None,
-    prior_home_years: Optional[set] = None,
+    buyer_prior_home_years: Optional[set] = None,
+    spouse_prior_home_years: Optional[set] = None,
 ) -> bool:
     """First-time-buyer test over the statutory four-year window.
 
     The CRA (s.118.05(3)) and the Quebec bulletin (2026-2) both test the
-    **spouse** as well as the buyer: neither the buyer nor the spouse may have
-    lived in a home they owned in the purchase year or the four preceding
-    years. ``countries/canada/fhsa.py``'s ``FHSA.is_first_home_buyer`` is an
-    FHSA eligibility predicate and does not carry the spouse test, so this is
-    a separate, wider predicate rather than a reuse.
+    **spouse** as well as the buyer: neither may have lived in a home they
+    owned in the year of acquisition or the four preceding years.
+    ``countries/canada/fhsa.py``'s ``FHSA.is_first_home_buyer`` is an FHSA
+    eligibility predicate and does not carry the spouse test, so this is a
+    separate, wider predicate rather than a reuse.
 
-    ``prior_home_years`` is the set of calendar years in which the household
-    declares a prior owned-and-occupied home. **Absence is not evidence**:
-    ``None`` means "not declared", which is not the same as "declared none".
-    An undeclared history is treated as qualifying -- a household that never
-    declared a prior purchase is asserting it does not have one -- but the
-    caller must report the difference rather than present it as verified.
+    The two histories are SEPARATE parameters on purpose. An earlier version
+    took ``birth_year`` and ``spouse_birth_year``, read neither, and tested a
+    single merged set -- two dead parameters promising a spouse test the code
+    never performed. A caller who passed only their own history would have
+    silently qualified. Taking them separately makes the spouse half of the
+    test impossible to omit.
+
+    Each history is the set of calendar years in which that person declares a
+    prior owned-and-occupied home. **Absence is not evidence**: ``None`` means
+    "not declared", which is not the same as "declared none", so an
+    undeclared history qualifies rather than refusing on a datum nobody
+    supplied. The caller is expected to report that difference rather than
+    present it as verified.
     """
-    if prior_home_years is None:
-        return True
-    window_start = year - FIRST_TIME_LOOKBACK_YEARS
-    # The purchase year itself is in the window too: the test covers the year
-    # of acquisition and the four preceding years.
-    window = set(range(window_start, year + 1))
-    return not (prior_home_years & window)
+    window = set(range(year - FIRST_TIME_LOOKBACK_YEARS, year + 1))
+    for history in (buyer_prior_home_years, spouse_prior_home_years):
+        if history and (set(history) & window):
+            return False
+    return True
