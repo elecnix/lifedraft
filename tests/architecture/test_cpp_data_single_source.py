@@ -56,13 +56,21 @@ CPP_OAS_OWNER = os.path.join("countries", "canada", "retirement.py")
 # the VALUES is the year-versioned provider's own tests, not this guard.
 TAX_DATA_OWNER = "tax_data.py"
 
+# The package __init__ IMPORTS the owner's table in order to REGISTER it
+# (``register_oas_fallback(CPP_OAS_BY_YEAR)``). That is the bootstrap
+# handing the data to the provider, not a consumer reading a table, so the
+# import rule alone skips it. It is deliberately NOT a full owner: declaring
+# a ceiling or deriving one there would still be reported.
+PACKAGE_BOOTSTRAP = os.path.join("countries", "canada", "__init__.py")
+
 # A name that claims to hold a ceiling. Matched against the module-level (and
 # class-level) assignment targets, so ``ympe = ...`` locals are not caught:
 # the defect is a *table* declared away from the interface, not a local.
 CEILING_NAME = re.compile(
     r"(?:^|_)(?:Y?A[MP]PE|YMPE|YAMPE|CPP_MAX_PENSIONABLE|CPP2_MAX_PENSIONABLE"
     r"|CPP_MAX_BENEFIT_65|CPP2_MAX_BENEFIT|QPP_MAX_PENSIONABLE"
-    r"|QPP_MAX_BENEFIT_65)(?:_|$|\d)",
+    r"|QPP_MAX_BENEFIT_65|CPP_OAS_BY_YEAR|CPP_OAS_TABLE|CPP_OAS)"
+    r"(?:_|$|\d)",
     re.IGNORECASE,
 )
 
@@ -152,7 +160,11 @@ def _derived_by_operand(tree: ast.AST):
         )
         if not has_literal:
             continue
-        names = {n.id.lower() for n in ast.walk(node) if isinstance(n, ast.Name)}
+        # In a DIVISION the ceiling must be on the numerator. A ceiling in the
+        # denominator is being APPLIED ( ``1.0 / ympe`` is a ratio against a
+        # ceiling ), which is the opposite of rebuilding one.
+        scoped = node.left if isinstance(node.op, ast.Div) else node
+        names = {n.id.lower() for n in ast.walk(scoped) if isinstance(n, ast.Name)}
         if any(re.search(r"ympe|yampe|max_pensionable|max_benefit", name)
                for name in names):
             yield node.lineno
@@ -201,7 +213,7 @@ def test_no_consumer_reaches_for_the_ceiling_tables_directly():
     offenders = []
     for path in iter_source_files(ROOT):
         relpath = os.path.relpath(path, ROOT)
-        if _is_ceiling_module(relpath):
+        if _is_ceiling_module(relpath) or relpath == PACKAGE_BOOTSTRAP:
             continue
         with open(path, encoding="utf-8") as handle:
             source = handle.read()
@@ -364,6 +376,32 @@ def test_an_ordinary_use_of_a_ceiling_is_not_reported():
                 f"line {node.lineno} must carry no hardcoded factor, or this "
                 "case stops testing what it claims"
             )
+
+
+def test_a_ceiling_in_the_denominator_is_not_reported():
+    """Hole: ``1.0 / ympe`` was flagged — a ceiling APPLIED, not derived.
+
+    The counter-case above used ``above_ympe / cpp2_range``, which carries no
+    literal and so never exercised this shape at all.
+    """
+    src = "ratio = 1.0 / ympe\n"
+    rule = _RULES["derived_by_operand"]
+    assert not _findings_for(src, rule), (
+        "dividing by a ceiling is a ratio against it, not a derivation"
+    )
+
+
+def test_the_table_the_guard_names_is_itself_reachable():
+    """The docstring names CPP_OAS_BY_YEAR; the pattern must match it.
+
+    ``CEILING_NAME`` originally had no OAS alternative, so the guard could not
+    fire on the very table it says a consumer must not read.
+    """
+    rule = _RULES["ceiling_assignments"]
+    assert _findings_for("CPP_OAS_BY_YEAR = {2026: 1}\n", rule), (
+        "CPP_OAS_BY_YEAR must be recognised as a ceiling table name"
+    )
+    assert CEILING_NAME.search("CPP_OAS_BY_YEAR")
 
 
 def test_a_lowercase_interface_field_is_not_a_reported_table_reach():
