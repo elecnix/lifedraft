@@ -85,8 +85,7 @@ disappear. A repo-wide `grep` before writing this test confirmed
 fixture data (`'role': 'primary', 'birth_year': 1979, ...`) in well over a
 hundred unrelated call sites across `tests/` and `countries/canada/tests/`,
 including as literal *default parameter values* in production code
-(`countries/canada/retirement.py`'s `MemberRetirementData.birth_year`,
-`countries/canada/claiming_age_optimizer.py`'s `optimize_claiming_ages`).
+(`countries/canada/claiming_age_optimizer.py`'s `optimize_claiming_ages`).
 Forbidding those bare numbers here would either break the suite outright
 or force this guard into a permanently-maintained exception list the size
 of the test suite -- exactly the false-positive trap DP#15's own text

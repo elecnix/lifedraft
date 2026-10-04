@@ -1,0 +1,35 @@
+{
+  "_README": "Unreached public top-level symbols in the modules #417 cleaned, computed from tests/architecture/call_graph.py rooted at ENTRY_MODULES. MONOTONIC: entries may be removed (a symbol was deleted, or it got wired) but a NEW one fails the test. This is not an allowlist and cannot be grown to make a build green -- growing it IS the failure. Scope is deliberately narrow (the two modules #417 cleaned) so a ratchet in one module's debt cannot redden an unrelated PR; widen it as that debt is paid. See tests/architecture/test_unreached_public_symbols.py.",
+  "countries.canada.cpp_sharing": [
+    "CPPSharingInput",
+    "CPPSharingResult",
+    "CreditSplitResult",
+    "Province",
+    "combined_cpp_and_pension_split",
+    "compute_credit_split",
+    "compute_shared_benefits",
+    "compute_sharing_ratio",
+    "compute_survivor_benefit",
+    "cpp_basic_exemption_pensionable",
+    "cpp_sharing_eligibility",
+    "cpp_sharing_tax_benefit",
+    "credit_split_pension_impact",
+    "optimize_cpp_sharing",
+    "project_cpp_sharing"
+  ],
+  "countries.canada.retirement": [
+    "DrawdownOptimizer",
+    "DrawdownOrder",
+    "PensionIncomeType",
+    "RetirementState",
+    "cpp_benefit",
+    "get_cpp_max_benefit_65",
+    "get_cpp_max_pensionable",
+    "get_oas_annual_max_75plus",
+    "oas_amount_for_age",
+    "oas_clawback",
+    "pension_splitting_available",
+    "project_retirement",
+    "rrif_minimum_withdrawal"
+  ]
+}

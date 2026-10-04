@@ -454,73 +454,6 @@ def gis_benefit(net_income: float, is_coupled: bool = False,
     }
 
 
-def cpp2_benefit(earnings_above_ympe: float, years_contributing: int = 40,
-                 start_age: int = 65,
-                 max_benefit: float = None,
-                 year: int = None) -> float:
-    """Calculate CPP2 (second additional CPP) retirement benefit.
-
-    CPP2 covers earnings between YMPE and YMPE2 (also called YAMPE).
-    For earners above YMPE (like primary at $250k), CPP2 provides
-    additional retirement benefits on top of regular CPP.
-
-    The CPP2 benefit is calculated using the same age adjustment factors
-    as CPP1 (0.6% penalty per month before 65, 0.7% bonus per month after).
-
-    Pure function (DP#3): same inputs → same output.
-
-    Args:
-        earnings_above_ympe: Average earnings above YMPE (capped at YMPE2-YMPE)
-        years_contributing: Number of years of CPP2 contributions
-        start_age: Age to start CPP2 (60-70)
-        max_benefit: Maximum CPP2 benefit at 65 (None → use year or default)
-        year: Tax year for year-versioned data (DP#20, required)
-
-    Returns:
-        Estimated annual CPP2 benefit
-    """
-    if year is None:
-        raise ValueError("year parameter is required for cpp2_benefit (DP#9, DP#20: year-versioned data)")
-
-    # DP#20: Look up year-specific values
-    if max_benefit is None:
-        if year in CPP_OAS_BY_YEAR:
-            max_benefit = CPP_OAS_BY_YEAR[year].get("cpp2_max_benefit", CPP2_MAX_BENEFIT)
-        else:
-            max_benefit = CPP2_MAX_BENEFIT
-
-    # Cap earnings at the CPP2 pensionable range (year-versioned YMPE and YMPE2)
-    if year in CPP_OAS_BY_YEAR:
-        ympe = CPP_OAS_BY_YEAR[year]["cpp_max_pensionable"]
-        ympe2 = CPP_OAS_BY_YEAR[year].get("cpp2_max_pensionable", CPP2_MAX_PENSIONABLE)
-    else:
-        ympe = get_cpp_max_pensionable(year)
-        ympe2 = CPP2_MAX_PENSIONABLE  # Use default for unknown years
-    ympe2_range = ympe2 - ympe
-    capped_earnings = min(earnings_above_ympe, ympe2_range)
-
-    # Pro-rate based on actual earnings vs max pensionable
-    if ympe2_range > 0 and years_contributing > 0:
-        benefit_ratio = capped_earnings / ympe2_range
-    else:
-        benefit_ratio = 0.0
-
-    base_benefit = max_benefit * benefit_ratio
-
-    # Apply age adjustment (same as CPP1)
-    start_age = max(60, min(70, start_age))
-    if start_age < 65:
-        months_early = (65 - start_age) * 12
-        penalty = 1 - months_early * CPP_EARLY_START_PENALTY
-        return base_benefit * penalty
-    elif start_age > 65:
-        months_late = (start_age - 65) * 12
-        bonus = 1 + months_late * CPP_LATE_START_BONUS
-        return base_benefit * bonus
-    else:
-        return base_benefit
-
-
 def cpp_benefit(start_age: int, average_contributions: float = None,
                 max_benefit_at_65: float = None,
                 year: int = None) -> float:
@@ -708,197 +641,6 @@ def pension_splitting_available(
 
 
 # =============================================================================
-# Per-Member Retirement Data (DP#28)
-# =============================================================================
-
-@dataclass
-class MemberRetirementData:
-    """Per-member retirement income and pension data.
-    
-    DP#4: role-based names, not person names.
-    DP#28: eligibility is date-computed from birth_year.
-    DP#16: auto-include when any field is non-zero.
-    DP#1/DP#32: ``birth_year`` is REQUIRED — never invent a person (a prior
-    silent person-specific default dated every age wrong for any other
-    household; see #756 / #389 follow-up).
-    """
-    birth_year: int                   # DP#1/DP#32: required; no silent person default
-    role: str = "primary"             # 'primary' or 'spouse'
-    cpp_start_age: int = 65         # 60-70 range
-    cpp_monthly_estimated: float = 0.0  # Monthly CPP at age 65 (base+CPP2); age-adjusted in cpp_from_estimate
-    oas_start_age: int = 65         # 65-70 (can defer 0-60 months)
-    oas_defer_months: int = 0       # 0 = start at 65, 60 = start at 70
-    pension_income_annual: float = 0.0  # Employer pension (DB or DC)
-    employer_rrsp_match_pct: float = 0.0  # DP: employer RRSP match %
-    employer_rrsp_match_max: float = 0.0  # Maximum employer match $
-    rrif_conversion_age: int = 71   # Default; can convert at 65+ for splitting
-    earnings_history: Optional[List] = None  # issue #365: optional contributory earnings
-
-    @property
-    def cpp_annual(self) -> float:
-        """Annual CPP benefit based on start age."""
-        if self.cpp_monthly_estimated <= 0:
-            return 0.0
-        return self.cpp_monthly_estimated * 12
-    
-    @property
-    def oas_annual(self) -> float:
-        """OAS annual amount, increased by deferral and 75+ enhancement (DP#28)."""
-        # Base OAS depends on age (75+ gets 10% enhancement)
-        # Use 2026 as default for property access without a specific year
-        base = get_oas_annual_max(2026)
-        if self.oas_defer_months > 0:
-            # 0.6% increase per month deferred after age 65
-            increase = 1 + (self.oas_defer_months * 0.006)
-            return base * increase
-        return base
-    
-    def oas_annual_for_year(self, year: int) -> float:
-        """OAS annual amount for a specific year, accounting for age-based enhancement and deferral.
-        
-        DP#28: OAS amounts depend on recipient age (75+ gets 10% more).
-        DP#20: Amounts are year-versioned.
-        """
-        age = year - self.birth_year
-        return oas_amount_for_age(age, year=year, defer_months=self.oas_defer_months)
-    
-    @property
-    def age_in(self) -> callable:
-        """DP#1: Compute age from birth_year, not stored age."""
-        def _age(year: int) -> int:
-            return year - self.birth_year
-        return _age
-    
-    def is_cpp_eligible(self, year: int) -> bool:
-        """Check if CPP starts this year."""
-        return (year - self.birth_year) >= self.cpp_start_age
-    
-    def is_oas_eligible(self, year: int) -> bool:
-        """Check if OAS starts this year."""
-        actual_start_age = 65 + self.oas_defer_months / 12
-        return (year - self.birth_year) >= actual_start_age
-    
-    def is_pension_splitting_eligible(self, year: int, province: str = 'quebec') -> bool:
-        """Check if pension splitting is available.
-        
-        Federal: 55+
-        Quebec: 65+ (even for RPP)
-        """
-        age = year - self.birth_year
-        if province == 'quebec':
-            return age >= 65
-        return age >= 55
-    
-    def employer_match(self, gross_income: float) -> float:
-        """Calculate employer RRSP match contribution."""
-        return min(gross_income * self.employer_rrsp_match_pct, self.employer_rrsp_match_max)
-    
-    @classmethod
-    def from_dict(cls, data: dict) -> 'MemberRetirementData':
-        """Create from input.json family.members section.
-
-        issue #365: when earnings_history is present and
-        cpp_monthly_estimated is 0, a grounded estimate is computed
-        from contributory earnings.
-
-        issue #388: store the age-65 monthly only (base + CPP2). Age
-        adjustment for cpp_start_age happens once in cpp_from_estimate,
-        which treats cpp_monthly_estimated as the Statement-at-65 amount.
-
-        DP#1/DP#32: ``birth_year`` is required. A missing or zero value
-        fails loudly — never invent a fabricated birth year.
-        """
-        birth_year = data.get('birth_year')
-        # DP#1/DP#32: require a real calendar year. Reject absent / non-numeric /
-        # bool (bool is an int subclass — never treat True/False as a year) /
-        # zero (the 'unset' sentinel elsewhere). Whole-number floats (JSON
-        # 1985.0) coerce to int; fractional years refuse.
-        if birth_year is None:
-            raise ValueError(
-                "MemberRetirementData.from_dict: birth_year is required "
-                "(DP#1/DP#32) — got None. A missing birth date must not "
-                "become a confident wrong age; pass the member's real "
-                "birth_year (derived from birth_date on the contract)."
-            )
-        if type(birth_year) is bool:
-            raise ValueError(
-                f"MemberRetirementData.from_dict: birth_year must be an int "
-                f"calendar year (DP#1/DP#32) — got {birth_year!r} (bool). "
-                f"True/False are not birth years."
-            )
-        if type(birth_year) is float:
-            if not birth_year.is_integer():
-                raise ValueError(
-                    f"MemberRetirementData.from_dict: birth_year must be a "
-                    f"whole calendar year (DP#1/DP#32) — got {birth_year!r}."
-                )
-            birth_year = int(birth_year)
-        elif type(birth_year) is not int:
-            raise ValueError(
-                f"MemberRetirementData.from_dict: birth_year must be an int "
-                f"calendar year (DP#1/DP#32) — got {birth_year!r} "
-                f"({type(birth_year).__name__})."
-            )
-        if birth_year <= 0:
-            raise ValueError(
-                f"MemberRetirementData.from_dict: birth_year must be a "
-                f"positive calendar year (DP#1/DP#32) — got {birth_year!r}. "
-                f"Zero is the 'unset' sentinel used elsewhere, not a person."
-            )
-
-        earnings_history_raw = data.get('earnings_history', None)
-        cpp_monthly = data.get('cpp_monthly_estimated', 0)
-
-        if earnings_history_raw and cpp_monthly == 0:
-            from countries.canada.cpp_estimator import (
-                EarningsEntry, age_65_monthly_total, compute_benefit_estimate,
-            )
-            entries = [
-                EarningsEntry(year=e.get('year', 0),
-                              employment_income=e.get('employment_income'))
-                for e in earnings_history_raw
-            ]
-            start_age = data.get('cpp_start_age', 65)
-            estimate = compute_benefit_estimate(entries, start_age=start_age)
-            # Age-65 convention (issue #388): do not pre-apply start-age
-            # factors here. The aggregation rule (base tier at 65 + the CPP2
-            # tier at 65) is stated once, in the module that owns the tiers.
-            cpp_monthly = age_65_monthly_total(estimate)
-
-        return cls(
-            birth_year=birth_year,
-            role=data.get('role', 'primary'),
-            cpp_start_age=data.get('cpp_start_age', 65),
-            cpp_monthly_estimated=cpp_monthly,
-            oas_start_age=data.get('oas_start_age', 65),
-            oas_defer_months=data.get('oas_defer_months', 0),
-            pension_income_annual=data.get('pension_income_annual', 0),
-            employer_rrsp_match_pct=data.get('employer_rrsp_match_pct', 0),
-            employer_rrsp_match_max=data.get('employer_rrsp_match_max', 0),
-            rrif_conversion_age=data.get('rrif_conversion_age', 71),
-            earnings_history=earnings_history_raw,
-        )
-
-    def to_dict(self) -> dict:
-        """Export to dict. DP#24: round-trip."""
-        result = {
-            'role': self.role,
-            'birth_year': self.birth_year,
-            'cpp_start_age': self.cpp_start_age,
-            'cpp_monthly_estimated': self.cpp_monthly_estimated,
-            'oas_start_age': self.oas_start_age,
-            'oas_defer_months': self.oas_defer_months,
-            'pension_income_annual': self.pension_income_annual,
-            'employer_rrsp_match_pct': self.employer_rrsp_match_pct,
-            'employer_rrsp_match_max': self.employer_rrsp_match_max,
-            'rrif_conversion_age': self.rrif_conversion_age,
-        }
-        if self.earnings_history is not None:
-            result['earnings_history'] = self.earnings_history
-        return result
-
-
-# =============================================================================
 # Retirement State
 # =============================================================================
 
@@ -936,9 +678,6 @@ class RetirementState:
     drawdown_order: list = field(default_factory=lambda: ["tfsa", "non_reg", "rrsp"])
     rrif_conversion_age: int = 71  # Default; can convert at 65+ for splitting
 
-    # Per-member retirement income (DP#28)
-    members: List[MemberRetirementData] = field(default_factory=list)
-
     # LIF (Life Income Fund) — issue #230: CRI/LIRA converts to LIF at age 71
     lif_balance: float = 0.0
     lif_jurisdiction: str = 'federal'
@@ -963,22 +702,14 @@ class RetirementState:
         """Total retirement assets including LIF (issue #230)."""
         return self.rrif_balance + self.tfsa_balance + self.non_reg_balance + self.lif_balance
 
-    def compute_cpp(self) -> float:
-        """Compute CPP benefit based on start age.
-
-        Uses self.year for year-versioned lookup (DP#20).
-        Raises ValueError if self.year is 0 (unset).
-
-        Returns:
-            Estimated annual CPP benefit
-        """
-        if not self.year:
-            raise ValueError("RetirementState.year must be set before calling compute_cpp() (DP#9, DP#20)")
-        return cpp_benefit(self.cpp_start_age, year=self.year)
-
     def compute_taxable_income(self, rrif_withdrawal: float = 0) -> float:
         """Compute total taxable income including LIF withdrawals (issue #230)."""
-        cpp = self.compute_cpp() if self.age >= self.cpp_start_age else 0
+        # DP#32: `year` gates the year-versioned lookup below. Reaching a year
+        # whose CPP table is absent raises, rather than defaulting to a benefit
+        # the caller never asked for.
+        if not self.year:
+            raise ValueError("RetirementState.year must be set before calling compute_taxable_income() (DP#9, DP#20)")
+        cpp = cpp_benefit(self.cpp_start_age, year=self.year) if self.age >= self.cpp_start_age else 0
         oas = self.oas_annual if self.age >= 65 else 0
         rrif_income = rrif_withdrawal or rrif_minimum_withdrawal(
             self.rrif_balance, self.age)
@@ -1029,15 +760,12 @@ class DrawdownOptimizer:
         when it starts, and the gap years when OAS hasn't started yet.
         """
         needed = state.annual_expenses
-        cpp = state.compute_cpp() if state.age >= state.cpp_start_age else 0
-        
+        if not state.year:
+            raise ValueError("RetirementState.year must be set before optimize_year() (DP#9, DP#20: year-versioned data)")
+        cpp = cpp_benefit(state.cpp_start_age, year=state.year) if state.age >= state.cpp_start_age else 0
+
         # DP#28: Use age-based OAS amount (75+ enhancement) and deferral
         oas_for_age = oas_amount_for_age(state.age, year=state.year)
-        # If members have retirement data with deferral, use that
-        if state.members:
-            primary = next((m for m in state.members if m.role == 'primary'), None)
-            if primary:
-                oas_for_age = primary.oas_annual_for_year(state.year)
         
         oas_info = oas_clawback(0, oas_amount=oas_for_age)  # Will be recalculated
 
@@ -1142,14 +870,9 @@ class DrawdownOptimizer:
         """Compute tax and OAS clawback cost for a withdrawal strategy."""
         # Taxable income
         rrif_income = withdrawals.get('rrif', 0)
-        cpp = state.compute_cpp() if state.age >= state.cpp_start_age else 0
+        cpp = cpp_benefit(state.cpp_start_age, year=state.year) if state.age >= state.cpp_start_age else 0
         # DP#28: Use age-based OAS (75+ enhancement)
         oas = oas_amount_for_age(state.age, year=state.year) if state.age >= 65 else 0
-        # If members have retirement data with deferral, use that
-        if state.members:
-            primary = next((m for m in state.members if m.role == 'primary'), None)
-            if primary and state.age >= 65:
-                oas = primary.oas_annual_for_year(state.year)
 
         # Non-reg: capital gains on disposition
         non_reg_withdrawal = withdrawals.get('non_reg', 0)
@@ -1227,7 +950,7 @@ def project_retirement(
             state.age = state.age_in(sim_year)
         else:
             sim_year = 2026 + yr
-        state.year = sim_year  # Set for RetirementState.compute_cpp() and optimizer
+        state.year = sim_year  # Year-versioned CPP/OAS lookups require it (DP#20)
         current_age = state.age
 
         if state.total_assets <= 0 and current_age < 65:
