@@ -108,10 +108,15 @@ class TestTuitionCreditComputesFederalPlusQC(unittest.TestCase):
         p._fallbacks['canada:quebec:2026'].qc_tuition_credit_rate = 0.20
         # Issue #348: the FEDERAL half is abated too, so the patched 20% sits
         # beside the un-abated provincial rate and an abated federal one.
+        # The federal rate is READ from the record, not written as 0.14 -- a
+        # hardcoded literal here would pin the test to today's bracket and
+        # fail for the wrong reason the day it is revalued (review finding).
         ab = p._load_year(2026, 'canada', 'quebec').provincial_abatement
+        fed_lowest = p._load_year(
+            2026, 'canada', 'federal').federal_brackets[0].rate
         self.assertAlmostEqual(
             tuition_tax_credit(10_000, 2026, p, province='quebec'),
-            10_000 * (0.14 * (1 - ab) + 0.20))  # fed 14% abated + patched 20%
+            10_000 * (fed_lowest * (1 - ab) + 0.20))
 
     def test_no_qc_data_yields_zero_provincial_credit(self):
         """DP#32: a provider with no Quebec tax data must yield a $0 QC
