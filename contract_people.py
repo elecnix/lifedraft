@@ -662,9 +662,17 @@ def _map_member(doc: Dict, person_id: str, role: str,
     # project cpp_income=0 — no Statement, no usable history, and no
     # pensionable incomes to estimate from. Younger earners without any
     # CPP source stay silent (intentional omit, DP#32).
+    #
+    # Issue #391: this log line reached nobody (nothing configures the
+    # `contract_people` logger), so the same fact is now ALSO declared as the
+    # model_fidelity caveat `cpp_modelled_as_zero`, which every output surface
+    # renders. The age gate comes from model_fidelity.CPP_FIDELITY_MIN_AGE --
+    # imported, not repeated, so the load-time warning and the user-visible
+    # caveat cannot disagree about who counts as near retirement (DP#9).
+    from model_fidelity import CPP_FIDELITY_MIN_AGE
     if "cpp_monthly_estimated" not in member:
         age = _age_at(p.get("birth_date"), as_of)
-        if age is not None and age >= 50:
+        if age is not None and age >= CPP_FIDELITY_MIN_AGE:
             logger.warning(
                 "person %r (age %s) is near retirement but has no "
                 "benefits.cpp / entitlements.cpp, no usable "
