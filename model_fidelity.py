@@ -1709,9 +1709,17 @@ def cpp_modelled_as_zero_people(cfg: dict) -> List[Dict]:
     datable age, is deliberately not reported.
 
     Returns [] for a config shape it cannot read (a non-dict cfg, a missing
-    `family.members`, or a missing `assumptions.start_year`) rather than
-    guessing: this is a disclosure, and inventing an age to decide it would
-    be the very silence it exists to end.
+    `family.members`, a missing `assumptions.start_year`, or a member whose
+    `cpp_monthly_estimated` is present but not a number) rather than
+    guessing: this is a disclosure, and inventing a figure to disclose would
+    be the very silence it exists to end. An ABSENT or None amount is not in
+    that class -- it is the $0 case itself, and is reported.
+
+    `assumptions.start_year` is the run's FIRST calendar year, not a
+    date the household chose independently: `input_contract.to_internal_config`
+    computes it as `int(as_of[:4])` and `contract_assumptions.map_assumptions`
+    writes it, and nothing overwrites it afterwards, so the age below is the
+    age at the start of the plan.
 
     KNOWN LIMIT -- the age basis. This reads whole calendar years
     (`assumptions.start_year - birth_year`) because the mapped config carries
@@ -1744,9 +1752,20 @@ def cpp_modelled_as_zero_people(cfg: dict) -> List[Dict]:
         if not isinstance(member, dict):
             continue
         monthly = member.get('cpp_monthly_estimated')
-        if isinstance(monthly, (int, float)) and not isinstance(monthly, bool):
-            if monthly > 0:
-                continue
+        # A MALFORMED amount is not evidence of a $0 pension. Reporting one
+        # would state a figure this predicate never verified, and a false
+        # caveat is worse than none: it teaches the reader to ignore the
+        # caveats that are true. So an unreadable value is declined, exactly
+        # as an undatable age is below -- while an ABSENT or None amount IS
+        # reported, because that is the real $0 case (the engine's own reader
+        # turns a missing or null cpp_monthly_estimated into 0 as well).
+        # `bool` is excluded on purpose: True would otherwise pass as "has
+        # an amount".
+        if isinstance(monthly, bool) or (
+                monthly is not None and not isinstance(monthly, (int, float))):
+            continue
+        if monthly is not None and monthly > 0:
+            continue
         birth_year = member.get('birth_year')
         if not isinstance(birth_year, int) or isinstance(birth_year, bool):
             continue

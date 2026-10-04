@@ -102,6 +102,33 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
         self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
                          [{'role': 'adult', 'age': 55, 'source': None}])
 
+    def test_a_malformed_amount_is_declined_not_called_zero(self):
+        """Cite (#391 review): a non-numeric `cpp_monthly_estimated` is not
+        evidence of a $0 pension. Reporting one would state a figure this
+        predicate never verified -- and a false caveat is worse than none.
+        `bool` is excluded too: True must not pass as "has an amount"."""
+        for bad in ('1200', [1200], {'monthly': 1200}, True, False):
+            cfg = _cfg([{'role': 'primary', 'birth_year': 1971,
+                         'cpp_monthly_estimated': bad}])
+            self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
+                             [], msg=f"{bad!r} must not be read as $0")
+
+    def test_a_present_but_null_amount_IS_the_zero_case(self):
+        """Absent or None is the real $0: the engine's own reader turns a
+        missing or null cpp_monthly_estimated into 0 as well."""
+        cfg = _cfg([{'role': 'primary', 'birth_year': 1971,
+                     'cpp_monthly_estimated': None}])
+        self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
+                         [{'role': 'primary', 'age': 55, 'source': None}])
+
+    def test_a_zero_amount_is_reported(self):
+        cfg = _cfg([{'role': 'primary', 'birth_year': 1971,
+                     'cpp_benefit_source': 'statement',
+                     'cpp_monthly_estimated': 0}])
+        people = model_fidelity.cpp_modelled_as_zero_people(cfg)
+        self.assertEqual(len(people), 1)
+        self.assertEqual(people[0]['source'], 'statement')
+
     def test_a_malformed_member_is_skipped_not_fatal(self):
         """A non-dict entry in `family.members` is skipped, not fatal: the
         caveat is a disclosure and must never take a run down."""
@@ -113,6 +140,15 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
         for cfg in ({}, {'family': {}}, {'family': {'members': 'nope'}},
                     {'family': {'members': []}},
                     {'family': {'members': [{'role': 'primary', 'birth_year': 1970}]}},
+                    # assumptions present but the year is missing, not a
+                    # number, or a bool -- no age can be read off any of them.
+                    {'assumptions': {},
+                     'family': {'members': [{'role': 'primary', 'birth_year': 1970}]}},
+                    {'assumptions': {'start_year': '2026'},
+                     'family': {'members': [{'role': 'primary', 'birth_year': 1970}]}},
+                    {'assumptions': {'start_year': True},
+                     'family': {'members': [{'role': 'primary', 'birth_year': 1970}]}},
+                    {'assumptions': 'nope', 'family': {'members': []}},
                     None, 'not a config'):
             self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
                              [], msg=f"must not invent a finding from {cfg!r}")
