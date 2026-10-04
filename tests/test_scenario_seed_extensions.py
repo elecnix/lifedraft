@@ -99,10 +99,38 @@ class TestDesignPrinciples:
     """Verify adherence to DESIGN_PRINCIPLES.md."""
 
     def test_dp1_store_dates_not_derived(self):
-        """DP#1: a member carries birth_year; every age is derived from it."""
+        """DP#1: a member carries birth_year; every age is derived from it.
+
+        The pure-function half was the only assertion left after #425 deleted
+        the member dataclass this test used to inspect, and a pure-function
+        check cannot fail if someone starts STORING a derived age -- which is
+        the regression the principle is about (#425 review). So it now also
+        asserts against a real production object: RetirementState carries
+        ``birth_year``, derives age through ``age_in``, and its ``age`` field
+        is explicitly marked deprecated.
+        """
+        from countries.canada.retirement import RetirementState
+
         birth_year = 1979
         assert member_age(birth_year, 2044) == 65
         assert member_age(birth_year, 2043) == 64
+
+        state = RetirementState(birth_year=birth_year, year=2026)
+        # The DATE is stored...
+        assert state.birth_year == 1979
+        # ...and every age comes from it, so no age can go stale.
+        assert state.age_in(2026) == 47
+        assert state.age_in(2044) == 65
+        # Two states carrying the SAME stored age but DIFFERENT birth years
+        # must derive different ages. That is the substance of DP#1: the
+        # stored field cannot be what decides, so a stale or wrong ``age``
+        # cannot silently produce the wrong year.
+        older = RetirementState(birth_year=1970, age=65, year=2026)
+        younger = RetirementState(birth_year=2000, age=65, year=2026)
+        assert older.age == younger.age == 65
+        assert older.age_in(2026) == 56
+        assert younger.age_in(2026) == 26
+        assert older.age_in(2026) != younger.age_in(2026)
 
     def test_dp8_compose_through_data(self):
         """DP#8: Strategies and models are data objects, not subclasses."""
@@ -141,9 +169,32 @@ class TestDesignPrinciples:
         assert roc_rate == 0
 
     def test_dp28_eligibility_date_computed(self):
-        """DP#28: eligibility is date-computed, not a stored boolean."""
+        """DP#28: eligibility is date-computed, not a stored boolean.
+
+        Same shape as the DP#1 test: the pure function is necessary but not
+        sufficient, because a regression that STORES a boolean eligibility
+        flag would leave `is_retired` untouched and still pass (#425 review).
+        So it also asserts that no production member type carries a stored
+        eligibility flag -- the thing the principle forbids.
+        """
+        from countries.canada.retirement import RetirementState
+
         assert is_retired(1960, 65, 2025) is True
         assert is_retired(1960, 65, 2024) is False
+
+        fields = set(RetirementState.__dataclass_fields__)
+        for forbidden in ("is_retired", "retired", "is_cpp_eligible",
+                          "cpp_eligible", "is_oas_eligible", "oas_eligible"):
+            assert forbidden not in fields, (
+                f"RetirementState stores '{forbidden}', but DP#28 requires "
+                "eligibility to be date-computed, never a stored boolean"
+            )
+        # And the date drives it: the same birth year is eligible in one year
+        # and not the other, with nothing stored between the two calls.
+        state = RetirementState(birth_year=1960, year=2024)
+        assert is_retired(state.birth_year, 65, state.year) is False
+        state.year = 2025
+        assert is_retired(state.birth_year, 65, state.year) is True
 
     def test_dp30_simulator_models_consequences_not_decisions(self):
         """DP#30: Asset location recommendations model consequences."""

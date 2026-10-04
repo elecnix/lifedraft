@@ -62,6 +62,17 @@ BASELINE_PATH = os.path.join(HERE, "unreached_surface_baseline.json")
 
 SCOPED_MODULES = ("countries.canada.cpp_sharing", "countries.canada.retirement")
 
+# Used only when the baseline on disk has no "_README" key. Regeneration must
+# never be the thing that breaks, so the worst case is a less detailed README
+# rather than a KeyError (#425 review).
+_DEFAULT_README = (
+    "Unreached public top-level symbols, computed from "
+    "tests/architecture/call_graph.py. MONOTONIC: entries may be removed but "
+    "a NEW one fails the test. This is not an allowlist and cannot be grown to "
+    "make a build green. See "
+    "tests/architecture/test_unreached_public_symbols.py."
+)
+
 
 def unreached_public_symbols() -> dict[str, list[str]]:
     """Public top-level defs in SCOPED_MODULES with no production call path."""
@@ -84,9 +95,23 @@ def _load_baseline() -> dict[str, list[str]]:
     return {module: list(raw.get(module, [])) for module in SCOPED_MODULES}
 
 
+def _readme_text() -> str:
+    """The baseline's `_README`, or a default when the key is absent.
+
+    ``_load_baseline`` reads the module rows with ``raw.get(module, [])``, so
+    it tolerates a missing key. ``_update`` indexed ``["_README"]`` directly,
+    which meant a baseline without one made regeneration itself raise
+    KeyError -- the command you would reach for in order to FIX the baseline
+    was the thing that broke (#425 review). The two readers now agree.
+    """
+    with open(BASELINE_PATH, encoding="utf-8") as fh:
+        raw = json.load(fh)
+    return raw.get("_README", _DEFAULT_README)
+
+
 def _update() -> None:
     current = unreached_public_symbols()
-    payload = {"_README": json.load(open(BASELINE_PATH, encoding="utf-8"))["_README"]}
+    payload = {"_README": _readme_text()}
     payload.update(current)
     with open(BASELINE_PATH, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)

@@ -712,10 +712,16 @@ class RetirementState:
         # the caller never asked for.
         if not self.year:
             raise ValueError("RetirementState.year must be set before calling compute_taxable_income() (DP#9, DP#20)")
-        cpp = cpp_benefit(self.cpp_start_age, year=self.year) if self.age >= self.cpp_start_age else 0
-        oas = self.oas_annual if self.age >= 65 else 0
+        # DP#1: gate on the DERIVED age for this state's year, not the stored
+        # ``age``. ``age`` is marked deprecated on this class precisely because
+        # a caller that sets birth_year and does not refresh ``age`` would get a
+        # CPP amount for the wrong age -- or none at all (#425 review). The LIF
+        # term below already used age_in(year); these three now agree.
+        _age = self.age_in(self.year)
+        cpp = cpp_benefit(self.cpp_start_age, year=self.year) if _age >= self.cpp_start_age else 0
+        oas = self.oas_annual if _age >= 65 else 0
         rrif_income = rrif_withdrawal or rrif_minimum_withdrawal(
-            self.rrif_balance, self.age)
+            self.rrif_balance, _age)
         # LIF withdrawals are fully taxable as regular income (issue #230)
         lif_income = 0.0
         if self.lif_balance > 0 and self.lif_birth_year is not None:
@@ -765,15 +771,19 @@ class DrawdownOptimizer:
         needed = state.annual_expenses
         if not state.year:
             raise ValueError("RetirementState.year must be set before optimize_year() (DP#9, DP#20: year-versioned data)")
-        cpp = cpp_benefit(state.cpp_start_age, year=state.year) if state.age >= state.cpp_start_age else 0
+        # DP#1: derived age for this state's year, not the stored ``age``
+        # (deprecated on this class). Same reason as compute_taxable_income.
+        _state_age = state.age_in(state.year)
+        cpp = (cpp_benefit(state.cpp_start_age, year=state.year)
+               if _state_age >= state.cpp_start_age else 0)
 
         # DP#28: Use age-based OAS amount (75+ enhancement) and deferral
-        oas_for_age = oas_amount_for_age(state.age, year=state.year)
+        oas_for_age = oas_amount_for_age(_state_age, year=state.year)
         
         oas_info = oas_clawback(0, oas_amount=oas_for_age)  # Will be recalculated
 
         remaining_needed = needed - cpp
-        if state.age >= 65:
+        if _state_age >= 65:
             remaining_needed -= oas_for_age  # OAS covers some expenses
 
         # Try different drawdown strategies and pick the best
@@ -873,9 +883,13 @@ class DrawdownOptimizer:
         """Compute tax and OAS clawback cost for a withdrawal strategy."""
         # Taxable income
         rrif_income = withdrawals.get('rrif', 0)
-        cpp = cpp_benefit(state.cpp_start_age, year=state.year) if state.age >= state.cpp_start_age else 0
+        # DP#1: derived age for this state's year, not the stored ``age``
+        # (deprecated on this class). Same reason as compute_taxable_income.
+        _state_age = state.age_in(state.year)
+        cpp = (cpp_benefit(state.cpp_start_age, year=state.year)
+               if _state_age >= state.cpp_start_age else 0)
         # DP#28: Use age-based OAS (75+ enhancement)
-        oas = oas_amount_for_age(state.age, year=state.year) if state.age >= 65 else 0
+        oas = oas_amount_for_age(_state_age, year=state.year) if _state_age >= 65 else 0
 
         # Non-reg: capital gains on disposition
         non_reg_withdrawal = withdrawals.get('non_reg', 0)
