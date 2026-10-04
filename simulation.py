@@ -2691,13 +2691,37 @@ class FamilySimulation:
              _lp_rent_cca, _ls_rent_cca, _) = _rental_income_for(
                 cfg, self.start_year, primary_member, spouse_member,
                 state.jurisdiction_state.get('canada', {}).get('rental_ucc', {}))
-            _l_income_by_role, _l_loan_by_role = _adult_income_maps(
+            # Issue #289: the employee payroll premiums for the year-0 lump-sum
+            # slice, from the SAME helper the annual path calls, so the two
+            # cannot drift (DP#9). Year 0 has no retirement yet in the normal
+            # case, but a start_year at or past a member's retirement_age must
+            # not be charged employment premiums, so the flags are computed
+            # rather than assumed.
+            from countries.canada.retirement_transition import (
+                is_retired, DEFAULT_RETIREMENT_AGE,
+            )
+            p_retired_lump = is_retired(
+                primary_member.get('birth_year', 0),
+                primary_member.get('retirement_age', DEFAULT_RETIREMENT_AGE),
+                self.start_year) if primary_member else False
+            s_retired_lump = is_retired(
+                spouse_member.get('birth_year', 0),
+                spouse_member.get('retirement_age', DEFAULT_RETIREMENT_AGE),
+                self.start_year) if spouse_member else False
+            _payroll_lump = _payroll_contributions_by_role(
+                cfg, primary_member, spouse_member, self._primary_income,
+                self._spouse_income, self.start_year, salary_growth, 0,
+                p_retired_lump, s_retired_lump, self.tax_provider)
+            _l_income_by_role, _l_loan_by_role, _l_payroll_by_role = _adult_income_maps(
                 primary_income, spouse_income,
                 (_lp_loan_inc + _lp_rent_op, _lp_loan_ded + _lp_rent_ded + _lp_rent_cca),
                 (_ls_loan_inc + _ls_rent_op, _ls_loan_ded + _ls_rent_ded + _ls_rent_cca),
-                _extra_adult_specs(cfg, self.start_year, salary_growth, 0, lump_brackets))
+                _extra_adult_specs(cfg, self.start_year, salary_growth, 0,
+                                   lump_brackets, self.tax_provider),
+                _payroll_lump['primary'], _payroll_lump['spouse'])
             lump_taxable = _income_tax_by_adult(
-                cfg, _l_income_by_role, _l_loan_by_role, lump_brackets)
+                cfg, _l_income_by_role, _l_loan_by_role, lump_brackets,
+                _l_payroll_by_role)
 
             # Apply lump sum as year-0 allocation via simulate_year_pure
             lump_allocations = {
