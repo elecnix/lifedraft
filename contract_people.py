@@ -662,7 +662,14 @@ def _map_member(doc: Dict, person_id: str, role: str,
     # project cpp_income=0 — no Statement, no usable history, and no
     # pensionable incomes to estimate from. Younger earners without any
     # CPP source stay silent (intentional omit, DP#32).
-    if "cpp_monthly_estimated" not in member:
+    #
+    # Guarded on the ABSENCE OF A SOURCE, not on the absence of an amount.
+    # Those are different situations and the old guard conflated them: a
+    # person with a declared, usable series that modelled to $0 carries
+    # cpp_benefit_source but no cpp_monthly_estimated, and telling them they
+    # have "no usable earnings_history" is the opposite of the truth — they
+    # have one, it just earned nothing.
+    if "cpp_benefit_source" not in member and "cpp_monthly_estimated" not in member:
         age = _age_at(p.get("birth_date"), as_of)
         if age is not None and age >= 50:
             logger.warning(
@@ -675,6 +682,24 @@ def _map_member(doc: Dict, person_id: str, role: str,
                 "people[].earnings_history, or active employment incomes "
                 "(issues #389/#390).",
                 person_id, age,
+            )
+    elif "cpp_monthly_estimated" not in member:
+        # A source exists and produced no benefit. Not a missing input, so it
+        # is not the absence DP#32 asks us to be loud about — but silently
+        # modelling a near-retirement adult to a zero pension is exactly the
+        # kind of answer a reader should not have to discover, so it says so
+        # in its own words rather than borrowing the missing-input message.
+        age = _age_at(p.get("birth_date"), as_of)
+        if age is not None and age >= 50:
+            logger.warning(
+                "person %r (age %s) is near retirement and a CPP estimate WAS "
+                "built from %s, but it came out at $0.00/month, so "
+                "cpp_monthly_estimated is unset and cpp_income=0 for the "
+                "horizon. Check the declared earnings_history / income "
+                "amounts and dates; if this person does have contributory "
+                "earnings, a Service Canada / Retraite Québec Statement as "
+                "entitlements.cpp is the authoritative answer (issue #389).",
+                person_id, age, member.get("cpp_benefit_source"),
             )
 
     for cand in doc["decisions"]["retirement_age"]:  # both schema-required

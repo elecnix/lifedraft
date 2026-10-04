@@ -574,3 +574,72 @@ class HistoryPlusGrowth(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ZeroEstimateWarnsAsZeroNotAsMissingInput(unittest.TestCase):
+    """A modelled zero is not a missing input (issue #420 review).
+
+    The near-retirement warning used to fire on the absence of
+    ``cpp_monthly_estimated``. A person with a declared, usable series that
+    models to $0 carries ``cpp_benefit_source`` and no amount, so they were
+    told they had "no usable earnings_history" — the opposite of the truth.
+    """
+
+    def _doc(self, history):
+        from test_input_contract import _load_example, _two_generation_subset
+        doc = _two_generation_subset(_load_example())
+        p1 = next(p for p in doc["people"] if p["id"] == "p1")
+        p1.pop("entitlements", None)
+        benefits = p1.get("benefits") or {}
+        benefits.pop("cpp", None)
+        if benefits:
+            p1["benefits"] = benefits
+        else:
+            p1.pop("benefits", None)
+        if history is not None:
+            p1["earnings_history"] = history
+        # Issue #390: strip pensionable incomes too. Otherwise always-on
+        # estimation builds a series from them, sets a non-zero estimate, and
+        # silences the warning — which is the case these tests must NOT be
+        # exercising. Both tests need the estimate to come from the history
+        # (or from nothing at all).
+        for _inc in p1.get("incomes", []):
+            _inc["kind"] = "other"
+        # Age 55 as of the example's as_of — near retirement, so the warning
+        # is eligible to fire at all.
+        p1["birth_date"] = "1971-03-14"
+        return doc
+
+    def _warnings(self, doc):
+        import input_contract as ic
+        with self.assertLogs("contract_people", level="WARNING") as captured:
+            ic.to_internal_config(doc)
+        return "\n".join(captured.output)
+
+    def test_a_zero_estimate_is_reported_as_zero_not_as_a_missing_input(self):
+        """Declared and usable, but every year earned nothing.
+
+        Zero-income contributory years are a real case -- a career with no
+        pensionable earnings -- and the series is legitimately buildable, so
+        the only thing wrong with the member is that the estimate came out at
+        zero. That is NOT the same as having nothing to estimate from.
+        """
+        text = self._warnings(self._doc(
+            [{"year": y, "employment_income": 0} for y in (2010, 2011, 2012)]
+        ))
+        self.assertTrue(text.strip(), "no warning was emitted at all")
+        self.assertNotIn(
+            "no usable earnings_history", text,
+            "a person WITH a declared history was told they had none",
+        )
+        self.assertIn("came out at $0.00/month", text)
+
+    def test_no_source_at_all_still_warns_about_the_missing_input(self):
+        """The original message is unchanged where it actually applies."""
+        text = self._warnings(self._doc(None))
+        self.assertIn("no usable earnings_history", text)
+        self.assertNotIn("came out at $0.00/month", text)
+
+
+if __name__ == "__main__":
+    unittest.main()
