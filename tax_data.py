@@ -258,6 +258,28 @@ class TaxYearData:
     # Revenu Québec Schedule T (TP-1.D.T-V), line 45. Year-versioned (DP#20);
     # 0.0 for non-Quebec jurisdictions (the field is Quebec-specific).
     qc_tuition_credit_rate: float = 0.0
+    # ── First-home buyers' credits (issue #368) ──
+    # Federal home buyers' amount, CRA line 31270 / ITA s.118.05(3): $5,000
+    # before 2022 and $10,000 from 2022. Claimed at the year's LOWEST FEDERAL
+    # rate, which is already year-versioned on ``federal_brackets[0].rate``
+    # (0.15 for 2023/2024, 0.145 for 2025, 0.14 for 2026), so only the DOLLAR
+    # amount is stored here and the rate is read rather than hardcoded (DP#20).
+    home_buyers_amount: float = 0.0
+    # Quebec home buyers' tax credit, TP-1 line 396 (form TP-752.HA-V): a
+    # NON-REFUNDABLE maximum per qualifying home, limited to Quebec tax
+    # otherwise payable. $1,400 = 10,000 x 14%.
+    qc_home_buyers_credit_max: float = 0.0
+    # ── Quebec refundable credit for access to homeownership (2026+) ──
+    # Ministère des Finances bulletin 2026-2. Refundable, so paid even at zero
+    # Quebec tax. 100% of the first $5,000 of municipal transfer duties plus
+    # 25% of the next $3,500, then reduced by 2.35% of the basis of imposition
+    # above $750,000 (nil at $1,000,000). Zero before 2026: the credit starts
+    # with the 2026 taxation year (qualifying homes acquired after 2025-12-31).
+    qc_homeownership_credit_full_rate_band: float = 0.0   # duties refunded at 100% within this band
+    qc_homeownership_credit_partial_band: float = 0.0   # duties refunded at 25% within this band
+    qc_homeownership_credit_partial_rate: float = 0.0
+    qc_homeownership_credit_reduction_rate: float = 0.0  # of the basis above the threshold
+    qc_homeownership_credit_reduction_threshold: float = 0.0
     # ── Quebec work premium (prime au travail, refundable, issue #321) ──
     # Source: Revenu Québec, Work Premium Tax Credits; Québec Ministère des
     # Finances, Parameters of the Personal Income Tax System (general work premium).

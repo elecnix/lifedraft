@@ -1,0 +1,271 @@
+"""First-home buyers' tax credits (issue #368).
+
+A household can declare a first-home purchase through ``first_home_purchases[]``
+or buy a principal residence through ``properties[].purchase``. Until now the
+engine moved only the FHSA qualifying withdrawal and the Home Buyers' Plan
+from such a purchase -- **none of the tax credits were booked**, so every
+first-time buyer paid too much tax in the purchase year. For a Quebec
+household in 2024 that is up to **$2,652.50** of overstated cash; from 2026 a
+further up to **$5,875** of refundable relief.
+
+All three credits share one trigger, one eligibility test and one cap, so they
+live together here rather than being re-spelled by the federal and Quebec
+aggregators (DP#10).
+
+Verified statutory values, from primary sources:
+
+* **Federal Home Buyers' Amount**, CRA line 31270 / ITA s.118.05(3).
+  $10,000 for 2022 and later ($5,000 before), claimed at the year's lowest
+  federal rate, non-refundable. First-time means neither the buyer **nor the
+  spouse** lived in a home they owned in the purchase year or the four
+  preceding years. **The credit cannot be split unless both spouses are
+  eligible.**
+  https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/about-your-tax-return/tax-return/completing-a-tax-return/deductions-credits-expenses/line-31270-home-buyers-amount.html
+
+* **Quebec home buyers' tax credit**, TP-1 line 396 (form TP-752.HA-V).
+  Maximum $1,400 per qualifying home, non-refundable, limited to Quebec tax
+  otherwise payable, splittable among the eligible claimants.
+  https://www.revenuquebec.ca/documents/en/formulaires/tp/TP-752.HA-V(2024-10).pdf
+
+* **Quebec refundable credit for access to homeownership**, Ministère des
+  Finances bulletin 2026-2, from the 2026 taxation year. 100% of the first
+  $5,000 of municipal transfer duties plus 25% of the next $3,500 (maximum
+  $5,875), reduced by 2.35% of the basis of imposition above $750,000 so it
+  is nil at $1,000,000. Paid even when Quebec tax is zero.
+  https://cdn-contenu.quebec.ca/cdn-contenu/adm/min/finances/publications-adm/Bulletins/EN/BULEN_2026-2.pdf
+
+DP#3: pure functions. DP#20: every amount is year-versioned data, read from the
+provider -- no rate or ceiling is hardcoded here.
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+from tax_data import TaxDataProvider
+
+# The four preceding calendar years are part of the first-time test for both
+# the federal amount and the Quebec refundable credit. Named so the window is
+# stated once rather than restated at each call site.
+FIRST_TIME_LOOKBACK_YEARS = 4
+
+# The CRA lists the federal amount as $5,000 before 2022 and $10,000 from 2022
+# (bulletin: "Amounts for prior years"). Carried as DATA on the year record;
+# this is only the pre-2022 default used when a record predates the change and
+# therefore carries no value.
+PRE_2022_HOME_BUYERS_AMOUNT = 5_000.0
+
+
+def _federal_record(year: int, provider: Optional[TaxDataProvider]):
+    if provider is None:
+        provider = TaxDataProvider()
+    return provider.get_year_data(year, "canada", "federal")
+
+
+def _is_quebec(province: Optional[str]) -> bool:
+    return province is not None and province.lower() in ("quebec", "qc")
+
+
+def _quebec_record(year: int, provider: TaxDataProvider):
+    """The Quebec year record, for either the long or the short province key.
+
+    The contract accepts both ``quebec`` and ``qc`` for a province, and the
+    provider registers the long key, so passing the caller's string through
+    unchanged would look up a record that does not exist for the short form.
+    """
+    return provider.get_year_data(year, "canada", "quebec")
+
+
+def lowest_federal_rate(year: int,
+                        provider: Optional[TaxDataProvider] = None) -> float:
+    """The year's lowest federal rate -- the rate the CRA credits the amount at.
+
+    Read from ``federal_brackets[0].rate`` rather than hardcoded: the repo
+    already carries it year-versioned, and it moves (0.15 for 2023/2024, 0.145
+    for 2025, 0.14 for 2026). A literal here would be wrong the year it changed.
+    """
+    record = _federal_record(year, provider)
+    brackets = getattr(record, "federal_brackets", None)
+    if not brackets:
+        raise ValueError(
+            f"No federal brackets are registered for {year}, so the home "
+            f"buyers' amount cannot be priced. Load the year-versioned federal "
+            f"record rather than assuming a rate (DP#32)."
+        )
+    return float(brackets[0].rate)
+
+
+def home_buyers_amount_for_year(year: int,
+                                provider: Optional[TaxDataProvider] = None) -> float:
+    """The federal DOLLAR amount claimable for a qualifying home in ``year``.
+
+    $10,000 from 2022, $5,000 before. Data, not a literal (DP#20).
+    """
+    record = _federal_record(year, provider)
+    amount = getattr(record, "home_buyers_amount", 0.0) or 0.0
+    if amount:
+        return float(amount)
+    # A record that predates the 2022 change carries no value; the CRA's
+    # published amount for those years is the smaller one.
+    return PRE_2022_HOME_BUYERS_AMOUNT if year < 2022 else 0.0
+
+
+def federal_home_buyers_amount(
+    year: int,
+    province: Optional[str] = None,
+    claimed_amount: Optional[float] = None,
+    provider: Optional[TaxDataProvider] = None,
+) -> float:
+    """The federal home buyers' amount, as a reduction of FEDERAL tax.
+
+    ``claimed_amount`` is the dollar amount this claimant claims for the home
+    (the full year's amount, or a share when both spouses are eligible and the
+    claim is split). The CRA caps the total across all claimants for one home
+    at the year's maximum; the cap is enforced by the caller, which knows how
+    many claimants there are.
+
+    **A Quebec resident's federal credit is reduced by the provincial
+    abatement.** The CRA computes the refundable Quebec abatement on line
+    42900 -- *basic* federal tax, i.e. after the federal non-refundable
+    credits (ITA s.120(4)). A federal credit therefore shrinks the 16.5%
+    abatement by 16.5% of the credit, so the credit is worth
+    ``rate x (1 - 0.165)`` here, not ``rate``. This is the same statutory
+    effect issue #350 fixed for the credit ordering, and the 2024 figure the
+    issue states ($1,252.50 = 10,000 x 15% x 0.835) depends on it.
+
+    Returns 0 for a household that declared no purchase (the caller simply
+    does not invoke this), and 0 outside Quebec's abatement.
+    """
+    if claimed_amount is None:
+        claimed_amount = home_buyers_amount_for_year(year, provider)
+    if claimed_amount <= 0:
+        return 0.0
+    credit = claimed_amount * lowest_federal_rate(year, provider)
+
+    if _is_quebec(province):
+        if provider is None:
+            provider = TaxDataProvider()
+        try:
+            abatement = float(_quebec_record(year, provider).provincial_abatement)
+        except (ValueError, IndexError, AttributeError):
+            # DP#32: with no province record we cannot know the abatement.
+            # Returning the UN-abatemented figure would overstate a Quebec
+            # resident's credit by 16.5%, and returning zero would understate
+            # it. Refuse rather than guess -- the caller can report it.
+            raise ValueError(
+                f"No Quebec record for {year}, so the provincial abatement on "
+                f"the federal home buyers' amount cannot be determined. Load "
+                f"the year-versioned Quebec record rather than crediting the "
+                f"un-abatemented amount (DP#32)."
+            )
+        credit *= (1.0 - abatement)
+    return credit
+
+
+def quebec_home_buyers_credit(
+    year: int,
+    quebec_tax_payable: float = 0.0,
+    claimed_amount: Optional[float] = None,
+    provider: Optional[TaxDataProvider] = None,
+) -> float:
+    """The Quebec home buyers' tax credit (TP-1 line 396).
+
+    A **non-refundable** maximum per qualifying home, limited to Quebec tax
+    otherwise payable -- so the credit can never exceed what this claimant
+    actually owes. Splittable among the eligible claimants for the same home;
+    ``claimed_amount`` is this claimant's share of the year's maximum.
+
+    $1,400 for 2024 (10,000 x 14%), read from the Quebec record.
+    """
+    if provider is None:
+        provider = TaxDataProvider()
+    try:
+        maximum = float(_quebec_record(year, provider).qc_home_buyers_credit_max)
+    except (ValueError, IndexError, AttributeError):
+        maximum = 0.0
+    if maximum <= 0:
+        return 0.0
+
+    share = maximum if claimed_amount is None else min(float(claimed_amount), maximum)
+    if share <= 0:
+        return 0.0
+    # Non-refundable: bounded by the tax this claimant actually owes.
+    return min(share, max(0.0, quebec_tax_payable))
+
+
+def quebec_homeownership_refundable_credit(
+    year: int,
+    transfer_duties: float = 0.0,
+    duty_basis: float = 0.0,
+    provider: Optional[TaxDataProvider] = None,
+) -> float:
+    """The Quebec refundable credit for access to homeownership (2026+).
+
+    **Refundable**, so unlike the two non-refundable credits it is paid even
+    when Quebec tax is zero.
+
+        credit = 100% of the first $5,000 of municipal transfer duties
+               + 25%  of the next $3,500          (maximum $5,875)
+
+    then reduced by ``2.35%`` of the duty basis above ``$750,000``, so the
+    credit is nil once the basis reaches $1,000,000.
+
+    Every band, rate and threshold is year-versioned data. A year with no
+    populated bands means the credit does not apply (it starts in 2026), which
+    is a genuine zero rather than a missing one.
+    """
+    if provider is None:
+        provider = TaxDataProvider()
+    try:
+        record = _quebec_record(year, provider)
+    except (ValueError, IndexError, AttributeError):
+        return 0.0
+
+    full_band = float(getattr(record, "qc_homeownership_credit_full_rate_band", 0.0) or 0.0)
+    if full_band <= 0:
+        return 0.0  # the credit does not exist for this taxation year
+
+    partial_band = float(getattr(record, "qc_homeownership_credit_partial_band", 0.0) or 0.0)
+    partial_rate = float(getattr(record, "qc_homeownership_credit_partial_rate", 0.0) or 0.0)
+    reduction_rate = float(getattr(record, "qc_homeownership_credit_reduction_rate", 0.0) or 0.0)
+    threshold = float(getattr(record, "qc_homeownership_credit_reduction_threshold", 0.0) or 0.0)
+
+    duties = max(0.0, float(transfer_duties))
+    credit = min(duties, full_band)                       # 100% of the first band
+    excess = duties - full_band
+    if excess > 0 and partial_band > 0:
+        credit += min(excess, partial_band) * partial_rate   # 25% of the next band
+
+    if duty_basis > threshold > 0:
+        credit -= (duty_basis - threshold) * reduction_rate
+    return max(0.0, credit)
+
+
+def is_first_home_buyer(
+    birth_year: Optional[int],
+    year: int,
+    spouse_birth_year: Optional[int] = None,
+    prior_home_years: Optional[set] = None,
+) -> bool:
+    """First-time-buyer test over the statutory four-year window.
+
+    The CRA (s.118.05(3)) and the Quebec bulletin (2026-2) both test the
+    **spouse** as well as the buyer: neither the buyer nor the spouse may have
+    lived in a home they owned in the purchase year or the four preceding
+    years. ``countries/canada/fhsa.py``'s ``FHSA.is_first_home_buyer`` is an
+    FHSA eligibility predicate and does not carry the spouse test, so this is
+    a separate, wider predicate rather than a reuse.
+
+    ``prior_home_years`` is the set of calendar years in which the household
+    declares a prior owned-and-occupied home. **Absence is not evidence**:
+    ``None`` means "not declared", which is not the same as "declared none".
+    An undeclared history is treated as qualifying -- a household that never
+    declared a prior purchase is asserting it does not have one -- but the
+    caller must report the difference rather than present it as verified.
+    """
+    if prior_home_years is None:
+        return True
+    window_start = year - FIRST_TIME_LOOKBACK_YEARS
+    # The purchase year itself is in the window too: the test covers the year
+    # of acquisition and the four preceding years.
+    window = set(range(window_start, year + 1))
+    return not (prior_home_years & window)

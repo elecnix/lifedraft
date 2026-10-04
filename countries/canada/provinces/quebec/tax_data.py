@@ -101,6 +101,21 @@ class QuebecTaxData:
             qc_charitable_donation_rate_top=0.2575,
             qc_charitable_donation_top_threshold=132245,  # top bracket floor 2026
             qc_medical_expense_threshold_pct=0.03,
+            # Issue #368: TP-1 line 396 (form TP-752.HA-V) -- NON-REFUNDABLE
+            # maximum per qualifying home, limited to Quebec tax otherwise
+            # payable. $1,400 = 10,000 x 14%.
+            qc_home_buyers_credit_max=1400,
+            # Refundable credit for access to homeownership, Ministere des
+            # Finances bulletin 2026-2. Only the 2026 record carries these: the
+            # credit starts with the 2026 taxation year (qualifying home
+            # acquired after December 31, 2025). Earlier years keep 0.0, which
+            # is a GENUINE zero -- the program does not exist for them, so the
+            # absence is not a missing datum (DP#32).
+            qc_homeownership_credit_full_rate_band=5000,
+            qc_homeownership_credit_partial_band=3500,
+            qc_homeownership_credit_partial_rate=0.25,
+            qc_homeownership_credit_reduction_rate=0.0235,
+            qc_homeownership_credit_reduction_threshold=750000,
             # ── Senior assistance tax credit (Parameters 2026) ──
             qc_senior_assistance_max_per_person=2000,
             qc_senior_assistance_threshold_single=28405,
@@ -195,6 +210,10 @@ class QuebecTaxData:
             qc_charitable_donation_rate_top=0.2575,
             qc_charitable_donation_top_threshold=129590,  # top bracket floor 2025
             qc_medical_expense_threshold_pct=0.03,
+            # Issue #368: TP-1 line 396 (form TP-752.HA-V) -- NON-REFUNDABLE
+            # maximum per qualifying home, limited to Quebec tax otherwise
+            # payable. $1,400 = 10,000 x 14%.
+            qc_home_buyers_credit_max=1400,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
             # ── Senior assistance tax credit (Parameters 2025) ──
             qc_senior_assistance_max_per_person=2000,
@@ -277,6 +296,10 @@ class QuebecTaxData:
             qc_charitable_donation_rate_low=0.20,
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
+            # Issue #368: TP-1 line 396 (form TP-752.HA-V) -- NON-REFUNDABLE
+            # maximum per qualifying home, limited to Quebec tax otherwise
+            # payable. $1,400 = 10,000 x 14%.
+            qc_home_buyers_credit_max=1400,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
             # ── RESP/CESG/QESI/CLB thresholds (DP#12, DP#20) ──
             cesg_first_threshold=55867,
@@ -336,6 +359,10 @@ class QuebecTaxData:
             qc_charitable_donation_rate_low=0.20,
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
+            # Issue #368: TP-1 line 396 (form TP-752.HA-V) -- NON-REFUNDABLE
+            # maximum per qualifying home, limited to Quebec tax otherwise
+            # payable. $1,400 = 10,000 x 14%.
+            qc_home_buyers_credit_max=1400,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
             source="fallback",
         )
