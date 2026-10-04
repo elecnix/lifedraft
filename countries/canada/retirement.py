@@ -230,7 +230,11 @@ def get_cpp_max_benefit_65(year: int) -> float:
 
 # DP#20: Year-versioned CPP/OAS defaults (fallback per DP#13)
 CPP_OAS_BY_YEAR = {
-    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 66600, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 188, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
+    # 2023 carries NO cpp2_max_benefit: CPP2 contributions began 2024-01-01, so
+    # a 2023 row that names one is carrying the 2024 figure backwards. The band
+    # (cpp2_max_pensionable == cpp_max_pensionable) is empty, which is the
+    # honest representation of "no second ceiling that year".
+    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 66600, "cpp_max_benefit_65": 14010, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
     2024: {"cpp_max_pensionable": 68500, "cpp2_max_pensionable": 73300, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8291, "oas_annual_max_75plus": 9118, "oas_clawback_threshold": 87068, "gis_max_single": 1616, "gis_max_coupled": 9739},
     2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8381, "oas_annual_max_75plus": 9218, "oas_clawback_threshold": 90997, "gis_max_single": 1657, "gis_max_coupled": 9987},
     2026: {"cpp_max_pensionable": 74600, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 18092, "cpp2_max_benefit": 800, "oas_annual_max": 8908, "oas_annual_max_75plus": 9800, "oas_clawback_threshold": 95323, "gis_max_single": 1726, "gis_max_coupled": 10384},

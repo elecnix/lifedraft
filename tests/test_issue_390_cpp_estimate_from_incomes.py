@@ -533,11 +533,25 @@ class QppMaxBenefitFallback(unittest.TestCase):
         from countries.canada.cpp_data import max_benefit_65_for_year
         # Exact table year.
         self.assertEqual(max_benefit_65_for_year(2026, plan="qpp"), 17334)
-        # Before QPP table → fall through to CPP historical (not 2023 QPP).
-        before = max_benefit_65_for_year(2020, plan="qpp")
-        cpp_2020ish = max_benefit_65_for_year(2020, plan="cpp")
-        self.assertEqual(before, cpp_2020ish)
-        # Future year after table → latest QPP row.
+        # Before the QPP table starts (2023) -> the nearest FEDERAL row, which
+        # for 2020 is the 2023 row's 14010. Pinned as a CONCRETE number: an
+        # earlier version compared the QPP lookup to the CPP lookup, so it
+        # passed for any rule the interface was self-consistent under and
+        # could not detect the fallback changing (issue #422 review).
+        self.assertEqual(max_benefit_65_for_year(2020, plan="qpp"), 14010)
+        # The same year under the CPP plan answers identically, which is what
+        # "falls through" means -- asserted alongside the literal above so the
+        # intent is readable, not as the only evidence.
+        self.assertEqual(
+            max_benefit_65_for_year(2020, plan="qpp"),
+            max_benefit_65_for_year(2020, plan="cpp"),
+        )
+        # A year inside the QPP table is NOT the federal figure.
+        self.assertNotEqual(
+            max_benefit_65_for_year(2024, plan="qpp"),
+            max_benefit_65_for_year(2024, plan="cpp"),
+        )
+        # Future year after table -> latest QPP row carried forward.
         self.assertEqual(max_benefit_65_for_year(2035, plan="qpp"), 17334)
 
 

@@ -186,13 +186,18 @@ def ympe_for_year(year: int) -> float:
 def yampe_for_year(year: int) -> float:
     """YAMPE (the second ceiling) for ``year``.
 
-    Equal to :func:`ympe_for_year` before 2024 — CPP2 did not exist, so there
-    was no band to contribute in and a wider ceiling would invent one.
+    A published ``cpp2_max_pensionable`` row always wins. Only a year with no
+    such row *and* earlier than :data:`CPP2_START_YEAR` falls back to the
+    YMPE — CPP2 did not exist then, so there was no band to contribute in and
+    a wider ceiling would invent one. Reading the year before the table would
+    discard a real row if one were ever published for a pre-2024 year.
     """
-    ympe = ympe_for_year(year)
+    rows = _federal_rows("cpp2_max_pensionable")
+    if year in rows:
+        return float(rows[year])
     if year < CPP2_START_YEAR:
-        return ympe
-    return _nearest(_federal_rows("cpp2_max_pensionable"), year, "YAMPE")
+        return ympe_for_year(year)
+    return _nearest(rows, year, "YAMPE")
 
 
 def max_benefit_65_for_year(year: int, plan: str = "cpp") -> float:
@@ -218,10 +223,19 @@ def max_benefit_65_for_year(year: int, plan: str = "cpp") -> float:
 
 
 def max_cpp2_benefit_for_year(year: int) -> float:
-    """Maximum annual CPP2 benefit at 65 for ``year`` (0 before 2024)."""
+    """Maximum annual CPP2 benefit at 65 for ``year``.
+
+    A published ``cpp2_max_benefit`` row always wins. A year with no such row
+    *and* earlier than :data:`CPP2_START_YEAR` is 0.0 — CPP2 did not exist,
+    so no enhancement could have been earned. The year test is applied *after*
+    the table so a published pre-2024 row is never discarded for zero.
+    """
+    rows = _federal_rows("cpp2_max_benefit")
+    if year in rows:
+        return float(rows[year])
     if year < CPP2_START_YEAR:
         return 0.0
-    return _nearest(_federal_rows("cpp2_max_benefit"), year, "CPP2 max benefit")
+    return _nearest(rows, year, "CPP2 max benefit")
 
 
 def cpp_parameters(year: int, plan: str = "cpp") -> CPPParameters:
