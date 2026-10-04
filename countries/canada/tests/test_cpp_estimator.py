@@ -393,6 +393,150 @@ def test_member_auto_estimate_age_70_stores_age_65():
     assert abs(annual - expected_annual) < 0.01
 
 
+# ── Plan resolution + the one-call person estimate (issue #364) ──────────────
+#
+# The ingestion layer used to decide all of this itself. These tests pin the
+# decisions to the module that now owns them: which plan a province runs, where
+# the contributory period ends, the base+CPP2 aggregation, the provenance
+# labels, and the two absences it refuses on.
+
+
+def test_resolve_plan_is_a_lookup_not_a_ternary_in_the_caller():
+    """Quebec runs QPP; everywhere else runs CPP; casing is not a decision."""
+    from countries.canada.cpp_estimator import resolve_plan
+
+    assert resolve_plan("quebec") == "qpp"
+    assert resolve_plan("Quebec") == "qpp"
+    assert resolve_plan("  quebec ") == "qpp"
+    assert resolve_plan("ontario") == "cpp"
+    assert resolve_plan("british columbia") == "cpp"
+
+
+def test_contributory_end_age_defaults_to_65_and_follows_an_early_retirement():
+    """No modeled retirement -> 65. A modeled retirement before 65 shortens
+    the period; one AFTER 65 must not lengthen it past 65."""
+    from countries.canada.cpp_estimator import contributory_end_age
+
+    assert contributory_end_age(None) == 65
+    assert contributory_end_age(60) == 60
+    assert contributory_end_age(70) == 65
+
+
+def test_estimate_person_cpp_answers_qpp_and_cpp_from_one_call():
+    """Same earnings, same arguments, one differing province -> two answers.
+
+    This is the whole point of the move: the CALLER no longer picks a plan.
+    """
+    from countries.canada.cpp_estimator import estimate_person_cpp
+
+    incomes = [{"kind": "employment", "from": "2015-01-01", "amount": 120_000}]
+    common = dict(
+        birth_year=1960,
+        incomes=incomes,
+        salary_growth=0.0,
+        as_of_year=2026,
+        as_of_date="2026-06-30",
+    )
+    qc = estimate_person_cpp(province="quebec", **common)
+    on = estimate_person_cpp(province="ontario", **common)
+
+    assert qc.refusals == [] and on.refusals == []
+    assert qc.plan == "qpp" and on.plan == "cpp"
+    assert qc.monthly > 0
+    # 2026 QPP max (17334) != CPP max (18092): the two plans diverge.
+    assert qc.monthly != on.monthly
+
+
+def test_estimate_person_cpp_refuses_a_missing_birth_year():
+    """No birth year is not a zero: it is a refusal (DP#1/DP#32)."""
+    from countries.canada.cpp_estimator import estimate_person_cpp
+
+    result = estimate_person_cpp(
+        province="ontario",
+        birth_year=None,
+        incomes=[{"kind": "employment", "from": "2015-01-01", "amount": 90_000}],
+        salary_growth=0.0,
+        as_of_year=2026,
+    )
+    assert [r.reason for r in result.refusals] == ["missing_birth_year"]
+    assert result.refusals[0].missing == "birth_year"
+    assert "birth year" in result.refusals[0].detail
+
+
+def test_estimate_person_cpp_refuses_a_missing_province():
+    """No province is not a silent CPP default: it is a refusal (DP#32)."""
+    from countries.canada.cpp_estimator import estimate_person_cpp
+
+    result = estimate_person_cpp(
+        province=None,
+        birth_year=1960,
+        incomes=[{"kind": "employment", "from": "2015-01-01", "amount": 90_000}],
+        salary_growth=0.0,
+        as_of_year=2026,
+    )
+    assert [r.reason for r in result.refusals] == ["missing_province"]
+    assert result.refusals[0].missing == "province"
+    # A refusal names no plan: nothing was decided.
+    assert result.plan == ""
+
+
+def test_estimate_person_cpp_labels_provenance_on_an_empty_series():
+    """A pensionable source that yields no projectable year is an answer of
+    ZERO with a stated provenance -- not a refusal, and not silence."""
+    from countries.canada.cpp_estimator import estimate_person_cpp
+
+    result = estimate_person_cpp(
+        province="ontario",
+        birth_year=1960,
+        # A history leaf with no usable year/amount projects nothing.
+        earnings_history=[{}],
+        salary_growth=0.0,
+        as_of_year=2026,
+    )
+    assert result.refusals == []
+    assert result.monthly == 0.0
+    assert result.source == "estimated_from_earnings_history"
+    assert result.earnings == []
+
+
+def test_estimate_person_cpp_source_follows_the_declared_input():
+    """History present -> the history label; incomes only -> the incomes label."""
+    from countries.canada.cpp_estimator import estimate_person_cpp
+
+    history = [{"year": 1990 + i, "employment_income": 100_000}
+               for i in range(30)]
+    from_history = estimate_person_cpp(
+        province="ontario", birth_year=1960, earnings_history=history,
+        salary_growth=0.0, as_of_year=2026,
+    )
+    from_incomes = estimate_person_cpp(
+        province="ontario", birth_year=1960,
+        incomes=[{"kind": "employment", "from": "2015-01-01", "amount": 90_000}],
+        salary_growth=0.0, as_of_year=2026,
+    )
+    assert from_history.source == "estimated_from_earnings_history"
+    assert from_incomes.source == "estimated_from_incomes"
+
+
+def test_estimate_person_cpp_sums_base_and_cpp2_through_one_rule():
+    """The monthly it returns is exactly the base+CPP2 aggregation."""
+    from countries.canada.cpp_estimator import (
+        age_65_monthly_total, compute_benefit_estimate, estimate_person_cpp,
+    )
+
+    history = [{"year": 2000 + i, "employment_income": 150_000}
+               for i in range(25)]
+    result = estimate_person_cpp(
+        province="ontario", birth_year=1960, earnings_history=history,
+        salary_growth=0.0, as_of_year=2026,
+    )
+    entries = list(result.earnings)
+    direct = compute_benefit_estimate(entries, start_age=65, plan="cpp")
+    assert result.monthly == age_65_monthly_total(direct)
+    # The CPP2 tier is included, not discarded (issue #388).
+    assert direct.cpp2_age_65_monthly > 0
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])
