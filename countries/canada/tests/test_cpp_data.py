@@ -152,6 +152,39 @@ class TestLoudFailures(unittest.TestCase):
         self.assertIn("2031", str(ctx.exception))
         self.assertNotIn(2031, qpp_max_benefit_65_years())
 
+    def test_a_negative_qpp_maximum_is_refused_and_says_so(self):
+        """A negative maximum is CORRUPT data, not absent data.
+
+        The guard is ``not value > 0``, so it fires on a negative as well as a
+        zero. The message has to say which: telling the reader a negative
+        figure "carries no maximum" sends them looking for a missing datum
+        instead of a bad one (#422 review).
+        """
+        class Record:
+            year = 2032
+            qpp_max_benefit_65 = -1.0
+
+        with self.assertRaises(ValueError) as ctx:
+            register_qpp_max_benefit_65([Record()])
+        message = str(ctx.exception)
+        self.assertIn("2032", message)
+        self.assertIn("corrupt", message)
+        self.assertIn("-1.0", message)
+        self.assertNotIn("absent", message)
+        self.assertNotIn(2032, qpp_max_benefit_65_years())
+
+    def test_the_zero_message_says_absent_not_corrupt(self):
+        """The two branches must not report the same diagnosis."""
+        class Record:
+            year = 2033
+            qpp_max_benefit_65 = 0.0
+
+        with self.assertRaises(ValueError) as ctx:
+            register_qpp_max_benefit_65([Record()])
+        message = str(ctx.exception)
+        self.assertIn("absent", message)
+        self.assertNotIn("corrupt", message)
+
 
 class TestRegistration(unittest.TestCase):
     def test_quebec_records_are_the_registered_source(self):
