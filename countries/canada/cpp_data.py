@@ -94,18 +94,24 @@ def register_qpp_max_benefit_65(records: Iterable) -> None:
         records: Quebec ``TaxYearData`` records (e.g. ``QuebecTaxData.all_years()``).
 
     Raises:
-        ValueError: a record carries no QPP maximum. Registering a zero would
-            make a ``plan="qpp"`` estimate silently price on the CPP maximum
-            (DP#32).
+        ValueError: a record carries a QPP age-65 maximum that is not
+            positive — absent (zero) or corrupt (negative). Registering a
+            zero would make a ``plan="qpp"`` estimate silently price on the
+            CPP maximum (DP#32).
     """
     for record in records:
         value = record.qpp_max_benefit_65
         if not value > 0:
+            # The message names the actual value and says which side of zero it
+            # fell on: a bare "carries no maximum" misdescribes a NEGATIVE
+            # value, which is corrupt data rather than absent data, and points
+            # the reader at the wrong fix.
+            kind = "absent (zero)" if value == 0 else "corrupt (negative)"
             raise ValueError(
-                f"Quebec {record.year} record carries no QPP age-65 maximum "
-                f"({value!r}). Refusing to register zero: a QPP estimate "
-                f"priced on the CPP maximum is a silent swap of programs "
-                f"(DP#32)."
+                f"Quebec {record.year} record has a QPP age-65 maximum that is "
+                f"{kind}: {value!r}. Refusing to register a non-positive "
+                f"maximum: a QPP estimate priced on the CPP maximum is a "
+                f"silent swap of programs (DP#32)."
             )
         _QPP_MAX_BENEFIT_65_BY_YEAR[int(record.year)] = float(value)
 
