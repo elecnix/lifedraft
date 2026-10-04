@@ -850,7 +850,9 @@ def _declared_resp_opening(config, has_history: List[bool], composition: Dict) -
 
     Refuses (ValueError), never repairs: a config where only SOME children
     carry a history (the missing ones would silently fall back to a share of
-    an even split); per-child balances that do not add up to
+    an even split); a child carrying a history but no ``resp_opening`` (the
+    two are read as one fact, so the refusal names both rather than raising a
+    bare KeyError); per-child balances that do not add up to
     ``resp_current_balance``; per-child buckets that do not add up to a
     ``resp_composition`` that is present. Any of these means the per-child
     figures and the household totals were built from different facts --
@@ -864,6 +866,15 @@ def _declared_resp_opening(config, has_history: List[bool], composition: Dict) -
             f"missing for {missing}. Either every child's history comes from the "
             f"input contract or none does -- a mix would split the undeclared "
             f"children's share of the plan evenly and silently.")
+    absent_opening = [ch.get('name', f'child {i}') for i, ch in
+                      enumerate(config.children) if 'resp_opening' not in ch]
+    if absent_opening:
+        raise ValueError(
+            f"Children {absent_opening} carry a declared RESP history but no "
+            f"'resp_opening' (issue #295). The two are written together by the "
+            f"contract loader; one without the other means the per-child "
+            f"lifetime history and what is in the plan for that child were built "
+            f"from different facts (DP#18), which cannot be told apart.")
     openings = [ch['resp_opening'] for ch in config.children]
     balances = [o['balance'] for o in openings]
     contributions = [o['contributions'] for o in openings]

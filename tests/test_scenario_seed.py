@@ -520,6 +520,13 @@ class TestRESPAge17(unittest.TestCase):
 
         # Young child: cesg_eligible returns True
         self.assertTrue(child_young.cesg_eligible(2026))
+        # Age 17: the LAST year CESG is payable, and the only age at which the
+        # two-prong 16-17 test gates it. Asserted on both methods, because a
+        # regression that flipped either branch passes a test that constructs
+        # the child and never asks about it.
+        self.assertTrue(child_16.cesg_eligible(2026))
+        self.assertFalse(child_16.cesg_16_17_eligible(2026))
+        self.assertTrue(child_16.cesg_16_17_eligible(2027))
         # Age 18+: not eligible
         self.assertFalse(child_18.cesg_eligible(2026))
 

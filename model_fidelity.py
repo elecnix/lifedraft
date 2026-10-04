@@ -1663,8 +1663,31 @@ register(Approximation(
 # approximations remain, each switched on by the config shape that triggers it.
 
 def _resp_children(ctx: FidelityContext) -> List[dict]:
-    # A config with no family block has no children, hence no RESP caveat.
-    return ctx.cfg.get('family', {}).get('children', [])
+    # A config with no family block has no children, hence no RESP caveat --
+    # and neither has one whose family block is not an object. The isinstance
+    # guard is _adult_rrsp_members' (below): these predicates run for every
+    # run through is_active, which SWALLOWS a raised predicate and reports it
+    # as active, so a crash here is not a loud failure but a caveat that does
+    # not apply -- the false disclosure this module treats as corrosive.
+    family = ctx.cfg.get('family')
+    if not isinstance(family, dict):
+        return []
+    children = family.get('children')
+    return children if isinstance(children, list) else []
+
+
+def _resp_history(ch: dict) -> Optional[Dict]:
+    """A child's declared RESP history, or None when it declares none.
+
+    A history that is present but omits a figure reads as undeclared for the
+    purposes of the caveat that needed the figure: the loader
+    (resp_rules.resp_child_from_config) indexes every key and refuses such a
+    history anyway, and resp_grant_history_not_declared discloses the missing
+    declaration. Reading it through .get here keeps a caveat surface from
+    raising where the sibling predicate already treats absence as absence.
+    """
+    history = ch.get('resp_history') if isinstance(ch, dict) else None
+    return history if isinstance(history, dict) else None
 
 
 def _resp_split_evenly_applies(ctx: FidelityContext) -> bool:
@@ -1743,9 +1766,10 @@ def _resp_over_limit_children(ctx: FidelityContext) -> List[tuple]:
     limit = RESPCalculator.RESP_LIFETIME_CONTRIBUTION_LIMIT
     out = []
     for i, ch in enumerate(_resp_children(ctx)):
-        history = ch['resp_history'] if 'resp_history' in ch else None
-        if history is not None and history['contributions_total'] > limit:
-            out.append((_resp_child_label(ch, i), history['contributions_total'] - limit))
+        history = _resp_history(ch)
+        total = history.get('contributions_total') if history else None
+        if total is not None and total > limit:
+            out.append((_resp_child_label(ch, i), total - limit))
     return out
 
 
@@ -1776,8 +1800,8 @@ register(Approximation(
 
 
 def _resp_family_plan_applies(ctx: FidelityContext) -> bool:
-    return any(ch['resp_history']['family_plan'] for ch in _resp_children(ctx)
-               if 'resp_history' in ch and ch['resp_history'] is not None)
+    return any(_resp_history(ch).get('family_plan')
+               for ch in _resp_children(ctx) if _resp_history(ch))
 
 
 register(Approximation(
@@ -1800,10 +1824,23 @@ register(Approximation(
 
 def _resp_quebec_children(ctx: FidelityContext) -> List[dict]:
     # A child's own province wins; otherwise the household's (tax.province,
-    # 'quebec' when absent -- the same resolution config_serde applies).
-    household = ctx.cfg.get('tax', {}).get('province', 'quebec')
-    return [ch for ch in _resp_children(ctx)
-            if (ch['province'] if 'province' in ch else household).lower() in ('quebec', 'qc')]
+    # 'quebec' when absent -- the same resolution config_serde applies at
+    # config_serde.py:172, so this caveat tracks what the engine will compute).
+    # A province that is present but not a string names no province: it
+    # resolves to the household's rather than raising, because a raise here
+    # is disclosed as a QESI approximation this run does not make.
+    tax = ctx.cfg.get('tax')
+    household = tax.get('province', 'quebec') if isinstance(tax, dict) else 'quebec'
+    if not isinstance(household, str):
+        household = 'quebec'
+    out = []
+    for ch in _resp_children(ctx):
+        province = ch.get('province') if isinstance(ch, dict) else None
+        if not isinstance(province, str):
+            province = household
+        if province.lower() in ('quebec', 'qc'):
+            out.append(ch)
+    return out
 
 
 def _resp_qesi_rules_simplified_applies(ctx: FidelityContext) -> bool:

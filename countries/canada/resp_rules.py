@@ -366,7 +366,7 @@ def resp_child_from_config(child_cfg: Dict, start_year: int,
             f"RESP beneficiary {name!r} has neither 'birth_year' nor 'age': "
             f"its CESG/QESI eligibility cannot be dated (DP#1). Declare the "
             f"child's birth date.")
-    province = child_cfg['province'] if 'province' in child_cfg else default_province
+    province = child_cfg['province'] if child_cfg.get('province') is not None else default_province
     history = child_cfg['resp_history'] if 'resp_history' in child_cfg else None
     child = RESPChild(
         name=name,
@@ -1178,6 +1178,17 @@ def resp_collapse_aip(cesg: float, qesi: float, earnings: float,
     }
 
 
+def _child_age(ch: Dict, ref_year: int) -> int:
+    """The child's age in ``ref_year``, resolved the one way
+    ``resp_child_from_config`` resolves it: ``birth_year`` when declared,
+    otherwise ``ref_year - age``. Reading ``ch['age']`` directly made a child
+    that declares both report two different ages out of the same report
+    (issue #295: the per-child block dates the child, the summary did not)."""
+    if 'birth_year' in ch:
+        return ref_year - ch['birth_year']
+    return ch.get('age', 0)
+
+
 def analyze_resp_for_family(cfg: Dict) -> Dict:
     """Analyze RESP situation for the family based on input.json data."""
     calc = RESPCalculator()
@@ -1340,7 +1351,7 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
 
     for ch in ineligible_children:
         ch_name = ch.get('name', 'Child')
-        ch_age = ch.get('age', 0)
+        ch_age = _child_age(ch, ref_year)
         important_notes.append(
             f"⚠️ {ch_name} (age {ch_age}) is PAST CESG age limit — no more matching grants possible"
         )
@@ -1350,7 +1361,7 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
 
     for i, ch in enumerate(eligible_children):
         ch_name = ch.get('name', f'Child {i+1}')
-        ch_age = ch.get('age', 0)
+        ch_age = _child_age(ch, ref_year)
         birth_yr = ref_year - ch_age
         remaining_years = 18 - ch_age
         if remaining_years > 0:
@@ -1383,7 +1394,7 @@ def analyze_resp_for_family(cfg: Dict) -> Dict:
 
     for ch in eligible_children:
         ch_name = ch.get('name', 'Child')
-        ch_age = ch.get('age', 0)
+        ch_age = _child_age(ch, ref_year)
         remaining_years = 18 - ch_age
         if remaining_years > 0:
             important_notes.append(

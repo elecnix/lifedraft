@@ -742,3 +742,147 @@ def test_resp_caveats_render_only_when_a_child_is_present():
     assert "child 1: no declared RESP beneficiary history" in text
     by_id = dict(base, family={"children": [{"id": "cb", "birth_year": 2015}]})
     assert "cb: no declared RESP" in "\n".join(model_fidelity.render_text(by_id, "min_risk"))
+
+
+# ── Cite #323 review: the caveat and report surfaces must not crash ───────
+#
+# A caveat predicate that raises is swallowed by Approximation.is_active and
+# reported as ACTIVE, so a missing key turns a caveat that does not apply into
+# one that does -- a false disclosure, which this module treats as corrosive.
+# render_text/to_dict call findings_for with no such guard, so the same missing
+# key aborted the report outright.
+
+
+def _resp_caveats(cfg):
+    return model_fidelity.active_approximations(cfg)
+
+
+@pytest.mark.parametrize("family", [None, [], "child_a"])
+def test_a_non_dict_family_block_never_crashes_a_caveat_surface(family):
+    """model_fidelity._resp_children read family with .get('children'), so a
+    family that is present but not a dict raised AttributeError -- which main
+    does not, and which to_dict/render_text do not survive."""
+    cfg = {"assumptions": {"dollar_basis": "nominal"}, "family": family}
+    assert model_fidelity.render_text(cfg, "min_risk") is not None
+    assert model_fidelity.to_dict(cfg, "min_risk") is not None
+
+
+def test_a_non_dict_tax_block_does_not_disclose_the_quebec_qesi_caveat():
+    """_resp_quebec_children read tax.get('province') unguarded, so `tax: null`
+    raised, was swallowed, and disclosed QESI for a household that models none."""
+    ontario_child = {"name": "child_a", "province": "ontario"}
+    for tax in (None, [], "ontario"):
+        cfg = {"family": {"children": [ontario_child]}, "tax": tax}
+        assert "resp_qesi_accumulated_rights_not_modelled" not in [
+            a.id for a in _resp_caveats(cfg)]
+
+
+def test_a_null_child_province_does_not_disclose_the_quebec_qesi_caveat():
+    cfg = {"family": {"children": [{"name": "child_a", "province": None}]},
+           "tax": {"province": "ontario"}}
+    assert "resp_qesi_accumulated_rights_not_modelled" not in [
+        a.id for a in _resp_caveats(cfg)]
+
+
+def _history(**over):
+    base = {"contributions_total": 1000.0, "contributions_before_age_15": 1000.0,
+            "years_with_100_before_age_15": 4, "cesg_basic_received": 200.0,
+            "cesg_additional_received": 0.0, "qesi_received": 0.0,
+            "clb_received": 0.0, "family_plan": False}
+    base.update(over)
+    return base
+
+
+@pytest.mark.parametrize("drop", ["contributions_total", "family_plan"])
+def test_an_incomplete_history_does_not_crash_or_false_disclose(drop):
+    """Both RESP predicates indexed one key of a history the sibling predicate
+    already treats as optional; is_active swallowed the KeyError and reported
+    the caveat, and render_text/to_dict died on it."""
+    history = _history()
+    del history[drop]
+    cfg = {"assumptions": {"dollar_basis": "nominal"},
+           "family": {"children": [{"name": "child_a", "resp_history": history}]}}
+    text = "\n".join(model_fidelity.render_text(cfg, "min_risk"))
+    assert "resp_family_plan_earnings_attributed_pro_rata" not in text
+    assert "resp_declared_contributions_exceed_lifetime_limit" not in text
+    assert model_fidelity.to_dict(cfg, "min_risk") is not None
+
+
+def test_an_untested_child_province_still_discloses_the_qesi_caveat():
+    """The counterpart guard: a Quebec child whose own province wins over the
+    household's must keep the QESI disclosure."""
+    cfg = {"family": {"children": [{"name": "child_a", "province": "quebec"}]},
+           "tax": {"province": "ontario"}}
+    assert "resp_qesi_accumulated_rights_not_modelled" in [a.id for a in _resp_caveats(cfg)]
+
+
+def test_an_over_limit_child_is_still_disclosed_by_name():
+    cfg = {"assumptions": {"dollar_basis": "nominal"},
+           "family": {"children": [{"name": "child_a", "province": "ontario",
+                                    "resp_history": _history(contributions_total=51000.0)}]},
+           "tax": {"province": "ontario"}}
+    assert "child_a: declared RESP contributions exceed" in "\n".join(
+        model_fidelity.render_text(cfg, "min_risk"))
+
+
+def test_a_declared_family_plan_is_still_disclosed():
+    cfg = {"assumptions": {"dollar_basis": "nominal"},
+           "family": {"children": [{"name": "child_a", "province": "ontario",
+                                    "resp_history": _history(family_plan=True)}]},
+           "tax": {"province": "ontario"}}
+    assert "resp_family_plan_earnings_attributed_pro_rata" in [a.id for a in _resp_caveats(cfg)]
+
+
+def test_a_present_but_null_child_province_falls_back_to_the_household():
+    """resp_child_from_config indexed province, so `"province": null` raised
+    AttributeError -- while the adjacent resp_history key already treats None
+    as absent."""
+    from countries.canada.resp_rules import resp_child_from_config
+    child = resp_child_from_config({"name": "child_a", "birth_year": 2015,
+                                    "province": None, "resp_history": None}, 2026, "quebec")
+    assert child.province == "quebec"
+    assert child.is_quebec_resident
+
+
+def test_a_declared_history_without_an_opening_is_refused_with_a_reason():
+    """SimState.initial gated the per-child seed on `resp_history` and then
+    read `resp_opening`, so a child carrying one and not the other raised a
+    bare KeyError instead of the documented refusal."""
+    from simulation_state import _declared_resp_opening
+    config = SimulationConfig.from_dict({
+        "assumptions": {"start_year": 2026, "return_rate": 0.05},
+        "accounts": {"resp_current_balance": 1000.0},
+        "family": {"children": [{"name": "child_a", "birth_year": 2015,
+                                 "resp_history": _history()}]},
+    })
+    with pytest.raises(ValueError, match="resp_opening"):
+        _declared_resp_opening(config, [True], {})
+
+
+def test_the_report_agrees_with_itself_about_an_eligible_childs_age():
+    """The per-child block resolved birth_year through the shared constructor
+    (age 14, CESG through 2029) while the family summary still read the stale
+    'age' key (age 3, CESG through 2040) -- one report, two ages."""
+    from countries.canada.resp_rules import analyze_resp_for_family
+    report = analyze_resp_for_family(
+        {"family": {"children": [{"name": "child_a", "birth_year": 2012, "age": 3}],
+                    "members": [{"gross_income": 60000.0}]},
+         "tax": {"province": "ontario"}, "accounts": {"resp_current_balance": 5000.0},
+         "assumptions": {"start_year": 2026}})
+    assert "age 14" in report["family_summary"]["important_notes"][0]
+    assert "through 2029" in report["family_summary"]["important_notes"][0]
+
+
+def test_the_report_agrees_with_itself_about_a_delinquent_childs_age():
+    """Same split on the other branch: birth_year 2005 is age 21 and past the
+    CESG limit; the summary called it age 1 and promised 17 more years."""
+    from countries.canada.resp_rules import analyze_resp_for_family
+    report = analyze_resp_for_family(
+        {"family": {"children": [{"name": "child_a", "birth_year": 2005, "age": 1}],
+                    "members": [{"gross_income": 60000.0}]},
+         "tax": {"province": "ontario"}, "accounts": {"resp_current_balance": 5000.0},
+         "assumptions": {"start_year": 2026}})
+    notes = "\n".join(report["family_summary"]["important_notes"])
+    assert "age 21" in notes
+    assert "PAST CESG age limit" in notes
+    assert "age 1)" not in notes
