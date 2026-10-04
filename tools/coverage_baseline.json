@@ -71,7 +71,7 @@
     "countries/canada/rental_income.py": 0,
     "countries/canada/resp_rules.py": 24,
     "countries/canada/retirement.py": 15,
-    "countries/canada/retirement_transition.py": 2,
+    "countries/canada/retirement_transition.py": 1,
     "countries/canada/self_employed_contributions.py": 0,
     "countries/canada/short_term_rental.py": 0,
     "countries/canada/sim_state.py": 2,
