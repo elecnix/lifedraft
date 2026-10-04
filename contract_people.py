@@ -232,14 +232,26 @@ def _active_employment_income(person: Dict, as_of: str) -> float:
     ``kind`` is restricted to ``employment`` on purpose and unchanged -- see
     #415's second finding, where this exclusion and the CPP estimator's
     ``_PENSIONABLE_KINDS`` disagree about ``self_employment``.
+
+    Uses the MODULE-level ``_date`` rather than a function-local import: a
+    local ``from datetime import date as _date`` shadowed the module binding,
+    so the two were the same object only by coincidence and a future change to
+    the module-level name would silently stop applying here (#424 review).
     """
-    from datetime import date as _date
     from income_window import covers_date
 
     on = _date.fromisoformat(as_of)
     total = 0.0
     for inc in person.get("incomes", []):
         if inc["kind"] != "employment":
+            continue
+        # An income with no ``from`` has no window, so it cannot be active at
+        # any date. The old guard (``if inc["from"] and ...``) skipped it;
+        # parsing unconditionally turned that skip into a TypeError on None.
+        # ``_future_employment_segments`` already skips the same shape, and
+        # the two readers must agree about whether ``from`` may be absent
+        # (#424 review).
+        if not inc["from"]:
             continue
         window_from = _date.fromisoformat(inc["from"])
         window_to = _date.fromisoformat(inc["to"]) if inc["to"] else None

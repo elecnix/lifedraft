@@ -207,9 +207,23 @@ def test_open_ended_window_runs_forward_forever():
     caller's year does."""
     start = income_window.parse_date(FROM)
     for year in (2018, 2050, 2200):
+        # Assert the COUNT, not the call against itself. An earlier version
+        # wrote ``overlap_days(start, None, year) == overlap_days(start, None,
+        # year)``, which passes for any implementation including one that
+        # returns 0 for every year -- it could not fail (#424 review).
+        jan1 = date(year, 1, 1)
+        jan1_next = date(year + 1, 1, 1)
+        lo = max(start, jan1)
         assert income_window.overlap_days(start, None, year) == \
-            income_window.overlap_days(start, None, year)
+            (jan1_next - lo).days, (
+            f"{year}: an open-ended window must fill the whole queried year "
+            f"once it has started"
+        )
         assert income_window.overlaps_year(start, None, year) is True
+    # Before the window opens there is nothing at all -- the other direction
+    # of the same boundary.
+    assert income_window.overlap_days(start, None, 2010) == 0
+    assert income_window.overlaps_year(start, None, 2010) is False
     assert income_window.covers_date(start, None, date(2200, 1, 1)) is True
 
 
