@@ -128,3 +128,23 @@ def test_amt_and_compute_total_tax_agree_on_the_regular_federal_tax():
     assert "quebec_abatement_on_credits" in source
     assert "gross_fed - abatement - nr_credits" not in source
     assert expected > 0  # the fixture is non-degenerate
+
+def test_the_rate_falls_back_when_the_province_record_is_missing(monkeypatch):
+    """The documented fallback path is real and must be exercised (#350).
+
+    ``quebec_abatement_on_credits`` reads ``provincial_abatement`` from the
+    province record and falls back to ``QC_ABATEMENT`` when that read fails.
+    Without a test the fallback is uncovered, and a later edit could delete
+    the except clause -- turning a missing record into a hard crash on a
+    Quebec return.
+    """
+    from countries.canada import tax_calc
+
+    class _NoRecord:
+        def _load_year(self, *a, **kw):
+            raise ValueError("no record")
+
+    monkeypatch.setattr(
+        tax_calc, "TaxDataProvider", lambda *a, **kw: _NoRecord())
+    got = quebec_abatement_on_credits(10_000, 0, year=2026, province="quebec")
+    assert got == pytest.approx(10_000 * tax_calc.QC_ABATEMENT, abs=0.01)
