@@ -52,6 +52,7 @@ import json
 import unittest
 
 import model_fidelity
+from countries.canada.retirement_transition import member_retirement_income
 from output_plugins import HtmlReport, JsonReport, TextReport
 
 # The id under test. Referenced by the registry entry in model_fidelity.py.
@@ -168,11 +169,21 @@ class TestTheCaveatStaysQuietWhenItDoesNotApply(unittest.TestCase):
         cfg = _cfg(non_reg_balance=2_000_000, return_of_capital=0.05)
         self.assertNotIn(CAVEAT_ID, _active_ids(cfg))
 
-    def test_an_empty_pot_does_not_fire_it(self):
-        """A non-reg account with no balance holds nothing, so it distributes
-        nothing and there is no income for the OAS base to be missing."""
+    def test_an_empty_pot_still_fires_it(self):
+        """A zero OPENING balance does not mean the household holds no taxable
+        portfolio. After-tax savings fund the non-reg pot across the
+        projection, so a declared dividend yield still generates investment
+        income later -- and that income is still missing from the OAS base.
+
+        An earlier draft suppressed the caveat on a zero balance. Cite flagged
+        that as a possible logic inversion (it dropped the finding as an
+        unverified external claim, but the reasoning is right), and it is the
+        same false-disclosure failure this registry exists to prevent, one level
+        down: the caveat would vanish for exactly the runs that accumulate the
+        pot.
+        """
         cfg = _cfg(non_reg_balance=0, eligible_dividends=0.015)
-        self.assertNotIn(CAVEAT_ID, _active_ids(cfg))
+        self.assertIn(CAVEAT_ID, _active_ids(cfg))
 
     def test_a_pot_with_no_yield_block_still_fires_it(self):
         """The false-disclosure guard that matters most.
@@ -190,7 +201,8 @@ class TestTheCaveatStaysQuietWhenItDoesNotApply(unittest.TestCase):
 
     def test_a_pot_of_unstated_size_still_fires_it(self):
         """An unpriceable pot is not an exonerated one: report rather than
-        hide (DP#32 applied to the caveat mechanism)."""
+        hide (DP#32 applied to the caveat mechanism). The balance is no longer
+        read at all -- see the zero-opening-balance test for why."""
         cfg = _cfg(non_reg_balance=2_000_000, interest=0.02)
         del cfg['portfolio']['accounts']['non_reg']['balance']
         self.assertIn(CAVEAT_ID, _active_ids(cfg))
@@ -349,7 +361,6 @@ class TestTheCaveatCannotOutliveTheBug(unittest.TestCase):
         default is replaced with a real income term, this test fails and names
         the registry entry to delete with it."""
         import inspect
-        from countries.canada.retirement_transition import member_retirement_income
         default = inspect.signature(
             member_retirement_income).parameters['other_net_income'].default
         self.assertEqual(default, 0.0)

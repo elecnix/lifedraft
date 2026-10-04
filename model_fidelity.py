@@ -1749,38 +1749,45 @@ def _income_yield_is_unpriceable(yields: dict) -> bool:
 
 
 def _has_income_earning_portfolio(ctx: FidelityContext) -> bool:
-    """Whether THIS run distributes taxable investment income, and so whether
-    there IS distributed income for the OAS recovery base to be missing.
+    """Whether THIS run's config DECLARES a taxable portfolio that distributes
+    income, and so whether there is distributed income for the OAS recovery
+    base to be missing.
 
     Objective-independent on purpose: the clawback base is the same base
     whichever objective ranks the run, so gating on the objective would
     suppress the caveat on exactly the figures it applies to.
 
-    The three absences are handled separately, because they mean different
+    The trigger is the declared YIELD, never the opening balance. An earlier
+    draft suppressed the caveat when ``non_reg.balance`` was 0, which is wrong:
+    after-tax savings fund the non-reg pot over the projection, so a household
+    that opens with an empty taxable account and a declared dividend yield
+    DOES hold a portfolio, DOES earn investment income later, and WOULD miss it
+    in the OAS base. Suppressing on the balance would hide the caveat from
+    exactly those runs -- and it is the same false-disclosure failure this
+    registry exists to prevent, one level down. The registry's own rule decides
+    the tie: when in doubt, report the caveat rather than suppress it.
+
+    The absences are still handled separately, because they mean different
     things and only one of them is a reason to stay quiet (DP#32):
 
     - no ``non_reg`` account declared at all -> no taxable pot -> False.
     - a declared pot whose ``yield`` composition is absent -> the engine falls
       back to its configured ``non_reg_yield_rate`` (``simulation.
       _non_reg_after_tax_return_for``), so income IS being distributed and the
-      OAS base IS missing it -> True. Returning False here would be a false
-      disclosure, which is the failure mode this registry exists to prevent.
-    - a declared pot of unstated size -> unpriceable, so report rather than
-      exonerate -> True.
+      OAS base IS missing it -> True.
+    - a declared yield that cannot be priced -> report rather than exonerate ->
+      True.
+    - a yield block that declares zero on every income type -> genuinely
+      nothing is distributed -> False.
     """
     non_reg = _portfolio_block(ctx.cfg).get('non_reg')
     if not isinstance(non_reg, dict):
         return False
-    balance = non_reg.get('balance')
-    if balance is None or not _is_number(balance):
-        return True                       # a pot exists; its size is unstated
-    if float(balance) <= 0.0:
-        return False                      # no pot, so nothing is distributed
     yields = non_reg.get('yield')
     if not isinstance(yields, dict):
-        return True                       # the fallback rate applies
+        return True                        # the fallback rate applies
     if _income_yield_is_unpriceable(yields):
-        return True                       # declared, but not a number
+        return True                        # declared, but not a number
     return _declared_income_yield(yields) > 0.0
 
 
