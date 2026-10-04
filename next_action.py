@@ -232,7 +232,15 @@ MISSING_BIRTH_DATE_NOTE = (
 
 
 def _resp_beneficiary_ids(contract: Dict[str, Any]) -> set:
-    """Everyone named as a beneficiary of an RESP account."""
+    """Everyone named as a beneficiary of an RESP account.
+
+    A beneficiary is an object carrying its own grant history (issue #295), so
+    an entry that is not one names nobody at all. Refused rather than skipped:
+    skipping would drop that child's age-17 CESG deadline trigger without
+    saying so, which is the absence this module's own guard exists to prevent,
+    and ``b["person"]`` on a bare string raised a bare ``TypeError`` that named
+    neither the entry nor the account.
+    """
     ids: set = set()
     for account in contract.get("accounts", []):
         if account.get("kind") != "resp":
@@ -240,8 +248,15 @@ def _resp_beneficiary_ids(contract: Dict[str, Any]) -> set:
         resp = account.get("resp")
         if resp is None:
             continue
-        # Issue #295: each beneficiary is an object carrying its history.
-        ids.update(b["person"] for b in resp.get("beneficiaries", []))
+        for i, b in enumerate(resp.get("beneficiaries", [])):
+            if not isinstance(b, dict) or b.get("person") is None:
+                raise ValueError(
+                    f"RESP account {account.get('id')!r}: beneficiaries[{i}] is {b!r}, "
+                    f"which names no person. Each beneficiary is an object carrying "
+                    f"its own grant history (issue #295); an entry that is not one "
+                    f"cannot be matched to a child, and skipping it would silently "
+                    f"drop that child's age-17 CESG deadline.")
+            ids.add(b["person"])
     return ids
 
 

@@ -886,3 +886,41 @@ def test_the_report_agrees_with_itself_about_a_delinquent_childs_age():
     assert "age 21" in notes
     assert "PAST CESG age limit" in notes
     assert "age 1)" not in notes
+
+
+def _next_action_doc(beneficiaries):
+    return {
+        "as_of": "2026-07-12",
+        "people": [
+            {"id": "pa", "birth_date": "1985-03-01",
+             "relationships": [{"type": "parent_of", "person": "ca"}]},
+            {"id": "ca", "birth_date": "2009-06-01", "relationships": []},
+        ],
+        "accounts": [{"id": "r1", "kind": "resp", "owner": "pa", "resp": {
+            "subscribers": ["pa"], "beneficiaries": beneficiaries,
+            "contributions_total": 0, "cesg_received": 0,
+            "qesi_received": 0, "clb_received": 0}}],
+    }
+
+
+@pytest.mark.parametrize("entry", ["ca", {"id": "ca"}, {"person": None}])
+def test_a_beneficiary_naming_no_person_is_refused_by_name(entry):
+    """next_action reads a raw document from its CLI with no schema gate, and
+    b["person"] on a bare string raised a bare TypeError. Refused with a reason
+    naming the account and the entry -- skipping it would drop the child's
+    age-17 CESG deadline without a word."""
+    import next_action
+    with pytest.raises(ValueError, match=r"r1.*beneficiaries\[0\]"):
+        next_action.derive_actions(_next_action_doc([entry]))
+
+
+def test_a_well_formed_beneficiary_still_emits_the_age_17_cesg_deadline():
+    """The counterpart guard: the refusal above must not swallow the action."""
+    import next_action
+    actions = next_action.derive_actions(_next_action_doc([
+        {"person": "ca", "contributions_total": 0.0,
+         "contributions_before_age_15": 0.0, "cesg_basic_received": 0.0,
+         "cesg_additional_received": 0.0, "qesi_received": 0.0,
+         "clb_received": 0.0, "years_with_100_before_age_15": 0}]))
+    assert any("cesg" in a.what.lower() or "cesg" in a.why.lower() for a in actions), \
+        f"no CESG action derived from {[a.what for a in actions]}"
