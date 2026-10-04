@@ -100,6 +100,33 @@ TUITION_CHARACTERIZATION_BASELINE = {
 }
 
 
+# Issue #289: this QC couple's net employee payroll cost, published here so
+# the baseline add-back below is pinned to a constant rather than read back
+# off the very YearResult being asserted (an add-back derived from the value
+# under test cancels any premium change and stops constraining anything).
+#
+#   QPP   primary (74,600 - 3,500) x 6.30% = 4,479.30
+#         + QPP2 (85,000 - 74,600) x 4%    =   416.00
+#         + spouse (45,000 - 3,500) x 6.30% = 2,614.50   = 7,509.80
+#   EI    primary min(120,000, 68,900) x 1.30% = 895.70
+#         + spouse min(45,000, 68,900) x 1.30% = 585.00    = 1,480.70
+#         (EI has no basic exemption: canada.ca, "Payroll Responsibilities
+#          for Employers" -- "Unlike the CPP, there is no basic exemption and
+#          no age limit for EI premiums")
+#   QPIP  primary min(120,000, 103,000) x 0.430% = 442.90
+#         + spouse min(45,000, 103,000) x 0.430% = 193.50  =   636.40
+#   less ITA s.118.7 credit (base QPP + EI + QPIP, at the lowest federal
+#   rate, de-aborated for Quebec)                                  = 1,566.89
+#   ---------------------------------------------------------------------
+#                                                             8,060.01
+#
+# Sources: Retraite Quebec QPP contribution rates and maximums (2026 MGA
+# 74,600 / max. supplementaire 85,000; employee rate 5.3% + 1% = 6.30%);
+# CRA "EI premium rates and maximums" (2026 MIE 68,900; Quebec employee rate
+# 1.30%); Revenu Quebec "Employee Premium Under the QPIP" (2026 rate 0.430%,
+# maximum insurable income 103,000).
+NET_PAYROLL_2026 = 8060.01
+
 _FIELDS = ('year', 'primary_income', 'spouse_income', 'after_tax_income',
            'total_family_income', 'total_assets')
 
@@ -115,18 +142,23 @@ def test_tuition_household_trajectory_matches_origin_main(time_step):
         f"{time_step}: projected {len(results)} years, baseline has "
         f"{len(baseline)} -- the household's projection_years changed")
     for res, base in zip(results, baseline):
-        # Issue #289: the baseline predates the employee payroll premiums.
-        # after_tax_income is now lower by exactly each year's net payroll
-        # cost (premiums - their s.60(e)/s.118.7 relief, read off the
-        # YearResult: $8,092.13 every year for this QC couple at $120k/$45k),
-        # so add it back and the origin/main figure must reappear unchanged --
-        # any other movement is still a regression.
+        # Issue #289: the baseline predates the employee payroll premiums, so
+        # after_tax_income is now lower by this household's net payroll cost.
+        # Two separate pins, because one combined derived add-back would
+        # constrain nothing:
+        #   1. the run's OWN payroll fields must net to the published constant
+        #      -- this is what constrains the premiums and their relief;
+        #   2. after_tax_income plus that SAME CONSTANT must reproduce the
+        #      origin/main figure -- this is what constrains everything else.
         net_payroll = (res.payroll_pension_contributions + res.payroll_ei_premiums
                        + res.payroll_qpip_premiums - res.payroll_tax_relief)
-        assert net_payroll > 0, "both members are employees: premiums must be charged"
+        assert net_payroll == pytest.approx(NET_PAYROLL_2026, abs=0.01), (
+            f"{time_step} year {res.year}: net payroll cost is {net_payroll!r}, "
+            f"expected {NET_PAYROLL_2026!r} -- a premium rate, a ceiling or the "
+            f"s.118.7 relief moved")
         actual = (res.year, res.primary_income, res.spouse_income,
-                  res.after_tax_income + net_payroll, res.total_family_income,
-                  res.total_assets)
+                  res.after_tax_income + NET_PAYROLL_2026,
+                  res.total_family_income, res.total_assets)
         for i, (got, exp) in enumerate(zip(actual, base)):
             if isinstance(exp, float):
                 assert got == pytest.approx(exp), (
