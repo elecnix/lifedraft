@@ -25,11 +25,19 @@ def _final_year_result():
     ``oas_annual`` reaches net benefit ONLY through the capital-gains leg's
     marginal rate (retirement income + taxable gain). A marginal RATE moves
     only when the income crosses a bracket edge, so the non-reg gain is sized
-    from the live brackets (not a frozen number) to put the income halfway
-    between ``edge - 8908`` and ``edge - 8500``: 0, 8500 and 8908 of OAS then
-    land in different brackets. Retirement income here is CPP 14,400
-    (``cpp_income``, issue #414 -- what the fold wrote for the year) plus a
-    LIF withdrawal of 5,000."""
+    from the live brackets (not a frozen number) to straddle the lowest edge:
+    retirement income here is CPP 14,400 (``cpp_income``, issue #414 -- what
+    the fold wrote for the year) plus a LIF withdrawal of 5,000.
+
+    The gain is set so income sits at ``edge - 8704`` with no OAS. OAS then
+    carries it across: 8500 lands at ``edge - 204`` (below the edge) and 8908
+    at ``edge + 204`` (above it), so the two land in DIFFERENT brackets.
+
+    Zero OAS is deliberately NOT one of that pair: at ``edge - 8704`` it shares
+    the bracket with 8500, so "0, 8500 and 8908 land in different brackets"
+    was never true. The bracketing contrast is 8500 vs 8908; the 0 case is
+    the baseline the other two are measured away from.
+    """
     from tax_data import default_tax_provider
     from year_result import YearResult
     edge = default_tax_provider().get_combined_brackets()[0]['max']

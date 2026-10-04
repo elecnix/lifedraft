@@ -496,6 +496,13 @@ def contributory_end_age(earliest_retirement_age: Optional[int] = None) -> int:
     """
     if earliest_retirement_age is None:
         return DEFAULT_CLAIM_AGE
+    # A CAP at 65, not a floor. The estimate is always stated AT 65 (issue
+    # #388: the claim-age adjustment happens once, downstream, in
+    # ``cpp_from_estimate``), and ``compute_benefit_estimate`` keys the
+    # age-65 maximum off the LAST contributory year — so extending the series
+    # to a later retirement would silently restate the age-65 figure. A
+    # household retiring at 70 therefore still gets the series built to 65,
+    # which is the age the answer describes.
     return min(DEFAULT_CLAIM_AGE, int(earliest_retirement_age))
 
 
@@ -553,10 +560,19 @@ def estimate_person_cpp(
         # distinguishable from "never estimated" (issue #390). Not a refusal
         # -- the caller already established the person has a pensionable
         # source; there is simply nothing projectable to build a series from.
+        #
+        # The label describes WHICH INPUT THE HOUSEHOLD DECLARED, not what
+        # survived the build. Choosing it by truthiness of ``earnings_history``
+        # made an explicitly-declared-but-empty ``[]`` read as "from incomes",
+        # and a full history whose every entry was dropped (no
+        # employment_income, or a year with no published ceiling) read as
+        # "from earnings history" for a series that produced no ratio at all.
+        # ``is not None`` is the declared/undeclared distinction; the empty
+        # series is already reported by ``earnings == []``.
         return CPPPersonEstimate(
             plan=plan,
             monthly=0.0,
-            source=(SOURCE_FROM_EARNINGS_HISTORY if earnings_history
+            source=(SOURCE_FROM_EARNINGS_HISTORY if earnings_history is not None
                     else SOURCE_FROM_INCOMES),
             earnings=[],
             refusals=[],
@@ -571,6 +587,11 @@ def estimate_person_cpp(
     return CPPPersonEstimate(
         plan=plan,
         monthly=age_65_monthly_total(estimate),
+        # Truthiness, because here there IS a number and it says where the
+        # number came from: a non-empty history that lost every entry to the
+        # incomes overlay did not produce it. The empty-series branch above
+        # uses `is not None` because there the label names the DECLARED input,
+        # not a contributor.
         source=(SOURCE_FROM_EARNINGS_HISTORY if earnings_history
                 else SOURCE_FROM_INCOMES),
         earnings=entries,

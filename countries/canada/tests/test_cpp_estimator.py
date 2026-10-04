@@ -540,3 +540,66 @@ def test_estimate_person_cpp_sums_base_and_cpp2_through_one_rule():
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])
+
+
+class TestProvenanceNamesTheDeclaredInput:
+    """The label describes what the household DECLARED, not what survived.
+
+    Chosen by truthiness of ``earnings_history``, so an explicitly-declared
+    but empty ``[]`` was labelled ``estimated_from_incomes``, and a full
+    history whose every entry was dropped was labelled
+    ``estimated_from_earnings_history`` for a series that produced no ratio
+    (issue #420 review).
+    """
+
+    def _estimate(self, **kwargs):
+        from countries.canada.cpp_estimator import estimate_person_cpp
+        base = dict(province="ontario", birth_year=1980, as_of_year=2026,
+                    as_of_date="2026-01-01")
+        base.update(kwargs)
+        return estimate_person_cpp(**base)
+
+    def test_a_declared_empty_history_is_not_silently_undeclared(self):
+        """Declared-but-empty is NOT the same as never declared.
+
+        With no usable series to build, the label names what the household
+        declared. Here the incomes DO produce a series, so the populated
+        branch applies and the number is attributed to incomes -- which is
+        correct, because that is where the number came from.
+        """
+        est = self._estimate(earnings_history=[],
+                             incomes=[{"kind": "employment",
+                                       "amount": 90_000,
+                                       "from": "2024-01-01"}])
+        assert est.source == "estimated_from_incomes"
+        assert est.monthly > 0.0
+
+    def test_a_declared_empty_history_with_no_incomes_is_zero_and_labelled(self):
+        est = self._estimate(earnings_history=[])
+        assert est.source == "estimated_from_earnings_history"
+        assert est.monthly == 0.0
+        assert est.earnings == []
+
+    def test_a_history_whose_entries_were_all_dropped_is_still_labelled(self):
+        """Declared, but every entry unusable: zero, and it says what it used.
+
+        The old truthiness test produced the same label here, so this case is
+        the regression guard for the branch, not a behaviour change.
+        """
+        est = self._estimate(earnings_history=[{"year": 2024}])
+        assert est.source == "estimated_from_earnings_history"
+        assert est.monthly == 0.0
+        assert est.earnings == []
+
+    def test_no_history_declared_at_all_reports_incomes(self):
+        est = self._estimate(incomes=[{"kind": "employment",
+                                       "amount": 90_000,
+                                       "from": "2024-01-01"}])
+        assert est.source == "estimated_from_incomes"
+        assert est.monthly > 0.0
+
+    def test_a_populated_history_keeps_its_label(self):
+        est = self._estimate(earnings_history=[{"year": 2024,
+                                                "employment_income": 90_000}])
+        assert est.source == "estimated_from_earnings_history"
+        assert est.monthly > 0.0
