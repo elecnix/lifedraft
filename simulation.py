@@ -58,6 +58,9 @@ from jurisdiction import (
 from scenario_overlay import ScenarioOverlay, build_overlay_config
 from simulation_config import SimulationConfig
 from year_result import YearResult
+# Issue #415: the ONE spelling of what a dated [from, to) window means. Core
+# module, jurisdiction-neutral (DP#25), so importing it at module scope is fine.
+from income_window import overlap_days_between, year_bounds
 # Issue #681: the trajectory invariants are LIBRARY code, asserted from the
 # run path itself -- not a test-only harness that a real household can walk
 # straight past (see trajectory_invariants.py's module docstring).
@@ -412,8 +415,7 @@ def _income_components_for_year(base_amount: float, segments: Optional[List[Dict
     # lazy-import it (no jurisdiction import at simulation.py module scope).
     from countries.canada.earned_income import is_earned_income
 
-    year_start = date(calendar_year, 1, 1)
-    year_end = date(calendar_year + 1, 1, 1)
+    year_start, year_end = year_bounds(calendar_year)
     days_in_year = (year_end - year_start).days
 
     parsed = []
@@ -447,11 +449,12 @@ def _income_components_for_year(base_amount: float, segments: Optional[List[Dict
     earned_income = 0.0
     covered_days = 0
     for seg_from, seg_to, kind, amount in parsed:
-        overlap_start = max(seg_from, year_start)
-        overlap_end = min(seg_to, year_end) if seg_to is not None else year_end
-        if overlap_end <= overlap_start:
+        # Issue #415: the day-count overlap is income_window's one primitive,
+        # not a fourth restatement of it. Byte-identical arithmetic -- the
+        # fold already blended by day count, and it stays that way.
+        days = overlap_days_between(seg_from, seg_to, year_start, year_end)
+        if days == 0:
             continue
-        days = (overlap_end - overlap_start).days
         covered_days += days
         fraction = days / days_in_year
         total_income += amount * fraction
@@ -501,8 +504,7 @@ def _self_employment_income_for_year(base_amount: float, segments: Optional[List
     """
     from datetime import date
 
-    year_start = date(calendar_year, 1, 1)
-    year_end = date(calendar_year + 1, 1, 1)
+    year_start, year_end = year_bounds(calendar_year)
     days_in_year = (year_end - year_start).days
 
     self_emp_income = 0.0
@@ -511,11 +513,11 @@ def _self_employment_income_for_year(base_amount: float, segments: Optional[List
             continue
         seg_from = date.fromisoformat(seg["from"])
         seg_to = date.fromisoformat(seg["to"]) if seg.get("to") else None
-        overlap_start = max(seg_from, year_start)
-        overlap_end = min(seg_to, year_end) if seg_to is not None else year_end
-        if overlap_end <= overlap_start:
+        # Issue #415: same primitive as _income_components_for_year above, so
+        # the two slices of a member's year can never disagree about the days.
+        days = overlap_days_between(seg_from, seg_to, year_start, year_end)
+        if days == 0:
             continue
-        days = (overlap_end - overlap_start).days
         fraction = days / days_in_year
         # Issue #980 (T2125): the contribution-stack base is NET business
         # income (gross fees - expenses_annual), the SAME net the tax path
