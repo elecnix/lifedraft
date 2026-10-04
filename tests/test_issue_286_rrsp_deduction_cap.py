@@ -51,6 +51,26 @@ B = default_tax_provider().get_combined_brackets(2026, province="quebec")
 FLOOR = lowest_taxed_floor(B)
 TOL = 1e-6
 
+# Issue #289: the ITA s.60(e) deduction for a Quebec employee, published here
+# as CONSTANTS rather than recomputed as `rate * (gross - basic_exemption)`.
+#
+# Recomputing it would make every assertion below an identity: the deduction
+# and the expectation would both move together if the first-additional rate or
+# the basic exemption were wrong, and the test would stay green.
+#
+# Quebec 2026 (Retraite Quebec): basic plan 5.3 % plus first additional plan
+# 1 % on earnings above the $3,500 basic exemption -> employee rate 6.30 % on
+# $3,500-$74,600, and the second additional plan at 4 % above it. Only the
+# first additional plan (and the second, once earnings pass the YMPE) is
+# DEDUCTIBLE; the base plan is a s.118.7 credit instead.
+#
+#   gross 20,000: (20,000 - 3,500) = 16,500 x 1% = 165.00
+#   gross 50,000: (50,000 - 3,500) = 46,500 x 1% = 465.00
+# Both sit below the 2026 MGA of $74,600, so the second additional plan
+# contributes nothing in either case.
+S60E_QC_2026_AT_20K = 165.00
+S60E_QC_2026_AT_50K = 465.00
+
 
 def _config(*, primary_income=150_000, primary_room=200_000,
             spouse_income=None, spouse_room=0, bracket_target=0.0):
@@ -419,10 +439,12 @@ def test_refund_capped_at_taxable_income_with_interest_deduction():
     # the s.20(1)(c) loan interest. $20k sits below the 2026 maximum
     # pensionable earnings ($74,600), so the second additional plan
     # contributes nothing.
-    s60e = 0.01 * (20_000 - 3_500)
+    s60e = S60E_QC_2026_AT_20K
     ec = employee_contribution_breakdown(20_000, 'quebec', 2026,
                                          default_tax_provider())
-    assert abs(ec.s60e_deduction - s60e) < 1e-9
+    assert abs(ec.s60e_deduction - s60e) < 1e-9, (
+        f"s.60(e) deduction is {ec.s60e_deduction!r}, expected {s60e!r} -- the "
+        f"first-additional rate or the basic exemption moved")
     taxable = 20_000 - 0.05 * 100_000 - s60e
     assert abs(r0.rrsp_tax_savings - tax_on_income(taxable, B)) < 1e-3
     assert r0.rrsp_tax_savings < tax_on_income(20_000, B)
@@ -540,10 +562,12 @@ def test_carry_open_at_retirement_is_claimed_against_retirement_income(role):
     # basic exemption amount, Retraite Quebec) is a deduction from income.
     # The $100k contribution is therefore capped at the taxable base, which
     # is $50,000 of employment income less that $465 -- not the full $50,000.
-    s60e = 0.01 * (50_000 - 3_500)
+    s60e = S60E_QC_2026_AT_50K
     ec = employee_contribution_breakdown(50_000, 'quebec', 2026,
                                          default_tax_provider())
-    assert abs(ec.s60e_deduction - s60e) < 1e-9
+    assert abs(ec.s60e_deduction - s60e) < 1e-9, (
+        f"s.60(e) deduction is {ec.s60e_deduction!r}, expected {s60e!r} -- the "
+        f"first-additional rate or the basic exemption moved")
     assert abs(r0.rrsp_deduction_carried_forward
                - (100_000 - 50_000 + s60e)) < 1e-3
     assert r0.rrsp_tax_savings > 0
