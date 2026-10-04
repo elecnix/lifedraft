@@ -309,38 +309,50 @@ class TestTheCaveatCannotOutliveTheBug(unittest.TestCase):
             self.assertIn(_ANCHOR_CLAUSE, handle.read())
 
     def test_the_oas_base_still_omits_distributed_income(self):
-        """The second pin, read straight off the defect itself: the recovery
-        base is still built from CPP + pension only. When #437 lands and this
-        changes, this test fails and names the registry entry to delete."""
-        from countries.canada.retirement_transition import member_retirement_income
-        income = member_retirement_income(
-            member={'role': 'primary', 'cpp': 10_000, 'pension_income_annual': 0},
-            sim_year=5, oas_annual_max=8_908, oas_clawback_threshold=75_000,
-        )
-        # 10,000 of CPP sits far under the threshold either way, so assert the
-        # threshold-crossing case: push CPP up so a missing income term would
-        # visibly change the OAS. Both assertions below read the SAME base.
-        from countries.canada.retirement_transition import member_retirement_income as _mri
-        high = _mri(
-            member={'role': 'primary', 'cpp': 80_000, 'pension_income_annual': 0},
-            sim_year=5, oas_annual_max=8_908, oas_clawback_threshold=75_000,
-        )
-        self.assertLess(high.oas, 8_908)      # 80k of CPP claws back
-        self.assertAlmostEqual(income.oas, 8_908, places=6)  # 10k does not
+        """The defect, read straight off the real function.
 
-    def test_the_second_argument_is_not_a_cross_year_carry_forward(self):
-        """``other_net_income`` is the ONLY channel by which non-CPP income
-        could reach this base -- and no production caller passes it. This is
-        what makes the gap 'the base is CPP alone' rather than 'the base is
-        wired but fed zeros'."""
+        ``other_net_income`` is the ONLY channel by which anything other than
+        CPP can reach the recovery base. Production never passes it, so the
+        base is CPP alone -- which is exactly why a retiree living on portfolio
+        distributions keeps full, unclawed-back OAS. This drives the real
+        function (a properly aged, retired member whose OAS has started) and
+        shows the channel is both live and unused.
+
+        An earlier draft of this test invented a ``cpp`` key and omitted
+        ``birth_year``; the function ignores ``cpp`` entirely (CPP comes from
+        ``cpp_monthly_estimated`` via ``cpp_from_estimate``) and the missing
+        birth year made ``is_retired`` false, so the member got no OAS at all
+        and the assertion failed against 0.0. A test that hand-builds state the
+        engine cannot produce verifies nothing.
+        """
+        member = {'birth_year': 1960, 'retirement_age': 65,
+                  'cpp_monthly_estimated': 1000}
+        # sim_year 2026 -> age 66: retired, and past the 65 OAS claim age.
+        common = dict(sim_year=2026, oas_annual_max=8_908,
+                      oas_clawback_threshold=75_000)
+
+        production = member_retirement_income(member, **common)
+        # Premise: OAS really is flowing here, and the 15% recovery rate would
+        # bite on 12,000 + 80,000 against a 75,000 threshold.
+        self.assertEqual(production.oas, 8_908.0)
+
+        with_distributed_income = member_retirement_income(
+            member, other_net_income=80_000, **common)
+        self.assertLess(with_distributed_income.oas, production.oas)
+        self.assertAlmostEqual(
+            with_distributed_income.oas, 8_908 - min(8_908, 17_000 * 0.15),
+            places=6)
+
+    def test_the_distributed_income_channel_defaults_to_zero(self):
+        """The second half of the same pin: production relies on the argument's
+        0.0 default, so the base is CPP + nothing. When #437 lands and this
+        default is replaced with a real income term, this test fails and names
+        the registry entry to delete with it."""
         import inspect
-        from countries.canada import retirement_transition as rt
-        callers = [ln for ln in inspect.getsource(rt).splitlines()
-                   if 'member_retirement_income(' in ln]
-        # Every call in the module leaves the argument at its 0.0 default.
-        self.assertTrue(callers)
-        for line in callers:
-            self.assertNotIn('other_net_income', line)
+        from countries.canada.retirement_transition import member_retirement_income
+        default = inspect.signature(
+            member_retirement_income).parameters['other_net_income'].default
+        self.assertEqual(default, 0.0)
 
 
 if __name__ == '__main__':
