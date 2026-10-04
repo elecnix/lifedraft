@@ -1734,15 +1734,23 @@ def _declared_income_yield(yields: dict) -> float:
 
 
 def _income_yield_is_unpriceable(yields: dict) -> bool:
-    """Whether an INCOME yield is declared in a form that cannot be priced.
+    """Whether a yield declared in the block cannot be priced.
 
     A present-but-malformed rate is not a zero rate. Reading it as zero would
     turn a config that cannot be priced into a run that reports no caveat,
     which is precisely the silent-substitution this module exists to prevent,
     so it is reported instead.
+
+    The screen covers EVERY key the block declares, not only the five income
+    keys that get summed. Cite caught this (r4179432734): a block whose only
+    malformed entry is a non-income key such as ``return_of_capital: "high"``
+    passed the screen and then totalled 0.0, so the caveat was suppressed --
+    the docstring's promise was false for exactly the inputs it was written
+    about. A malformed ROC contributes 0 to income either way, so it cannot
+    change the arithmetic, but silently reading declared garbage as a clean
+    zero is the habit this module exists to break.
     """
-    for key in _PORTFOLIO_INCOME_YIELDS:
-        rate = yields.get(key)
+    for rate in yields.values():
         if rate is not None and not _is_number(rate):
             return True
     return False

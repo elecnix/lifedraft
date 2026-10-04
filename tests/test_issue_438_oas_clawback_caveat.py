@@ -262,6 +262,25 @@ class TestTheCaveatStaysQuietWhenItDoesNotApply(unittest.TestCase):
             with self.subTest(rate=bad_rate):
                 self.assertIn(CAVEAT_ID, _active_ids(cfg))
 
+    def test_a_malformed_non_income_yield_also_reports(self):
+        """Cite, r4179432734: the screen used to cover only the five income
+        keys, so a block whose ONLY malformed entry was a non-income key passed
+        the screen and then totalled 0.0 -- suppressing the caveat and making
+        this function's own docstring false. A malformed ROC contributes 0 to
+        income either way, but silently reading declared garbage as a clean
+        zero is precisely the habit this module exists to break.
+        """
+        cfg = _cfg(non_reg_balance=2_000_000)
+        yield_block = cfg['portfolio']['accounts']['non_reg']['yield']
+        yield_block['return_of_capital'] = 'high'
+        self.assertIn(CAVEAT_ID, _active_ids(cfg))
+
+        # And a VALID non-income yield still stays quiet when there is no
+        # income: screening everything must not turn the screen into a
+        # "any key present fires" rule.
+        cfg_ok = _cfg(non_reg_balance=2_000_000, return_of_capital=0.05)
+        self.assertNotIn(CAVEAT_ID, _active_ids(cfg_ok))
+
     def test_an_absent_yield_key_is_not_a_malformed_one(self):
         """The other side of the same distinction: an absent key leaves the
         other declared yields at zero, so there is genuinely nothing to
