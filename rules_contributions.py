@@ -286,6 +286,40 @@ def apply_fhsa(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.new_fhsa_lifetime_used = new_fhsa_lifetime_used
     return fhsa_actual > 0
 
+def _pension_adjustment_for(ctx: RuleContext, role: str) -> float:
+    """The member's declared pension adjustment (PA) for the prior year.
+
+    Reads the member-level ``pension_adjustment`` key. ``RRSPAccount`` has
+    carried the field since the legacy schema, and many fixtures still pass
+    it, but nothing ever consumed it -- so an RPP member's RRSP room was
+    overstated by exactly the PA, silently (issue #342).
+
+    Zero when absent, and zero for a negative or non-numeric value: a PA is
+    never negative, so a negative one is bad data and must not INCREASE the
+    room this way.
+
+    ``family_members`` is a declared field on SimulationConfig, so it is read
+    directly. An earlier version used ``getattr(..., None) or []``, which the
+    DP#32 guard correctly flagged: an absent member list would have become
+    "no pension adjustment", which is the very over-credit this issue is about
+    (a member with a PA would get the full 18% room). An empty list is the
+    truth and is handled as such.
+    """
+    members = ctx.config.family_members or ()
+    for member in members:
+        if member.get('role') != role:
+            continue
+        raw = member.get('pension_adjustment')
+        if raw is None:
+            return 0.0
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+        return value if value > 0 else 0.0
+    return 0.0
+
+
 @rule('contribution_room')
 def apply_contribution_room(ws: YearWorkingState, ctx: RuleContext) -> bool:
     """Add this year's annual RRSP/TFSA room (DP#20: year-specific limits
@@ -316,6 +350,25 @@ def apply_contribution_room(ws: YearWorkingState, ctx: RuleContext) -> bool:
         spouse_earned = ctx.allocations.get('_spouse_income', 50000)
     primary_room_added = min(rrsp_limit, ctx.config.rrsp_annual_percent * primary_earned)
     spouse_room_added = min(rrsp_limit, ctx.config.rrsp_annual_percent * spouse_earned)
+
+    # Issue #342: ITA s.146(1) -- the RRSP deduction limit is 18% of the
+    # prior year's EARNED income, capped at the dollar limit, MINUS the
+    # prior year's pension adjustment (PA). The PA is the total value of the
+    # employee's required contributions to a registered pension plan (RPP),
+    # plus the bridge-benefit portion of a defined-benefit pension accruing in
+    # the year. It occupies deduction-limit room that the member therefore
+    # does NOT have, so crediting the full 18% overstates their room and lets
+    # the optimizer recommend a contribution they cannot make.
+    #
+    # An ABSENT key means "no PA declared" (DP#32) -- which is right for every
+    # member who is not in a pension plan, and is why an absent key must not
+    # be read as "unknown, refuse": it is a genuine zero. It was previously
+    # not merely zero but IGNORED, so a fixture could carry the key and get
+    # the wrong answer with nothing saying so.
+    primary_pa = _pension_adjustment_for(ctx, 'primary')
+    spouse_pa = _pension_adjustment_for(ctx, 'spouse')
+    primary_room_added = max(0.0, primary_room_added - primary_pa)
+    spouse_room_added = max(0.0, spouse_room_added - spouse_pa)
 
     ws.new_rrsp_room += primary_room_added
     ws.new_spouse_rrsp_room += spouse_room_added
