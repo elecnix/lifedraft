@@ -88,6 +88,10 @@ class MultigenerationalRenovation:
     has_secondary_unit: bool = False
     qualifying_person_ids: Tuple[str, ...] = field(default_factory=tuple)
     prior_qualifying_renovations: int = 0
+    # s.122.92(4) counts per QUALIFYING INDIVIDUAL, so the block may state how
+    # many each named person has already claimed. A property-level count alone
+    # cannot express "person A has claimed but person B has not".
+    prior_by_person: Tuple[Tuple[str, int], ...] = field(default_factory=tuple)
 
 
 def _lowest_federal_rate(year: int) -> float:
@@ -157,13 +161,62 @@ def multigenerational_reno_credit(
     if prior_renovations >= MHRTC_LIFETIME_CAP:
         return 0.0
 
+    # s.122.92(4) is per QUALIFYING INDIVIDUAL. The credit is allowed while at
+    # least one named person both qualifies and has not already claimed a
+    # lifetime renovation. A single property-level count cannot express
+    # "person A has claimed but person B has not", so a per-person map wins
+    # when one is declared, and the scalar remains for the simple case of one
+    # named person.
+    prior_by_person = dict(renovation.prior_by_person)
     named = set(renovation.qualifying_person_ids)
-    if not any(q.person_id in named and q.qualifies(renovation.year)
-               for q in qualifiers):
-        return 0.0
+    for q in qualifiers:
+        if q.person_id not in named or not q.qualifies(renovation.year):
+            continue
+        already = prior_by_person.get(q.person_id)
+        if already is None:
+            already = renovation.prior_qualifying_renovations
+        if already < MHRTC_LIFETIME_CAP:
+            return _lowest_federal_rate(renovation.year) * min(
+                renovation.qualifying_expenditures, RENOVATION_CREDIT_MAX)
+    return 0.0
 
     rate = _lowest_federal_rate(renovation.year)
     return rate * min(renovation.qualifying_expenditures, RENOVATION_CREDIT_MAX)
+
+def _prior_by_person(facts: dict) -> Tuple[Tuple[str, int], ...]:
+    """The per-person lifetime counts, keyed by person_id.
+
+    Absent means every named person has claimed none -- a real, documented
+    default (DP#13: a fallback for ABSENT input, not a way to coerce a value
+    that was supplied). A present-but-empty map says the same thing
+    explicitly. Read with explicit checks rather than `or {}`, which would
+    also swallow a malformed value (DP#32).
+    """
+    raw = facts.get("prior_renovations_by_person")
+    if raw is None:
+        return ()
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"mg_reno.prior_renovations_by_person must be an object keyed by "
+            f"person_id; {raw!r} is {type(raw).__name__} (DP#32)."
+        )
+    out = []
+    for key, value in raw.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(
+                f"mg_reno.prior_renovations_by_person[{key!r}] must be a whole "
+                f"number of renovations already claimed; {value!r} is "
+                f"{type(value).__name__} (DP#32)."
+            )
+        if value < 0:
+            raise ValueError(
+                f"mg_reno.prior_renovations_by_person[{key!r}] is {value}; a "
+                f"count of renovations already claimed cannot be negative "
+                f"(DP#32)."
+            )
+        out.append((str(key), value))
+    return tuple(out)
+
 
 def mg_reno_from_property(
     facts: Optional[dict],
@@ -225,6 +278,21 @@ def mg_reno_from_property(
             "individual. An empty list is a gap in the document, not a "
             "household that fails to qualify (DP#32)."
         )
+    if isinstance(person_ids, str):
+        # A bare string would silently become ('c','h','i','l','d','_','a'),
+        # so every named person fails to resolve and the run refuses with a
+        # baffling message about a person called 'c'. Refuse here instead.
+        raise ValueError(
+            f"mg_reno.qualifying_person_ids must be a LIST of person_ids, not "
+            f"a string ({person_ids!r}). Iterating a string yields its "
+            f"characters, so every named person would fail to resolve (DP#32)."
+        )
+    for _pid in person_ids:
+        if not isinstance(_pid, str) or not _pid:
+            raise ValueError(
+                f"mg_reno.qualifying_person_ids must contain person_id strings; "
+                f"{_pid!r} is {type(_pid).__name__} (DP#32)."
+            )
 
     return MultigenerationalRenovation(
         year=renovation_date.year,
@@ -233,6 +301,7 @@ def mg_reno_from_property(
         qualifying_person_ids=tuple(person_ids),
         prior_qualifying_renovations=int(
             facts.get("prior_qualifying_renovations", 0)),
+        prior_by_person=_prior_by_person(facts),
     )
 
 

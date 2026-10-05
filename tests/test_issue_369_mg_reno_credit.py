@@ -580,3 +580,133 @@ class TestTheEighteenFloorOnTheDtcRoute:
         assert multigenerational_reno_credit(self._renovation(), [minor]) == 0.0, (
             "a DTC-eligible minor must not unlock the credit"
         )
+
+
+class TestCiteRoundTwoOnPR447:
+    """The findings Cite raised on PR #447, pinned."""
+
+    def _facts(self, **over):
+        base = dict(renovation_date="2024-03-15",
+                    qualifying_expenditures=25_000.0, has_secondary_unit=True,
+                    qualifying_person_ids=["parent"])
+        base.update(over)
+        return base
+
+    def test_a_bare_string_person_id_is_refused_not_split_into_characters(self):
+        """'child_a' must not become ('c','h','i','l','d','_','a')."""
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        with pytest.raises(ValueError, match="LIST"):
+            mg_reno_from_property(self._facts(qualifying_person_ids="child_a"), [])
+
+    def test_a_non_string_entry_in_the_list_is_refused(self):
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        with pytest.raises(ValueError, match="person_id strings"):
+            mg_reno_from_property(self._facts(qualifying_person_ids=["parent", 7]), [])
+
+    def test_the_lifetime_cap_is_evaluated_per_person(self):
+        """The statute counts per individual, so A having claimed must not
+        deny B -- which a property-level count cannot express."""
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        r = mg_reno_from_property(
+            self._facts(qualifying_person_ids=["parent", "uncle"],
+                        prior_renovations_by_person={"parent": 1, "uncle": 0}),
+            [])
+        qual = [QualifyingIndividual("parent", birth_year=1955),
+                QualifyingIndividual("uncle", birth_year=1955)]
+        assert mg_reno_credit_for_year(r, qual) == pytest.approx(3_750.00), (
+            "the uncle has not claimed; the parent's claim must not deny him"
+        )
+
+    def test_every_named_person_at_the_cap_gives_zero(self):
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        r = mg_reno_from_property(
+            self._facts(qualifying_person_ids=["parent"],
+                        prior_renovations_by_person={"parent": 1}), [])
+        qual = [QualifyingIndividual("parent", birth_year=1955)]
+        assert mg_reno_credit_for_year(r, qual) == 0.0
+
+    def test_the_scalar_count_still_answers_for_the_simple_single_person_case(self):
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        r = mg_reno_from_property(
+            self._facts(prior_qualifying_renovations=1), [])
+        qual = [QualifyingIndividual("parent", birth_year=1955)]
+        assert mg_reno_credit_for_year(r, qual) == 0.0
+
+    def test_the_age_test_is_anchored_to_the_YEAR_END_not_the_renovation_date(self):
+        """s.122.92(3)(a) reads 'has attained 65 before the END OF THE TAXATION
+        YEAR'. Cite argued a mid-year renovation should not qualify for someone
+        who turns 65 later that year; the statute does not say that, so a
+        year-level test is exactly right and a birth-DATE test would be wrong.
+        """
+        from countries.canada.mg_reno_credit import QualifyingIndividual
+        born_dec_31_1959 = QualifyingIndividual("parent", birth_year=1959)
+        assert born_dec_31_1959.qualifies(2024) is True, (
+            "turns 65 on 2024-12-31, which is the end of the 2024 taxation "
+            "year, so 2024 qualifies"
+        )
+        born_1960 = QualifyingIndividual("parent", birth_year=1960)
+        assert born_1960.qualifies(2024) is False, (
+            "turns 65 in 2025, so 2024 does not"
+        )
+
+    def test_a_declared_zero_expenditure_is_a_real_zero_not_a_refusal(self):
+        """DP#32 says zero is a VALUE, not an absence.
+
+        The module refuses a NEGATIVE outlay because a renovation cannot cost
+        less than nothing. A declared $0 is a different fact: nothing
+        qualifying was spent, which is worth $0 and needs no refusal.
+        """
+        assert multigenerational_reno_credit(_renovation(2024, 0.0), _qualifiers()) == 0.0
+
+
+class TestThePerPersonMapIsValidatedNotCoerced:
+    """Every malformed shape of prior_renovations_by_person refuses.
+
+    A map that is silently coerced would make "person A already claimed" and
+    "we could not read the count" look identical, which is how a wrong number
+    survives (DP#32).
+    """
+
+    def _facts(self, value):
+        return {"renovation_date": "2024-03-15",
+                "qualifying_expenditures": 25_000.0,
+                "has_secondary_unit": True,
+                "qualifying_person_ids": ["parent"],
+                "prior_renovations_by_person": value}
+
+    def test_a_non_object_is_refused(self):
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        with pytest.raises(ValueError, match="must be an object"):
+            mg_reno_from_property(self._facts(["parent"]), [])
+
+    def test_a_non_integer_count_is_refused(self):
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        with pytest.raises(ValueError, match="whole"):
+            mg_reno_from_property(self._facts({"parent": "one"}), [])
+
+    def test_a_boolean_count_is_not_a_number(self):
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        with pytest.raises(ValueError, match="whole"):
+            mg_reno_from_property(self._facts({"parent": True}), [])
+
+    def test_a_negative_count_is_refused(self):
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        with pytest.raises(ValueError, match="negative"):
+            mg_reno_from_property(self._facts({"parent": -1}), [])
+
+    def test_an_absent_map_means_nobody_has_claimed_yet(self):
+        """DP#13: a fallback for ABSENT input, not coercion of a value given."""
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        facts = {"renovation_date": "2024-03-15",
+                 "qualifying_expenditures": 25_000.0,
+                 "has_secondary_unit": True,
+                 "qualifying_person_ids": ["parent"]}
+        r = mg_reno_from_property(facts, [])
+        assert r.prior_by_person == ()
+        qual = [QualifyingIndividual("parent", birth_year=1955)]
+        assert mg_reno_credit_for_year(r, qual) == pytest.approx(3_750.00)
+
+    def test_an_empty_map_is_the_same_as_absent(self):
+        from countries.canada.mg_reno_credit import mg_reno_from_property
+        r = mg_reno_from_property(self._facts({}), [])
+        assert r.prior_by_person == ()
