@@ -122,7 +122,12 @@ def _needs_adult_compute(doc: Dict, person_id: str, person: Dict) -> bool:
     # `_map_child` would silently drop -- trip the adult-compute boundary.
     if person.get("earnings_history"):
         return True
-    if _future_employment_segments(person, doc["as_of"]):
+    if (_future_employment_segments(person, doc["as_of"])
+            or _self_employment_segments(person, doc["as_of"])):
+        # Issue #377: a self-employment income is contributory earnings and a
+        # T2125 base -- it must trip the adult-compute boundary exactly as a
+        # future job does, or a child with a declared business income would be
+        # silently mapped without it.
         return True
     for cand in doc["decisions"]["retirement_age"]:  # both keys schema-required
         if cand["person"] == person_id and cand["candidate_ages"]:
@@ -250,6 +255,51 @@ def _future_employment_segments(person: Dict, as_of: str) -> List[Dict]:
             continue
         if not (inc["from"] and inc["from"] > as_of):
             continue
+        segments.append({
+            "kind": inc["kind"],
+            "amount": inc["amount"],
+            "from": inc["from"],
+            "to": inc["to"],
+        })
+    return segments
+
+
+def _self_employment_segments(person: Dict, as_of: str) -> List[Dict]:
+    """Issue #377: every ``kind == 'self_employment'`` income the person still
+    has, as a dated ``income_segments`` entry.
+
+    Before this, the contract path dropped a self-employment income entirely:
+    ``_active_employment_income`` folds only ``kind == 'employment'`` into the
+    flat ``gross_income`` base scalar, and ``_future_employment_segments``
+    emits a segment only for an employment income starting after ``as_of`` -- so
+    a self-employed household declared honestly in the contract reached the
+    engine as a member with $0 of income, silently. Every downstream consumer
+    then agreed on the zero: the tax return, the QPP/QPIP base (#978), the
+    RRSP-room accrual, and (from #377) the income cap on a business-use
+    portion's CCA claim, which would therefore always be $0 -- a feature that
+    validates, maps, and never fires.
+
+    A self-employment income is a T2125 NET-income fact, not a salary scalar:
+    ``income.expenses_annual`` (#980) reduces it, and only
+    ``simulation._self_employment_net_amount`` applies that reduction. Folding
+    the GROSS amount into ``gross_income`` would book it gross and then let the
+    net helpers disagree with the tax base -- two spellings of one fact (DP#9).
+    So it rides the SAME dated segment mechanism every other dated income uses,
+    with the declared ``[from, to)`` window carried through (DP#1) and the
+    amount left GROSS here, exactly as the employment segments do -- the engine
+    nets it once, in one place.
+
+    An income that ENDED before ``as_of`` pays nothing in any projected year and
+    is skipped; one active at ``as_of`` or starting later is carried. Absent (an
+    employee) => ``[]`` => the member's mapping is byte-identical to before
+    (DP#32).
+    """
+    segments = []
+    for inc in person.get("incomes", []):
+        if inc["kind"] != "self_employment":
+            continue
+        if inc.get("to") and inc["to"] < as_of:
+            continue  # already finished before the snapshot date
         segments.append({
             "kind": inc["kind"],
             "amount": inc["amount"],
@@ -472,9 +522,13 @@ def _map_member(doc: Dict, person_id: str, role: str,
     # reaches its start date -- carry it as a dated income_segment so the
     # engine turns it on in the right calendar year instead of reading the
     # salary as $0 forever. Absent (no future income) => key omitted => no-op.
-    future_segments = _future_employment_segments(p, as_of)
-    if future_segments:
-        member["income_segments"] = future_segments
+    # Issue #377: + every self-employment income (see the function's docstring
+    # for why it never rides the base scalar). Concatenated onto the SAME list,
+    # so a member with only one of the two is byte-identical to before.
+    segments = (_future_employment_segments(p, as_of)
+                + _self_employment_segments(p, as_of))
+    if segments:
+        member["income_segments"] = segments
     if p.get("birth_date"):
         member["birth_year"] = int(p["birth_date"][:4])
     # Note (issue #100): a person admitted as a SIMULATED ADULT member must have

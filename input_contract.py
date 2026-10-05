@@ -95,7 +95,8 @@ from contract_people import (
     _map_registered_balances, _people_by_id, admit_people, map_members,
 )
 from contract_principal import map_property_config
-from contract_property import _find_property, _map_owned_properties
+from contract_property import (_find_property, _map_business_use,
+                               _map_owned_properties)
 from contract_schema import load_contract_json, validate_contract
 from contract_transfers import (
     map_cash_flows, map_equity_grants, map_installments, _map_first_home_purchases,
@@ -402,6 +403,16 @@ def to_internal_config(doc: Dict) -> Dict:
                                              family_pre_window=family_pre_window)
     if owned_properties:
         legacy["properties"] = owned_properties
+
+    # Issue #377: a business-use PORTION of a property -- a home office, or part
+    # of a principal residence converted to a shop. Carried in its own list (not
+    # inside `properties`) because the principal residence is deliberately not in
+    # `properties`, and the principal's business portion is exactly this issue's
+    # case. Emitted only when some property declares one, so a household with no
+    # business portion round-trips byte-identically (DP#32).
+    business_use = _map_business_use(doc, primary_id, spouse_id)
+    if business_use:
+        legacy["business_use"] = business_use
 
     installment_plans = map_installments(doc)
     if installment_plans:

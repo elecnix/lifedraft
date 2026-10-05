@@ -143,6 +143,38 @@ class YearResult:
     cca_claimed: float = 0.0
     rental_ucc: Dict[str, float] = field(default_factory=dict)
 
+    # Issue #377: a BUSINESS-USE PORTION of a property -- a home office, or part
+    # of a principal residence converted to a shop. The claim on it is part of
+    # `cca_claimed` above (the household's total CCA), but it offsets
+    # self-employment income, not rental income, so it is netted out of
+    # NEITHER `net_rental_income` nor any cash figure: like every CCA here it is
+    # non-cash (ITA s.20(1)(a)), so it lowers tax without consuming cash.
+    #   * `business_use_ucc`: the running per-property undepreciated capital
+    #     cost of the portion, threaded to next year and read by the estate to
+    #     recapture the claim at the deemed disposition (ITA s.13(1)).
+    #   * `cca_recapture_ordinary`: what that recapture would cost at a
+    #     disposition RIGHT NOW -- 100% ordinary income, no 50% inclusion. The
+    #     estate prices the terminal value of this same figure, so the number
+    #     reported each year is the arithmetic that taxes at death, not a
+    #     forecast of it.
+    #   * `property_business_fraction_acb` / `..._fmv`: the business portion's
+    #     cost base -- fixed at the ITA s.45(1)(c) deemed disposition, when the
+    #     change in use reacquired the fraction at FMV -- and its value in this
+    #     year. The gap between them is the gain the principal-residence
+    #     exemption no longer shelters (Income Tax Folio S1-F3-C2 para
+    #     2.59-2.60), and the estate prices exactly that gap
+    #     (`objective._estate_call_args` -> `EstatePlan.business_use_gains`).
+    #     A property that has not appreciated since the change in use reports
+    #     fmv == acb: no gain, no exemption to deny. Both 0.0 for a business
+    #     portion of a NON-principal property, whose gain is already fully
+    #     taxable and so has no exemption to lose.
+    # All inert (0.0 / {}) for a household that declares no business portion
+    # (the golden path, DP#32).
+    business_use_ucc: Dict[str, float] = field(default_factory=dict)
+    cca_recapture_ordinary: float = 0.0
+    property_business_fraction_acb: float = 0.0
+    property_business_fraction_fmv: float = 0.0
+
     # Issue #697 (epic #690 bite 6): a SHORT-TERM rental (Airbnb-style) is
     # ACTIVE business income (ITA s.9), not passive property income. Its net
     # income is included in net_rental_income above (business income is ordinary

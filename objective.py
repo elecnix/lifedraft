@@ -661,15 +661,23 @@ def _cca_recapture_for(final: YearResult, cfg: Dict,
     year (``start_year + len(results) - 1``), passed by ``_estate_call_args``
     so the two value the estate on the SAME year; None -> conservatively keep
     every rental (do not drop a recapture on an unknown terminal year).
+
+    Issue #377: a declared BUSINESS-USE PORTION of a property (a home office, or
+    part of a principal residence converted to a shop) carries the same price
+    for its CCA election, and the fold has ALREADY computed it -- see the
+    ``final.cca_recapture_ordinary`` line below. Claiming CCA on that portion is
+    an election whose cost falls due at the deemed disposition, and CRA's own
+    guidance makes it usually a poor one, so the recapture has to be priced for
+    the trade-off to be visible at all.
     """
     props = cfg.get('properties')
-    if not props:
+    if not props and not cfg.get('business_use'):
         return 0.0  # no properties -> no rental, no recapture
     ucc_by_prop = getattr(final, 'rental_ucc', None)
     if ucc_by_prop is None:
         ucc_by_prop = {}  # a YearResult built without the fold's UCC ledger
     total = 0.0
-    for prop in props:
+    for prop in (props or []):
         if not isinstance(prop, dict):
             continue
         # Issue #964: a property sold on/before the terminal year is not owned
@@ -683,11 +691,21 @@ def _cca_recapture_for(final: YearResult, cfg: Dict,
                 continue
         rental = prop.get('rental')
         cca = rental.get('cca') if rental else None
-        if not cca:
-            continue
-        ucc = ucc_by_prop.get(prop['id'], cca['opening_ucc'])
-        total += _recapture_on_disposition(
-            cca['fmv_at_disposition'], cca['capital_cost'], ucc)['recapture']
+        if cca:
+            ucc = ucc_by_prop.get(prop['id'], cca['opening_ucc'])
+            total += _recapture_on_disposition(
+                cca['fmv_at_disposition'], cca['capital_cost'], ucc)['recapture']
+    # Issue #377: a declared BUSINESS-USE PORTION of a property (a home office,
+    # or part of a principal residence converted to a shop) has the same price
+    # for its CCA election, and the fold has already computed it -- the terminal
+    # year's `cca_recapture_ordinary` is exactly this arithmetic on this year's
+    # closing UCC (ITA s.13(1), 100%-inclusion ordinary income), recomputed
+    # here by the same `_recapture_on_disposition` for every rental above. It is
+    # CONSUMED, not recomputed (DP#9): one spelling of the recapture, so the
+    # figure a report shows each year and the tax charged at death cannot
+    # disagree. A YearResult built without the fold's ledger reports 0.0, which
+    # is the same "never claimed anything" state the fold's own absence is.
+    total += final.cca_recapture_ordinary
     return total
 
 
@@ -831,6 +849,36 @@ def _estate_call_args(results: List[YearResult], cfg: Dict) -> Optional[Dict]:
     if recapture > 0.0:
         from dataclasses import replace as _replace
         plan = _replace(plan, cca_recapture=recapture)
+
+    # Issue #377: the business-use portion of the principal residence has lost
+    # the principal-residence exemption for the gain it accrued since the ITA
+    # s.45(1)(c) change in use (Income Tax Folio S1-F3-C2 para 2.59-2.60), so
+    # that gain is taxed as a gain base of its own -- the residence's own gain
+    # stays exempt and prices exactly as before. The fold computed the portion's
+    # (fmv, acb) from the SAME value series every other consumer of the
+    # principal's gross value reads (`_principal_value_for_year`), so the estate
+    # consumes it rather than re-deriving a second appreciation (DP#9).
+    #
+    # ... and only where the exemption would OTHERWISE have sheltered that gain
+    # in full. Two cases deny it, and both must deny it here or the same dollars
+    # are taxed twice (the residence's own gain is already taxable):
+    #   * an UNDESIGNATED residence -- `principal_residence_designated` is
+    #     False, so `compute_estate` already taxes its whole gain; and
+    #   * the per-year apportionment path (#695/#969, two or more designated
+    #     properties), which already splits this property's gain between exempt
+    #     and taxable shares -- re-adding the portion beside it would double
+    #     count. Refining THAT interaction would need the portion apportioned
+    #     WITHIN the designated years; it is the one interaction this issue
+    #     deliberately leaves alone, and the guard is what makes leaving it
+    #     alone safe rather than quietly double-taxing.
+    fraction_fmv = final.property_business_fraction_fmv
+    fraction_acb = final.property_business_fraction_acb
+    residence_gain_is_exempt = (
+        plan.property_gains is None and plan.principal_residence_designated)
+    if (fraction_fmv > 0.0 or fraction_acb > 0.0) and residence_gain_is_exempt:
+        from dataclasses import replace as _replace
+        plan = _replace(plan, business_use_gains=(
+            {'fmv': fraction_fmv, 'acb': fraction_acb},))
 
     # #705: compute_estate now sums the deemed-disposition tax over a per-member
     # LIST of terminal returns, not two hardcoded scalars. For the two-adult
