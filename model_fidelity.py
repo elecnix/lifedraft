@@ -1764,7 +1764,12 @@ def cpp_modelled_as_zero_people(cfg: dict) -> List[Dict]:
         if isinstance(monthly, bool) or (
                 monthly is not None and not isinstance(monthly, (int, float))):
             continue
-        if monthly is not None and monthly > 0:
+        if monthly is not None and monthly != 0:
+            # Only ABSENCE or an explicit zero is the "$0 pension" case. A
+            # NEGATIVE amount is neither: it is an anomaly, not a zero, and
+            # reporting it as $0 would state a figure the engine is not
+            # using. It is declined on the same principle as an unreadable
+            # value above -- a false caveat is worse than none.
             continue
         birth_year = member.get('birth_year')
         if not isinstance(birth_year, int) or isinstance(birth_year, bool):
@@ -1811,10 +1816,12 @@ def _describe_cpp_modelled_as_zero(ctx: FidelityContext) -> List[str]:
 
 register(Approximation(
     id='cpp_modelled_as_zero',
-    summary=("At least one near-retirement adult has no CPP/QPP source at all "
-             "(no Statement, no earnings history, nothing to estimate from), "
-             "so their pension income is modelled as $0 for the whole horizon "
-             "-- a first-pillar retirement income the plan does not have"),
+    summary=("At least one near-retirement adult's CPP/QPP pension is modelled "
+             "as $0 for the whole horizon -- either because the document "
+             "declares no source at all (no Statement, no earnings history, "
+             "nothing to estimate from), or because the source it does declare "
+             "estimated to $0; the per-adult findings below say which, because "
+             "only one of those is fixed by supplying a Statement"),
     biased_figure=("CPP/QPP pension income in every retirement year, and "
                    "through it retirement net cash flow, the portfolio "
                    "drawdown the shortfall must be funded from, and every "

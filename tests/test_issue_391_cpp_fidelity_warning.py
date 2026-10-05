@@ -113,6 +113,27 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
             self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
                              [], msg=f"{bad!r} must not be read as $0")
 
+    def test_a_negative_estimate_is_declined_not_called_zero(self):
+        """Cite (#391 review, round 2): a NEGATIVE amount is not the $0 case.
+        Reporting it as "$0 pension" would state a figure the engine is not
+        using -- the adapter only ever writes a positive amount, so a negative
+        is an anomaly to decline, not an absence to describe."""
+        cfg = _cfg([{'role': 'primary', 'birth_year': 1971,
+                     'cpp_benefit_source': 'estimated_from_incomes',
+                     'cpp_monthly_estimated': -50}])
+        self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg), [])
+
+    def test_the_summary_never_asserts_one_cause_for_both(self):
+        """The summary is the one line every surface prints, so it must not
+        claim a cause it cannot know: the predicate also fires for a declared
+        source that estimated to $0, and telling that household it 'declares
+        no source at all' is simply false. The findings carry the cause."""
+        entry = next(a for a in model_fidelity.all_approximations()
+                     if a.id == 'cpp_modelled_as_zero')
+        self.assertNotIn('no CPP/QPP source at all', entry.summary)
+        self.assertIn('modelled', entry.summary)
+        self.assertIn('as $0', entry.summary)
+
     def test_a_present_but_null_amount_IS_the_zero_case(self):
         """Absent or None is the real $0: the engine's own reader turns a
         missing or null cpp_monthly_estimated into 0 as well."""
