@@ -2461,6 +2461,10 @@ def simulate_year_pure(
         'primary_tuition_carryforward': ws.new_primary_tuition_carryforward,
         'spouse_tuition_carryforward': ws.new_spouse_tuition_carryforward,
         'child_tuition_carryforwards': ws.new_child_tuition_carryforwards,
+        # Issue #372: the training_credit rule's per-member Canada training
+        # amount limit. {} for a household that declares no tuition (the golden
+        # path) -- a strict no-op.
+        'training_amount_limit': ws.new_training_amount_limit,
         # Issue #140: write the capital_loss rule's settled pool to
         # jurisdiction_state (the carry-forward that shelters a later year's
         # net capital gain). 0.0 for a household with no losses (the golden
@@ -2980,6 +2984,13 @@ def simulate_year_pure(
         # household that declares no tuition (the golden path).
         primary_tuition_carryforward=ws.new_primary_tuition_carryforward,
         spouse_tuition_carryforward=ws.new_spouse_tuition_carryforward,
+        # Issue #372: surface the training_credit rule's claim and closing
+        # balance (the refundable credit is already in after_tax_income; these
+        # say how much of it was the CTC and how much room is left). 0.0 / {}
+        # for a household with no declared tuition (the golden path).
+        primary_ctc_claimed=ws.ctc_claimed_primary,
+        spouse_ctc_claimed=ws.ctc_claimed_spouse,
+        training_amount_limit=dict(ws.new_training_amount_limit),
         # Issue #140: the capital-loss carry-forward ledger surfaced for
         # transparency (the settled pool, the offset the rule applied this
         # year, and the slice pricing already sheltered). All 0.0 for a

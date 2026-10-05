@@ -48,6 +48,15 @@ def federal_all_years():
             bpa_phaseout_end=258482,
             bpa_minimum=14829,
             canada_employment_amount=1501,
+            # ── Canada Training Credit (ITA s.122.91, issue #372) ──
+            # The $250 annual accrual and the $5,000 lifetime cap are statutory
+            # and NOT indexed (they are carried through `_project_from_base`
+            # unchanged); the working-income threshold below IS indexed by CRA
+            # and is what actually moves year to year. Source: CRA, "Canada
+            # training credit"; ITA s.122.91(3).
+            ctc_annual_accrual=250,
+            ctc_lifetime_cap=5000,
+            ctc_working_income_threshold=12058,
             # DP#20, DP#27: Year-versioned DTC rates and capital gains inclusion
             federal_eligible_dtc_rate=0.150198,
             federal_non_eligible_dtc_rate=0.090301,
@@ -85,6 +94,15 @@ def federal_all_years():
             bpa_phaseout_end=253414,
             bpa_minimum=14538,
             canada_employment_amount=1471,
+            # ── Canada Training Credit (ITA s.122.91, issue #372) ──
+            # The $250 annual accrual and the $5,000 lifetime cap are statutory
+            # and NOT indexed (they are carried through `_project_from_base`
+            # unchanged); the working-income threshold below IS indexed by CRA
+            # and is what actually moves year to year. Source: CRA, "Canada
+            # training credit"; ITA s.122.91(3).
+            ctc_annual_accrual=250,
+            ctc_lifetime_cap=5000,
+            ctc_working_income_threshold=11821,
             federal_eligible_dtc_rate=0.150198,
             federal_non_eligible_dtc_rate=0.090301,
             federal_eligible_gross_up=0.38,
@@ -127,6 +145,15 @@ def federal_all_years():
             bpa_phaseout_end=246752,
             bpa_minimum=14156,
             canada_employment_amount=1433,  # CRA 2024: $1,433 (T4127 Table 8.2)
+            # ── Canada Training Credit (ITA s.122.91, issue #372) ──
+            # The $250 annual accrual and the $5,000 lifetime cap are statutory
+            # and NOT indexed (they are carried through `_project_from_base`
+            # unchanged); the working-income threshold below IS indexed by CRA
+            # and is what actually moves year to year. Source: CRA, "Canada
+            # training credit"; ITA s.122.91(3).
+            ctc_annual_accrual=250,
+            ctc_lifetime_cap=5000,
+            ctc_working_income_threshold=11511,
             federal_eligible_dtc_rate=0.150198,
             federal_non_eligible_dtc_rate=0.090301,
             federal_eligible_gross_up=0.38,
@@ -169,6 +196,15 @@ def federal_all_years():
             bpa_phaseout_end=235675,
             bpa_minimum=13520,  # CRA 2023 Federal Worksheet Line 30000
             canada_employment_amount=1368,  # CRA 2023: $1,368 (T4127 Table 8.2)
+            # ── Canada Training Credit (ITA s.122.91, issue #372) ──
+            # The $250 annual accrual and the $5,000 lifetime cap are statutory
+            # and NOT indexed (they are carried through `_project_from_base`
+            # unchanged); the working-income threshold below IS indexed by CRA
+            # and is what actually moves year to year. Source: CRA, "Canada
+            # training credit"; ITA s.122.91(3).
+            ctc_annual_accrual=250,
+            ctc_lifetime_cap=5000,
+            ctc_working_income_threshold=10994,
             federal_eligible_dtc_rate=0.150198,
             federal_non_eligible_dtc_rate=0.090301,
             federal_eligible_gross_up=0.38,

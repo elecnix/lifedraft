@@ -194,6 +194,15 @@ def _default_canada_state() -> dict:
         # parallel to SimulationConfig.children, initialized to all 0.0.
         'child_tuition_carryforwards': [],
 
+        # Issue #372 (ITA s.122.91): per-member unused Canada training amount
+        # limit -- the $250-a-year balance that caps the refundable Canada
+        # Training Credit. Seeded from the member's declared
+        # `training_amount_limit_opening`, reduced by each year's claim, and
+        # expired at the end of the year the member turns 65. Keyed by member
+        # id (it is a PERSONAL balance, not a household one). {} for a
+        # household that declares no tuition (inert, DP#32).
+        'training_amount_limit': {},
+
         # Issue #140: the capital-loss carry-forward pool, in TAXABLE-BASIS
         # (includable) dollars -- a $40k raw net capital loss at 50% inclusion
         # is $20k here. Settled once per year by the registered `capital_loss`

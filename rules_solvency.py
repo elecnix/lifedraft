@@ -557,6 +557,15 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
                      # no tuition (the golden path) -- a strict no-op.
                      + ws.tuition_credit_applied_primary
                      + ws.tuition_credit_applied_spouse
+                     # Issue #372: the Canada Training Credit is REFUNDABLE
+                     # (ITA s.122.91) -- CRA refunds the excess over tax
+                     # otherwise payable -- so it arrives as CASH in the
+                     # household's hand, not as a reduction of anybody's tax.
+                     # Counted here as an inflow, beside the tax reductions
+                     # above rather than inside them. 0.0 for a household that
+                     # declares no tuition (the golden path, DP#32).
+                     + ws.ctc_claimed_primary
+                     + ws.ctc_claimed_spouse
                      # Issue #1083: the s.20(1)(c) deduction's statutory saving
                      # on the primary's prologue-taxed rental/loan slice -- the
                      # tax the prologue already embedded in
@@ -613,7 +622,13 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
                      # epic #795 bite 3: the tuition_credit rule's per-member
                      # tax reduction (0.0 for a no-tuition household).
                      + ws.tuition_credit_applied_primary
-                     + ws.tuition_credit_applied_spouse)
+                     + ws.tuition_credit_applied_spouse
+                     # Issue #372: the Canada Training Credit is REFUNDABLE, so
+                     # it is cash in the household's hand rather than a tax
+                     # reduction -- an inflow in the identity (see the retired
+                     # branch's identical line). 0.0 with no declared tuition.
+                     + ws.ctc_claimed_primary
+                     + ws.ctc_claimed_spouse)
     required = debt_service + spending_outflow + contributions
 
     # epic #795 bite 3: ctx.after_tax_income is the PRE-credit after-tax
@@ -627,6 +642,12 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
         ctx.after_tax_income
         + ws.tuition_credit_applied_primary
         + ws.tuition_credit_applied_spouse
+        # Issue #372: the refundable CTC's cash -- real money in the household's
+        # hand this year, so the REPORTED after-tax income carries it exactly as
+        # it carries a tax reduction. 0.0 for a household with no declared
+        # tuition (the golden invariant is untouched).
+        + ws.ctc_claimed_primary
+        + ws.ctc_claimed_spouse
         # Issue #1083: the s.20(1)(c) nondrawdown routing's saving is a tax
         # reduction on income already inside ``ctx.after_tax_income`` -- report
         # the POST-saving figure, exactly as the tuition credits above report

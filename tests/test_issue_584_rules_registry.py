@@ -98,6 +98,7 @@ EXPECTED_RULE_NAMES = frozenset({
     'rrif_minimum',                # issue #574: mandatory RRIF minimum withdrawal from 71
     'sm_unwind',                   # issue #1017: under liquidate_to_target, unwind the SM sleeve to fund the spending shortfall (sell SM, repay HELOC, pay cap-gains tax, deliver net)
     'property_disposition',        # issue #956 bite B: a declared mid-horizon property SALE settles in its sale year (net proceeds invested post-growth, gain taxed + PRE-apportioned, conservation identity Δtotal_assets = -(selling_costs + T))
+    'training_credit',              # issue #372: Canada Training Credit (ITA s.122.91) -- a REFUNDABLE credit (cash via solvency) claimed against eligible tuition, capped by a per-member $250/yr balance; runs BEFORE tuition_credit, which reduces the s.118.5 base by it
     'tuition_credit',              # epic #795 bite 3: federal (+ QC) tuition tax credit (own credit + #784 carry-forward + #785 transfers) -- was inline in the fold's prologue
     'solvency',                    # issue #679: cash-flow identity + forced-liquidation waterfall
     'superficial_loss',            # issue #141: ITA s.53(1)(c) deny a loss whose household repurchase lands in the annualized window + defer the denial into the repurchased pot's ACB under s.53(1)(f)
@@ -212,6 +213,12 @@ EXPECTED_RULE_ORDER = (
     # income; proceeds inject post-growth) and before 'solvency' (the
     # invested non-reg is on the balance sheet the waterfall reads).
     'property_disposition',
+    # issue #372: the Canada Training Credit (ITA s.122.91) runs immediately
+    # BEFORE 'tuition_credit' -- the CTC claimed reduces the s.118.5
+    # eligible-tuition base, so the non-refundable credit must be computed on
+    # what is left -- and immediately before 'solvency', which counts the CTC
+    # as CASH (it is refundable, not a tax reduction).
+    'training_credit',
     # epic #795 bite 3: the tuition tax credit runs immediately before
     # 'solvency' (its sole consumer) -- it writes the per-member tax
     # reduction to YearWorkingState, which apply_solvency adds to
@@ -1037,6 +1044,18 @@ def test_every_rule_fires_somewhere_in_representative_households():
         )
     _merge(fired)
 
+    # ── Scenario Q: a learner household (issue #372) whose primary declares
+    # eligible tuition and a training amount limit carried in from a notice of
+    # assessment. The `training_credit` rule fires on that household -- the CTC
+    # it claims is cash, and it reduces the tuition base the `tuition_credit`
+    # rule (already swept by its own scenario above) then works from. It stays
+    # a no-op in every other scenario above, which is the point: a rule that
+    # fired everywhere would be a rule that cannot tell a learner from anyone
+    # else. Round numbers, role-based names (DP#4/#15).
+    with trace_firing() as fired:
+        _run_golden(_ctc_household_config())
+    _merge(fired)
+
     never_fired = sorted(name for name, fired in fired_ever.items() if not fired)
     assert not never_fired, (
         f"rule(s) {never_fired} are registered (present in RULE_ORDER) but "
@@ -1324,3 +1343,83 @@ def test_tuition_credit_rule_changes_engine_output():
     assert disabled_results[0].primary_tuition_carryforward == 0.0, (
         "expected zero carry-forward with the rule disabled -- the rule is "
         "the sole source of the tuition carry-forward in the fold")
+
+# ============================================================================
+# issue #372: the registered `training_credit` rule is not dead -- the same
+# two proofs as the tuition rule above, for the same reason (#627's shape
+# generalized: a registered rule whose outputs no consumer reads, or whose
+# firing changes no number, is a rule that was never written).
+# ============================================================================
+
+def _ctc_household_config():
+    """A fabricated learner who declares tuition AND an opening training amount
+    limit, so the Canada Training Credit fires. Round numbers, role-based names
+    (DP#4/DP#15). The opening balance is what a learner who has been accruing
+    for a few years before the projection would carry in from their notice of
+    assessment -- without it the room starts at $0 and nothing is claimable in
+    year one.
+    """
+    return {
+        'family': {
+            'members': [
+                {'role': 'primary', 'birth_year': 1996, 'gross_income': 120_000,
+                 'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0,
+                 'tuition_by_year': {2026: 2_000},
+                 'training_amount_limit_opening': 800.0},
+                {'role': 'spouse', 'birth_year': 1982, 'gross_income': 45_000,
+                 'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0},
+            ],
+            'children': [],
+        },
+        'accounts': {},
+        'assumptions': {'start_year': 2026, 'projection_years': 3,
+                        'investment_return': 0.0, 'salary_growth': 0.0,
+                        'inflation': 0.0, 'frozen_brackets': True,
+                        'time_step': 'yearly'},
+        'portfolio': {'accounts': {}},
+        'property': {'house_value': 0, 'mortgage_balance': 0,
+                     'mortgage_rate': 0.0, 'amortization_years': 25,
+                     'margin_available': 0, 'ltv_max': 0.80, 'heloc_readvance': False},
+        'savings': {'rate': 0.0},
+        'retirement': {'spending_target': 0, 'rrif_conversion_age': 71},
+        'tax': {'province': 'qc'},
+        'household_budget': {'living_costs': 50_000},
+    }
+
+
+def test_training_credit_rule_fires_for_a_ctc_household():
+    with trace_firing() as fired:
+        _run_golden(_ctc_household_config())
+    assert fired.get('training_credit', False), (
+        "training_credit never fired for a household whose member declares "
+        "tuition and a training amount limit -- a registered rule that does "
+        "not fire is the #627 defect shape (nominally present, silently inert).")
+
+
+def test_training_credit_rule_changes_engine_output():
+    """DP#18/#710: disabling the rule must change the year-1 result. The CTC is
+    REFUNDABLE, so it arrives as cash -- after_tax_income must be HIGHER with
+    the rule than without it. (A refundable credit implemented as a tax
+    reduction would show the opposite, or no difference at all for a learner
+    owing no tax.)"""
+    from rule_registry import RULES
+
+    baseline_results = _run_golden(_ctc_household_config())
+    original = RULES['training_credit']
+    RULES['training_credit'] = lambda ws, ctx: False
+    try:
+        disabled_results = _run_golden(_ctc_household_config())
+    finally:
+        RULES['training_credit'] = original
+
+    assert baseline_results[0].primary_ctc_claimed > 0.0, (
+        "premise: the learner must actually claim something in year one, or "
+        "'the rule changes nothing' is satisfied by the absence of the credit")
+    assert baseline_results[0].after_tax_income > \
+        disabled_results[0].after_tax_income, (
+        "the CTC's cash must reach after_tax_income -- it is a refundable "
+        "credit, so a household that owes tax still receives it. A rule whose "
+        "cash no consumer reads is a dead rule (DP#18/#710).")
+    assert disabled_results[0].primary_ctc_claimed == 0.0, (
+        "with the rule disabled the claim must be the seeded 0.0 default -- "
+        "the rule is the fold's only source of the CTC")

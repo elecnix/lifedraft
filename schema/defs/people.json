@@ -31,6 +31,10 @@
           "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
           "description": "Issue #764: the ELIGIBLE tuition the person PAID for this study period, per calendar year it is in session (the same amount is paid in each year the window covers). null/absent = no tuition declared (the engine applies no tuition credit). The federal 15% non-refundable tuition credit (ITA s.118.5) is modelled on this leaf; the Quebec provincial portion (#783), carry-forward of unused amounts (#784), and transfer to a supporting spouse/parent (#785, federal $5,000 limit) are modelled. See engine issues #764/#783/#784/#785."
         },
+        "reimbursed": {
+          "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
+          "description": "Issue #372: the portion of this study period's `tuition` that an EMPLOYER (or anyone else) paid back, per calendar year in session -- the same shape and per-year semantics as `tuition`, so `eligible = tuition - reimbursed`. Reimbursed fees are NOT eligible for the Canada Training Credit and NOT eligible for the s.118.5 tuition credit either: CRA allows neither where the learner did not bear the cost. What a reimbursed year DOES still do is build the learner's Canada training amount limit, which is why the two figures are kept apart rather than collapsed into one `eligible tuition` number: the room accrues on the year's income whether or not the fees were reimbursed (CRA's own example: an employee whose employer pays the fees accrues $250/yr and cannot claim the credit that year). null/absent = nothing reimbursed. Declaring MORE than `tuition` is refused at map time rather than clamped -- an overstatement here would silently create eligible tuition that was never paid."
+        },
         "transfer_to": {
           "anyOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }],
           "description": "Issue #785: the person (spouse/parent) to whom the student TRANSFERS their unused federal tuition credit (ITA s.118.8, $5,000 annual limit). null/absent = no transfer declared; the student uses the credit against their own tax first, then carries forward the remainder (#784). For a CHILD student (#701), the child has no own tax, so the entire credit (up to $5,000) transfers to this person, reducing THEIR federal tax."
@@ -166,7 +170,11 @@
         "incomes": { "type": "array", "items": { "$ref": "#/$defs/income" } },
         "benefits": { "$ref": "#/$defs/benefit_claim" },
         "entitlements": { "$ref": "#/$defs/benefit_entitlement" },
-        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } }
+        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } },
+        "training_amount_limit_opening": {
+          "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
+          "description": "Issue #372: this person's UNUSED Canada training amount limit carried into the projection's first year -- the balance their notice of assessment shows at the end of the year before it. The Canada Training Credit (ITA s.122.91) builds $250 a year and is claimed against later tuition; a household that has been accruing for years before the projection starts is otherwise modelled as having no credit room at all, which silently costs them the credit on their first course. null/absent = $0 carried in, which is the honest default for a person who has never claimed (DP#32: an absent balance is $0 because the limit starts empty, NOT because it is unknown -- the two are indistinguishable only if the declaration is missing, and the field above is how a document states a real one). This is a PERSONAL balance, not a household one: the limit is per individual."
+        }
       }
     }
 

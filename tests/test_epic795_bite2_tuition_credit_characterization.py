@@ -76,12 +76,27 @@ def _run_tuition(time_step):
     sim = FamilySimulation(cfg, adapter=CanadaAdapter(cfg),
                            use_readvanceable=False, deduct_later=False)
     return sim.run()
+# RE-PINNED by #372 (the Canada Training Credit). Years 2-4 moved and the move
+# is the feature working, not drift: this household's members are 46 and 44 in
+# 2026 on working incomes of $120k and $45k, so each accrues the first $250 of
+# training-amount limit in 2026 and claims it in 2027 against that year's
+# tuition. Each claim pays $250 of REFUNDABLE cash and removes $250 from the
+# s.118.5 base (worth 250 x 22% = $55 at the federal 14% + Quebec 8% rates), so
+# each member's after-tax income rises by $195 and the household's by $390 --
+# exactly the $390 the years 2-3 show. Year 1 is unchanged because a claim draws
+# on the balance carried in from the PREVIOUS year (ITA s.122.91), and the
+# household starts with none. Years 4-8 settle once the balance is spent and no
+# tuition is declared.
+#
+# The `monthly` list must stay IDENTICAL to `yearly`: that equality is the
+# two-folds-agree check, and it is why the numbers are written out twice rather
+# than computed.
 TUITION_CHARACTERIZATION_BASELINE = {
     'yearly': [
         (1, 120000.0, 45000.0, 117928.91440000001, 165000.0, 0.0),
-        (2, 120000.0, 45000.0, 119028.91440000001, 165000.0, 0.0),
-        (3, 120000.0, 45000.0, 118808.91440000001, 165000.0, 0.0),
-        (4, 120000.0, 45000.0, 116608.91440000001, 165000.0, 0.0),
+        (2, 120000.0, 45000.0, 119418.91440000001, 165000.0, 0.0),
+        (3, 120000.0, 45000.0, 119198.91440000001, 165000.0, 0.0),
+        (4, 120000.0, 45000.0, 116803.91440000001, 165000.0, 0.0),
         (5, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (6, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (7, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
@@ -89,9 +104,9 @@ TUITION_CHARACTERIZATION_BASELINE = {
     ],
     'monthly': [
         (1, 120000.0, 45000.0, 117928.91440000001, 165000.0, 0.0),
-        (2, 120000.0, 45000.0, 119028.91440000001, 165000.0, 0.0),
-        (3, 120000.0, 45000.0, 118808.91440000001, 165000.0, 0.0),
-        (4, 120000.0, 45000.0, 116608.91440000001, 165000.0, 0.0),
+        (2, 120000.0, 45000.0, 119418.91440000001, 165000.0, 0.0),
+        (3, 120000.0, 45000.0, 119198.91440000001, 165000.0, 0.0),
+        (4, 120000.0, 45000.0, 116803.91440000001, 165000.0, 0.0),
         (5, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (6, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (7, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
