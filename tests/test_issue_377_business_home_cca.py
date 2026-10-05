@@ -126,12 +126,12 @@ def _cfg(with_business_use=True, projection_years=10,
     return d
 
 
-def _run(cfg_dict):
+def _run(cfg_dict, monthly=False):
     cfg = SimulationConfig.from_dict(cfg_dict)
     sim = FamilySimulation(cfg, adapter=CanadaAdapter(cfg),
                            use_readvanceable=False, deduct_later=False,
                            lump_sum=0.0)
-    return sim.run(), cfg
+    return (sim._run_monthly() if monthly else sim.run()), cfg
 
 
 class TestThePureLaw:
@@ -237,6 +237,36 @@ class TestTheClaimItself:
         assert with_bu[y].rrsp_tax_savings > 0.0, (
             "the deduction still shelters real tax -- the claim is a deferral, "
             "not a wipe-out")
+
+    def test_the_monthly_path_agrees_with_the_yearly_one(self):
+        """The claim is wired into both fold paths. Wired into only one, the
+        monthly run would depreciate the business portion while the yearly run
+        did not -- and nothing would notice, because the two paths are compared
+        per household rather than per implementation."""
+        def check(cfg_dict):
+            yearly, _ = _run(cfg_dict)
+            monthly, _ = _run(cfg_dict, monthly=True)
+            assert [r.cca_claimed for r in monthly] == \
+                [r.cca_claimed for r in yearly]
+            assert [r.business_use_ucc for r in monthly] == \
+                [r.business_use_ucc for r in yearly]
+            assert [r.cca_recapture_ordinary for r in monthly] == \
+                [r.cca_recapture_ordinary for r in yearly]
+
+        check(_cfg())
+        # ... and once with the SPOUSE's own business portion, because the two
+        # roles are separate branches on both paths and a one-member household
+        # can only reach one of them.
+        spouse_cfg = _cfg()
+        spouse_cfg["family"]["members"].append({
+            "role": "spouse", "birth_year": 1976, "retirement_age": 65,
+            "gross_income": 0, "rrsp_room_accumulated": 0,
+            "tfsa_room_accumulated": 0,
+            "income_segments": [{"id": "biz", "kind": "self_employment",
+                                 "amount": 90_000, "from": "2026-01-01",
+                                 "to": "2036-01-01"}]})
+        spouse_cfg["business_use"][0]["role"] = "spouse"
+        check(spouse_cfg)
 
     def test_a_claim_larger_than_the_business_income_is_capped_at_it(self):
         """CCA cannot create or deepen a business loss (ITA s.20(1)(a) via the
@@ -502,6 +532,29 @@ class TestTheContractPath:
         from contract_property import _map_business_use
         doc = self._doc()
         assert _map_business_use(doc, "p1", "p2") == []
+
+    def test_a_business_that_closed_before_the_snapshot_pays_nothing(self):
+        """A self-employment income whose window ENDED before `as_of` is not
+        carried: it earns nothing in any projected year, and carrying it forward
+        would have the engine pay a business that no longer trades -- and, worse,
+        an income to cap this feature's claim against."""
+        doc = self._doc(
+            business_use={
+                "fraction": BUSINESS_FRACTION, "role": "primary",
+                "change_in_use_date": "2028-05-01",
+                "cca": {"rate": CCA_RATE, "capital_cost": BUSINESS_CAPITAL_COST,
+                        "opening_ucc": OPENING_UCC}},
+            self_employment={"kind": "self_employment", "amount": 90_000,
+                             "from": "2015-01-01", "to": "2020-01-01"})
+        internal = self._internal(doc)
+        member = next(m for m in internal['family']['members']
+                      if m.get('role') == 'primary')
+        assert 'income_segments' not in member, (
+            "an income that ended before the snapshot date is not carried "
+            "forward -- the key is absent, not an empty entry")
+        assert member['gross_income'] == 0.0, (
+            "and it is not folded into the base scalar either -- it neither "
+            "trades nor is it undated")
 
     def test_an_election_plus_a_dated_sale_is_refused(self):
         """Both consequences fall due in the SALE year, and the disposition
