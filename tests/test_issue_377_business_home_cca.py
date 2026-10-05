@@ -192,15 +192,25 @@ class TestTheClaimItself:
             f"expected {FIRST_CLAIM:,.2f} of CCA in the first full year, got "
             f"{rs[FIRST_CLAIM_INDEX].cca_claimed:,.2f}")
 
-    def test_nothing_is_claimed_before_the_change_in_use(self):
-        """DP#16: the block is inert until its trigger, exactly as a rental
-        block is inert before its purchase year."""
+    def test_nothing_is_claimed_in_or_before_the_change_in_use(self):
+        """DP#16: the block is inert until its trigger, exactly as a rental block
+        is inert before its purchase year. The slice deliberately INCLUDES the
+        change-in-use year itself, because the rule is "the first full year
+        after it" -- a claim in the change year would fail a different rule
+        (the un-modelled half-year allowance), and this assertion is about the
+        trigger, not about that."""
         rs, _ = _run(_cfg())
         assert [r.cca_claimed for r in rs[:CHANGE_YEAR + 1 - START_YEAR]] == \
             [0.0] * (CHANGE_YEAR + 1 - START_YEAR)
 
     def test_ucc_declines_and_closes_at_the_remaining_balance(self):
-        """The declining pool is the whole point -- the claim must reduce it."""
+        """The declining pool is the whole point -- the claim must reduce it.
+
+        The loop's identity is `prev.ucc - cur.claim == cur.ucc`: the claim
+        recorded on ``cur`` is the one that moved the balance from the previous
+        year to this one, so it holds whatever the rate does next -- the pool
+        declines at 2,625 then 2,520, and each year's closing figure is the
+        year before's less that year's own claim."""
         rs, _ = _run(_cfg())
         assert rs[FIRST_CLAIM_INDEX].business_use_ucc['home'] == \
             pytest.approx(UCC_AFTER_FIRST_CLAIM)
@@ -476,6 +486,29 @@ class TestTheContractPath:
             "a block that is validated and mapped but never serviced is a "
             "silent no-op (DP#16/DP#18)")
         assert claims[FIRST_CLAIM_INDEX] == pytest.approx(FIRST_CLAIM)
+
+    def test_exactly_one_change_in_use_leaf_is_required(self):
+        """The dated leaf is the real fact and the numeric twin its sweepable
+        alternative; a document supplying BOTH is ambiguous about when the use
+        commenced and is refused rather than silently resolved to one of them.
+        Mirrors the purchase/sale blocks' own oneOf."""
+        import copy as _copy
+        block = {"fraction": BUSINESS_FRACTION, "role": "primary",
+                 "cca": {"rate": CCA_RATE, "capital_cost": BUSINESS_CAPITAL_COST,
+                         "opening_ucc": OPENING_UCC}}
+        for both in ({"change_in_use_date": "2028-05-01",
+                      "change_in_use_year": None},
+                     {"change_in_use_date": "2028-05-01",
+                      "change_in_use_year": 2028}):
+            doc = self._doc(business_use=dict(block, **both))
+            with pytest.raises(contract_errors.ContractValidationError):
+                self._internal(doc)
+        # ... and either one ALONE is accepted, or the block would be
+        # unexpressible.
+        for one in ({"change_in_use_date": "2028-05-01"},
+                    {"change_in_use_year": 2028}):
+            doc = self._doc(business_use=dict(block, **one))
+            assert len(self._internal(doc)["business_use"]) == 1
 
     def test_a_role_the_household_does_not_have_is_refused(self):
         """A one-adult household declaring a spouse-owned portion: the claim

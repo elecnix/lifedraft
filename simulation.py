@@ -1378,29 +1378,6 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
     spouse_self_emp = _self_employment_income_for_year(
         ctx.spouse_income, spouse_member.get('income_segments'),
         sim_year, salary_growth, year)
-    # Issue #377: Capital Cost Allowance on a declared BUSINESS-USE PORTION of a
-    # property -- a home office, or part of a principal residence converted to a
-    # shop. The claim is capped at the owner's net business income (it cannot
-    # create or deepen a business loss), so it is computed from the net slice
-    # above and then SUBTRACTED from that slice and from the earned income that
-    # accrues RRSP room -- ITA s.20(1)(a) lowers the net business income the
-    # contribution stack (QPP/QPIP/HSF) and the s.146(1) earned-income room are
-    # both built on. It is NOT subtracted from cash income: CCA is non-cash, so
-    # the taxable-income adjustment below carries it (exactly as #694's rental
-    # CCA does) and savings capacity is untouched. All zero for a household with
-    # no business-use portion (the golden path, DP#32).
-    _bu = _business_use_for_year(
-        cfg, sim_year,
-        {'primary': primary_self_emp, 'spouse': spouse_self_emp},
-        state.jurisdiction_state.get('canada', {}).get('business_use_ucc', {}))
-    _p_bu_cca, _s_bu_cca = _bu.primary_claim, _bu.spouse_claim
-    _business_ucc = _bu.ucc_by_prop
-    if _p_bu_cca > 0.0:
-        primary_self_emp -= _p_bu_cca
-        primary_earned_income -= _p_bu_cca
-    if _s_bu_cca > 0.0:
-        spouse_self_emp -= _s_bu_cca
-        spouse_earned_income -= _s_bu_cca
     # Issue #761: a working-life year whose income is reduced below baseline
     # by a dated decisions.income[] shock -- compresses the discretionary
     # portion of living_costs in apply_solvency when a split is declared.
@@ -1447,6 +1424,37 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         spouse_income = 0.0
         spouse_earned_income = 0.0
         spouse_self_emp = 0.0
+
+    # Issue #377: Capital Cost Allowance on a declared BUSINESS-USE PORTION of a
+    # property -- a home office, or part of a principal residence converted to a
+    # shop. The claim is capped at the owner's net business income (it cannot
+    # create or deepen a business loss), so it is computed from that net slice
+    # and then SUBTRACTED from it and from the earned income that accrues RRSP
+    # room -- ITA s.20(1)(a) lowers the net business income the contribution
+    # stack (QPP/QPIP/HSF) and the s.146(1) earned-income room are both built
+    # on. It is NOT subtracted from cash income: CCA is non-cash, so the
+    # taxable-income adjustment below carries it (exactly as #694's rental CCA
+    # does) and savings capacity is untouched. All zero for a household with no
+    # business-use portion (the golden path, DP#32).
+    #
+    # Computed AFTER the retirement transition above, not before it: the cap is
+    # this year's net business income, and a member who retired this year has
+    # none. Reading the pre-transition figure instead would let a retired
+    # member claim against income they no longer earn AND drive
+    # `primary_self_emp` negative -- the claim would exceed the very base it is
+    # supposed to be bounded by (found by Cite on this PR).
+    _bu = _business_use_for_year(
+        cfg, sim_year,
+        {'primary': primary_self_emp, 'spouse': spouse_self_emp},
+        state.jurisdiction_state.get('canada', {}).get('business_use_ucc', {}))
+    _p_bu_cca, _s_bu_cca = _bu.primary_claim, _bu.spouse_claim
+    _business_ucc = _bu.ucc_by_prop
+    if _p_bu_cca > 0.0:
+        primary_self_emp -= _p_bu_cca
+        primary_earned_income -= _p_bu_cca
+    if _s_bu_cca > 0.0:
+        spouse_self_emp -= _s_bu_cca
+        spouse_earned_income -= _s_bu_cca
 
     total_income = primary_income + spouse_income
     for ch in cfg.children:
@@ -2764,24 +2772,6 @@ class FamilySimulation:
             spouse_self_emp = _self_employment_income_for_year(
                 self._spouse_income, spouse_member.get('income_segments'),
                 sim_year, salary_growth, year)
-            # Issue #377: business-use-portion CCA, computed and deducted
-            # EXACTLY as the yearly path does (see the identical block in
-            # `simulate_year_pure`) -- the monthly and yearly folds must agree
-            # (the parity tests), so the same claim, the same cap and the same
-            # net-business-income / RRSP-room reductions, read from the same
-            # `business_use_ucc` ledger.
-            _bu = _business_use_for_year(
-                cfg, sim_year,
-                {'primary': primary_self_emp, 'spouse': spouse_self_emp},
-                state.jurisdiction_state.get('canada', {}).get('business_use_ucc', {}))
-            _p_bu_cca, _s_bu_cca = _bu.primary_claim, _bu.spouse_claim
-            _business_ucc = _bu.ucc_by_prop
-            if _p_bu_cca > 0.0:
-                primary_self_emp -= _p_bu_cca
-                primary_earned_income -= _p_bu_cca
-            if _s_bu_cca > 0.0:
-                spouse_self_emp -= _s_bu_cca
-                spouse_earned_income -= _s_bu_cca
             # Issue #761: a working-life year whose income is reduced below
             # baseline by a dated decisions.income[] shock -- compresses the
             # discretionary portion of living_costs in apply_solvency when a
@@ -2827,6 +2817,27 @@ class FamilySimulation:
                 spouse_income = 0.0
                 spouse_earned_income = 0.0
                 spouse_self_emp = 0.0
+
+            # Issue #377: the business-use-portion CCA, computed and deducted
+            # EXACTLY as the yearly path does (see the identical block in
+            # `simulate_year_pure`) -- including AFTER the retirement
+            # transition, for the same reason: the claim is capped at this
+            # year's net business income, and a retired member has none. The
+            # monthly and yearly folds must agree (the parity tests), so this
+            # reads the same `business_use_ucc` ledger as the yearly path.
+            _bu = _business_use_for_year(
+                cfg, sim_year,
+                {'primary': primary_self_emp, 'spouse': spouse_self_emp},
+                state.jurisdiction_state.get('canada', {}).get(
+                    'business_use_ucc', {}))
+            _p_bu_cca, _s_bu_cca = _bu.primary_claim, _bu.spouse_claim
+            _business_ucc = _bu.ucc_by_prop
+            if _p_bu_cca > 0.0:
+                primary_self_emp -= _p_bu_cca
+                primary_earned_income -= _p_bu_cca
+            if _s_bu_cca > 0.0:
+                spouse_self_emp -= _s_bu_cca
+                spouse_earned_income -= _s_bu_cca
 
             total_income = primary_income + spouse_income
             for ch in cfg.children:

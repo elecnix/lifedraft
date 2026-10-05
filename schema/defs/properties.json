@@ -69,12 +69,12 @@
           "description": "Whose self-employment income the CCA offsets. The claim reduces THAT income's net business income, and so that person's QPP/QPIP base and RRSP-room accrual (ITA s.20(1)(a) is an individual's deduction, and this tool models no joint filing)."
         },
         "change_in_use_date": {
-          "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }],
+          "$ref": "#/$defs/date",
           "description": "The date the income-producing use commenced. ITA s.45(1)(c) deems the business fraction disposed of and reacquired at FMV on THAT date, which is when the principal-residence exemption stops covering its gain. Before it the business portion claims nothing and the whole property keeps its PRE (DP#16 -- the block is inert until its trigger date, exactly as a rental block is inert before its purchase)."
         },
         "change_in_use_year": {
           "anyOf": [{ "type": "integer" }, { "type": "null" }],
-          "description": "Sweepable alternative to `change_in_use_date`: the CALENDAR year the income-producing use commenced (the same numeric-leaf alternative the purchase/sale blocks carry, #956 bite C). Exactly one of the two is given (the schema's oneOf). An explicit `is not None` test is applied at map time, never `or` (DP#32)."
+          "description": "Sweepable alternative to `change_in_use_date`: the CALENDAR year the income-producing use commenced (the same numeric-leaf alternative the purchase/sale blocks carry, #956 bite C). Exactly one of the two is given (the schema's oneOf). An explicit `is not None` test is applied at map time, never `or` (DP#32). Declared NULLABLE and the dated leaf a plain `$ref`, exactly as `property_purchase`'s `year`/`date` pair is: the oneOf then requires exactly one of the two keys to be PRESENT, so the numeric twin may be carried as null. A document that supplies BOTH is ambiguous about when the use commenced and is refused -- the same reading the purchase and sale blocks take."
         },
         "cca": {
           "anyOf": [{"$ref": "#/$defs/cca_election"}, {"type": "null"}],
