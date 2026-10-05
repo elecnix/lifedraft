@@ -429,8 +429,6 @@ class TestTheCaveatCannotOutliveTheBug(unittest.TestCase):
         self.assertEqual(default, 0.0)
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 class TestAnEmptyCompositionIsAnAbsentComposition(unittest.TestCase):
     """Cite (r4180599342): ``isinstance(yields, dict)`` let an EMPTY block
@@ -467,3 +465,7 @@ class TestAnEmptyCompositionIsAnAbsentComposition(unittest.TestCase):
         empty['portfolio']['accounts']['non_reg']['yield'] = {}
         self.assertNotIn(CAVEAT_ID, _active_ids(zeroes))
         self.assertIn(CAVEAT_ID, _active_ids(empty))
+
+
+if __name__ == '__main__':
+    unittest.main()
