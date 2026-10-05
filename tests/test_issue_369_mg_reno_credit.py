@@ -530,3 +530,53 @@ def test_a_mg_reno_block_that_is_none_is_not_a_renovation():
     cfg = {"people": [{"person_id": "elder_parent", "birth_year": 1955}],
            "properties": [{"mg_reno": None}]}
     assert mg_reno_credit_total(cfg) == 0.0
+
+
+class TestTheEighteenFloorOnTheDtcRoute:
+    """s.122.92(3) gives two routes and they are NOT symmetric.
+
+    (a) reached 65 by the end of the renovation-period year, OR
+    (b) is 18 or older at the end of that year AND DTC-eligible.
+
+    The 18+ floor applies to route (b) only. Without it, a DTC-eligible minor
+    made a renovation qualify -- up to the full $7,500 the statute does not
+    allow. Cite caught this on PR #447.
+    """
+
+    def _renovation(self):
+        return MultigenerationalRenovation(
+            year=2024, qualifying_expenditures=50_000.0,
+            has_secondary_unit=True, qualifying_person_ids=("child",))
+
+    def test_a_dtc_eligible_minor_does_not_qualify(self):
+        from countries.canada.mg_reno_credit import QualifyingIndividual
+        minor = QualifyingIndividual(
+            "child", birth_year=2010, dtc_eligible=True)  # 14 in 2024
+        assert minor.qualifies(2024) is False
+        assert multigenerational_reno_credit(self._renovation(), [minor]) == 0.0
+
+    def test_the_same_person_qualifies_once_they_turn_eighteen(self):
+        """The floor is a DATE, not a standing boolean (DP#1)."""
+        from countries.canada.mg_reno_credit import QualifyingIndividual
+        born_2006 = QualifyingIndividual("child", birth_year=2006, dtc_eligible=True)
+        assert born_2006.qualifies(2024) is True   # 18 exactly
+        assert born_2006.qualifies(2023) is False  # 17
+
+    def test_an_adult_without_dtc_eligibility_still_does_not_qualify(self):
+        from countries.canada.mg_reno_credit import QualifyingIndividual
+        adult = QualifyingIndividual("child", birth_year=1990, dtc_eligible=False)
+        assert adult.qualifies(2024) is False
+
+    def test_reaching_65_qualifies_without_any_dtc_claim(self):
+        """Route (a) needs no disability test at all."""
+        from countries.canada.mg_reno_credit import QualifyingIndividual
+        elder = QualifyingIndividual("parent", birth_year=1955, dtc_eligible=False)
+        assert elder.qualifies(2024) is True
+
+    def test_the_minor_route_is_closed_even_at_the_full_cap(self):
+        """The point of the fix: the money, not just the predicate."""
+        from countries.canada.mg_reno_credit import QualifyingIndividual
+        minor = QualifyingIndividual("child", birth_year=2010, dtc_eligible=True)
+        assert multigenerational_reno_credit(self._renovation(), [minor]) == 0.0, (
+            "a DTC-eligible minor must not unlock the credit"
+        )

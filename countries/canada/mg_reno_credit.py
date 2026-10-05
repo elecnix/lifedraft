@@ -53,9 +53,29 @@ class QualifyingIndividual:
     birth_year: Optional[int] = None
 
     def qualifies(self, year: int) -> bool:
-        """s.122.92(3). Both routes, evaluated against a DATE (DP#1)."""
+        """s.122.92(3), evaluated against a DATE (DP#1).
+
+        The statute gives two routes, and they are not symmetric:
+
+        (a) the person has **reached 65** by the end of the renovation-period
+            taxation year; or
+        (b) the person is **18 or older** at the end of that year **and** is
+            eligible for the disability tax credit under s.118.3.
+
+        The 18+ floor applies to route (b) ONLY. Without it a DTC-eligible
+        minor made a renovation qualify, which the statute does not allow --
+        worth up to the full $7,500.
+        """
         if year < MHRTC_FIRST_YEAR:
             return False
+        if self.birth_year is not None:
+            age = year - self.birth_year
+            if age >= 65:
+                return True          # route (a)
+            if age < 18:
+                return False         # s.122.92(3)(b): the 18+ floor
+            return self.dtc_eligible  # route (b)
+        # No birth year recorded: fall back to the caller's resolved flags.
         return self.reached_65_by_year_end or self.dtc_eligible
 
 
@@ -238,16 +258,6 @@ def qualifiers_from_people(members: Sequence[dict]) -> list:
             # run in the repo (DP#16). A NAMED person who resolves to nobody
             # IS refused, in mg_reno_credit_for_year.
             continue
-            pass
-            # DP#4: a person is identified by person_id, never by role text.
-            # A role fallback would credit whoever is "primary", so a member
-            # with no id is a document gap and is refused (DP#32).
-            raise ValueError(
-                f"a household member has no person_id ({member!r}). The "
-                f"multigenerational renovation credit names its qualifying "
-                f"people by person_id; a role fallback would credit the wrong "
-                f"person (DP#4, DP#32)."
-            )
         birth_year = member.get("birth_year")
         if birth_year is None:
             # Without a birth year the DATE-computed age test cannot be
