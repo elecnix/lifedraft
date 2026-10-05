@@ -432,3 +432,22 @@ def test_a_missing_quebec_record_refuses_rather_than_claiming_nothing():
         quebec_home_buyers_credit(
             2024, quebec_tax_payable=50_000,
             provider=_RaisingQuebecProvider())
+
+
+@pytest.mark.parametrize("duties,basis", [(-1.0, 500_000.0), (5_000.0, -1.0), (-1.0, -1.0)])
+def test_negative_duty_figures_refuse_rather_than_over_crediting(duties, basis):
+    """A negative basis skips the 2.35% reduction and pays the FULL credit.
+
+    That is an over-credit vector, not a rounding detail: at a basis of -1 the
+    claimant would receive $5,875 on a home whose duty basis is nonsense.
+    Clamping to zero would hide the bad input, so it refuses.
+    """
+    with pytest.raises(ValueError, match="Negative transfer-duty"):
+        quebec_homeownership_refundable_credit(
+            2026, transfer_duties=duties, duty_basis=basis)
+
+
+def test_zero_duty_figures_are_a_genuine_zero_not_an_error():
+    """No duties paid -> nothing to refund. That is a real zero."""
+    assert quebec_homeownership_refundable_credit(
+        2026, transfer_duties=0.0, duty_basis=500_000) == 0.0

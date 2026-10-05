@@ -280,14 +280,29 @@ def quebec_homeownership_refundable_credit(
     reduction_rate = float(record.qc_homeownership_credit_reduction_rate)
     threshold = float(record.qc_homeownership_credit_reduction_threshold)
 
-    duties = max(0.0, float(transfer_duties))
+    duties = float(transfer_duties)
+    basis = float(duty_basis)
+    if duties < 0 or basis < 0:
+        # A NEGATIVE duty basis would be nonsense that reads as "below the
+        # $750,000 threshold", so no reduction applies and the claimant
+        # receives the FULL $5,875 -- an over-credit vector, not a rounding
+        # detail. Clamping to zero would hide the bad input; refusing says so.
+        raise ValueError(
+            f"Negative transfer-duty figures for {year} (duties={duties!r}, "
+            f"basis={basis!r}). Municipal transfer duties and the basis of "
+            f"imposition cannot be negative; a negative basis would skip the "
+            f"2.35% reduction and over-credit the claim (DP#32)."
+        )
     credit = min(duties, full_band)                       # 100% of the first band
     excess = duties - full_band
     if excess > 0 and partial_band > 0:
         credit += min(excess, partial_band) * partial_rate   # 25% of the next band
 
-    if duty_basis > threshold > 0:
-        credit -= (duty_basis - threshold) * reduction_rate
+    # The reduction keys on the BASIS OF IMPOSITION, not on the duties paid:
+    # bulletin 2026-2 reduces by 2.35% of the excess basis over $750,000.
+    # These are different quantities; conflating them changes the answer.
+    if basis > threshold > 0:
+        credit -= (basis - threshold) * reduction_rate
     return max(0.0, credit)
 
 
