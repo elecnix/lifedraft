@@ -1752,24 +1752,14 @@ def cpp_modelled_as_zero_people(cfg: dict) -> List[Dict]:
         if not isinstance(member, dict):
             continue
         monthly = member.get('cpp_monthly_estimated')
-        # A MALFORMED amount is not evidence of a $0 pension. Reporting one
-        # would state a figure this predicate never verified, and a false
-        # caveat is worse than none: it teaches the reader to ignore the
-        # caveats that are true. So an unreadable value is declined, exactly
-        # as an undatable age is below -- while an ABSENT or None amount IS
-        # reported, because that is the real $0 case (the engine's own reader
-        # turns a missing or null cpp_monthly_estimated into 0 as well).
-        # `bool` is excluded on purpose: True would otherwise pass as "has
-        # an amount".
+        # Only ABSENCE or an explicit zero is the "$0 pension" case. Anything
+        # else -- unreadable, a bool, or negative -- is declined rather than
+        # described: a false caveat is worse than none, because it teaches the
+        # reader to ignore the ones that are true.
         if isinstance(monthly, bool) or (
                 monthly is not None and not isinstance(monthly, (int, float))):
             continue
         if monthly is not None and monthly != 0:
-            # Only ABSENCE or an explicit zero is the "$0 pension" case. A
-            # NEGATIVE amount is neither: it is an anomaly, not a zero, and
-            # reporting it as $0 would state a figure the engine is not
-            # using. It is declined on the same principle as an unreadable
-            # value above -- a false caveat is worse than none.
             continue
         birth_year = member.get('birth_year')
         if not isinstance(birth_year, int) or isinstance(birth_year, bool):
