@@ -146,6 +146,14 @@ def test_the_ctc_projection_does_not_index_the_statutory_amounts():
                     and getattr(sub.func, "id", "") == "TaxYearData"):
                 continue
             passed = {kw.arg: kw.value for kw in sub.keywords}
+            for name in CTC_STATUTORY_FIELDS + CTC_INDEXED_FIELDS:
+                # A field absent from the projection call must fail with THIS
+                # message, not a bare KeyError -- the first test names it, and a
+                # detector is not allowed to be less legible than the failure it
+                # guards against.
+                assert name in passed, (
+                    f"_project_from_base does not pass {name} at all, so the "
+                    f"indexation check below has nothing to inspect (issue #372)")
             for name in CTC_STATUTORY_FIELDS:
                 assert "factor" not in ast.dump(passed[name]), (
                     f"_project_from_base indexes TaxYearData.{name}, but the "

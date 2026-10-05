@@ -460,14 +460,14 @@ def _tuition_by_year(doc: Dict, p: Dict, role: str, person_id: str) -> Dict[int,
             # boundary is exactly the kind of failure a caller cannot act on.
             raise ContractAdaptationError(
                 f"Person {person_id!r} declares a study period starting "
-                f"{s['start_date']!r} whose tuition/reimbursed amounts are not "
+                f"{s.get('start_date')!r} whose tuition/reimbursed amounts are not "
                 f"numbers: tuition={tuition!r}, reimbursed={reimbursed!r}. "
                 f"Both are money amounts (issue #372)."
             )
         if reimbursed_amount is not None and reimbursed_amount > tuition_amount:
             raise ContractAdaptationError(
                 f"Person {person_id!r} declares a study period starting "
-                f"{s['start_date']!r} with tuition={tuition!r} but "
+                f"{s.get('start_date')!r} with tuition={tuition!r} but "
                 f"reimbursed={reimbursed!r} -- more was reimbursed than was "
                 f"paid. Reimbursed fees are not eligible for the tuition tax "
                 f"credit or the Canada Training Credit, so this document would "

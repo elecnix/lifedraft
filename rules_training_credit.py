@@ -163,6 +163,12 @@ def apply_training_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # Quebec or Ontario household -- a credit that never fires, with no error.
     fed_data = tax_provider._load_year(sim_year, 'canada', 'federal')
     annual_accrual = fed_data.ctc_annual_accrual
+    # A year with no published lifetime cap is a year with no CTC parameters:
+    # the pure functions treat `lifetime_cap <= 0` as "the caller supplied no
+    # cap", which is the right contract for a library but the wrong one here --
+    # in the fold a zero means the DATA is missing, and an unbounded claim
+    # computed from a missing ceiling is exactly the plausible-from-absent shape
+    # this repo refuses.
     lifetime_cap = fed_data.ctc_lifetime_cap
     # CRA's earnings-limits table is labelled by the TAXATION YEAR whose limit
     # the row supports, but the income it tests is the PRECEDING year's: the
@@ -178,6 +184,8 @@ def apply_training_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
     working_threshold = next_year_data.ctc_working_income_threshold
     ceiling = third_bracket_ceiling(next_year_data.federal_brackets)
 
+    if lifetime_cap <= 0.0:
+        return False
     rooms = ws.opening_training_amount_limit
     claims = {}
     new_rooms = {}
@@ -233,8 +241,13 @@ def apply_training_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
         new_room = room_after_claim(room, claim, accrual, lifetime_cap)
         if age_at_year_end >= 65:
             # ITA s.122.91(4): the unused balance expires at the end of the year
-            # the individual turns 65. The claim above still stands -- they may
-            # use the balance in that final year -- but nothing carries past it.
+            # the individual turns 65, so nothing is CARRIED out of any year at
+            # or past that age. The condition is `>= 65` rather than `== 65`
+            # deliberately: a member who is already 66 when the projection
+            # begins and declares an opening balance may still CLAIM against it
+            # (the claim above is computed from the carried-in room first), and
+            # then it is gone -- there is no year in which a past-65 member is
+            # entitled to carry one forward.
             new_room = 0.0
         new_rooms[mid] = new_room
         claims[role] = claim
