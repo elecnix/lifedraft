@@ -1749,9 +1749,17 @@ def _income_yield_is_unpriceable(yields: dict) -> bool:
     about. A malformed ROC contributes 0 to income either way, so it cannot
     change the arithmetic, but silently reading declared garbage as a clean
     zero is the habit this module exists to break.
+
+    A key PRESENT with the value ``None`` is the same failure one step
+    further in, and Cite found it (r4179432734's follow-up): the screen skips
+    None, so ``{'interest': None}`` passed here AND contributed nothing to the
+    sum, and the caveat was suppressed. But "I declare an interest yield and
+    give no value" is not "I declare no interest yield" -- it is an unpriceable
+    input, which is the case this whole screen exists to catch. Only a key that
+    is ABSENT is an absence.
     """
     for rate in yields.values():
-        if rate is not None and not _is_number(rate):
+        if not _is_number(rate):
             return True
     return False
 

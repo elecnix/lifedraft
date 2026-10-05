@@ -281,13 +281,57 @@ class TestTheCaveatStaysQuietWhenItDoesNotApply(unittest.TestCase):
         cfg_ok = _cfg(non_reg_balance=2_000_000, return_of_capital=0.05)
         self.assertNotIn(CAVEAT_ID, _active_ids(cfg_ok))
 
-    def test_an_absent_yield_key_is_not_a_malformed_one(self):
-        """The other side of the same distinction: an absent key leaves the
-        other declared yields at zero, so there is genuinely nothing to
-        report and the caveat stays quiet."""
+    def test_a_declared_null_yield_reports_rather_than_reads_as_zero(self):
+        """Cite (r4179432734 follow-up): a key PRESENT with the value ``None``
+        was skipped by the malformed screen AND contributed nothing to the sum,
+        so ``{'interest': None}`` suppressed the caveat. "I declare an interest
+        yield and give no value" is not "I declare no interest yield" -- it is an
+        unpriceable input. Only an ABSENT key is an absence.
+        """
+        for key in ('interest', 'eligible_dividends', 'foreign_income'):
+            cfg = _cfg(non_reg_balance=2_000_000)
+            cfg['portfolio']['accounts']['non_reg']['yield'][key] = None
+            with self.subTest(key=key):
+                self.assertIn(CAVEAT_ID, _active_ids(cfg))
+
+    def test_a_null_on_a_non_income_key_also_reports(self):
+        """Same reasoning for a key the sum never reads: a declared ROC with no
+        value is still declared-but-unpriceable, and the screen is deliberately
+        wider than the sum."""
         cfg = _cfg(non_reg_balance=2_000_000)
-        del cfg['portfolio']['accounts']['non_reg']['yield']['interest']
-        self.assertNotIn(CAVEAT_ID, _active_ids(cfg))
+        cfg['portfolio']['accounts']['non_reg']['yield']['return_of_capital'] = None
+        self.assertIn(CAVEAT_ID, _active_ids(cfg))
+
+    def test_an_absent_yield_key_is_not_a_null_yield_key(self):
+        """The contrast that makes the rule legible, and the one Cite's second
+        finding said the file stated ambiguously.
+
+        These two are NOT the same absence, and the difference is the whole
+        point:
+
+        - **no ``yield`` block at all** -> no composition is declared, so the
+          engine falls back to its configured ``non_reg_yield_rate`` and income
+          IS being distributed. The caveat must fire.
+        - **one key deleted, the others explicitly 0.0** -> a composition IS
+          declared, and it declares ZERO income. Nothing is distributed, so
+          there is nothing for the recovery base to be missing.
+
+        Deleting a key leaves the block declaring zeroes; deleting the block
+        removes the declaration entirely.
+        """
+        no_block = _cfg(non_reg_balance=2_000_000)
+        del no_block['portfolio']['accounts']['non_reg']['yield']
+        self.assertIn(CAVEAT_ID, _active_ids(no_block))
+
+        zero_composition = _cfg(non_reg_balance=2_000_000)
+        del zero_composition['portfolio']['accounts']['non_reg']['yield']['interest']
+        self.assertNotIn(CAVEAT_ID, _active_ids(zero_composition))
+
+        # And the middle case, which the old wording blurred: the key is
+        # present but unpriceable, so the block is NOT declaring zeroes.
+        null_value = _cfg(non_reg_balance=2_000_000)
+        null_value['portfolio']['accounts']['non_reg']['yield']['interest'] = None
+        self.assertIn(CAVEAT_ID, _active_ids(null_value))
 
 
 class TestTheCaveatReachesEveryOutputSurface(unittest.TestCase):
