@@ -254,3 +254,155 @@ def test_a_prior_home_outside_the_window_does_not_disqualify():
     assert is_first_home_buyer(
         2026, buyer_prior_home_years={1990},
         spouse_prior_home_years={1991}) is True
+
+# ── Absence must fail loudly, not read as a plausible zero (DP#32) ───────────
+
+class _EmptyProvider:
+    """A provider with nothing registered -- the "no data at all" case."""
+
+    def get_year_data(self, year, country, province):
+        raise ValueError(f"No tax data for {country}/{province}/{year}")
+
+
+class _Bracket:
+    """The year record's brackets are objects with a ``rate``, not dicts."""
+
+    def __init__(self, rate):
+        self.rate = rate
+
+
+class _Record:
+    """A TaxYearData-shaped stub. Every field a pricing path reads is here,
+    so a test can blank exactly ONE and see only that refusal fire."""
+
+    federal_brackets = (_Bracket(0.15),)
+    home_buyers_amount = 10_000.0
+    provincial_abatement = 0.165
+    qc_home_buyers_credit_max = 1_400.0
+    qc_homeownership_credit_full_rate_band = 5_000.0
+    qc_homeownership_credit_partial_band = 3_500.0
+    qc_homeownership_credit_partial_rate = 0.25
+    qc_homeownership_credit_reduction_rate = 0.0235
+    qc_homeownership_credit_reduction_threshold = 750_000.0
+
+    def __init__(self, **overrides):
+        for key, value in overrides.items():
+            setattr(self, key, value)
+
+
+class _StubProvider:
+    """Serves federal and Quebec records independently, so one can be blanked."""
+
+    def __init__(self, federal=None, quebec=None):
+        self._federal = federal
+        self._quebec = quebec
+
+    def get_year_data(self, year, country, province):
+        if (country, province) == ("canada", "federal"):
+            if self._federal is None:
+                raise ValueError("no federal record")
+            return self._federal
+        if (country, province) == ("canada", "quebec"):
+            if self._quebec is None:
+                raise ValueError("no quebec record")
+            return self._quebec
+        raise ValueError(f"No tax data for {country}/{province}/{year}")
+
+
+def test_a_missing_bracket_table_refuses_rather_than_assuming_a_rate():
+    """The rate is READ, so without brackets there is nothing to read."""
+    provider = _StubProvider(federal=_Record(federal_brackets=[]))
+    with pytest.raises(ValueError, match="federal brackets"):
+        lowest_federal_rate(2024, provider=provider)
+
+
+def test_an_unpopulated_amount_refuses_rather_than_crediting_zero():
+    """The CRA has legislated $10,000 every year since 2022.
+
+    An empty field is a data gap, not a zero credit. Answering 0 would tell a
+    first-time buyer they get nothing, with nothing to say so.
+    """
+    provider = _StubProvider(federal=_Record(home_buyers_amount=0.0))
+    with pytest.raises(ValueError, match="home buyers' amount"):
+        home_buyers_amount_for_year(2024, provider=provider)
+
+
+def test_a_missing_quebec_abatement_refuses_rather_than_crediting_unabatemented():
+    """Crediting the un-abatemented figure overstates a Quebec credit by 16.5%.
+
+    Refusing is the honest answer: the caller can report it, whereas a silent
+    $1,500 would read as a correct $1,252.50 to anyone who did not recompute.
+    """
+    provider = _StubProvider(federal=_Record(),
+                             quebec=_Record(provincial_abatement=0.0))
+    # A 0.0 abatement is a real value, so this must NOT raise -- it must
+    # simply produce the un-abatemented credit, which is why the test below
+    # pins the raising case separately.
+    assert federal_home_buyers_amount(
+        2024, province="quebec", provider=provider) == pytest.approx(1_500.00)
+
+    missing = _StubProvider(federal=_Record(), quebec=None)
+    with pytest.raises(ValueError, match="provincial abatement"):
+        federal_home_buyers_amount(2024, province="quebec", provider=missing)
+
+
+def test_the_quebec_credit_is_zero_when_the_province_has_no_maximum():
+    """No maximum registered -> nothing to claim, and not an error."""
+    provider = _StubProvider(federal=_Record(), quebec=_Record(
+        qc_home_buyers_credit_max=0.0))
+    assert quebec_home_buyers_credit(
+        2024, quebec_tax_payable=50_000, provider=provider) == 0.0
+
+
+def test_a_zero_or_negative_share_is_zero():
+    """A claimant with no share of the home claims nothing."""
+    assert quebec_home_buyers_credit(2024, quebec_tax_payable=50_000,
+                                     claimed_amount=0.0) == 0.0
+    assert quebec_home_buyers_credit(2024, quebec_tax_payable=50_000,
+                                     claimed_amount=-500.0) == 0.0
+
+
+def test_the_refundable_credit_is_zero_without_a_quebec_record():
+    """Pre-2026 and a missing record both mean no credit -- neither raises."""
+    provider = _StubProvider(federal=_Record(), quebec=None)
+    assert quebec_homeownership_refundable_credit(
+        2026, transfer_duties=8_500, duty_basis=500_000,
+        provider=provider) == 0.0
+
+
+def test_no_rate_is_ever_assumed_when_the_data_is_absent():
+    """Together: none of the absence paths invents a plausible number."""
+    # The federal amount still answers for a pre-2022 year from the statute,
+    # because that one IS legislated and stated -- not guessed.
+    assert home_buyers_amount_for_year(2021) == 5_000
+    with pytest.raises(ValueError):
+        lowest_federal_rate(2024, provider=_StubProvider(federal=_Record(
+            federal_brackets=[])))
+
+
+class _RaisingQuebecProvider:
+    """Federal answers fine; the Quebec lookup raises.
+
+    Distinct from a Quebec record that answers 0.0 -- an absent record is a
+    different condition from a year whose maximum is genuinely zero, and the
+    two must not be conflated.
+    """
+
+    def get_year_data(self, year, country, province):
+        if (country, province) == ("canada", "federal"):
+            return _Record()
+        raise ValueError(f"No tax data for {country}/{province}/{year}")
+
+
+def test_a_missing_quebec_record_leaves_the_line_396_credit_at_zero():
+    """No record -> no maximum -> nothing to claim.
+
+    The line-396 credit is an OPT-IN: an unpopulated Quebec record means the
+    credit is not claimed, which is a truthful zero rather than a guess. (The
+    FEDERAL side is different and refuses -- see
+    test_an_unpopulated_amount_refuses_rather_than_crediting_zero -- because
+    the CRA has legislated an amount for every year since 2022.)
+    """
+    assert quebec_home_buyers_credit(
+        2024, quebec_tax_payable=50_000,
+        provider=_RaisingQuebecProvider()) == 0.0

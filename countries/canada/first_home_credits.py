@@ -98,15 +98,30 @@ def home_buyers_amount_for_year(year: int,
                                 provider: Optional[TaxDataProvider] = None) -> float:
     """The federal DOLLAR amount claimable for a qualifying home in ``year``.
 
-    $10,000 from 2022, $5,000 before. Data, not a literal (DP#20).
+    $5,000 before 2022, $10,000 from 2022.
+
+    The YEAR decides, not the record. The provider resolves an unregistered
+    year to the NEAREST row, so a 2021 query carries back the 2023 record and
+    would otherwise report the post-2022 $10,000 for a year the CRA legislated
+    at half that. Deciding on the year first is what stops the carry-forward
+    from silently crediting an amount that did not exist.
     """
-    record = _federal_record(year, provider)
-    amount = getattr(record, "home_buyers_amount", 0.0) or 0.0
-    if amount:
-        return float(amount)
-    # A record that predates the 2022 change carries no value; the CRA's
-    # published amount for those years is the smaller one.
-    return PRE_2022_HOME_BUYERS_AMOUNT if year < 2022 else 0.0
+    if year < 2022:
+        return PRE_2022_HOME_BUYERS_AMOUNT
+    amount = float(_federal_record(year, provider).home_buyers_amount)
+    if amount <= 0:
+        # A year whose record carries no amount is a DATA GAP, not a zero
+        # credit: the CRA has legislated $10,000 for every year from 2022, so
+        # an empty field means the record was not populated. Answering 0 would
+        # tell a first-time buyer they get nothing when the statute says they
+        # get $10,000, with nothing to say so (DP#32).
+        raise ValueError(
+            f"No federal home buyers' amount is registered for {year}. The "
+            f"federal record must carry home_buyers_amount (CRA line 31270 / "
+            f"ITA s.118.05(3)) for {year}; returning 0 here would silently "
+            f"deny a first-time buyer their credit (DP#32)."
+        )
+    return amount
 
 
 def federal_home_buyers_amount(
@@ -139,6 +154,17 @@ def federal_home_buyers_amount(
         claimed_amount = home_buyers_amount_for_year(year, provider)
     if claimed_amount <= 0:
         return 0.0
+    # The CRA caps the total across ALL eligible claimants for one home at the
+    # year's maximum (s.118.05(4)). Enforcing it here rather than trusting the
+    # caller is what stops a household claiming $15,000 and being credited
+    # 150% of the credit -- a real over-credit, not a theoretical one.
+    claimed_amount = min(float(claimed_amount),
+                         home_buyers_amount_for_year(year, provider))
+    # No second guard after the cap: `home_buyers_amount_for_year` RAISES
+    # rather than returning 0 for a year it has no amount for, so a capped
+    # value of zero is unreachable. An earlier version guarded it anyway, and
+    # the coverage gate correctly reported the branch as uncovered -- dead
+    # code shaped like a safety net.
     credit = claimed_amount * lowest_federal_rate(year, provider)
 
     if _is_quebec(province):
@@ -220,14 +246,19 @@ def quebec_homeownership_refundable_credit(
     except (ValueError, IndexError, AttributeError):
         return 0.0
 
-    full_band = float(getattr(record, "qc_homeownership_credit_full_rate_band", 0.0) or 0.0)
+    full_band = float(record.qc_homeownership_credit_full_rate_band)
     if full_band <= 0:
-        return 0.0  # the credit does not exist for this taxation year
+        # A GENUINE zero, not a gap: the refundable credit begins with the
+        # 2026 taxation year, so every earlier year legitimately carries 0.
+        # Distinguishing "the program does not exist" from "the record is
+        # missing" by the value alone is impossible here, and the programme
+        # boundary is the only reading that is right for a pre-2026 year.
+        return 0.0
 
-    partial_band = float(getattr(record, "qc_homeownership_credit_partial_band", 0.0) or 0.0)
-    partial_rate = float(getattr(record, "qc_homeownership_credit_partial_rate", 0.0) or 0.0)
-    reduction_rate = float(getattr(record, "qc_homeownership_credit_reduction_rate", 0.0) or 0.0)
-    threshold = float(getattr(record, "qc_homeownership_credit_reduction_threshold", 0.0) or 0.0)
+    partial_band = float(record.qc_homeownership_credit_partial_band)
+    partial_rate = float(record.qc_homeownership_credit_partial_rate)
+    reduction_rate = float(record.qc_homeownership_credit_reduction_rate)
+    threshold = float(record.qc_homeownership_credit_reduction_threshold)
 
     duties = max(0.0, float(transfer_duties))
     credit = min(duties, full_band)                       # 100% of the first band

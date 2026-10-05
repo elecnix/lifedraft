@@ -149,6 +149,23 @@ KNOWN_UNREACHED: dict[str, str] = {
         "#724 — IRD / breakage penalty on discharging a fixed-rate mortgage. "
         "Priced nowhere, so every refinance in the optimizer is penalty-free."
     ),
+    "countries.canada.first_home_credits": (
+        "#368 (blocked on #325) — NOT dead code and NOT a clone: the three "
+        "first-home credits are PRICED here against the CRA line 31270 / ITA "
+        "s.118.05 amounts, the TP-1 line 396 Quebec maximum, and the Quebec "
+        "bulletin 2026-2 refundable transfer-duty bands, all year-versioned. "
+        "They cannot be applied because the production tax path computes "
+        "PURE BRACKET TAX — `tax_calculator.tax_on_income` applies no "
+        "non-refundable credits at all, not even the basic personal amount, "
+        "which appears nowhere in rules_*.py. Both aggregators that know how "
+        "to price a credit (compute_non_refundable_credits and "
+        "quebec_non_refundable_credits) are themselves unreached — see the "
+        "ontario_credits row above, which is the same shape. Wiring this "
+        "module alone would give a first-time buyer their home credit but not "
+        "their basic personal amount, which is a worse inconsistency than "
+        "giving neither. REMOVE THIS ROW when #325 lands and the fold "
+        "computes non-refundable credits."
+    ),
     "countries.canada.provinces.ontario.ontario_credits": (
         "#745 — NOT a dead clone: the production tax path computes no Ontario "
         "surtax, health premium, trillium, LIFT, or sales-tax credit, so an "
