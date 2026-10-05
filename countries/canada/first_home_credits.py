@@ -1,12 +1,25 @@
 """First-home buyers' tax credits (issue #368).
 
-A household can declare a first-home purchase through ``first_home_purchases[]``
-or buy a principal residence through ``properties[].purchase``. Until now the
-engine moved only the FHSA qualifying withdrawal and the Home Buyers' Plan
-from such a purchase -- **none of the tax credits were booked**, so every
-first-time buyer paid too much tax in the purchase year. For a Quebec
-household in 2024 that is up to **$2,652.50** of overstated cash; from 2026 a
-further up to **$5,875** of refundable relief.
+A household declares a first-home purchase through ``first_home_purchases[]``
+(``{buyer, year}``); issue #368 also names buying a principal residence through
+``properties[].purchase`` as a trigger. Either way the engine moves only the
+FHSA qualifying withdrawal and the Home Buyers' Plan -- **none of the tax
+credits are booked** -- so a first-time buyer is still modelled as paying too
+much tax in the purchase year. For a Quebec household in 2024 that is up to
+**$2,652.50** of overstated cash; from 2026 a further up to **$5,875** of
+refundable relief.
+
+STATUS: PRICED AND UNIT-TESTED, NOT WIRED, and the gap is input rather than
+taste. The fold cannot book these credits because the contract carries none of
+the facts they need: ``first_home_purchases[]`` is ``{buyer, year}`` with
+``additionalProperties: false``, so ``is_first_home_buyer`` has no prior-home
+years to read (and a declared purchase is not proof of first-time status); the
+refundable credit needs the municipal transfer duties paid and the basis of
+imposition, and no duty calculator or such field exists; and line 396 is
+non-refundable, bounded by Quebec tax *otherwise payable*, which the fold does
+not compute -- it taxes from ONE combined federal+provincial bracket list.
+The ``KNOWN_UNREACHED`` row in tests/architecture/test_unreached_rule_modules.py
+records this and names #368.
 
 All three credits share one trigger, one eligibility test and one cap, so they
 live together here rather than being re-spelled by the federal and Quebec
@@ -327,7 +340,12 @@ def quebec_homeownership_refundable_credit(
         )
     credit = min(duties, full_band)                       # 100% of the first band
     excess = duties - full_band
-    if excess > 0 and partial_band > 0:
+    # No `and partial_band > 0` here: the guard above RAISES when the band is
+    # zero-or-less, so a conjunct re-testing it is unreachable. An earlier
+    # version chained it on, which read as a second safety net while being
+    # dead code -- and a dead branch shaped like a guard is what the coverage
+    # gate reports as an uncovered line.
+    if excess > 0:
         credit += min(excess, partial_band) * partial_rate   # 25% of the next band
 
     # The reduction keys on the BASIS OF IMPOSITION, not on the duties paid:

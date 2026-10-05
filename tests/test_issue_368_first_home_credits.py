@@ -18,8 +18,16 @@ issue:
   100% of the first $5,000 of transfer duties plus 25% of the next $3,500
   (max $5,875), reduced by 2.35% of the basis above $750,000.
 
-NOTE: these tests were written during a hold on executing test commands and
-have NOT yet been run. The first thing to do on resuming is run them.
+NOTE on status: these tests RUN (60 pass in about 3 s), and they pin every
+rule, threshold and absence path of ``countries/canada/first_home_credits``.
+What they do NOT pin is a household's tax: the module is not wired into the
+fold, because the input contract carries none of the facts the three credits
+need -- each adult's prior-home years (``first_home_purchases[]`` is
+``{buyer, year}``, so a declared purchase must not be read as proof of
+first-time status), the municipal transfer duties paid and the basis of
+imposition, and a Quebec tax otherwise payable for line 396 to be capped by.
+The ``KNOWN_UNREACHED`` row in ``tests/architecture/test_unreached_rule_modules.py``
+records that gap and names #368.
 """
 import pytest
 import unittest
