@@ -924,3 +924,66 @@ def test_a_well_formed_beneficiary_still_emits_the_age_17_cesg_deadline():
          "clb_received": 0.0, "years_with_100_before_age_15": 0}]))
     assert any("cesg" in a.what.lower() or "cesg" in a.why.lower() for a in actions), \
         f"no CESG action derived from {[a.what for a in actions]}"
+
+
+class TestThePredicateGuardItselfIsStillExercised:
+    """The fail-open guard must not rot just because the predicates stopped raising.
+
+    #295 fixed the RESP predicates so they no longer raise on a malformed key.
+    That is the right fix, but it had a side effect on coverage: a predicate
+    that never raises means the ``except: return True`` branch in
+    ``Approximation.is_active`` is never taken, so the guard that exists
+    precisely to stop a raising predicate from silently hiding a caveat loses
+    its only cover.
+
+    That guard is the last line of defence for the false disclosure this module
+    calls corrosive, so it is pinned here directly. Without this test, a future
+    predicate that starts raising again would fail open with nothing to catch
+    the regression.
+    """
+
+    def test_a_predicate_that_raises_fails_OPEN_and_reports_the_caveat(self):
+        from model_fidelity import Approximation, Direction
+
+        def explodes(ctx):
+            raise KeyError("contributions_total")
+
+        approx = Approximation(
+            id="pension_contributions_not_coordinated_across_earnings_kinds",
+            summary="coordination caveat",
+            biased_figure="pension contributions",
+            direction=Direction.UNDERSTATES,
+            applies=explodes,
+        )
+        assert approx.is_active(object()) is True, (
+            "a predicate that cannot be evaluated must fail OPEN (report the "
+            "caveat), never silently hide it"
+        )
+
+    def test_a_predicate_returning_false_is_respected(self):
+        from model_fidelity import Approximation, Direction
+
+        approx = Approximation(
+            id="k", summary="s", biased_figure="f",
+            direction=Direction.UNDERSTATES, applies=lambda ctx: False,
+        )
+        assert approx.is_active(object()) is False
+
+    def test_a_predicate_returning_true_is_respected(self):
+        from model_fidelity import Approximation, Direction
+
+        approx = Approximation(
+            id="k", summary="s", biased_figure="f",
+            direction=Direction.UNDERSTATES, applies=lambda ctx: True,
+        )
+        assert approx.is_active(object()) is True
+
+    def test_an_approximation_with_no_predicate_is_always_active(self):
+        """No ``applies`` at all is the vacuous case; it must not be callable."""
+        from model_fidelity import Approximation, Direction
+
+        approx = Approximation(
+            id="k", summary="s", biased_figure="f",
+            direction=Direction.UNDERSTATES, applies=None,
+        )
+        assert approx.is_active(object()) is True
