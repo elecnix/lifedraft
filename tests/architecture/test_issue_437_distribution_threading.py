@@ -33,29 +33,40 @@ SIMULATION_PY = os.path.join(REPO_ROOT, "simulation.py")
 COMBINED = "non_reg_after_tax_return"
 DISTRIBUTION = "non_reg_after_tax_distribution"
 
+# Every spelling of the CAPITAL-APPRECIATION-INCLUSIVE rate. The Smith-
+# Manoeuvre sleeve reads the same quantity under a different name
+# (``ws.taxable_after_tax_rate``), so a single forbidden string would guard one
+# module and silently skip the other.
+COMBINED_RATE_NAMES = frozenset({COMBINED, "taxable_after_tax_rate"})
+
 
 def _calls_passing(tree, kwarg):
-    """Every ast.Call in ``tree`` that supplies ``kwarg=...``."""
+    """Every ``ast.Call`` node in ``tree`` that supplies ``kwarg=...``.
+
+    Yields the CALL node, not a line number: two nested calls written on one
+    physical line share a ``lineno``, so comparing line numbers could let one
+    call's threaded argument vouch for a different, unthreaded call.
+    """
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             for keyword in node.keywords:
                 if keyword.arg == kwarg:
-                    yield node.lineno
+                    yield node
 
 
 def test_every_call_passing_the_combined_rate_passes_the_distribution():
     with open(SIMULATION_PY, encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
 
-    combined_lines = sorted(_calls_passing(tree, COMBINED))
-    assert combined_lines, (
+    combined_calls = list(_calls_passing(tree, COMBINED))
+    assert combined_calls, (
         f"{COMBINED}= no longer appears in simulation.py -- if the non-reg "
         "growth rate moved, update this guard with it rather than deleting it")
 
-    distribution_lines = set(_calls_passing(tree, DISTRIBUTION))
+    threaded = {id(call) for call in _calls_passing(tree, DISTRIBUTION)}
 
-    unthreaded = [line for line in combined_lines
-                  if line not in distribution_lines]
+    unthreaded = sorted(call.lineno for call in combined_calls
+                        if id(call) not in threaded)
     assert not unthreaded, (
         f"simulation.py passes {COMBINED}= at line(s) {unthreaded} without "
         f"the matching {DISTRIBUTION}=. That call site would grow the pot "
@@ -78,41 +89,54 @@ def _combined_rate_names(node):
     different kinds of node holding the same forbidden identifier: the
     attribute name of ``ctx.non_reg_after_tax_return`` lives in
     ``Attribute.attr``, which ``ast.walk`` never yields as a ``Name``.
+
+    Matched for EQUALITY, not containment. ``non_reg_after_tax_return_for`` is
+    the module-level pure function that legitimately composes the combined
+    rate; a substring test would flag that name too.
     """
     for sub in ast.walk(node):
-        if isinstance(sub, ast.Name) and COMBINED in sub.id:
+        if isinstance(sub, ast.Name) and sub.id in COMBINED_RATE_NAMES:
             yield sub
-        elif isinstance(sub, ast.Attribute) and COMBINED in sub.attr:
+        elif (isinstance(sub, ast.Attribute)
+              and sub.attr in COMBINED_RATE_NAMES):
             yield sub
+
+
+# Both modules this PR writes a cost basis from. The Smith-Manoeuvre sleeve is
+# legally non-registered and carries the same exposure, so guarding only the
+# declared non-reg pot would leave half the change unguarded.
+COST_BASIS_MODULES = ("rules_growth.py", "rules_leverage.py")
 
 
 def test_the_distribution_rate_is_never_added_to_acb_by_capital_appreciation():
-    """``rules_growth`` may add the DISTRIBUTION to ACB, never the combined
-    rate. Growth is capital-appreciation-inclusive, so adding it to cost basis
-    would erase a household's entire unrealized gain -- the opposite error from
-    #437, and one that would make every drawdown tax-free."""
+    """Neither taxable pot may add the COMBINED rate to a cost basis. Growth is
+    capital-appreciation-inclusive, so adding it to cost basis would erase a
+    household's entire unrealized gain -- the opposite error from #437, and one
+    that would make every drawdown tax-free."""
     import ast as _ast
-    path = os.path.join(REPO_ROOT, "rules_growth.py")
-    with open(path, encoding="utf-8") as handle:
-        tree = _ast.parse(handle.read())
 
     offenders = []
-    for node in _ast.walk(tree):
-        if isinstance(node, _ast.AugAssign):
-            targets = [node.target]
-        elif isinstance(node, _ast.Assign):
-            targets = list(node.targets)
-        else:
-            continue
-        if not any(isinstance(t, _ast.Attribute) and t.attr.endswith("_acb")
-                   for t in targets):
-            continue
-        for sub in _combined_rate_names(node.value):
-            offenders.append(node.lineno)
+    for module in COST_BASIS_MODULES:
+        path = os.path.join(REPO_ROOT, module)
+        with open(path, encoding="utf-8") as handle:
+            tree = _ast.parse(handle.read())
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.AugAssign):
+                targets = [node.target]
+            elif isinstance(node, _ast.Assign):
+                targets = list(node.targets)
+            else:
+                continue
+            if not any(isinstance(t, _ast.Attribute)
+                       and t.attr.endswith(("_acb", "_cost_basis"))
+                       for t in targets):
+                continue
+            for sub in _combined_rate_names(node.value):
+                offenders.append(f"{module}:{node.lineno}")
 
     assert not offenders, (
-        f"rules_growth.py adds the combined growth rate to a cost basis at "
-        f"line(s) {offenders}. Capital appreciation is unrealized and is "
-        "never income; only the after-tax DISTRIBUTION may join cost basis "
-        "(DP#19). Adding the combined rate would make the pot's unrealized "
-        "gain permanently zero and tax every drawdown at the lowest rate.")
+        f"a combined growth rate reaches a cost basis at {offenders}. Capital "
+        "appreciation is unrealized and is never income; only the after-tax "
+        "DISTRIBUTION may join cost basis (DP#19). Adding the combined rate "
+        "would make the pot's unrealized gain permanently zero and tax every "
+        "drawdown at the lowest rate.")
