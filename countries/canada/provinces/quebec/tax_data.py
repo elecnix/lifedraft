@@ -159,7 +159,7 @@ class QuebecTaxData:
             qpp_max_benefit_65=17334,   # DP#52: QPP max benefit at 65 (2025)
             qpp_survivor_flat_rate=6498, # DP#52: QPP survivor flat-rate (annual, 2025)
             oas_annual_max=8381,
-            oas_clawback_threshold=90997,
+            oas_clawback_threshold=93454,
             provincial_eligible_dtc_rate=0.11510,
             provincial_non_eligible_dtc_rate=0.05575,
             # ── Quebec solidarity tax credit (2024-2025 benefit year) ──
@@ -253,7 +253,7 @@ class QuebecTaxData:
             qpp_max_benefit_65=17334,   # DP#52: QPP max benefit at 65 (2024)
             qpp_survivor_flat_rate=6498, # DP#52: QPP survivor flat-rate (annual, 2024)
             oas_annual_max=8291,
-            oas_clawback_threshold=87068,
+            oas_clawback_threshold=90997,
             provincial_eligible_dtc_rate=0.11510,
             provincial_non_eligible_dtc_rate=0.05575,
             # ── Quebec solidarity tax credit (2023-2024 benefit year) ──
@@ -312,7 +312,7 @@ class QuebecTaxData:
             qpp_max_benefit_65=15170,   # DP#52: QPP max benefit at 65 (2023)
             qpp_survivor_flat_rate=5640, # DP#52: QPP survivor flat-rate (annual, 2023)
             oas_annual_max=8083,
-            oas_clawback_threshold=83917,
+            oas_clawback_threshold=86912,
             provincial_eligible_dtc_rate=0.11510,
             provincial_non_eligible_dtc_rate=0.05575,
             # ── Quebec solidarity tax credit (2022-2023 benefit year) ──

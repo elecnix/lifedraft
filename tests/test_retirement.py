@@ -230,10 +230,18 @@ class TestYearVersionedOAS(unittest.TestCase):
         self.assertEqual(result_2026['threshold'], 95323)
 
     def test_oas_year_2023_lower_threshold(self):
-        """2023 OAS had a lower threshold."""
+        """2023 OAS had a lower threshold.
+
+        Issue #345: this test used to pin 83917 -- the PREVIOUS year's figure,
+        which is how the one-year lag survived. The published 2023 minimum is
+        86,912 (Service Canada publishes each income year beside its threshold;
+        the 2023 advisor reference tables carry the same series). Still below
+        2026's 95,323, so the 90,000 case below still claws back, which is what
+        this test is for.
+        """
         result_2023 = oas_clawback(90000, year=2023)
-        # 2023 threshold was 83917, so 90000 > 83917 → some clawback
-        self.assertEqual(result_2023['threshold'], 83917)
+        # 2023 threshold was 86912, so 90000 > 86912 → some clawback
+        self.assertEqual(result_2023['threshold'], 86912)
         self.assertTrue(result_2023['clawback_amount'] > 0)
 
     def test_oas_year_specific_clawback_different(self):
