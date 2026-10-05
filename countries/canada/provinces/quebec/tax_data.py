@@ -243,7 +243,7 @@ class QuebecTaxData:
                 TaxBracket(126000, 0, 0.2575, "25.75%"),
             ],
             provincial_abatement=cls.ABATEMENT,
-            basic_personal_amount=17183,
+            basic_personal_amount=18056,  # Issue #351: was 17183, the 2023 value,
             cpp_max_pensionable=68500,
             cpp_rate=0.0595,
             cpp2_max_pensionable=73200,  # DP#20: CPP2 YAMPE 2024 (first year of second ceiling)
@@ -286,7 +286,33 @@ class QuebecTaxData:
             clb_threshold_1_3_children=55867,
             clb_threshold_4_children=63036,
             clb_threshold_5plus_children=70234,
-            source="fallback",
+            source="fallback",            # Issue #351: Finances Quebec, "Parameters of the personal income
+            # tax system for 2024", Table 3. These were UNSET for 2023/2024, so
+            # every reader fell back to the TaxYearData default of 0.0 and the
+            # credit came out $0 with no error -- the silent zero DP#32 exists
+            # to prevent.
+            qc_non_refundable_credit_rate=0.14,       # 14% conversion (unchanged by year)
+            qc_age_credit_reduction_rate=0.1875,      # line-361 reduction (unchanged by year)
+            qc_senior_assistance_max_per_person=2000,
+            qc_fss_individual_first_cap=150,
+            qc_fss_individual_max=1000,
+            qc_fss_individual_rate=0.01,
+            qc_work_premium_reduction_rate=0.10,
+            qc_age_amount=3798,
+            qc_living_alone_amount=2069,
+            qc_retirement_income_amount=3374,
+            qc_age_credit_reduction_threshold=40925,
+            qc_senior_assistance_threshold_single=27065,
+            qc_senior_assistance_threshold_couple=44015,
+            qc_senior_assistance_reduction_rate=0.0531,
+            qc_fss_individual_exemption=17630,
+            qc_fss_individual_second_threshold=61315,
+            qc_work_premium_max_single=1152.34,
+            qc_work_premium_max_couple=1797.07,
+            qc_work_premium_reduction_threshold_single=12334,
+            qc_work_premium_reduction_threshold_couple=19092,
+            qc_drug_insurance_max_premium=737.5,
+
         )
 
     @classmethod
@@ -337,5 +363,31 @@ class QuebecTaxData:
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
-            source="fallback",
+            source="fallback",            # Issue #351: Finances Quebec, "Parameters of the personal income
+            # tax system for 2024", Table 3. These were UNSET for 2023/2024, so
+            # every reader fell back to the TaxYearData default of 0.0 and the
+            # credit came out $0 with no error -- the silent zero DP#32 exists
+            # to prevent.
+            qc_non_refundable_credit_rate=0.14,       # 14% conversion (unchanged by year)
+            qc_age_credit_reduction_rate=0.1875,      # line-361 reduction (unchanged by year)
+            qc_senior_assistance_max_per_person=2000,
+            qc_fss_individual_first_cap=150,
+            qc_fss_individual_max=1000,
+            qc_fss_individual_rate=0.01,
+            qc_work_premium_reduction_rate=0.10,
+            qc_age_amount=3614,
+            qc_living_alone_amount=1969,
+            qc_retirement_income_amount=3211,
+            qc_age_credit_reduction_threshold=38945,
+            qc_senior_assistance_threshold_single=25755,
+            qc_senior_assistance_threshold_couple=41885,
+            qc_senior_assistance_reduction_rate=0.0516,
+            qc_fss_individual_exemption=16780,
+            qc_fss_individual_second_threshold=58350,
+            qc_work_premium_max_single=1095.27,
+            qc_work_premium_max_couple=1709.61,
+            qc_work_premium_reduction_threshold_single=11842,
+            qc_work_premium_reduction_threshold_couple=18338,
+            qc_drug_insurance_max_premium=731.0,
+
         )
