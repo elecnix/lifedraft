@@ -101,32 +101,40 @@ def is_retired(birth_year: int, retirement_age: int, sim_year: int) -> bool:
 
 
 def cpp_from_estimate(monthly_estimate: float, start_age: int,
-                      claim_age: int) -> float:
-    """Annual CPP from a member's monthly estimate, age-adjusted for start_age.
+                      claim_age: int, plan: str = 'cpp',
+                      max_pension_at_65: Optional[float] = None) -> float:
+    """Annual CPP/QPP from a member's monthly estimate, age-adjusted.
 
     The member's `cpp_monthly_estimated` is, by convention, the estimate *at 65*.
-    Starting earlier reduces it (−0.6%/mo), later increases it (+0.7%/mo). CPP
-    only flows once the member is at least `start_age`, so `claim_age` gates it.
+
+    **Issue #361: the plan decides the claiming-age rules, and they differ.**
+    CPP is a flat 0.6%/month early (36% at 60) and runs to 70. The QPP slides
+    from 0.5% to 0.6%/month with the pension's level against the year's maximum,
+    and can be deferred to **72** (+58.8%), not 70. Pricing a Quebec member with
+    the CPP rules understated a claim at 72 by ~$2,016/year for life and taxed a
+    below-maximum early claimor at six points more than the statute does.
 
     Args:
         monthly_estimate: cpp_monthly_estimated (estimate at 65).
-        start_age: cpp_start_age (60–70).
+        start_age: cpp_start_age / qpp_start_age.
         claim_age: member's current age this year.
+        plan: ``'cpp'`` (default) or ``'qpp'``.
+        max_pension_at_65: the year's MAXIMUM retirement pension at 65. Required
+            for ``plan='qpp'`` on the early side, because the QPP reduction is
+            proportional to the pension's level -- see
+            ``countries.canada.claim_age``. Ignored for CPP.
 
     Returns:
-        Annual CPP for this year (0 before the member reaches start_age).
+        Annual CPP/QPP for this year (0 before the member reaches start_age).
     """
     if monthly_estimate <= 0 or claim_age < start_age:
         return 0.0
     annual_at_65 = monthly_estimate * 12
-    start_age = max(60, min(70, start_age))
-    if start_age < 65:
-        months_early = (65 - start_age) * 12
-        return annual_at_65 * (1 - months_early * CPP_EARLY_START_PENALTY)
-    if start_age > 65:
-        months_late = (start_age - 65) * 12
-        return annual_at_65 * (1 + months_late * CPP_LATE_START_BONUS)
-    return annual_at_65
+    from countries.canada.claim_age import claiming_age_factor
+    return annual_at_65 * claiming_age_factor(
+        start_age, plan=plan,
+        pension_at_65=annual_at_65,
+        max_pension_at_65=max_pension_at_65)
 
 
 def oas_gross(oas_annual_max: float, defer_months: int) -> float:
@@ -192,7 +200,10 @@ class MemberRetirementIncome:
 def member_retirement_income(member: Dict, sim_year: int,
                              oas_annual_max: float,
                              oas_clawback_threshold: float,
-                             other_net_income: float = 0.0) -> MemberRetirementIncome:
+                             other_net_income: float = 0.0,
+                             plan: str = 'cpp',
+                             max_pension_at_65: Optional[float] = None
+                             ) -> MemberRetirementIncome:
     """Compute a member's CPP + OAS + pension for `sim_year`.
 
     Government benefits only flow once the member is retired (>= retirement_age)
@@ -225,6 +236,7 @@ def member_retirement_income(member: Dict, sim_year: int,
     cpp_start_age = member.get('cpp_start_age')
     cpp_start_age = 65 if cpp_start_age is None else cpp_start_age
     cpp = cpp_from_estimate(
+        plan=plan, max_pension_at_65=max_pension_at_65,
         monthly_estimate=member.get('cpp_monthly_estimated', 0) or 0,
         start_age=cpp_start_age,
         claim_age=age,

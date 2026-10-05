@@ -170,6 +170,7 @@ def optimize_claiming_ages(
     cpp_start_range: Tuple[int, int] = (60, 70),
     oas_defer_range: Tuple[int, int] = (0, 60),
     discount_rate: float = 0.0,
+    plan: str = 'cpp',
 ) -> ClaimingAgeResult:
     """Optimize CPP start age and OAS deferral months.
 
@@ -198,9 +199,13 @@ def optimize_claiming_ages(
     cpp_min, cpp_max = cpp_start_range
     oas_min, oas_max = oas_defer_range
 
-    # Clamp ranges
-    cpp_min = max(60, cpp_min)
-    cpp_max = min(70, cpp_max)
+    # Clamp ranges to the PLAN's own window (issue #361): the QPP may be
+    # deferred to 72, so a Quebec sweep must be able to reach 71 and 72 --
+    # clamping both plans at 70 made the deferral-to-72 rule unreachable from
+    # the one surface built to compare claim ages.
+    from countries.canada.claim_age import max_claim_age, min_claim_age
+    cpp_min = max(min_claim_age(plan), cpp_min)
+    cpp_max = min(max_claim_age(plan), cpp_max)
     oas_min = max(0, oas_min)
     oas_max = min(60, oas_max)
 

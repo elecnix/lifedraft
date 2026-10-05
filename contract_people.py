@@ -544,7 +544,31 @@ def _map_member(doc: Dict, person_id: str, role: str,
                 f"the in-pay benefit if CPP is flowing, else the entitlement."
             )
         member["cpp_monthly_estimated"] = ent_cpp["estimated_monthly_at_65"]
-        member["cpp_start_age"] = ent_cpp["claim_age"]
+        # Issue #361: the schema's bound is 60-72 because that leaf cannot see
+        # the jurisdiction, so the REFUSAL lives here, where it can. The QPP may
+        # be deferred to 72 (Retraite Quebec, since 2024); the CPP may not, and
+        # a non-Quebec claim at 71 or 72 must fail loudly rather than be
+        # silently clamped to 70 -- which would have quietly paid a 70-year-old
+        # factor to someone who asked for 72 (DP#32).
+        _claim_age = ent_cpp["claim_age"]
+        from countries.canada.claim_age import max_claim_age
+        # DP#32: an explicit absence test, never `or {}`. A contract with no
+        # jurisdiction block is a malformed document, not one that silently
+        # defaults to the CPP rules.
+        _jurisdiction = doc.get("jurisdiction")
+        _province = ({} if _jurisdiction is None
+                     else _jurisdiction).get("province")
+        _plan = 'qpp' if _province == "quebec" else 'cpp'
+        if _claim_age > max_claim_age(_plan):
+            raise ContractAdaptationError(
+                f"person {person_id!r} declares a retirement pension claim at "
+                f"{_claim_age}, but the {_plan.upper()} allows a claim no later "
+                f"than {max_claim_age(_plan)}"
+                + (". The QPP's deferral to 72 is a Quebec rule; a CPP "
+                   "entitlement claimed at 71 or 72 does not exist."
+                   if _plan == 'cpp' else ".")
+            )
+        member["cpp_start_age"] = _claim_age
     ent_oas = entitlements.get("oas")
     if ent_oas:
         if oas:
