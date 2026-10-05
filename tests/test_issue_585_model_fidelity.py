@@ -447,6 +447,12 @@ class TestCaveatVocabularyIsCoveredOrAllowlisted(unittest.TestCase):
 _CODE_ANCHORS = {
     'terminal_wealth_is_pretax': (
         'objective.py', 'def _terminal_wealth('),
+    # Issue #352: the caveat exists exactly where the family window is still
+    # used as the C denominator -- the fallback branch of _pre_denominator.
+    # If that branch is removed (every property stating its acquisition), the
+    # approximation no longer exists and this caveat must go with it.
+    'pre_family_window_denominator': (
+        'contract_estate.py', 'def _pre_denominator('),
     # Issue #170: the refused-contribution caveat is anchored to the clamp
     # site that records the refusal -- if the clip (or its disclosure) is
     # ever removed, this anchor goes stale and the caveat must go with it.

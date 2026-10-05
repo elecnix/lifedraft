@@ -436,6 +436,51 @@ register(Approximation(
 ))
 
 
+def _pre_family_window_denominator_active(ctx: FidelityContext) -> bool:
+    """#352: fires when a PRE gain is apportioned against the FAMILY window.
+
+    Reads a fact the CONTRACT MAPPER recorded, not a re-derivation: the internal
+    config carries only the couple's non-principal properties, so a predicate
+    here cannot see the principal residence, let alone its acquisition date.
+    The mapper sets this only when a family contest exists AND at least one
+    designating property states no acquisition -- i.e. exactly when the
+    statutory per-property C is unavailable and the shared window stands in.
+    """
+    tax = ctx.cfg.get("tax")
+    if not isinstance(tax, dict):
+        return False
+    return bool(tax.get("pre_family_window_approximate"))
+
+
+register(Approximation(
+    id='pre_family_window_denominator',
+    summary=("A principal-residence exemption is apportioned against the family's "
+             "shared designation window rather than each property's own ownership "
+             "years, because the document does not state when a property was acquired"),
+    biased_figure=("capital-gains tax and after-tax estate value in a "
+                   "home-plus-cottage household"),
+    direction=Direction.UNKNOWN,
+    detail=("ITA s.40(2)(b) counts C -- the taxation years ending after the "
+            "acquisition date during which the taxpayer owned the property -- PER "
+            "PROPERTY. countries/canada/pre_designation.py instead uses "
+            "family_window_years: the span from the earliest to the latest "
+            "designated year across ALL the family's properties. The two agree "
+            "only when every property is held for the whole window, which is "
+            "false in the ordinary home-plus-cottage household, where a cottage "
+            "bought years after the home has a shorter C. The error runs both "
+            "ways -- a cottage priced against a wider window is OVER-taxed "
+            "(taxing a gain the 1 + designated year exempts in full), and the "
+            "same property priced against a narrower one is UNDER-taxed -- which "
+            "is why the direction is honestly reported as unknown, and why it "
+            "matters most for ranking designation choices, the decision this "
+            "feature exists to support. State `acquired` (an ISO date or a bare "
+            "year) on each property to have C counted statutorily; this caveat "
+            "then does not fire."),
+    issue='#352',
+    applies=_pre_family_window_denominator_active,
+))
+
+
 def _after_tax_estate_objective_active(ctx: FidelityContext) -> bool:
     # Only fires for the objectives whose figure these defaults actually
     # shape -- the after-tax-estate family (max + its #1009 min mirror).
