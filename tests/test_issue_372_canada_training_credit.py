@@ -655,7 +655,7 @@ class TestTheRefusalsTheGateNamed:
         assert third_bracket_ceiling(closed) == 20_000.0
 
     @pytest.mark.parametrize("field,value", [("reimbursed", "five hundred"),
-                                            ("tuition", None),
+                                            ("tuition", "one thousand"),
                                             ("reimbursed", [1])])
     def test_a_non_numeric_study_period_amount_refuses_at_the_contract_edge(
             self, field, value):
@@ -667,6 +667,8 @@ class TestTheRefusalsTheGateNamed:
         adapter is also reached from hand-built internal dicts, and that is the
         path this guard exists for; going through `_run` would prove the schema
         works, not that the adapter refuses cleanly."""
+        # (A study period whose `tuition` is None is SKIPPED, not coerced --
+        # declared-and-absent is a different fact from declared-and-unusable.)
         from contract_people import _tuition_by_year
         person = {"study_periods": [{
             "institution": "college", "program": "certificate",
