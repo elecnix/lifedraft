@@ -279,6 +279,20 @@ def quebec_homeownership_refundable_credit(
     partial_rate = float(record.qc_homeownership_credit_partial_rate)
     reduction_rate = float(record.qc_homeownership_credit_reduction_rate)
     threshold = float(record.qc_homeownership_credit_reduction_threshold)
+    if partial_band <= 0 or partial_rate <= 0:
+        # Same datum as the reduction threshold: the credit's own bands are
+        # populated, so the programme exists, which makes a zero PARTIAL BAND
+        # a missing value rather than "the 25% tier does not apply". Skipping
+        # it returned $5,000 on $10,000 of duties instead of $5,875 -- the
+        # opposite treatment to the threshold two lines below, on identical
+        # reasoning.
+        raise ValueError(
+            f"The Quebec homeownership credit is configured for {year} but "
+            f"its partial band is {partial_band!r} and its partial rate is "
+            f"{partial_rate!r}. Bulletin 2026-2 credits 25% of the next $3,500; "
+            f"silently dropping that tier would pay $5,000 where $5,875 is due, "
+            f"so this refuses rather than guessing (DP#32)."
+        )
     if threshold <= 0 or reduction_rate <= 0:
         # The credit's own bands are populated, so the programme exists for
         # this year -- which makes a ZERO reduction threshold a missing datum,

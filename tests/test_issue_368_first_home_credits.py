@@ -194,10 +194,13 @@ def test_the_credit_never_exceeds_the_duties_paid():
 def test_the_reduction_is_2_35_percent_of_the_basis_above_750000(basis, expected):
     """2.35% of the basis ABOVE $750,000 -- not a percentage of the credit.
 
-    An earlier version of this case expected 5,639.50 at a $800,000 basis,
-    which is 5,875 x 0.96: a 4%-of-credit reduction the statute does not
-    contain. The implementation was right and the TEST was wrong, which is the
-    worse kind of error because a "fix" would have broken correct code.
+    The reduction is COMPUTED from the basis (2.35% of the excess over
+    $750,000) and then APPLIED to the credit -- so the credit is reduced by
+    1,175 to 4,700.00. It is not a percentage OF the credit: 5,875 x 0.96 =
+    5,639.50, which is what an earlier version of this case expected and
+    which the statute does not contain. The implementation was right and the
+    TEST was wrong, which is the worse kind of error because a "fix" would
+    have broken correct code.
     """
     credit = quebec_homeownership_refundable_credit(
         2026, transfer_duties=8_500, duty_basis=basis)
@@ -478,3 +481,69 @@ def test_the_nil_point_is_reached_on_a_correctly_configured_year():
     """The guard above must not have broken the real nil point."""
     assert quebec_homeownership_refundable_credit(
         2026, transfer_duties=8_500, duty_basis=1_000_000) == pytest.approx(0.0)
+
+
+class _NoPartialBand(_Record):
+    """The credit exists for the year but its 25% tier is missing."""
+
+    qc_homeownership_credit_partial_band: float = 0.0
+
+
+def test_a_zero_partial_band_refuses_rather_than_dropping_the_25_percent_tier():
+    """Skipping the tier pays $5,000 where $5,875 is due.
+
+    Same datum class as the reduction threshold, and it was being treated the
+    opposite way. A populated programme with a missing band is a gap, not a
+    rule that the tier does not exist.
+    """
+    provider = _StubProvider(federal=_Record(), quebec=_NoPartialBand())
+    with pytest.raises(ValueError, match="partial band"):
+        quebec_homeownership_refundable_credit(
+            2026, transfer_duties=10_000, duty_basis=500_000, provider=provider)
+
+
+def test_the_partial_band_still_pays_on_a_correctly_configured_year():
+    """The guard must not have broken the ordinary $8,500 case."""
+    assert quebec_homeownership_refundable_credit(
+        2026, transfer_duties=8_500, duty_basis=500_000) == pytest.approx(5_875.00)
+
+
+def test_the_new_fields_survive_the_cache_parser():
+    """A cached year must carry the credits, not zero them.
+
+    The first commit added the fields to the PROJECTION only; a year resolved
+    from a cached JSON file came back with every field at 0.0 and the credits
+    priced at zero with no error -- the same defect class in the sibling path.
+    """
+    import json
+    import os
+    import tempfile
+
+    from tax_data import TaxDataProvider
+
+    record = TaxDataProvider().get_year_data(2026, "canada", "quebec")
+    payload = {
+        "home_buyers_amount": record.home_buyers_amount,
+        "qc_home_buyers_credit_max": record.qc_home_buyers_credit_max,
+        "qc_homeownership_credit_full_rate_band": record.qc_homeownership_credit_full_rate_band,
+        "qc_homeownership_credit_partial_band": record.qc_homeownership_credit_partial_band,
+        "qc_homeownership_credit_partial_rate": record.qc_homeownership_credit_partial_rate,
+        "qc_homeownership_credit_reduction_rate": record.qc_homeownership_credit_reduction_rate,
+        "qc_homeownership_credit_reduction_threshold": record.qc_homeownership_credit_reduction_threshold,
+    }
+    handle, path = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        provider = TaxDataProvider()
+        with open(path, encoding="utf-8") as fh:
+            parsed = provider._parse_cached(json.load(fh))
+    finally:
+        os.unlink(path)
+
+    assert parsed.home_buyers_amount == record.home_buyers_amount
+    assert parsed.qc_home_buyers_credit_max == record.qc_home_buyers_credit_max
+    assert parsed.qc_homeownership_credit_partial_band == \
+        record.qc_homeownership_credit_partial_band
+    assert parsed.qc_homeownership_credit_reduction_threshold == \
+        record.qc_homeownership_credit_reduction_threshold

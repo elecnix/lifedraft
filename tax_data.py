@@ -1028,6 +1028,19 @@ class TaxDataProvider:
             bpa_phaseout_end=data.get("bpa_phaseout_end", 0),
             bpa_minimum=data.get("bpa_minimum", 0),
             canada_employment_amount=data.get("canada_employment_amount", 0),
+            # ── First-home buyers' credits (issue #368) ──
+            # Carried through the CACHE path as well as the projection. An
+            # earlier commit added them only to _project_from_base, so any
+            # year resolved from a cached JSON file came back with every field
+            # at 0.0 and the credits priced at zero with no error -- the same
+            # class of defect as the projection gap, in the sibling path.
+            home_buyers_amount=data.get("home_buyers_amount", 0),
+            qc_home_buyers_credit_max=data.get("qc_home_buyers_credit_max", 0),
+            qc_homeownership_credit_full_rate_band=data.get("qc_homeownership_credit_full_rate_band", 0),
+            qc_homeownership_credit_partial_band=data.get("qc_homeownership_credit_partial_band", 0),
+            qc_homeownership_credit_partial_rate=data.get("qc_homeownership_credit_partial_rate", 0),
+            qc_homeownership_credit_reduction_rate=data.get("qc_homeownership_credit_reduction_rate", 0),
+            qc_homeownership_credit_reduction_threshold=data.get("qc_homeownership_credit_reduction_threshold", 0),
             qc_solidarity_single_max=data.get("qc_solidarity_single_max", 0),
             qc_solidarity_couple_max=data.get("qc_solidarity_couple_max", 0),
             qc_solidarity_single_threshold=data.get("qc_solidarity_single_threshold", 0),
