@@ -614,3 +614,63 @@ class TestNoDeclarationMeansNoAccrual:
         results = FamilySimulation(cfg).run()
         assert results[0].training_amount_limit == {}
         assert results[0].primary_ctc_claimed == 0.0
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# The coverage gate's named lines, so they are exercised rather than baselined
+# away (tools/coverage_gate.py fires on new code that arrives untested).
+# ────────────────────────────────────────────────────────────────────────────
+
+class TestTheRefusalsTheGateNamed:
+    def test_a_non_positive_threshold_or_ceiling_refuses_the_accrual(self):
+        """No data, no credit: either figure at zero (a missing CRA threshold, or
+        a bracket table too short to have a third one) must not manufacture the
+        $250 -- including for a member whose net income is itself $0."""
+        from countries.canada.training_credit import accrual_for_year
+        assert accrual_for_year(30, 40_000, 40_000, 250, 0.0, 165_430) == 0.0
+        assert accrual_for_year(30, 40_000, 40_000, 250, 11_511, 0.0) == 0.0
+        assert accrual_for_year(30, 40_000, 0.0, 250, 0.0, 0.0) == 0.0
+
+    def test_a_fully_spent_lifetime_limit_refuses_the_claim(self):
+        """The third prong: nothing left of the $5,000 means nothing to claim,
+        even with room on the ledger and tuition on the books."""
+        from countries.canada.training_credit import credit_for_year
+        assert credit_for_year(1_000.0, 2_000.0, lifetime_cap=5_000.0,
+                               claimed_to_date=5_000.0) == 0.0
+
+    def test_a_bracket_table_too_short_to_have_a_third_bracket_is_refused(self):
+        """The ceiling comes from the brackets the engine already uses. A table
+        with fewer than three has no third bracket, so there is no ceiling to
+        test against -- 0.0, and the accrual gate refuses rather than admitting
+        everyone whose income happens to be zero."""
+        from tax_data import TaxBracket
+        from countries.canada.training_credit import third_bracket_ceiling
+        two = [TaxBracket(0, 5_000, 0.15), TaxBracket(5_000, 0, 0.20)]
+        assert third_bracket_ceiling([]) == 0.0
+        assert third_bracket_ceiling(two) == 0.0
+        # And an open-ended third bracket has no ceiling either.
+        open_third = two + [TaxBracket(10_000, 0, 0.26)]
+        assert third_bracket_ceiling(open_third) == 0.0
+        closed = two + [TaxBracket(10_000, 20_000, 0.26)]
+        assert third_bracket_ceiling(closed) == 20_000.0
+
+    @pytest.mark.parametrize("field,value", [("reimbursed", "five hundred"),
+                                            ("tuition", None),
+                                            ("reimbursed", [1])])
+    def test_a_non_numeric_study_period_amount_refuses_at_the_contract_edge(
+            self, field, value):
+        """The coercion guard (Cite round 4): a bare float() error escaping the
+        contract boundary is not something a caller can act on.
+
+        Exercised on the mapper directly, not through `_run`, because the schema
+        catches a non-money value FIRST -- which is the point of the schema. The
+        adapter is also reached from hand-built internal dicts, and that is the
+        path this guard exists for; going through `_run` would prove the schema
+        works, not that the adapter refuses cleanly."""
+        from contract_people import _tuition_by_year
+        person = {"study_periods": [{
+            "institution": "college", "program": "certificate",
+            "start_date": "2026-01-01", "end_date": "2026-12-31",
+            "tuition": 1_000, field: value}]}
+        with pytest.raises(ContractAdaptationError, match="not numbers"):
+            _tuition_by_year({}, person, "primary", "p1")
