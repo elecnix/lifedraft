@@ -65,6 +65,27 @@ def test_every_call_passing_the_combined_rate_passes_the_distribution():
         "neither -- there is no correct middle here.")
 
 
+def _combined_rate_names(node):
+    """Every reference to the combined growth rate under ``node``.
+
+    Walks the whole expression subtree rather than testing ``node.value``'s own
+    type: an ACB increment is written as ``pre * dist_rate`` or
+    ``pre * ctx.non_reg_after_tax_return`` -- a BinOp, an Attribute, a Call -- so
+    an ``isinstance(node.value, ast.Name)`` test silently matches nothing and
+    the guard can never fail.
+
+    Both ``Name.id`` and ``Attribute.attr`` are matched, because they are
+    different kinds of node holding the same forbidden identifier: the
+    attribute name of ``ctx.non_reg_after_tax_return`` lives in
+    ``Attribute.attr``, which ``ast.walk`` never yields as a ``Name``.
+    """
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and COMBINED in sub.id:
+            yield sub
+        elif isinstance(sub, ast.Attribute) and COMBINED in sub.attr:
+            yield sub
+
+
 def test_the_distribution_rate_is_never_added_to_acb_by_capital_appreciation():
     """``rules_growth`` may add the DISTRIBUTION to ACB, never the combined
     rate. Growth is capital-appreciation-inclusive, so adding it to cost basis
@@ -73,21 +94,20 @@ def test_the_distribution_rate_is_never_added_to_acb_by_capital_appreciation():
     import ast as _ast
     path = os.path.join(REPO_ROOT, "rules_growth.py")
     with open(path, encoding="utf-8") as handle:
-        source = handle.read()
-    tree = _ast.parse(source)
+        tree = _ast.parse(handle.read())
 
     offenders = []
     for node in _ast.walk(tree):
-        if not isinstance(node, _ast.AugAssign):
+        if isinstance(node, _ast.AugAssign):
+            targets = [node.target]
+        elif isinstance(node, _ast.Assign):
+            targets = list(node.targets)
+        else:
             continue
-        target = node.target
-        if not isinstance(target, _ast.Attribute):
+        if not any(isinstance(t, _ast.Attribute) and t.attr.endswith("_acb")
+                   for t in targets):
             continue
-        if not target.attr.endswith("_acb"):
-            continue
-        # new_nonreg_acb += pre * dist_rate  -- the ACB increment must be
-        # driven by the distribution rate, never the combined growth rate.
-        if isinstance(node.value, _ast.Name) and COMBINED in node.value.id:
+        for sub in _combined_rate_names(node.value):
             offenders.append(node.lineno)
 
     assert not offenders, (
