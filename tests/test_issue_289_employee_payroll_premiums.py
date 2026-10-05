@@ -18,6 +18,8 @@ hand-built ``YearWorkingState``, DP#11) and assert against:
 DP#4/DP#15: fabricated round numbers and role-based names only.
 """
 
+from types import SimpleNamespace
+
 import logging
 import os
 import sys
@@ -418,3 +420,62 @@ def test_extra_adult_savings_net_of_premiums():
     for f in PAYROLL_FIELDS:
         assert getattr(emp[0], f) == getattr(other[0], f), f
     assert emp[0].after_tax_income == other[0].after_tax_income
+
+
+class TestNoEmploymentClauseIsSelfContained:
+    """Issue #315: a negative premium must reach the no-employment clause itself.
+
+    ``charged`` summed the signed premiums, so a year with no employment income
+    and ``payroll_ei_premiums = -500`` gave ``charged = -500``, which is not
+    ``> tol``. The separate negativity clause still caught it, so this was a
+    duplicate-report gap rather than a missed one -- but the clause should not
+    depend on a sibling check to fire.
+    """
+
+    def test_the_no_employment_clause_itself_fires_on_a_negative_premium(self):
+        """Not merely "something was reported" -- the SPECIFIC clause.
+
+        The negativity clause already flags a negative premium, so asserting
+        only that ``violations`` is non-empty passes with or without this fix
+        (measured: reverting the fix still passes such an assertion). The
+        clause under test has to be identified by its own message.
+        """
+        from trajectory_invariants import check_payroll_relief_bounded
+
+        year = SimpleNamespace(
+            payroll_cpp_premiums=0.0,
+            payroll_qpp_premiums=0.0,
+            payroll_ei_premiums=-500.0,
+            payroll_qpip_premiums=0.0,
+            payroll_tax_relief=0.0,
+            payroll_s60e_deduction=0.0,
+            payroll_pension_contributions=0.0,
+            employment_income=0.0,
+        )
+        messages = [v.message for v in check_payroll_relief_bounded(
+            [year], _ctx_with_no_employment())]
+        assert any('no employment income' in m for m in messages), (
+            f"the no-employment clause did not fire; got {messages!r}. With a "
+            f"signed sum, charged = -500 is not > tol, so this clause is dead "
+            f"for a negative premium."
+        )
+
+    def test_a_clean_year_still_reports_nothing(self):
+        from trajectory_invariants import check_payroll_relief_bounded
+
+        year = SimpleNamespace(
+            payroll_cpp_premiums=0.0,
+            payroll_qpp_premiums=0.0,
+            payroll_ei_premiums=0.0,
+            payroll_qpip_premiums=0.0,
+            payroll_tax_relief=0.0,
+            payroll_s60e_deduction=0.0,
+            payroll_pension_contributions=0.0,
+            employment_income=0.0,
+        )
+        assert check_payroll_relief_bounded([year], _ctx_with_no_employment()) == []
+
+
+def _ctx_with_no_employment():
+    """The mapping shape ``check_payroll_relief_bounded`` reads via ``ctx.get``."""
+    return {"start_year": 2026, "tolerance": 0.01}

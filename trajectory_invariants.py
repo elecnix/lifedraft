@@ -1221,7 +1221,10 @@ def check_payroll_relief_bounded(results, ctx):
     violations = []
     for i, r in enumerate(results):
         year = start_year + i
-        premiums = sum(getattr(r, f, 0.0) for f in _PAYROLL_PREMIUM_FIELDS)
+        # sum of ABSOLUTE values: a negative premium (which the negativity guard
+        # below flags separately) must still make `charged > tol` fire here, so
+        # this clause is self-contained rather than relying on that one (#315).
+        premiums = sum(abs(getattr(r, f, 0.0)) for f in _PAYROLL_PREMIUM_FIELDS)
         relief = getattr(r, 'payroll_tax_relief', 0.0)
         s60e = getattr(r, 'payroll_s60e_deduction', 0.0)
         pension = getattr(r, 'payroll_pension_contributions', 0.0)
