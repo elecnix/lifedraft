@@ -453,3 +453,70 @@ class TestAbsenceSafety:
         results, _ = _run(_doc())
         assert all(r.primary_ctc_claimed == 0.0 for r in results)
         assert all(r.spouse_ctc_claimed == 0.0 for r in results)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# The refusals (Cite round 2): an unusable birth year must refuse with the
+# message that says WHY, not with a bare int() conversion error from inside
+# the rule -- and a bool must not slip through as a year.
+# ────────────────────────────────────────────────────────────────────────────
+
+class TestUnusableBirthYearRefuses:
+    """The credit is age-gated, so an unusable birth year must REFUSE -- and it
+    must refuse with the message that says why, not with a bare ``int()``
+    conversion error from inside the rule (Cite round 2)."""
+
+    @staticmethod
+    def _config(birth_year):
+        return SimulationConfig.from_dict({
+            "family": {"members": [
+                {"role": "primary", "birth_year": birth_year,
+                 "gross_income": 78_000, "tuition_by_year": {2026: 1_500},
+                 "training_amount_limit_opening": 500.0},
+                {"role": "spouse", "birth_year": 1982, "gross_income": 45_000},
+            ], "children": []},
+            "accounts": {},
+            "assumptions": {"start_year": 2026, "projection_years": 2,
+                            "investment_return": 0.0, "salary_growth": 0.0,
+                            "inflation": 0.0, "frozen_brackets": True},
+            "portfolio": {"accounts": {}},
+            "property": {"house_value": 0, "mortgage_balance": 0,
+                         "mortgage_rate": 0.0, "amortization_years": 25,
+                         "margin_available": 0, "ltv_max": 0.80,
+                         "heloc_readvance": False},
+            "savings": {"rate": 0.0},
+            "retirement": {"spending_target": 0, "rrif_conversion_age": 71},
+            "tax": {"province": "qc"},
+            "household_budget": {"living_costs": 50_000},
+        })
+
+    @pytest.mark.parametrize("birth_year", [None, 19.65, True, [], {}])
+    def test_an_unusable_birth_year_refuses_with_the_explained_message(
+            self, birth_year):
+        """Driven through the REAL fold, not a hand-built RuleContext: the point
+        is that a household declaring tuition with an unusable birth year stops
+        with the message that says why, rather than dying on a conversion error
+        somewhere inside the engine.
+
+        A STRING year is deliberately not in this list: the retirement
+        transition runs first and already fails on it (age arithmetic in
+        `is_retired`), so this rule's guard is the second line of defence there,
+        not the first. What it is the first line of defence for is the shapes
+        that survive the transition and only reach the CTC because the
+        transition never needed them -- None, a float, a bool, a list.
+        """
+        from simulation import FamilySimulation
+        with pytest.raises(ValueError, match="birth year"):
+            FamilySimulation(self._config(birth_year)).run()
+
+    @pytest.mark.parametrize("birth_year", [1965, 1996])
+    def test_an_int_birth_year_is_accepted(self, birth_year):
+        from rules_training_credit import _is_usable_birth_year
+        assert _is_usable_birth_year(birth_year)
+
+    def test_an_int_birth_year_prices_the_credit(self):
+        """And the accepted form prices it: born 1996 is age 30 in 2026, so the
+        declared $500 is claimed -- proving the guard did not refuse the year."""
+        from simulation import FamilySimulation
+        results = FamilySimulation(self._config(1996)).run()
+        assert results[0].primary_ctc_claimed == 500.0

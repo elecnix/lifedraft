@@ -41,6 +41,26 @@ from tax_data import default_tax_provider
 from rule_registry import RuleContext, YearWorkingState, rule
 
 
+def _is_usable_birth_year(value) -> bool:
+    """Whether a member's ``birth_year`` is usable as an age.
+
+    The credit is age-gated, so an unusable birth year must REFUSE -- and it
+    must refuse with the MESSAGE that says why, not with a bare ``TypeError``
+    or ``ValueError`` from arithmetic further down (Cite round 2).
+
+    An ``int`` is the only accepted form, because that is what every other age
+    computation in the engine expects (``is_retired``, the drawdown sizing --
+    they all subtract it from a calendar year) and accepting a quoted year here
+    would move the refusal to a stranger's arithmetic instead. A ``bool`` is
+    rejected explicitly: it is an ``int`` subclass, and ``True`` is not a year.
+    A negative or absurd year is NOT rejected: it is a fact the engine does not
+    police elsewhere, and the age gate simply denies the credit for it.
+    """
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, int)
+
+
 def _taxed_slots(config):
     """The members this rule considers: the two TAXED slots, primary then
     spouse, each read off the config the same way ``rules_tuition_credit``
@@ -168,7 +188,7 @@ def apply_training_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
         if opening_declared is None:
             opening_declared = 0.0
         birth_year = member.get('birth_year')
-        if birth_year is None:
+        if not _is_usable_birth_year(birth_year):
             raise ValueError(
                 f"Member {mid!r} declares tuition or a Canada training amount "
                 f"limit but has no `birth_year`. The Canada Training Credit "
@@ -176,7 +196,8 @@ def apply_training_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
                 f"25 and 65, and the credit can only be claimed from 26 -- so an "
                 f"unknown age is not a $0 credit: it is a missing input that "
                 f"would read as 'too young' and silently deny a real credit. "
-                f"State the birth year (issue #372)."
+                f"State the birth year as a number (issue #372). Got "
+                f"{birth_year!r}."
             )
         age_at_year_end = sim_year - int(birth_year)
         eligible_tuition = tuition_by_year.get(sim_year, 0.0)
