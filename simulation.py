@@ -593,6 +593,75 @@ def _income_shock_active_for_year(base_amount: float, segments: Optional[List[Di
     return actual < baseline_full_year - 1e-6
 
 
+def _post_retirement_income_for_year(member: Dict, calendar_year: int,
+                                    year_index: int) -> float:
+    """Issue #375 (foundation): what a RETIRED member earns in ``calendar_year``.
+
+    The fold zeroes a retired member's income outright, which silently forbids
+    the single most common real retirement transition there is: stopping the
+    career job and taking a lighter one, or going back to work for a few years.
+    It is a silent ZERO — the engine prints a confident number from an income it
+    assumed away rather than one it was told about.
+
+    A retired member's earnings are therefore taken ONLY from an explicit,
+    dated declaration: an ``income_segment`` whose ``[from, to)`` window OPENS
+    on or after the year the member reaches retirement age. That window is the
+    source of truth (DP#1) and it is the household asserting "this job starts
+    after I retired".
+
+    The pre-retirement ``gross_income`` snapshot is deliberately NOT carried
+    forward: it describes the career job, which the retirement transition is
+    precisely the declaration that ended. So a member who returns to work gets
+    what they declared for that job and nothing more.
+
+    Returns 0.0 when no such segment exists, which keeps every household that
+    declares nothing byte-identical (DP#32).
+    """
+    from countries.canada.retirement_transition import DEFAULT_RETIREMENT_AGE
+    birth_year = member.get('birth_year', 0)
+    if not birth_year:
+        return 0.0                      # undatable retirement: nothing declared
+    retirement_age = member.get('retirement_age')
+    if retirement_age is None:
+        retirement_age = DEFAULT_RETIREMENT_AGE
+    retirement_year = birth_year + retirement_age
+    segments = member.get('income_segments')
+    if not segments:
+        return 0.0
+    total = 0.0
+    for seg in segments:
+        seg_from = seg.get('from')
+        if seg_from is None:
+            continue                    # an undated segment asserts nothing
+        try:
+            start_year = int(str(seg_from)[:4])
+        except (TypeError, ValueError):
+            continue                    # a malformed date is not a year
+        if start_year < retirement_year:
+            continue                    # began before retiring: the old job
+        # Active in this calendar year? The [from, to) window decides, exactly
+        # as everywhere else in the fold (DP#1).
+        seg_to = seg.get('to')
+        if seg_to is None:
+            end_year = None              # open-ended: the job runs on
+        else:
+            try:
+                end_year = int(str(seg_to)[:4])
+            except (TypeError, ValueError):
+                # An unparseable end is not "no end" -- it is an unusable
+                # bound, and a window we cannot read is a window we cannot
+                # claim this year falls inside (DP#32: absence never invents).
+                continue
+        if calendar_year < start_year:
+            continue
+        if end_year is not None and calendar_year >= end_year:
+            continue
+        amount = seg.get('amount')
+        if amount is not None:
+            total += float(amount)
+    return total
+
+
 def _private_loan_interest_for(
         cfg, sim_year: int, primary_member: dict, spouse_member: dict
 ) -> Tuple[float, float, float, float]:
@@ -1285,10 +1354,25 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         # Issue #978: the stack is on WORKING self-employment income -- a
         # retired member earns no self-employment salary, so charge no stack.
         primary_self_emp = 0.0
+        # Issue #375 (foundation): returning to work is real, so a retired
+        # member keeps any wage a DATED segment declares for a job opening on
+        # or after retirement. Without this the engine cannot represent the
+        # decision at all -- it assumes the income away (a silent zero) and
+        # then prices neither the contributions nor the benefit (#375).
+        _p_back_to_work = _post_retirement_income_for_year(
+            primary_member, sim_year, year)
+        if _p_back_to_work > 0.0:
+            primary_income = _p_back_to_work
+            primary_earned_income = _p_back_to_work
     if s_retired:
         spouse_income = 0.0
         spouse_earned_income = 0.0
         spouse_self_emp = 0.0
+        _s_back_to_work = _post_retirement_income_for_year(
+            spouse_member, sim_year, year)
+        if _s_back_to_work > 0.0:
+            spouse_income = _s_back_to_work
+            spouse_earned_income = _s_back_to_work
 
     total_income = primary_income + spouse_income
     for ch in cfg.children:
