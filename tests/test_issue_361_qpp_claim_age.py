@@ -42,6 +42,14 @@ class TestTheSourcedFormula:
     def test_a_pension_above_the_maximum_is_capped_not_extrapolated(self):
         assert qpp_early_monthly_rate(2_000.0, 1_000.0) == pytest.approx(0.006)
 
+    def test_a_negative_pension_is_clamped_to_the_floor_rate(self):
+        """A negative pension is malformed input, not a pension smaller than
+        zero: it must take the 0.5% floor rather than producing a rate BELOW it
+        (which would have credited a negative-ratio claimor more than the
+        maximum allowed). The upper clamp is tested above; this is the lower
+        one, and CI's coverage gate is what found it missing."""
+        assert qpp_early_monthly_rate(-1_000.0, 1_000.0) == pytest.approx(0.005)
+
     def test_a_missing_maximum_is_refused_not_assumed(self):
         """DP#32: the maximum comes from the year-versioned table, and its
         ABSENCE must not silently apply the top rate to every pension."""

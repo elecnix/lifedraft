@@ -35,10 +35,17 @@ from __future__ import annotations
 from typing import Optional
 
 # ── CPP ────────────────────────────────────────────────────────────────────
-CPP_EARLY_RATE = 0.006        # 0.6% per month before 65 (flat)
-CPP_LATE_RATE = 0.007         # 0.7% per month after 65
-CPP_MIN_AGE = 60
-CPP_MAX_AGE = 70
+# The CPP rates and window are NOT restated here: ``cpp_sharing`` already owns
+# them, and a second copy of a statutory rate is exactly the divergence DP#9
+# forbids (clone-detection flagged the duplication the first time this module
+# was written). One definition; this module adds the QPP's differences on top.
+from countries.canada.cpp_sharing import (  # noqa: E402
+    CPP_EARLIEST_START_AGE as CPP_MIN_AGE,
+    CPP_EARLY_PENALTY_PER_MONTH as CPP_EARLY_RATE,
+    CPP_LATE_BONUS_PER_MONTH as CPP_LATE_RATE,
+    CPP_LATEST_START_AGE as CPP_MAX_AGE,
+)
+
 CPP_REFERENCE_AGE = 65
 
 # ── QPP ────────────────────────────────────────────────────────────────────
