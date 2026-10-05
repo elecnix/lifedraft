@@ -54,7 +54,7 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
     def test_no_cpp_source_is_reported_with_no_source(self):
         cfg = _cfg([{'role': 'primary', 'birth_year': 1971}])
         self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
-                         [{'role': 'primary', 'age': 55, 'source': None}])
+                         [{'role': 'primary', 'age': 55, 'source': None, 'monthly': None}])
 
     def test_zero_estimate_is_reported_as_a_zero_estimate(self):
         """`cpp_benefit_source` set but no amount: the adapter DID look and
@@ -97,10 +97,10 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
         predicate exists to end."""
         cfg = _cfg([{'birth_year': 1971}])
         self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
-                         [{'role': 'adult', 'age': 55, 'source': None}])
+                         [{'role': 'adult', 'age': 55, 'source': None, 'monthly': None}])
         cfg = _cfg([{'role': '', 'birth_year': 1971}])
         self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
-                         [{'role': 'adult', 'age': 55, 'source': None}])
+                         [{'role': 'adult', 'age': 55, 'source': None, 'monthly': None}])
 
     def test_a_malformed_amount_is_declined_not_called_zero(self):
         """Cite (#391 review): a non-numeric `cpp_monthly_estimated` is not
@@ -121,7 +121,12 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
         cfg = _cfg([{'role': 'primary', 'birth_year': 1971,
                      'cpp_benefit_source': 'estimated_from_incomes',
                      'cpp_monthly_estimated': -50}])
-        self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg), [])
+        people = model_fidelity.cpp_modelled_as_zero_people(cfg)
+        self.assertEqual(len(people), 1, msg="a negative must still be disclosed")
+        ctx = model_fidelity.FidelityContext(cfg=cfg, objective_name=None)
+        line = model_fidelity._describe_cpp_modelled_as_zero(ctx)[0]
+        self.assertIn('NEGATIVE', line)
+        self.assertNotIn('comes to $0', line)
 
     def test_the_summary_never_asserts_one_cause_for_both(self):
         """The summary is the one line every surface prints, so it must not
@@ -132,7 +137,7 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
                      if a.id == 'cpp_modelled_as_zero')
         self.assertNotIn('no CPP/QPP source at all', entry.summary)
         self.assertIn('modelled', entry.summary)
-        self.assertIn('as $0', entry.summary)
+        self.assertIn('$0', entry.summary)
 
     def test_a_present_but_null_amount_IS_the_zero_case(self):
         """Absent or None is the real $0: the engine's own reader turns a
@@ -140,7 +145,7 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
         cfg = _cfg([{'role': 'primary', 'birth_year': 1971,
                      'cpp_monthly_estimated': None}])
         self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
-                         [{'role': 'primary', 'age': 55, 'source': None}])
+                         [{'role': 'primary', 'age': 55, 'source': None, 'monthly': None}])
 
     def test_a_zero_amount_is_reported(self):
         cfg = _cfg([{'role': 'primary', 'birth_year': 1971,
@@ -155,7 +160,7 @@ class PredicateReadsTheAdaptersOwnOutputs(unittest.TestCase):
         caveat is a disclosure and must never take a run down."""
         cfg = _cfg(['not a member', {'role': 'primary', 'birth_year': 1971}])
         self.assertEqual(model_fidelity.cpp_modelled_as_zero_people(cfg),
-                         [{'role': 'primary', 'age': 55, 'source': None}])
+                         [{'role': 'primary', 'age': 55, 'source': None, 'monthly': None}])
 
     def test_unreadable_config_shapes_are_empty_not_guessed(self):
         for cfg in ({}, {'family': {}}, {'family': {'members': 'nope'}},

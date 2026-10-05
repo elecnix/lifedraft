@@ -1752,14 +1752,16 @@ def cpp_modelled_as_zero_people(cfg: dict) -> List[Dict]:
         if not isinstance(member, dict):
             continue
         monthly = member.get('cpp_monthly_estimated')
-        # Only ABSENCE or an explicit zero is the "$0 pension" case. Anything
-        # else -- unreadable, a bool, or negative -- is declined rather than
-        # described: a false caveat is worse than none, because it teaches the
-        # reader to ignore the ones that are true.
+        # Only an UNREADABLE amount is declined. Absence, zero and a NEGATIVE
+        # amount are all reported, each with its own finding: a negative is not
+        # a $0 pension, but it is still an amount the plan is using without
+        # saying so, and declining it here would leave that household with no
+        # disclosure at all.
         if isinstance(monthly, bool) or (
                 monthly is not None and not isinstance(monthly, (int, float))):
             continue
-        if monthly is not None and monthly != 0:
+        if monthly is not None and monthly > 0:
+            # The ordinary case: a real pension. Nothing to disclose.
             continue
         birth_year = member.get('birth_year')
         if not isinstance(birth_year, int) or isinstance(birth_year, bool):
@@ -1771,7 +1773,8 @@ def cpp_modelled_as_zero_people(cfg: dict) -> List[Dict]:
         if not isinstance(role, str) or not role:
             role = 'adult'
         affected.append({'role': role, 'age': age,
-                         'source': member.get('cpp_benefit_source')})
+                         'source': member.get('cpp_benefit_source'),
+                         'monthly': monthly})
     return affected
 
 
@@ -1788,6 +1791,14 @@ def _describe_cpp_modelled_as_zero(ctx: FidelityContext) -> List[str]:
     lines: List[str] = []
     for person in people:
         source = person.get('source')
+        monthly = person.get('monthly')
+        if isinstance(monthly, (int, float)) and monthly < 0:
+            lines.append(
+                f"{person['role']} (age {person['age']}): the CPP amount on "
+                f"file is NEGATIVE (${monthly:,.0f}/month) -- that is not a "
+                f"$0 pension but an amount the plan uses as-is, and it is not "
+                f"a figure any CPP estimator produces")
+            continue
         if isinstance(source, str) and source:
             lines.append(
                 f"{person['role']} (age {person['age']}): a CPP source is "
@@ -1806,12 +1817,14 @@ def _describe_cpp_modelled_as_zero(ctx: FidelityContext) -> List[str]:
 
 register(Approximation(
     id='cpp_modelled_as_zero',
-    summary=("At least one near-retirement adult's CPP/QPP pension is modelled "
-             "as $0 for the whole horizon -- either because the document "
-             "declares no source at all (no Statement, no earnings history, "
-             "nothing to estimate from), or because the source it does declare "
-             "estimated to $0; the per-adult findings below say which, because "
-             "only one of those is fixed by supplying a Statement"),
+    summary=("At least one near-retirement adult's CPP/QPP pension is not "
+             "modelled as income the plan can count -- it is modelled at $0, "
+             "or on an amount that is not a valid pension -- for the whole "
+             "horizon; either the document declares no source at all (no "
+             "Statement, no earnings history, nothing to estimate from), or "
+             "the source it does declare produced $0 or a negative figure, "
+             "and the per-adult findings below say which, because only one of "
+             "those is fixed by supplying a Statement"),
     biased_figure=("CPP/QPP pension income in every retirement year, and "
                    "through it retirement net cash flow, the portfolio "
                    "drawdown the shortfall must be funded from, and every "
