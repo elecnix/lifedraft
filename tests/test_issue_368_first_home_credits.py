@@ -451,3 +451,30 @@ def test_zero_duty_figures_are_a_genuine_zero_not_an_error():
     """No duties paid -> nothing to refund. That is a real zero."""
     assert quebec_homeownership_refundable_credit(
         2026, transfer_duties=0.0, duty_basis=500_000) == 0.0
+
+
+class _NoThreshold(_Record):
+    """The credit's bands are present but its reduction threshold is missing."""
+
+    qc_homeownership_credit_reduction_threshold: float = 0.0
+
+
+def test_a_zero_reduction_threshold_refuses_rather_than_skipping_the_reduction():
+    """A missing threshold must not disable the 2.35% reduction.
+
+    The earlier `basis > threshold > 0` chain meant a zero threshold made the
+    reduction UNREACHABLE, so a $1,000,000 basis kept the full $5,875 instead
+    of the $0 the bulletin requires -- absent data turning into the
+    favourable answer. The bands being present proves the programme exists
+    for the year, so a zero threshold there is a gap, not a rule.
+    """
+    provider = _StubProvider(federal=_Record(), quebec=_NoThreshold())
+    with pytest.raises(ValueError, match="reduction threshold"):
+        quebec_homeownership_refundable_credit(
+            2026, transfer_duties=8_500, duty_basis=1_000_000, provider=provider)
+
+
+def test_the_nil_point_is_reached_on_a_correctly_configured_year():
+    """The guard above must not have broken the real nil point."""
+    assert quebec_homeownership_refundable_credit(
+        2026, transfer_duties=8_500, duty_basis=1_000_000) == pytest.approx(0.0)

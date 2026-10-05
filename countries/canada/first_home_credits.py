@@ -279,6 +279,24 @@ def quebec_homeownership_refundable_credit(
     partial_rate = float(record.qc_homeownership_credit_partial_rate)
     reduction_rate = float(record.qc_homeownership_credit_reduction_rate)
     threshold = float(record.qc_homeownership_credit_reduction_threshold)
+    if threshold <= 0 or reduction_rate <= 0:
+        # The credit's own bands are populated, so the programme exists for
+        # this year -- which makes a ZERO reduction threshold a missing datum,
+        # not "no reduction applies".
+        #
+        # An earlier version chained the test as `basis > threshold > 0`,
+        # which silently disabled the reduction whenever the threshold was
+        # zero: a $1,000,000 basis kept the full $5,875 instead of the $0
+        # the bulletin requires. A guard inside a comparison quietly turns
+        # absent data into the favourable answer -- the repo's named trap.
+        raise ValueError(
+            f"The Quebec homeownership credit is configured for {year} but "
+            f"its reduction threshold is {threshold!r} and its reduction rate "
+            f"is {reduction_rate!r}. Bulletin 2026-2 reduces the credit by "
+            f"2.35% of the basis above $750,000; skipping the reduction "
+            f"because the threshold is missing would pay the full amount on "
+            f"any purchase, so this refuses rather than guessing (DP#32)."
+        )
 
     duties = float(transfer_duties)
     basis = float(duty_basis)
@@ -301,7 +319,7 @@ def quebec_homeownership_refundable_credit(
     # The reduction keys on the BASIS OF IMPOSITION, not on the duties paid:
     # bulletin 2026-2 reduces by 2.35% of the excess basis over $750,000.
     # These are different quantities; conflating them changes the answer.
-    if basis > threshold > 0:
+    if basis > threshold:
         credit -= (basis - threshold) * reduction_rate
     return max(0.0, credit)
 
