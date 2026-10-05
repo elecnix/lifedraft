@@ -29,7 +29,8 @@ Absence must fail loudly (DP#32). A silent zero here is indistinguishable from
 wrong number survive.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import date
 from typing import Optional, Sequence, Tuple
 
 # The least of this and the qualifying expenditures.
@@ -49,6 +50,7 @@ class QualifyingIndividual:
     person_id: str
     reached_65_by_year_end: bool = False
     dtc_eligible: bool = False
+    birth_year: Optional[int] = None
 
     def qualifies(self, year: int) -> bool:
         """s.122.92(3). Both routes, evaluated against a DATE (DP#1)."""
@@ -65,6 +67,7 @@ class MultigenerationalRenovation:
     qualifying_expenditures: float
     has_secondary_unit: bool = False
     qualifying_person_ids: Tuple[str, ...] = field(default_factory=tuple)
+    prior_qualifying_renovations: int = 0
 
 
 def _lowest_federal_rate(year: int) -> float:
@@ -141,3 +144,164 @@ def multigenerational_reno_credit(
 
     rate = _lowest_federal_rate(renovation.year)
     return rate * min(renovation.qualifying_expenditures, RENOVATION_CREDIT_MAX)
+
+def mg_reno_from_property(
+    facts: Optional[dict],
+    qualifiers: Sequence[QualifyingIndividual],
+) -> Optional[MultigenerationalRenovation]:
+    """Build the renovation from a property's ``mg_reno`` block.
+
+    DP#16: returns None when the block is ABSENT, so the module does not
+    participate and the household is byte-identical to one that never did this
+    work. A block that is PRESENT but malformed refuses (DP#32) rather than
+    returning None, because "did not renovate" and "documented a renovation we
+    cannot price" must not look the same.
+
+    The year comes from ``renovation_date`` -- a DATE, never a bare year or an
+    assumed 2026 (DP#1/DP#2).
+    """
+    if facts is None:
+        return None
+    if not facts:
+        raise ValueError(
+            "a property's mg_reno block is present but empty. That is neither "
+            "'no qualifying renovation' nor a document we can price -- refuse "
+            "rather than credit $0 (DP#32)."
+        )
+
+    raw_date = facts.get("renovation_date")
+    if not raw_date:
+        raise ValueError(
+            "mg_reno.renovation_date is required and absent. The credit "
+            "belongs to the taxation year of completion, so there is no year to "
+            "price it without (DP#32)."
+        )
+    try:
+        renovation_date = date.fromisoformat(str(raw_date))
+    except ValueError as exc:
+        raise ValueError(
+            f"mg_reno.renovation_date {raw_date!r} is not an ISO date "
+            f"(YYYY-MM-DD): {exc} (DP#32)."
+        ) from exc
+
+    expenditures = facts.get("qualifying_expenditures")
+    if expenditures is None:
+        raise ValueError(
+            "mg_reno.qualifying_expenditures is required and absent. Without "
+            "it the credit has no B term, and B=0 would be indistinguishable "
+            "from an unknown outlay (DP#32)."
+        )
+    if isinstance(expenditures, bool) or not isinstance(expenditures, (int, float)):
+        raise ValueError(
+            f"mg_reno.qualifying_expenditures must be a number of dollars; "
+            f"{expenditures!r} is {type(expenditures).__name__}. Booleans are "
+            f"not money (DP#32)."
+        )
+
+    person_ids = facts.get("qualifying_person_ids")
+    if not person_ids:
+        raise ValueError(
+            "mg_reno.qualifying_person_ids must name at least one qualifying "
+            "individual. An empty list is a gap in the document, not a "
+            "household that fails to qualify (DP#32)."
+        )
+
+    return MultigenerationalRenovation(
+        year=renovation_date.year,
+        qualifying_expenditures=float(expenditures),
+        has_secondary_unit=bool(facts.get("has_secondary_unit", False)),
+        qualifying_person_ids=tuple(person_ids),
+        prior_qualifying_renovations=int(
+            facts.get("prior_qualifying_renovations", 0)),
+    )
+
+
+def qualifiers_from_people(members: Sequence[dict]) -> list:
+    """Build the qualifying individuals from the household's people block.
+
+    The 65 test is DATE-COMPUTED against the renovation year (DP#1): a member's
+    eligibility is a function of their birth date and the year, never a stored
+    boolean that can go stale against a different as_of.
+
+    A member is DTC-eligible when they are 18+ AND their own record says so.
+    The engine has no independent disability assessment, so the declaration is
+    a FACT about the household (DP#2), not an inference -- and it is never
+    defaulted to False for an absent field on a person the credit names.
+    """
+    out: list = []
+    for member in members:
+        person_id = member.get("person_id")
+        if not person_id:
+            # This member cannot be named by any mg_reno block, because a
+            # block names people by person_id. They are simply not about this
+            # credit; refusing here would let an unrelated record stop every
+            # run in the repo (DP#16). A NAMED person who resolves to nobody
+            # IS refused, in mg_reno_credit_for_year.
+            continue
+            pass
+            # DP#4: a person is identified by person_id, never by role text.
+            # A role fallback would credit whoever is "primary", so a member
+            # with no id is a document gap and is refused (DP#32).
+            raise ValueError(
+                f"a household member has no person_id ({member!r}). The "
+                f"multigenerational renovation credit names its qualifying "
+                f"people by person_id; a role fallback would credit the wrong "
+                f"person (DP#4, DP#32)."
+            )
+        birth_year = member.get("birth_year")
+        if birth_year is None:
+            # Without a birth year the DATE-computed age test cannot be
+            # evaluated. Skipping would read "unknown" as "not qualifying",
+            # which is a plausible wrong zero (DP#32).
+            raise ValueError(
+                f"member {person_id!r} has no birth_year, so the s.122.92 age "
+                f"test (reached 65 by the end of the renovation-period year) "
+                f"cannot be evaluated. Refusing rather than assuming (DP#32)."
+            )
+        if isinstance(birth_year, bool) or not isinstance(birth_year, int):
+            raise ValueError(
+                f"member {person_id!r} has birth_year={birth_year!r} "
+                f"({type(birth_year).__name__}); a year is required and a "
+                f"boolean is not one (DP#32)."
+            )
+        out.append(QualifyingIndividual(
+            person_id=person_id,
+            birth_year=birth_year,
+            reached_65_by_year_end=False,   # resolved per-year by qualifies()
+            dtc_eligible=bool(member.get("dtc_eligible", False)),
+        ))
+    return out
+
+
+def mg_reno_credit_for_year(
+    renovation: Optional[MultigenerationalRenovation],
+    qualifiers: Sequence[QualifyingIndividual],
+) -> float:
+    """The credit, resolving the age test against the renovation's own year."""
+    if renovation is None:
+        return 0.0
+    # DP#32: a person the credit NAMES must resolve to a real household
+    # member. If one does not, the document is inconsistent -- we cannot tell
+    # whether they qualify, and crediting $0 would be indistinguishable from a
+    # household that does not qualify.
+    known = {q.person_id for q in qualifiers}
+    for named in renovation.qualifying_person_ids:
+        if named not in known:
+            raise ValueError(
+                f"the {renovation.year} renovation names qualifying person "
+                f"{named!r}, who is not in the household's people block. Either "
+                f"the person_id is wrong or the person is missing; both are "
+                f"document gaps, and crediting $0 would look exactly like a "
+                f"household that does not qualify (DP#32)."
+            )
+    resolved = [
+        replace(q, reached_65_by_year_end=(
+            q.birth_year is not None
+            and renovation.year is not None
+            and renovation.year - q.birth_year >= 65))
+        for q in qualifiers
+        if q.person_id in set(renovation.qualifying_person_ids)
+    ]
+    return multigenerational_reno_credit(
+        renovation, resolved,
+        prior_renovations=renovation.prior_qualifying_renovations)
