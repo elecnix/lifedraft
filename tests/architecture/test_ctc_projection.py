@@ -48,25 +48,27 @@ def _dataclass_fields(source):
 
 
 def _cached_keywords(source):
-    """The ``data.get(...)`` keys `_parse_cached` reads when a year is served
-    from the JSON cache. A field carried by `_project_from_base` but not here
-    comes back as its dataclass default on the cached path -- the same silent
-    zero, reached by a different door (Cite round 4)."""
+    """The keyword names of the ``TaxYearData(...)`` call `_parse_cached`
+    BUILDS, when a year is served from the JSON cache.
+
+    Deliberately the constructor's keywords, not every ``.get()`` key in the
+    function: a field that `_parse_cached` merely *reads* (for a gate, a log, a
+    branch) would satisfy the looser check while the dataclass is still built
+    without it, so a cached year would keep the 0.0 default and the credit would
+    be denied with the detector green. This mirrors `_projected_keywords`, which
+    inspects the constructor call for the same reason (Cite round 6).
+    """
     tree = ast.parse(source)
     for node in ast.walk(tree):
         if (isinstance(node, ast.FunctionDef)
                 and node.name == "_parse_cached"):
-            keys = set()
             for sub in ast.walk(node):
                 if (isinstance(sub, ast.Call)
-                        and isinstance(sub.func, ast.Attribute)
-                        and sub.func.attr == "get"
-                        and sub.args
-                        and isinstance(sub.args[0], ast.Constant)
-                        and isinstance(sub.args[0].value, str)):
-                    keys.add(sub.args[0].value)
-            return keys
-    raise AssertionError("_parse_cached not found in tax_data.py")
+                        and getattr(sub.func, "id", "") == "TaxYearData"):
+                    return {kw.arg for kw in sub.keywords}
+    raise AssertionError(
+        "_parse_cached does not build a TaxYearData(...) call -- this detector "
+        "is guarding nothing and must be updated in the same change")
 
 
 def test_every_ctc_field_survives_the_json_cache_path():
@@ -122,6 +124,23 @@ def test_every_ctc_field_is_carried_through_the_forward_projection():
         "unchanged (issue #372; the same shape of bug is #416).")
 
 
+def _mentions_indexation_factor(value):
+    """Whether a keyword's argument expression actually USES the projection's
+    indexation factor.
+
+    Checks for a ``Name`` node bound to ``factor`` -- the name
+    `_project_from_base` binds and no other -- rather than searching
+    ``ast.dump`` output for the substring "factor". A substring test is
+    satisfied by an expression that merely mentions it (a helper called
+    ``_no_factor``, a comment-shaped name, a differently written product), which
+    would let a statutory amount be indexed past a detector meant to stop that,
+    and would equally mis-fire the mirrored check. A detector is only as good as
+    its precision about the thing it claims to detect (Cite round 6).
+    """
+    return any(isinstance(node, ast.Name) and node.id == "factor"
+               for node in ast.walk(value))
+
+
 # The CTC amounts CRA does NOT index, and the one it does.
 CTC_STATUTORY_FIELDS = ("ctc_annual_accrual", "ctc_lifetime_cap")
 CTC_INDEXED_FIELDS = ("ctc_working_income_threshold",)
@@ -155,13 +174,13 @@ def test_the_ctc_projection_does_not_index_the_statutory_amounts():
                     f"_project_from_base does not pass {name} at all, so the "
                     f"indexation check below has nothing to inspect (issue #372)")
             for name in CTC_STATUTORY_FIELDS:
-                assert "factor" not in ast.dump(passed[name]), (
+                assert not _mentions_indexation_factor(passed[name]), (
                     f"_project_from_base indexes TaxYearData.{name}, but the "
                     f"Canada Training Credit's accrual and lifetime cap are "
                     f"statutory amounts CRA does NOT index (issue #372). Only "
                     f"ctc_working_income_threshold is indexed.")
             for name in CTC_INDEXED_FIELDS:
-                assert "factor" in ast.dump(passed[name]), (
+                assert _mentions_indexation_factor(passed[name]), (
                     f"_project_from_base carries TaxYearData.{name} through "
                     f"unchanged, but it IS an indexed CRA threshold. Leaving "
                     f"it flat would understate the working-income test on a "

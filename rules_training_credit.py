@@ -180,6 +180,13 @@ def apply_training_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # until you have the table in front of you, and over-accrues by about one
     # year's indexation if you get it wrong. `sim_year + 1` is a real year in
     # the data or a projection of it, never an absence.
+    #
+    # BOTH figures shift, and the ceiling is the one that looks wrong: a
+    # bracket top is normally a fact about its own year, but CRA pairs the
+    # $177,882 printed in the 2026 row with 2025 INCOME, exactly as it pairs that
+    # row's $12,058 with 2025 income. Reading the ceiling from the same year
+    # would refuse a member whose net income sits between the two years' bracket
+    # tops -- a member the table's own sentence says IS entitled to accrue.
     next_year_data = tax_provider._load_year(sim_year + 1, 'canada', 'federal')
     working_threshold = next_year_data.ctc_working_income_threshold
     ceiling = third_bracket_ceiling(next_year_data.federal_brackets)
@@ -196,6 +203,13 @@ def apply_training_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
         # fallback -- but the two are different facts and `or` would make that
         # choice invisible (DP#32).
         member_id = member.get('id')
+        # `role` cannot be None here: `_taxed_slots` admits a member only when
+        # its `role` is exactly 'primary' or 'spouse', and that filter is what
+        # makes this fallback safe. The guarantee is stated rather than defended
+        # with a raise, because a raise for an unreachable input is a line no
+        # test can reach -- and an uncoverable line is its own defect here. A
+        # wider slot filter would have to revisit this key: two members sharing
+        # one ledger entry would silently overwrite each other's balance.
         mid = role if member_id is None else member_id
         tuition_by_year = member.get('tuition_by_year')
         if tuition_by_year is None:

@@ -395,6 +395,42 @@ def _state_with_fhsa_room(fhsa_room):
     return SimState(jurisdiction_state={'canada': canada})
 
 
+def _ctc_household_config():
+    """A fabricated learner who declares tuition AND an opening training amount
+    limit, so the Canada Training Credit fires. Round numbers, role-based names
+    (DP#4/DP#15). The opening balance is what a learner who has been accruing
+    for a few years before the projection would carry in from their notice of
+    assessment -- without it the room starts at $0 and nothing is claimable in
+    year one.
+    """
+    return {
+        'family': {
+            'members': [
+                {'role': 'primary', 'birth_year': 1996, 'gross_income': 120_000,
+                 'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0,
+                 'tuition_by_year': {2026: 2_000},
+                 'training_amount_limit_opening': 800.0},
+                {'role': 'spouse', 'birth_year': 1982, 'gross_income': 45_000,
+                 'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0},
+            ],
+            'children': [],
+        },
+        'accounts': {},
+        'assumptions': {'start_year': 2026, 'projection_years': 3,
+                        'investment_return': 0.0, 'salary_growth': 0.0,
+                        'inflation': 0.0, 'frozen_brackets': True,
+                        'time_step': 'yearly'},
+        'portfolio': {'accounts': {}},
+        'property': {'house_value': 0, 'mortgage_balance': 0,
+                     'mortgage_rate': 0.0, 'amortization_years': 25,
+                     'margin_available': 0, 'ltv_max': 0.80, 'heloc_readvance': False},
+        'savings': {'rate': 0.0},
+        'retirement': {'spending_target': 0, 'rrif_conversion_age': 71},
+        'tax': {'province': 'qc'},
+        'household_budget': {'living_costs': 50_000},
+    }
+
+
 def test_every_rule_fires_somewhere_in_representative_households():
     fired_ever = {name: False for name in RULE_ORDER}
 
@@ -1350,42 +1386,6 @@ def test_tuition_credit_rule_changes_engine_output():
 # generalized: a registered rule whose outputs no consumer reads, or whose
 # firing changes no number, is a rule that was never written).
 # ============================================================================
-
-def _ctc_household_config():
-    """A fabricated learner who declares tuition AND an opening training amount
-    limit, so the Canada Training Credit fires. Round numbers, role-based names
-    (DP#4/DP#15). The opening balance is what a learner who has been accruing
-    for a few years before the projection would carry in from their notice of
-    assessment -- without it the room starts at $0 and nothing is claimable in
-    year one.
-    """
-    return {
-        'family': {
-            'members': [
-                {'role': 'primary', 'birth_year': 1996, 'gross_income': 120_000,
-                 'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0,
-                 'tuition_by_year': {2026: 2_000},
-                 'training_amount_limit_opening': 800.0},
-                {'role': 'spouse', 'birth_year': 1982, 'gross_income': 45_000,
-                 'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0},
-            ],
-            'children': [],
-        },
-        'accounts': {},
-        'assumptions': {'start_year': 2026, 'projection_years': 3,
-                        'investment_return': 0.0, 'salary_growth': 0.0,
-                        'inflation': 0.0, 'frozen_brackets': True,
-                        'time_step': 'yearly'},
-        'portfolio': {'accounts': {}},
-        'property': {'house_value': 0, 'mortgage_balance': 0,
-                     'mortgage_rate': 0.0, 'amortization_years': 25,
-                     'margin_available': 0, 'ltv_max': 0.80, 'heloc_readvance': False},
-        'savings': {'rate': 0.0},
-        'retirement': {'spending_target': 0, 'rrif_conversion_age': 71},
-        'tax': {'province': 'qc'},
-        'household_budget': {'living_costs': 50_000},
-    }
-
 
 def test_training_credit_rule_fires_for_a_ctc_household():
     with trace_firing() as fired:
