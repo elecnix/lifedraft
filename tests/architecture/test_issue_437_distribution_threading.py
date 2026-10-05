@@ -63,10 +63,15 @@ def test_every_call_passing_the_combined_rate_passes_the_distribution():
         f"{COMBINED}= no longer appears in simulation.py -- if the non-reg "
         "growth rate moved, update this guard with it rather than deleting it")
 
-    threaded = {id(call) for call in _calls_passing(tree, DISTRIBUTION)}
+    # Membership on the nodes themselves, not a set of ``id()``. ``id()`` is
+    # only unique among LIVE objects, so a collected node's id can be reused by
+    # a later one and vouch for the wrong call. ``in`` on AST nodes is identity
+    # based (no ``__eq__`` is defined), and every node stays alive because
+    # ``tree`` holds it, so this has neither wrinkle.
+    threaded = list(_calls_passing(tree, DISTRIBUTION))
 
     unthreaded = sorted(call.lineno for call in combined_calls
-                        if id(call) not in threaded)
+                        if not any(call is t for t in threaded))
     assert not unthreaded, (
         f"simulation.py passes {COMBINED}= at line(s) {unthreaded} without "
         f"the matching {DISTRIBUTION}=. That call site would grow the pot "
@@ -143,6 +148,11 @@ def test_the_distribution_rate_is_never_added_to_acb_by_capital_appreciation():
                 targets = [node.target]
             elif isinstance(node, _ast.Assign):
                 targets = list(node.targets)
+            elif isinstance(node, _ast.AnnAssign):
+                # `acb: float = pre * <combined rate>` -- an annotated
+                # assignment is neither Assign nor AugAssign, and skipping it
+                # would leave the one-line spelling of this bug unguarded.
+                targets = [node.target] if node.value is not None else []
             else:
                 continue
             if not any(_is_cost_basis_target(t) for t in targets):
