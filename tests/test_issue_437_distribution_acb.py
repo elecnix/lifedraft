@@ -204,9 +204,16 @@ class TestSmithManoeuvreSleeve:
         # Measured only across a GROWTH-ONLY year. Comparing the first and last
         # year instead would pass vacuously: a readvance raises the sleeve's
         # cost basis all by itself, so the sleeve's ACB climbs whether or not
-        # the distribution is tracked.
-        prev = rs[rs.index(readvance_years[0]) - 1]
-        curr = readvance_years[0]
+        # the distribution is tracked. Indexed by POSITION rather than by
+        # ``rs.index(...)-1``, which silently wraps to the last year if the
+        # first year happens to readvance nothing.
+        positions = [i for i, r in enumerate(rs)
+                     if r.mortgage_principal == 0 and i > 0]
+        assert positions, (
+            "premise: need a growth-only year that is not the first year, so "
+            "there is an opening balance to measure the growth against")
+        pos = positions[0]
+        prev, curr = rs[pos - 1], rs[pos]
         acb_delta = (curr.sm_investment_cost_basis
                      - prev.sm_investment_cost_basis)
         fmv_delta = curr.sm_investment_balance - prev.sm_investment_balance
