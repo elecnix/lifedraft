@@ -421,17 +421,23 @@ class TestExpiryAt65:
         doc["decisions"]["horizon"] = {"person": "p1", "until_age": 68}
         start_year = 2024
         results, _ = _run(doc)
-        by_year = {start_year + i: r.training_amount_limit.get("p1", 0.0)
-                   for i, r in enumerate(results)}
-        # Prove the row -> calendar-year mapping rather than assuming it: the
-        # member turns 65 in 2030, so if row 0 were NOT calendar 2024 the whole
-        # table would be shifted and this premise would fail here instead of
-        # silently asserting the rule's opposite.
-        assert by_year[2030] == 0.0, (
-            "expires at the end of the year turned 65 -- and, as a premise, "
-            "the row this reads is calendar 2030 (the member born 1965-07-01 "
-            "turns 65 that year)")
-        assert by_year[2029] > 0.0, "still held the year before"
+        # `training_amount_limit` on a row is the balance CARRIED OUT of that
+        # year -- what the NEXT year's claim draws on -- not the balance held
+        # during it. The member (born 1965-07-01) turns 65 in 2030, so they are
+        # still holding the balance going into 2030 and hold nothing going into
+        # 2031: ITA s.122.91(4) expires it "at the end of the year in which the
+        # taxpayer turns 65".
+        carried_out_of = {start_year + i: r.training_amount_limit.get("p1", 0.0)
+                          for i, r in enumerate(results)}
+        assert carried_out_of[2029] > 0.0, (
+            "still carrying a balance out of 2029 -- the member does not turn 65 "
+            "until 2030")
+        assert carried_out_of[2030] == 0.0, (
+            "nothing carried out of 2030: the member turned 65 that year and "
+            "s.122.91(4) expires the balance at its end. This assertion also "
+            "proves the row -> calendar-year mapping rather than assuming it, "
+            "since 2030 is the year this birth date turns 65.")
+        assert carried_out_of[2031] == 0.0, "and it stays gone"
 
 
 # ────────────────────────────────────────────────────────────────────────────

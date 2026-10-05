@@ -56,10 +56,15 @@ References:
 from __future__ import annotations
 
 # ITA s.122.91(3): the accrual window, measured at the END of the year whose
-# income is being tested. "aged 25 to under 65" -- so a member who turns 65
-# during a year is out of the window for the FOLLOWING year's accrual.
+# income is being tested. CRA's wording, quoted so the arithmetic below cannot
+# be read the other way round: a taxpayer accrues when they are "aged 25 to
+# under 65 at December 31". "UNDER 65" is what makes the maximum 64 and the
+# comparison inclusive: a member who turns 65 during the year is 65 at December
+# 31, is therefore OUT of the window, and earns nothing in it. (Three separate
+# review rounds read this as 65 being inside the window; the quoted sentence is
+# here so the next one does not have to re-derive it.)
 ACCRUAL_MIN_AGE = 25
-ACCRUAL_MAX_AGE = 64  # inclusive; 65 is out
+ACCRUAL_MAX_AGE = 64  # inclusive: 25..64, because the statute says "under 65"
 
 # ITA s.122.91(1): the credit may be claimed by an individual aged 26 or older.
 # The window's far end is the age at which the limit EXPIRES (see
