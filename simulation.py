@@ -1126,10 +1126,21 @@ def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets):
         income = income_by_role[role]
         loan_inc, loan_ded = loan_by_role[role]
         taxable = income + loan_inc - loan_ded
+        pre_credit = tax_on_income(taxable, brackets)
+        from countries.canada.tax_calc import fold_non_refundable_credit
+        credits = fold_non_refundable_credit(config, income, taxable)
         return {
             'rate': marginal_rate(income, brackets),
             'taxable_income': taxable,
-            'tax_before': tax_on_income(taxable, brackets),
+            # Issue #325: the fold taxed BRACKETS ONLY. Nothing subtracted the
+            # basic personal amount or the Canada employment amount, so every
+            # household's tax -- and its disposable income, runway and
+            # solvency -- was overstated in every year it had income.
+            'tax_before': max(0.0, pre_credit - credits),
+            # Reported so the reduction is inspectable rather than implicit,
+            # and so a household can see WHICH credits moved its tax.
+            'tax_before_credits': pre_credit,
+            'non_refundable_credits': credits,
         }
 
     result = {adult['role']: _slot(adult['role']) for adult in config.adults()}
