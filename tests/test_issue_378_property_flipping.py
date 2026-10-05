@@ -114,8 +114,18 @@ class TestHoldingPeriodDecides:
         assert is_flipping_disposition(sale) is False
 
     def test_exactly_the_start_date_is_a_flip(self):
-        sale = _sale(date='2023-01-02', acquired_on='2023-01-01', year=2023)
+        """The rule's FIRST day, not merely the year after it: a sale ON
+        2023-01-01 falls inside s.12(12), so a 12-day hold from 2022-12-20 is
+        a flip. Testing only 'a date in 2023' would pass even if the
+        comparison were `<` instead of `<=`."""
+        sale = _sale(date='2023-01-01', acquired_on='2022-12-20', year=2023)
         assert is_flipping_disposition(sale) is True
+
+    def test_the_day_before_the_rule_does_not_reach_it(self):
+        """The other side of the same boundary: 2022-12-31 is before the rule,
+        so the same short hold keeps the capital-gains treatment."""
+        sale = _sale(date='2022-12-31', acquired_on='2022-12-20', year=2022)
+        assert is_flipping_disposition(sale) is False
 
     def test_a_long_sale_is_not_a_flip(self):
         sale = _sale(date='2025-01-02', acquired_on='2024-01-01', year=2025)
@@ -211,17 +221,25 @@ class TestTheGainIsPricedAsBusinessIncome:
         assert plain_capital > 0.0
         assert flipped > plain_capital
 
-    def test_the_flip_charges_the_whole_gain_not_half(self):
-        """The inclusion rate is the whole point. Tax on half the gain (what a
-        non-flip pays) must be strictly less than tax on all of it."""
-        full = _tax(_sale(designated_principal_residence_years=[]),
-                    gain=150_000.0)
-        half_only = _tax(_sale(designated_principal_residence_years=[]),
-                         gain=75_000.0)
-        assert full > half_only
-        # And the flip is the full-gain figure, not the half-gain one.
-        assert _tax(_sale(designated_principal_residence_years=[]),
-                    gain=150_000.0) == pytest.approx(full, abs=0.01)
+    def test_the_flip_includes_the_whole_gain_at_the_full_rate(self):
+        """Proves the inclusion rate is exactly 1.0, by reaching the SAME
+        taxable amount by two different routes and requiring the same tax:
+
+        - a flip on a $75,000 gain includes all $75,000;
+        - a capital gain on a $150,000 gain includes half, $75,000.
+
+        Equal taxes on an equal base is what "fully included" means. The
+        earlier version of this test compared a $150,000 gain against a
+        $75,000 one, which only proved the flip was dearer -- true of any two
+        gains of different sizes, and blind to the rate.
+        """
+        flipped_base = _tax(_sale(designated_principal_residence_years=[]),
+                            gain=75_000.0)
+        capital_base = _tax(
+            _sale(designated_principal_residence_years=[],
+                  flipping_exemption_event='insolvency'), gain=150_000.0)
+        assert flipped_base > 0.0
+        assert flipped_base == pytest.approx(capital_base, abs=0.01)
 
     def test_an_exempted_flip_matches_the_pre_exemption_exactly(self):
         """s.12(13): the life event puts the sale BACK on the capital-gains
@@ -251,29 +269,58 @@ class TestTheGainIsPricedAsBusinessIncome:
         assert _disposition_gain_tax(0.0, sale, 2024, _BRACKETS,
                                      60_000.0, 0.0) == 0.0
 
-    def test_the_rule_is_per_owner_and_bands_per_owner(self):
-        """A couple flipping jointly splits the gain per owner and bands each
-        share against that owner's own income — the same shape as the
-        capital-gains path, so the conservation identity is unchanged."""
+    def test_a_joint_sale_splits_the_gain_across_the_two_owners(self):
+        """The owner's loop must actually SPLIT. A 50/50 couple taxed on their
+        own incomes owes exactly what the single owner owes when given the
+        whole gain to ONE of them at the same income -- proving the gain is
+        divided, not charged twice or charged whole to each.
+
+        (The earlier version of this test compared one call to an identical
+        call, which asserted nothing at all.)
+        """
         joint = _sale(owner_roles={'primary': 0.5, 'spouse': 0.5})
-        both = _disposition_gain_tax(150_000.0, joint, 2024, _BRACKETS,
-                                    60_000.0, 30_000.0)
-        primary_only = _disposition_gain_tax(150_000.0, joint, 2024, _BRACKETS,
-                                            60_000.0, 30_000.0)
-        assert both == primary_only
-        assert both > 0.0
+        split = _disposition_gain_tax(150_000.0, joint, 2024, _BRACKETS,
+                                      60_000.0, 60_000.0)
+        # Both owners at the same income, so each half is taxed identically
+        # and the total is exactly ONE half-gain tax doubled -- not two whole
+        # gains.
+        one_half = _tax(_sale(designated_principal_residence_years=[]),
+                        gain=75_000.0, other_income=60_000.0)
+        assert split == pytest.approx(2 * one_half, abs=0.01)
+
+    def test_a_thirds_split_does_not_equal_the_whole(self):
+        """The negative control for the test above: a 50/50 split on a
+        $150,000 gain must NOT cost what the same owners would pay on the
+        full $150,000 each."""
+        joint = _sale(owner_roles={'primary': 0.5, 'spouse': 0.5})
+        split = _disposition_gain_tax(150_000.0, joint, 2024, _BRACKETS,
+                                      60_000.0, 60_000.0)
+        whole = _tax(_sale(designated_principal_residence_years=[]),
+                     gain=150_000.0, other_income=60_000.0)
+        assert split < whole
 
 
 class TestTheConservationIdentityStillHolds:
     """The disposition path's contract: assets fall by exactly the friction.
     The flip changes the SIZE of the tax, never the shape of the identity."""
 
-    def test_a_single_owner_flip_is_priced_once_not_twice(self):
-        """Guards the owner loop: `couple_share` normalisation means a 100%
-        owner's gain is the whole gain, taxed once."""
-        tax = _tax(_sale(owner_roles={'primary': 1.0}))
-        doubled = _tax(_sale(owner_roles={'primary': 1.0}), gain=150_000.0)
-        assert tax == doubled
+    def test_a_single_owner_owes_exactly_the_whole_gain_included(self):
+        """The one-owner case pinned against an INDEPENDENT computation of the
+        statutory treatment, not against a second call to the function under
+        test.
+
+        (The earlier version compared one call to an identical call, which
+        asserted nothing -- it passed for any implementation at all,
+        including one that returned a constant.)
+        """
+        sale = _sale(designated_principal_residence_years=[])
+        actual = _tax(sale, gain=150_000.0)
+        from countries.canada.estate import tax_on_capital_gain_at_death
+        expected = tax_on_capital_gain_at_death(
+            fmv=150_000.0, acb=0.0, brackets=_BRACKETS, other_income=60_000.0,
+            inclusion_rate=1.0, taxable_fraction=1.0)
+        assert actual == pytest.approx(expected, abs=0.01)
+        assert actual > 0.0
 
 # ── The contract seam ─────────────────────────────────────────────────────
 #
