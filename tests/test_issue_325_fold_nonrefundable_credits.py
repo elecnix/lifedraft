@@ -42,47 +42,69 @@ def _household(employment_income, province="ontario", year=2026):
             "investment_return": 0.0, "salary_growth": 0.0,
             "inflation": 0.0, "frozen_brackets": True,
         },
-        # rate 1.0: after-tax income is saved, so it lands in
-        # total_assets -- the one tax-sensitive figure YearResult exposes.
         "savings": {"rate": 1.0},
         "tax": {"province": province},
+        # Issue #679: the solvency identity -- and with it
+        # ``YearResult.after_tax_income`` -- only runs when a real obligation
+        # is declared (``ctx.living_costs > 0``, or a segment/purchase/carrying
+        # cost). Without this the observable below stays 0.0 and every
+        # assertion in this file would compare against income itself.
+        "household_budget": {"living_costs": 30_000.0},
     }
+
+
+def _fold(employment_income, province="ontario", year=2026):
+    """Run the fold for one adult; return ``(sim, first_year_result)``."""
+    sim = FamilySimulation(SimulationConfig.from_dict(
+        _household(employment_income, province, year)))
+    results = sim.run()
+    assert results, "the fold produced no years"
+    return sim, results[0]
 
 
 def _first_year_tax(employment_income, province="ontario", year=2026):
     """Tax the FOLD actually charged, observed end to end.
 
-    ``YearResult`` exposes no income-tax or after-tax field -- both live
-    inside the fold. Two earlier versions of this helper therefore read
-    non-existent attributes behind ``getattr(..., 0.0)`` and reported **zero
-    tax at every income**, which made every assertion built on it vacuous.
+    ``YearResult`` exposes no income-tax field, so this reads the one that
+    genuinely responds to a credit: ``after_tax_income``, which
+    ``apply_solvency`` fills from the prologue's ``_after_tax_by_role`` =
+    income - tax_before (simulation.py:1445). Read directly, with no
+    ``getattr`` default: an absent field must raise rather than become a
+    plausible number (DP#32).
 
-    The observable is ``total_assets`` with a savings rate of 1.0: after-tax
-    income is then saved whole, so ``assets = income - tax`` and the tax is
-    recoverable from a field that genuinely exists.
+    Two earlier versions of this helper read non-existent attributes and so
+    reported **zero tax at every income**. A third read ``total_assets``, which
+    is not tax on this path at all: the primary-couple fold computes
+    ``annual_savings = total_income * cfg.savings_rate`` (simulation.py:1315),
+    so the figure is tax-BLIND. Measured: 433.44 for a $60,000 employee in BOTH
+    Ontario and Quebec, unchanged when ``fold_non_refundable_credit`` is
+    patched to 0.0 or to 50,000.0. Hence ``after_tax_income``.
+
+    ``_fold`` returning the simulation as well matters for the bracket
+    comparisons below: ``sim.brackets`` is the frozen list the fold actually
+    taxed from, and it is NOT the same list a fresh
+    ``get_combined_brackets(province=...)`` call returns for a hand-built
+    internal config. Comparing against the latter measured a different bracket
+    list than the one under test.
     """
-    cfg = SimulationConfig.from_dict(
-        _household(employment_income, province, year))
-    results = FamilySimulation(cfg).run()
-    assert results, "the fold produced no years"
-    yr = results[0]
-    assets = float(getattr(yr, "total_assets", 0.0) or 0.0)
-    return employment_income - assets, yr
+    _, yr = _fold(employment_income, province, year)
+    return employment_income - float(yr.after_tax_income), yr
 
 
 class TestFoldAppliesNonRefundableCredits(unittest.TestCase):
     """The credits must be visible in the YEAR RESULT, not just in a helper."""
 
     def test_a_single_employee_pays_less_than_the_bracket_tax(self):
-        from tax_data import default_tax_provider
         from tax_calculator import tax_on_income
 
         income = 60_000.0
-        paid, _ = _first_year_tax(income)
+        sim, yr = _fold(income)
+        paid = income - float(yr.after_tax_income)
 
-        brackets = default_tax_provider().get_combined_brackets(
-            year=2026, province="ontario")
-        bracket_only = tax_on_income(income, brackets)
+        # The fold's OWN frozen bracket list, not a fresh provider lookup: a
+        # hand-built internal config never threads its declared province into
+        # ``SimulationConfig.brackets``, so the two are different lists.
+        bracket_only = tax_on_income(income, sim.brackets)
 
         self.assertGreater(bracket_only, paid, (
             "the fold charged bracket tax with no credits applied; the "
@@ -90,6 +112,14 @@ class TestFoldAppliesNonRefundableCredits(unittest.TestCase):
         ))
         # The relief is material, not a rounding artefact.
         self.assertGreater(bracket_only - paid, 1_000.0)
+        # ... and it is EXACTLY the credit the fold prices, so a regression
+        # that halves the credit fails here rather than merely shrinking.
+        from countries.canada.tax_calc import fold_non_refundable_credit
+        self.assertAlmostEqual(
+            bracket_only - paid,
+            fold_non_refundable_credit(_config("ontario"), income, income),
+            places=6,
+        )
 
     def test_every_income_level_gets_relief(self):
         """The BPA is worth most as a SHARE of tax at low incomes.
@@ -100,15 +130,13 @@ class TestFoldAppliesNonRefundableCredits(unittest.TestCase):
         asserted a decreasing absolute amount and failed. The share is what
         actually falls.
         """
-        from tax_data import default_tax_provider
         from tax_calculator import tax_on_income
 
-        brackets = default_tax_provider().get_combined_brackets(
-            year=2026, province="ontario")
         shares = []
         for income in (20_000.0, 60_000.0, 100_000.0):
-            paid, _ = _first_year_tax(income)
-            bracket_only = tax_on_income(income, brackets)
+            sim, yr = _fold(income)
+            paid = income - float(yr.after_tax_income)
+            bracket_only = tax_on_income(income, sim.brackets)
             self.assertGreater(bracket_only, paid, income)
             shares.append((bracket_only - paid) / bracket_only)
         self.assertGreater(shares[0], shares[-1], (
@@ -178,10 +206,56 @@ class TestQuebecCreditIsAbated(unittest.TestCase):
         self.assertAlmostEqual(qc_credit, on_credit * (1 - 0.165), places=6)
 
     def test_the_quebec_household_still_pays_less_than_its_bracket_tax(self):
-        """Abated is not zeroed: the credit still lands."""
-        paid, _ = _first_year_tax(60_000.0, province="quebec")
+        """Abated is not zeroed: the credit still lands, and it is the exact
+        credited figure -- not merely 'below some bracket number'.
+
+        The earlier version of this test asserted ``paid < 15_777.0``, where
+        15,777 was the PRE-credit tax: any credit at all, correct or wildly
+        too large, satisfied it, so it could not fail for the reason it was
+        named. It now measures the relief itself.
+        """
+        from tax_calculator import tax_on_income
+        from countries.canada.tax_calc import fold_non_refundable_credit
+
+        income = 60_000.0
+        sim, yr = _fold(income, province="quebec")
+        paid = income - float(yr.after_tax_income)
+        relief = tax_on_income(income, sim.brackets) - paid
+
         self.assertGreater(paid, 0.0)
-        self.assertLess(paid, 15_777.0)
+        # Material, not an epsilon: a zeroed credit leaves ~1.8e-12 of float
+        # noise here, which ``> 0`` would happily accept.
+        self.assertGreater(relief, 1_000.0)
+        self.assertAlmostEqual(
+            relief,
+            fold_non_refundable_credit(_config("quebec"), income, income),
+            places=6,
+        )
+
+    def test_the_abatement_is_the_ontario_relief_times_0_835(self):
+        """The 16.5% abatement, seen end to end in the FOLD's own numbers.
+
+        Both households are taxed from the same frozen bracket list, so the
+        only difference between the two reliefs is the abatement the Canada
+        package applies to the federal credit. The helper-level test above
+        pins the same fact on ``fold_non_refundable_credit`` directly; this one
+        pins that the fold actually USES it -- the wiring, not the arithmetic.
+        """
+        from tax_calculator import tax_on_income
+
+        income = 60_000.0
+        on_sim, on_yr = _fold(income, province="ontario")
+        qc_sim, qc_yr = _fold(income, province="quebec")
+        on_relief = tax_on_income(income, on_sim.brackets) - (
+            income - float(on_yr.after_tax_income))
+        qc_relief = tax_on_income(income, qc_sim.brackets) - (
+            income - float(qc_yr.after_tax_income))
+
+        self.assertGreater(on_relief, 1_000.0, (
+            "a zeroed credit leaves float noise here, so this must be a "
+            "material floor, not ``> 0``"
+        ))
+        self.assertAlmostEqual(qc_relief, on_relief * (1 - 0.165), places=6)
 
 
 def _config(province):
