@@ -145,6 +145,23 @@ KNOWN_UNREACHED: dict[str, str] = {
     # step) builds an HBPAccount for a child who becomes a first-time home buyer,
     # withdrawing up to HBP_MAX_WITHDRAWAL from the child's RRSP non-taxably and
     # tracking its 15-year repayment schedule.
+    "countries.canada.first_home_credits": (
+        "#368 -- PRICED AND TESTED, STILL UNREACHED, and the reason is "
+        "architectural rather than forgotten. The fold now applies "
+        "non-refundable credits (#325, the layer beneath this), so the obvious "
+        "wiring is one call in simulation._income_tax_by_adult. Adding it "
+        "makes TWO repo guards contradict each other: "
+        "test_unreached_rule_modules builds its call graph from MODULE edges, "
+        "so it needs `from countries.canada.tax_calc import ...` at module "
+        "scope in simulation.py -- while test_jurisdiction_agnostic forbids "
+        "exactly that, because core must not import a jurisdiction package. "
+        "A function-local import satisfies the second and is invisible to the "
+        "first. The fix is to route the credit through the jurisdiction "
+        "PROVIDER seam (jurisdiction_providers), which is the sanctioned way "
+        "for core to reach a jurisdiction module. That is a seam change, not a "
+        "credit change, so it is not smuggled in here. REMOVE THIS ROW when "
+        "the provider seam carries the credit."
+    ),
     "countries.canada.ird_penalty": (
         "#724 — IRD / breakage penalty on discharging a fixed-rate mortgage. "
         "Priced nowhere, so every refinance in the optimizer is penalty-free."

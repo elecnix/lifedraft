@@ -22,6 +22,7 @@ NOTE: these tests were written during a hold on executing test commands and
 have NOT yet been run. The first thing to do on resuming is run them.
 """
 import pytest
+import unittest
 
 from countries.canada.first_home_credits import (
     federal_home_buyers_amount,

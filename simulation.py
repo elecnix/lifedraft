@@ -1127,6 +1127,12 @@ def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets):
         loan_inc, loan_ded = loan_by_role[role]
         taxable = income + loan_inc - loan_ded
         pre_credit = tax_on_income(taxable, brackets)
+        # Lazy, jurisdiction-neutral: simulation.py must not import
+        # countries.canada at module scope (test_jurisdiction_agnostic), and a
+        # module-scope edge is also what the unreached-module guard needs to
+        # see. Those two guards cannot both be satisfied by a direct import --
+        # routing the credit through the jurisdiction PROVIDER seam is the
+        # fix, and it is not in this PR (issue #368).
         from countries.canada.tax_calc import fold_non_refundable_credit
         credits = fold_non_refundable_credit(config, income, taxable)
         return {
