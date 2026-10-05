@@ -164,8 +164,19 @@ def apply_training_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
     fed_data = tax_provider._load_year(sim_year, 'canada', 'federal')
     annual_accrual = fed_data.ctc_annual_accrual
     lifetime_cap = fed_data.ctc_lifetime_cap
-    working_threshold = fed_data.ctc_working_income_threshold
-    ceiling = third_bracket_ceiling(fed_data.federal_brackets)
+    # CRA's earnings-limits table is labelled by the TAXATION YEAR whose limit
+    # the row supports, but the income it tests is the PRECEDING year's: the
+    # row for 2026 reads "to accumulate the annual training amount limit of
+    # $250 for the 2026 taxation year ... have total working income of $12,058
+    # or more IN 2025 ... net income for 2025 that did not exceed $177,882".
+    # So the threshold and the net-income ceiling that apply to THIS year's
+    # income are the NEXT year's row -- a one-year shift that reads as a bug
+    # until you have the table in front of you, and over-accrues by about one
+    # year's indexation if you get it wrong. `sim_year + 1` is a real year in
+    # the data or a projection of it, never an absence.
+    next_year_data = tax_provider._load_year(sim_year + 1, 'canada', 'federal')
+    working_threshold = next_year_data.ctc_working_income_threshold
+    ceiling = third_bracket_ceiling(next_year_data.federal_brackets)
 
     rooms = ws.opening_training_amount_limit
     claims = {}

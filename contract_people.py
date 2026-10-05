@@ -449,7 +449,22 @@ def _tuition_by_year(doc: Dict, p: Dict, role: str, person_id: str) -> Dict[int,
         # document into a smaller -- still wrong -- tuition claim, and could
         # manufacture eligible tuition the learner never paid for.
         reimbursed = s.get("reimbursed")
-        if reimbursed is not None and float(reimbursed) > float(tuition):
+        try:
+            tuition_amount = float(tuition)
+            reimbursed_amount = (float(reimbursed)
+                                if reimbursed is not None else None)
+        except (TypeError, ValueError):
+            # The schema types both as money, so this is unreachable through the
+            # validator -- but this function is also reached from hand-built
+            # internal dicts, and a bare float() error escaping the contract
+            # boundary is exactly the kind of failure a caller cannot act on.
+            raise ContractAdaptationError(
+                f"Person {person_id!r} declares a study period starting "
+                f"{s['start_date']!r} whose tuition/reimbursed amounts are not "
+                f"numbers: tuition={tuition!r}, reimbursed={reimbursed!r}. "
+                f"Both are money amounts (issue #372)."
+            )
+        if reimbursed_amount is not None and reimbursed_amount > tuition_amount:
             raise ContractAdaptationError(
                 f"Person {person_id!r} declares a study period starting "
                 f"{s['start_date']!r} with tuition={tuition!r} but "
@@ -459,8 +474,8 @@ def _tuition_by_year(doc: Dict, p: Dict, role: str, person_id: str) -> Dict[int,
                 f"claim credit on fees the learner never bore. Fix the "
                 f"reimbursed amount (issue #372)."
             )
-        net = float(tuition) - (float(reimbursed)
-                                if reimbursed is not None else 0.0)
+        net = tuition_amount - (reimbursed_amount
+                                if reimbursed_amount is not None else 0.0)
         start_year = int(s["start_date"][:4])
         end = s.get("end_date")
         # null end = single known year (see docstring); do not annualise to infinity.

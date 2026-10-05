@@ -1044,7 +1044,7 @@ def test_every_rule_fires_somewhere_in_representative_households():
         )
     _merge(fired)
 
-    # ── Scenario Q: a learner household (issue #372) whose primary declares
+    # ── Scenario R: a learner household (issue #372) whose primary declares
     # eligible tuition and a training amount limit carried in from a notice of
     # assessment. The `training_credit` rule fires on that household -- the CTC
     # it claims is cash, and it reduces the tuition base the `tuition_credit`

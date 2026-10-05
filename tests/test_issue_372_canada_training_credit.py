@@ -526,3 +526,91 @@ class TestUnusableBirthYearRefuses:
         from simulation import FamilySimulation
         results = FamilySimulation(self._config(1996)).run()
         assert results[0].primary_ctc_claimed == 500.0
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# CRA's earnings-limits table is labelled by the taxation year whose limit the
+# row supports, but the income it tests is the PRECEDING year's (Cite round 4).
+# The row for 2026 says the $12,058 working-income test and the $177,882
+# net-income ceiling apply to 2025 income -- so the income earned in year Y is
+# gated by year Y+1's row. Reading the same year's row under-accrues by one
+# year's indexation, which is a small, plausible, wrong number.
+# ────────────────────────────────────────────────────────────────────────────
+
+class TestTheThresholdIsTheFollowingYears:
+    @staticmethod
+    def _config(income):
+        return SimulationConfig.from_dict({
+            "family": {"members": [
+                # A FULLY REIMBURSED study period: eligible tuition is $0 (so
+                # no credit can ever be claimed) but the block IS declared,
+                # which is what puts the member on the accrual path. Without it
+                # the rule short-circuits -- see the design-decision test below.
+                {"role": "primary", "birth_year": 1996, "gross_income": income,
+                 "retirement_age": 95, "rrsp_balance": 0, "tfsa_balance": 0,
+                 "tuition_by_year": {2026: 0.0}},
+                {"role": "spouse", "birth_year": 1982, "gross_income": 0,
+                 "retirement_age": 95, "rrsp_balance": 0, "tfsa_balance": 0},
+            ], "children": []},
+            "accounts": {},
+            # NOT frozen: with frozen brackets the 2027 row projects to the
+            # 2026 numbers, so the following year's threshold would equal this
+            # year's and the test could not tell the two rows apart at all.
+            "assumptions": {"start_year": 2026, "projection_years": 2,
+                            "investment_return": 0.0, "salary_growth": 0.0,
+                            "inflation": 0.02, "frozen_brackets": False},
+            "portfolio": {"accounts": {}},
+            "property": {"house_value": 0, "mortgage_balance": 0,
+                         "mortgage_rate": 0.0, "amortization_years": 25,
+                         "margin_available": 0, "ltv_max": 0.80,
+                         "heloc_readvance": False},
+            "savings": {"rate": 0.0},
+            "retirement": {"spending_target": 0, "rrif_conversion_age": 71},
+            "tax": {"province": "qc"},
+            "household_budget": {"living_costs": 50_000},
+        })
+
+    def test_income_that_clears_this_year_s_row_fails_next_year_s(self):
+        """$12,058 of 2026 employment income clears the threshold in the 2026
+        row, and is BELOW the 2027 row's (indexed up, and read from the
+        projection when the table has no 2027 line yet). So no $250 accrues.
+        Under the same-year reading this income would accrue, which is the bug
+        this pins shut."""
+        from simulation import FamilySimulation
+        results = FamilySimulation(self._config(12_058)).run()
+        # Keyed by member id; this hand-built config gives the members no id, so
+        # the ledger falls back to the role (see the rule's `mid`).
+        assert results[0].training_amount_limit.get("primary", 0.0) == 0.0
+
+    def test_income_above_the_next_row_s_threshold_does_accrue(self):
+        from simulation import FamilySimulation
+        results = FamilySimulation(self._config(60_000)).run()
+        assert results[0].training_amount_limit.get("primary", 0.0) == 250.0
+
+
+class TestNoDeclarationMeansNoAccrual:
+    """A DESIGN DECISION, pinned so it cannot drift into an accident: a member
+    who declares neither a study period nor an opening limit is left alone
+    entirely — no accrual, no ledger entry.
+
+    CRA would in fact accrue the limit for any qualifying working adult whether
+    or not they ever study. Accruing it for everyone would put a $250 balance on
+    every adult in every household, and since the limit is only ever paid out
+    against tuition it would change no tax anywhere — it would only make the
+    ledger non-empty for the majority of households that never study, and make
+    the golden trajectory's shape depend on a credit nobody can claim.
+
+    So the rule is gated on the household saying something about studying. The
+    cost of that choice, stated plainly: a household that studies LATER, in a
+    year the projection covers, starts accruing from that year rather than
+    having banked the limit in the years before it — which is exactly what the
+    declared ``training_amount_limit_opening`` is for, and why it exists.
+    """
+
+    def test_a_member_who_declares_nothing_gets_no_ledger_entry(self):
+        from simulation import FamilySimulation
+        cfg = TestTheThresholdIsTheFollowingYears._config(60_000)
+        cfg.family_members[0].pop("tuition_by_year")
+        results = FamilySimulation(cfg).run()
+        assert results[0].training_amount_limit == {}
+        assert results[0].primary_ctc_claimed == 0.0

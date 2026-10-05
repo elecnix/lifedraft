@@ -47,6 +47,42 @@ def _dataclass_fields(source):
     raise AssertionError("TaxYearData dataclass not found in tax_data.py")
 
 
+def _cached_keywords(source):
+    """The ``data.get(...)`` keys `_parse_cached` reads when a year is served
+    from the JSON cache. A field carried by `_project_from_base` but not here
+    comes back as its dataclass default on the cached path -- the same silent
+    zero, reached by a different door (Cite round 4)."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.FunctionDef)
+                and node.name == "_parse_cached"):
+            keys = set()
+            for sub in ast.walk(node):
+                if (isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr == "get"
+                        and sub.args
+                        and isinstance(sub.args[0], ast.Constant)
+                        and isinstance(sub.args[0].value, str)):
+                    keys.add(sub.args[0].value)
+            return keys
+    raise AssertionError("_parse_cached not found in tax_data.py")
+
+
+def test_every_ctc_field_survives_the_json_cache_path():
+    source = _read_tax_data()
+    owned = [f for f in _dataclass_fields(source)
+             if f.startswith(OWNED_PREFIXES)]
+    cached = _cached_keywords(source)
+    missing = [f for f in owned if f not in cached]
+    assert not missing, (
+        f"TaxDataProvider._parse_cached does not read {missing} out of the "
+        f"cached year, so a run served from the cache carries the dataclass "
+        f"DEFAULT (0.0) instead -- which the CTC's accrual gate reads as 'no "
+        f"data, no credit' and silently denies every learner their $250. Add "
+        f"the field to the TaxYearData(...) call in _parse_cached (issue #372).")
+
+
 def _projected_keywords(source):
     tree = ast.parse(source)
     for node in ast.walk(tree):

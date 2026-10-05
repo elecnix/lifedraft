@@ -994,6 +994,16 @@ class TaxDataProvider:
             rrsp_limit=data.get("rrsp_limit", 0),
             tfsa_limit=data.get("tfsa_limit", 0),
             fhsa_limit=data.get("fhsa_limit", 0),
+            # Issue #372: the CTC's parameters on the CACHED path too. A field
+            # read here but not in `_project_from_base` (or vice versa) comes
+            # back as its dataclass default, so a cached year would carry a $0
+            # working-income threshold -- which the accrual gate correctly
+            # treats as "no data, no credit", silently denying every learner
+            # their $250. Both directions of that mismatch are detected by
+            # tests/architecture/test_ctc_projection.py.
+            ctc_annual_accrual=data.get("ctc_annual_accrual", 0),
+            ctc_lifetime_cap=data.get("ctc_lifetime_cap", 0),
+            ctc_working_income_threshold=data.get("ctc_working_income_threshold", 0),
             federal_eligible_dtc_rate=data.get("federal_eligible_dtc_rate", 0),
             federal_non_eligible_dtc_rate=data.get("federal_non_eligible_dtc_rate", 0),
             federal_eligible_gross_up=data.get("federal_eligible_gross_up", 0.38),
