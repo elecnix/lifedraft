@@ -102,6 +102,24 @@ def _combined_rate_names(node):
             yield sub
 
 
+COST_BASIS_SUFFIXES = ("_acb", "_cost_basis")
+
+
+def _is_cost_basis_target(target):
+    """True for any target naming a cost basis.
+
+    Matches an Attribute's attribute AND a plain Name's identifier: a rule
+    that accumulates into a local ``sm_cost_basis`` rather than a
+    ``ws.new_sm_cost_basis`` attribute would otherwise slip past this guard
+    entirely, which is the failure it exists to prevent.
+    """
+    if isinstance(target, ast.Attribute):
+        return target.attr.endswith(COST_BASIS_SUFFIXES)
+    if isinstance(target, ast.Name):
+        return target.id.endswith(COST_BASIS_SUFFIXES)
+    return False
+
+
 # Both modules this PR writes a cost basis from. The Smith-Manoeuvre sleeve is
 # legally non-registered and carries the same exposure, so guarding only the
 # declared non-reg pot would leave half the change unguarded.
@@ -127,9 +145,7 @@ def test_the_distribution_rate_is_never_added_to_acb_by_capital_appreciation():
                 targets = list(node.targets)
             else:
                 continue
-            if not any(isinstance(t, _ast.Attribute)
-                       and t.attr.endswith(("_acb", "_cost_basis"))
-                       for t in targets):
+            if not any(_is_cost_basis_target(t) for t in targets):
                 continue
             for sub in _combined_rate_names(node.value):
                 offenders.append(f"{module}:{node.lineno}")
