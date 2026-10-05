@@ -431,3 +431,39 @@ class TestTheCaveatCannotOutliveTheBug(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class TestAnEmptyCompositionIsAnAbsentComposition(unittest.TestCase):
+    """Cite (r4180599342): ``isinstance(yields, dict)`` let an EMPTY block
+    through, where the malformed screen passes vacuously (nothing to iterate)
+    and the income sum is 0.0 — so ``yield: {}`` suppressed the caveat while a
+    wholly ABSENT block fired. Both are the same declaration: no composition
+    was given, so the engine falls back to its configured ``non_reg_yield_rate``
+    and income really is being distributed. Both must report.
+
+    This is deliberately distinct from a block declaring explicit ZEROES, which
+    IS a declaration — of no income — and stays quiet.
+    """
+
+    def test_an_empty_yield_block_reports(self):
+        cfg = _cfg(non_reg_balance=2_000_000)
+        cfg['portfolio']['accounts']['non_reg']['yield'] = {}
+        self.assertIn(CAVEAT_ID, _active_ids(cfg))
+
+    def test_an_empty_block_agrees_with_an_absent_block(self):
+        """The contradiction Cite named, stated as the pair it is."""
+        absent = _cfg(non_reg_balance=2_000_000)
+        del absent['portfolio']['accounts']['non_reg']['yield']
+        empty = _cfg(non_reg_balance=2_000_000)
+        empty['portfolio']['accounts']['non_reg']['yield'] = {}
+        self.assertIn(CAVEAT_ID, _active_ids(absent))
+        self.assertIn(CAVEAT_ID, _active_ids(empty))
+        self.assertEqual(_active_ids(absent), _active_ids(empty))
+
+    def test_explicit_zeroes_stay_distinct_from_an_empty_block(self):
+        """The other side: a block that declares a real number, zero, on every
+        income type HAS declared a composition -- of no income."""
+        zeroes = _cfg(non_reg_balance=2_000_000)
+        empty = _cfg(non_reg_balance=2_000_000)
+        empty['portfolio']['accounts']['non_reg']['yield'] = {}
+        self.assertNotIn(CAVEAT_ID, _active_ids(zeroes))
+        self.assertIn(CAVEAT_ID, _active_ids(empty))

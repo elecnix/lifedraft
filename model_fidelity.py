@@ -1787,21 +1787,27 @@ def _has_income_earning_portfolio(ctx: FidelityContext) -> bool:
     things and only one of them is a reason to stay quiet (DP#32):
 
     - no ``non_reg`` account declared at all -> no taxable pot -> False.
-    - a declared pot whose ``yield`` composition is absent -> the engine falls
-      back to its configured ``non_reg_yield_rate`` (``simulation.
-      _non_reg_after_tax_return_for``), so income IS being distributed and the
-      OAS base IS missing it -> True.
+    - a declared pot whose ``yield`` composition is absent -- OR EMPTY -- the
+      engine falls back to its configured ``non_reg_yield_rate``
+      (``simulation._non_reg_after_tax_return_for``), so income IS being
+      distributed and the OAS base IS missing it -> True.
     - a declared yield that cannot be priced -> report rather than exonerate ->
       True.
-    - a yield block that declares zero on every income type -> genuinely
-      nothing is distributed -> False.
+    - a yield block that declares a real NUMBER, and zero, on every income type
+      -> genuinely nothing is distributed -> False.
     """
     non_reg = _portfolio_block(ctx.cfg).get('non_reg')
     if not isinstance(non_reg, dict):
         return False
     yields = non_reg.get('yield')
-    if not isinstance(yields, dict):
-        return True                        # the fallback rate applies
+    # `not yields` rather than a type test alone: Cite caught (r4180599342)
+    # that `isinstance(yields, dict)` lets an EMPTY block through, where the
+    # screen passes vacuously and the sum is 0.0, so `{}` suppressed the
+    # caveat while a wholly absent block fired. Both are the SAME declaration --
+    # no composition -- so both must report. A block that declares explicit
+    # zeroes is a different thing, and is handled by the sum below.
+    if not isinstance(yields, dict) or not yields:
+        return True                        # no composition declared
     if _income_yield_is_unpriceable(yields):
         return True                        # declared, but not a number
     return _declared_income_yield(yields) > 0.0
