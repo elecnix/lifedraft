@@ -204,17 +204,37 @@ def quebec_home_buyers_credit(
     """
     if provider is None:
         provider = TaxDataProvider()
+    # DP#32: the line 396 credit has existed since 2018, so an absent maximum
+    # is a DATA GAP, not a genuine zero -- unlike the 2026 refundable credit
+    # below, which really does not exist for earlier years. An earlier
+    # version conflated the two and answered $0 either way, which would deny
+    # a Quebec first-time buyer their $1,400 with nothing to say so.
     try:
         maximum = float(_quebec_record(year, provider).qc_home_buyers_credit_max)
-    except (ValueError, IndexError, AttributeError):
-        maximum = 0.0
+    except (ValueError, IndexError, AttributeError) as exc:
+        raise ValueError(
+            f"No Quebec home buyers' credit maximum is registered for {year}. "
+            f"The Quebec record must carry qc_home_buyers_credit_max (TP-1 "
+            f"line 396, form TP-752.HA-V) for {year}; returning 0 here would "
+            f"silently deny a Quebec first-time buyer their credit (DP#32)."
+        ) from exc
     if maximum <= 0:
-        return 0.0
+        raise ValueError(
+            f"The Quebec home buyers' credit maximum for {year} is "
+            f"{maximum!r}, which is not a valid maximum. The credit has "
+            f"existed since 2018, so an empty value is a data gap rather than "
+            f"'this household qualifies for nothing' (DP#32)."
+        )
 
+    # A zero SHARE and a nil TAX LIABILITY are genuine zeros -- this claimant
+    # claims nothing, or owes nothing for the credit to offset.
+    if quebec_tax_payable <= 0:
+        return 0.0
     share = maximum if claimed_amount is None else min(float(claimed_amount), maximum)
     if share <= 0:
         return 0.0
-    # Non-refundable: bounded by the tax this claimant actually owes.
+    # Non-refundable: bounded by the tax this claimant actually owes
+    # (form TP-752.HA-V line 5.3 -- "whichever is less").
     return min(share, max(0.0, quebec_tax_payable))
 
 

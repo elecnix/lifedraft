@@ -98,12 +98,27 @@ def test_the_quebec_reduction_is_the_abatement_not_a_guess():
 
 
 def test_a_split_claim_never_exceeds_the_year_maximum():
-    """A claimant cannot claim more than the year's amount."""
-    from countries.canada.first_home_credits import home_buyers_amount_for_year as _max
+    """A claimant cannot claim more than the year's amount.
+
+    Three distinct claims are distinguished, because "clamped" and "ignored"
+    both produce the full credit and an earlier version of this test could
+    not tell them apart:
+
+      * a HALF share pays half  -- so a genuine split is priced, not zeroed;
+      * an OVERSHOOT pays the same as the full claim -- so the cap bites;
+      * the half-share pair sums to the full credit.
+    """
+    full = federal_home_buyers_amount(2024, province="ontario")
+    half = federal_home_buyers_amount(2024, province="ontario", claimed_amount=5_000)
     overshoot = federal_home_buyers_amount(
-        2024, province="ontario", claimed_amount=_max(2024) + 5_000)
-    assert overshoot == pytest.approx(federal_home_buyers_amount(
-        2024, province="ontario"), abs=0.01)
+        2024, province="ontario", claimed_amount=15_000)
+
+    assert half == pytest.approx(full / 2, abs=0.01), "a split must be priced"
+    assert overshoot == pytest.approx(full, abs=0.01), "the cap must bite"
+    assert half * 2 == pytest.approx(full, abs=0.01), "a split must reconstitute"
+    assert overshoot != pytest.approx(15_000 * 0.15, abs=0.01), (
+        "an unclamped overshoot would pay 2250.00 on a 1500.00 credit"
+    )
 
 
 def test_a_zero_claim_is_zero():
@@ -327,31 +342,42 @@ def test_an_unpopulated_amount_refuses_rather_than_crediting_zero():
         home_buyers_amount_for_year(2024, provider=provider)
 
 
-def test_a_missing_quebec_abatement_refuses_rather_than_crediting_unabatemented():
-    """Crediting the un-abatemented figure overstates a Quebec credit by 16.5%.
+def test_a_zero_abatement_is_a_real_rate_and_does_not_raise():
+    """0.0 is a value, not an absence.
 
-    Refusing is the honest answer: the caller can report it, whereas a silent
-    $1,500 would read as a correct $1,252.50 to anyone who did not recompute.
+    A province with no abatement genuinely has a 0.0 rate, and a Quebec
+    household should be credited the full face amount. Refusing here would
+    break every non-abatement jurisdiction that shares the code path.
     """
-    provider = _StubProvider(federal=_Record(),
-                             quebec=_Record(provincial_abatement=0.0))
-    # A 0.0 abatement is a real value, so this must NOT raise -- it must
-    # simply produce the un-abatemented credit, which is why the test below
-    # pins the raising case separately.
+    provider = _StubProvider(federal=_Record(), quebec=_Record(
+        provincial_abatement=0.0))
     assert federal_home_buyers_amount(
         2024, province="quebec", provider=provider) == pytest.approx(1_500.00)
 
+
+def test_a_missing_quebec_record_refuses_rather_than_crediting_unabatemented():
+    """No record -> no way to know the rate, so refuse.
+
+    Crediting the un-abatemented figure overstates a Quebec credit by 16.5%,
+    and crediting zero understates it. A refusal is the only honest answer.
+    """
     missing = _StubProvider(federal=_Record(), quebec=None)
     with pytest.raises(ValueError, match="provincial abatement"):
         federal_home_buyers_amount(2024, province="quebec", provider=missing)
 
 
-def test_the_quebec_credit_is_zero_when_the_province_has_no_maximum():
-    """No maximum registered -> nothing to claim, and not an error."""
+def test_an_unpopulated_quebec_maximum_refuses_rather_than_claiming_nothing():
+    """The line 396 credit has existed since 2018, so 0 is a data gap."""
     provider = _StubProvider(federal=_Record(), quebec=_Record(
         qc_home_buyers_credit_max=0.0))
-    assert quebec_home_buyers_credit(
-        2024, quebec_tax_payable=50_000, provider=provider) == 0.0
+    with pytest.raises(ValueError, match="not a valid maximum"):
+        quebec_home_buyers_credit(
+            2024, quebec_tax_payable=50_000, provider=provider)
+
+
+def test_a_nil_quebec_liability_is_a_genuine_zero():
+    """A claimant who owes no Quebec tax gets no non-refundable credit."""
+    assert quebec_home_buyers_credit(2024, quebec_tax_payable=0.0) == 0.0
 
 
 def test_a_zero_or_negative_share_is_zero():
@@ -394,15 +420,15 @@ class _RaisingQuebecProvider:
         raise ValueError(f"No tax data for {country}/{province}/{year}")
 
 
-def test_a_missing_quebec_record_leaves_the_line_396_credit_at_zero():
-    """No record -> no maximum -> nothing to claim.
+def test_a_missing_quebec_record_refuses_rather_than_claiming_nothing():
+    """No Quebec record -> no maximum -> refuse, not a silent zero.
 
-    The line-396 credit is an OPT-IN: an unpopulated Quebec record means the
-    credit is not claimed, which is a truthful zero rather than a guess. (The
-    FEDERAL side is different and refuses -- see
-    test_an_unpopulated_amount_refuses_rather_than_crediting_zero -- because
-    the CRA has legislated an amount for every year since 2022.)
+    This is deliberately OPPOSITE to the 2026 refundable credit, which
+    genuinely does not exist before 2026 and so answers 0. Line 396 has
+    existed since 2018, so conflating the two would deny a Quebec buyer
+    their credit silently.
     """
-    assert quebec_home_buyers_credit(
-        2024, quebec_tax_payable=50_000,
-        provider=_RaisingQuebecProvider()) == 0.0
+    with pytest.raises(ValueError, match="home buyers' credit maximum"):
+        quebec_home_buyers_credit(
+            2024, quebec_tax_payable=50_000,
+            provider=_RaisingQuebecProvider())
