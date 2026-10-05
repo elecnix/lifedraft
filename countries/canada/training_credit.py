@@ -103,6 +103,15 @@ def accrual_for_year(age_at_year_end: int, working_income: float,
     """
     if annual_accrual <= 0.0:
         return 0.0
+    # A missing ceiling must not MANUFACTURE a credit. `third_bracket_ceiling`
+    # returns 0.0 when the bracket table is too short to have a third bracket,
+    # and the income test below is `net_income > ceiling` -- so with a ceiling of
+    # 0.0 a member reporting exactly $0 of net income would satisfy it and bank
+    # $250 off a table we could not read. Refusing outright when the threshold
+    # or the ceiling is non-positive closes that: no data, no accrual. The same
+    # reasoning applies to the working-income threshold (0.0 would admit anyone).
+    if working_income_threshold <= 0.0 or third_bracket_ceiling <= 0.0:
+        return 0.0
     if not (ACCRUAL_MIN_AGE <= age_at_year_end <= ACCRUAL_MAX_AGE):
         return 0.0
     if working_income < working_income_threshold:
@@ -138,7 +147,10 @@ def credit_for_year(opening_room: float, eligible_tuition: float,
 
     Returns ``0.0`` when there is no room, no tuition, or no parameters -- a
     genuine zero, not a missing input (DP#32: the difference is stated in the
-    caller's disclosure, never papered over).
+    caller's disclosure, never papered over). Every input the caller reads off
+    year-versioned data: ``annual_accrual`` and ``working_income_threshold`` are
+    CRA's published figures and ``third_bracket_ceiling`` is the top of the
+    third bracket, all read from the same federal row every other rate uses.
     """
     if opening_room <= 0.0 or eligible_tuition <= 0.0:
         return 0.0

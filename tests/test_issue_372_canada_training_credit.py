@@ -148,11 +148,18 @@ def _student_doc(tuition=1_500, opening_limit=500.0, income=78_000,
     return doc
 
 
-def _row(results, year):
-    """``results`` for a projection that starts in 2023, indexed by calendar
-    year -- positional, because YearResult.year is the fold's own counter and
-    not the calendar year a reader of this test is asking about."""
-    return results[year - 2023]
+def _row(results, year, start_year):
+    """The result row for calendar ``year``, from a projection that starts at
+    ``start_year`` (the year of the document's ``as_of``).
+
+    Positional on purpose: ``YearResult.year`` is the fold's own 0/1-based
+    counter, not the calendar year a reader of this test is asking about, so the
+    only honest index is ``year - start_year``. The start year is an ARGUMENT
+    rather than a constant in this helper: every fixture sets its own ``as_of``,
+    and a helper that assumed one of them would silently read the wrong row for
+    the rest.
+    """
+    return results[year - start_year]
 
 
 def _member(legacy, role="primary"):
@@ -331,19 +338,31 @@ class TestAcceptanceCaseB:
         results, _ = _run(self._reimbursed_doc())
         assert results[0].training_amount_limit["p1"] > 0.0
 
+    START_YEAR = 2023
+
     def test_the_next_year_of_self_paid_tuition_claims_half_of_it(self):
-        """$2,000 of self-paid tuition -> 50% = $1,000, and the balance by then
-        is exactly $1,000 (four $250 accruals, 2024 through 2026, on the
-        2020-onward income). So this is the tuition-bound prong binding: the
-        claim is $1,000, not $1,250 and not $0."""
+        """$2,000 of self-paid tuition -> 50% = $1,000, and the balance it draws
+        on is exactly $1,000.
+
+        Two separate years, and the distinction is the whole mechanism: the
+        learner's balance CLOSING 2026 at $1,000 (four $250 accruals, 2024
+        through 2026, on the 2020-onward income) is what the 2027 claim is
+        allowed to draw on -- CRA limits a claim to "the training credit
+        accumulated to the end of the previous taxation year". So the $1,000
+        below is a 2026 figure and the $1,000 claim is a 2027 figure; the 2027
+        CLOSING balance is $250 (the room is spent, plus that year's accrual),
+        which is asserted too so a reader cannot conflate the three.
+        """
         doc = self._reimbursed_doc()
         _add_study_period(doc, "p1", 2_000, start="2027-01-01",
                           end="2027-12-31")
         results, _ = _run(doc)
-        assert _row(results, 2026).primary_ctc_claimed == 0.0
-        assert _row(results, 2026).training_amount_limit["p1"] == \
-            pytest.approx(4 * 250.0)
-        assert _row(results, 2027).primary_ctc_claimed == 1_000.0
+        assert _row(results, 2026, self.START_YEAR).primary_ctc_claimed == 0.0
+        assert _row(results, 2026, self.START_YEAR).training_amount_limit["p1"] \
+            == pytest.approx(4 * 250.0)
+        assert _row(results, 2027, self.START_YEAR).primary_ctc_claimed == 1_000.0
+        assert _row(results, 2027, self.START_YEAR).training_amount_limit["p1"] \
+            == pytest.approx(250.0)
 
     def test_more_reimbursed_than_paid_is_refused(self):
         """A clamp would turn an incoherent document into a smaller -- still
@@ -376,9 +395,15 @@ class TestNegativeControls:
         # And the two runs differ by exactly the CTC's two effects, in the
         # learner's favour: the balance pays $500 of cash and costs $500 of
         # s.118.5 base, so the CTC run has the HIGHER after-tax income. (The
-        # exact figure is asserted in the case above; here the sign is the
+        # exact figure is asserted in the case above; here the SIGN is the
         # point -- a CTC that arrived as a tax reduction rather than a refund
-        # would invert it.)
+        # would invert it, and this learner owes plenty of tax, so that
+        # regression would be invisible to a "the credit fired" assertion.)
+        assert with_room[0].after_tax_income > without[0].after_tax_income, (
+            "the refundable CTC must RAISE after-tax income even for a learner "
+            "who owes tax: it is cash in the household's hand, not a reduction "
+            f"of it. Got {with_room[0].after_tax_income} with the CTC vs "
+            f"{without[0].after_tax_income} without.")
 
     def test_no_tuition_at_all_is_a_strict_no_op(self):
         results, _ = _run(_student_doc(tuition=None, opening_limit=None))
@@ -394,10 +419,18 @@ class TestExpiryAt65:
         doc = _student_doc(tuition=None, opening_limit=1_000.0,
                            birth_date="1965-07-01", as_of="2024-06-30")
         doc["decisions"]["horizon"] = {"person": "p1", "until_age": 68}
+        start_year = 2024
         results, _ = _run(doc)
-        by_year = {2024 + i: r.training_amount_limit.get("p1", 0.0)
+        by_year = {start_year + i: r.training_amount_limit.get("p1", 0.0)
                    for i, r in enumerate(results)}
-        assert by_year[2030] == 0.0, "expires at the end of the year turned 65"
+        # Prove the row -> calendar-year mapping rather than assuming it: the
+        # member turns 65 in 2030, so if row 0 were NOT calendar 2024 the whole
+        # table would be shifted and this premise would fail here instead of
+        # silently asserting the rule's opposite.
+        assert by_year[2030] == 0.0, (
+            "expires at the end of the year turned 65 -- and, as a premise, "
+            "the row this reads is calendar 2030 (the member born 1965-07-01 "
+            "turns 65 that year)")
         assert by_year[2029] > 0.0, "still held the year before"
 
 

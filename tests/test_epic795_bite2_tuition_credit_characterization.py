@@ -76,17 +76,25 @@ def _run_tuition(time_step):
     sim = FamilySimulation(cfg, adapter=CanadaAdapter(cfg),
                            use_readvanceable=False, deduct_later=False)
     return sim.run()
-# RE-PINNED by #372 (the Canada Training Credit). Years 2-4 moved and the move
-# is the feature working, not drift: this household's members are 46 and 44 in
-# 2026 on working incomes of $120k and $45k, so each accrues the first $250 of
-# training-amount limit in 2026 and claims it in 2027 against that year's
-# tuition. Each claim pays $250 of REFUNDABLE cash and removes $250 from the
-# s.118.5 base (worth 250 x 22% = $55 at the federal 14% + Quebec 8% rates), so
-# each member's after-tax income rises by $195 and the household's by $390 --
-# exactly the $390 the years 2-3 show. Year 1 is unchanged because a claim draws
-# on the balance carried in from the PREVIOUS year (ITA s.122.91), and the
-# household starts with none. Years 4-8 settle once the balance is spent and no
-# tuition is declared.
+# RE-PINNED by #372 (the Canada Training Credit). The move is the feature
+# working, not drift. The household's members are 46 and 44 in 2026 on working
+# incomes of $120k and $45k, so each accrues the first $250 of training-amount
+# limit in 2026 and claims it in 2027 (and again in 2028) against that year's
+# tuition. A claim of $250 pays $250 of REFUNDABLE cash and removes $250 from
+# the s.118.5 base, worth 250 x 22% = $55 at the federal 14% + Quebec 8% rates
+# -- a net +$195 per member claiming, +$390 for the household when both claim.
+#
+# The after-tax-income deltas against the PREVIOUS pin, year by year (compare
+# each new row with the OLD row of the same year, not with the row above it):
+#   year 1  unchanged   (0 claimed)
+#   year 2  +$390.00    (both members claim: 2 x 195)
+#   year 3  +$390.00    (both claim again: 2 x 195)
+#   year 4   +$195.00   (primary's tuition ended in 2028, so only the spouse
+#                       claims: 1 x 195)
+#   years 5-8 unchanged (the balance is spent and no tuition is declared)
+# Year 1 cannot move whatever the household earns: a claim draws on the
+# balance carried in from the PREVIOUS year (ITA s.122.91), and this household
+# starts with none.
 #
 # The `monthly` list must stay IDENTICAL to `yearly`: that equality is the
 # two-folds-agree check, and it is why the numbers are written out twice rather
