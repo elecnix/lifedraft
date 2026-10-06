@@ -256,3 +256,86 @@ class TestTheLegIsReachableFromAConfig:
         cfg["people"][1]["parental_leave"]["plan"] = "special"
         with pytest.raises(ValueError, match="different QPIP plans"):
             qpip_benefit_total(cfg)
+
+
+class TestEveryRefusalPathInTheHouseholdEntryPoint:
+    """A refusal nobody exercises is a refusal nobody gets.
+
+    Coverage named six of these lines when the gate first ran; all are the
+    branches that REFUSE rather than guess, so leaving them untested would ship
+    the loud failures without proof they fire.
+    """
+
+    def test_an_empty_household_returns_nothing(self):
+        assert qpip_household_benefits(()) == {}
+
+    def test_a_leave_with_no_date_refuses(self):
+        leave = QPIPLeave("spouse", None, "basic", 700.0, True, 0)
+        with pytest.raises(ValueError, match="birth or adoption date"):
+            qpip_household_benefits((leave,))
+
+    def test_an_unknown_plan_refuses(self):
+        leave = QPIPLeave("spouse", BIRTH, "deluxe", 700.0, True, 0)
+        with pytest.raises(ValueError, match="unknown QPIP plan"):
+            qpip_household_benefits((leave,))
+
+    def test_negative_earnings_refuse(self):
+        leave = QPIPLeave("spouse", BIRTH, "basic", -1.0, True, 0)
+        with pytest.raises(ValueError, match="negative"):
+            qpip_household_benefits((leave,))
+
+    def test_leaves_in_different_years_refuse(self):
+        a = QPIPLeave("spouse", date(2024, 11, 28), "basic", 700.0, True, 5)
+        b = QPIPLeave("primary", date(2025, 3, 1), "basic", 700.0, False, 5)
+        with pytest.raises(ValueError, match="maximum insurable earnings is per year"):
+            qpip_household_benefits((a, b))
+
+    def test_without_a_declared_share_the_block_is_allocated_in_order(self):
+        """The deterministic fallback, pinned so its behaviour is deliberate.
+
+        Declaration order decides who consumes the shared 70 % block when
+        neither parent declares a share. The birthing parent listed first takes
+        all 7, which is the 20,520 answer -- correct as a fallback, and the
+        reason the declared split exists.
+        """
+        spouse, primary = _spouse(27), _primary(5)
+        r = qpip_household_benefits((spouse, primary))
+        assert r["spouse"].total == pytest.approx(20_520.00)
+        assert r["primary"].total == pytest.approx(6_750.00)
+
+    def test_the_declared_split_is_what_produces_the_cffp_figures(self):
+        """The contrast that makes the declared field worth its schema entry."""
+        spouse, primary = _spouse(27), _primary(5)
+        spouse.shared_full_rate_weeks = 2
+        primary.shared_full_rate_weeks = 5
+        ordered = qpip_household_benefits((spouse, primary))
+        reversed_ = qpip_household_benefits((primary, spouse))
+        assert ordered["spouse"].total == reversed_["spouse"].total == pytest.approx(19_980.00)
+        assert ordered["primary"].total == reversed_["primary"].total == pytest.approx(7_560.00)
+
+
+class TestTheLegsRefusalPaths:
+    def test_a_non_dict_member_is_skipped(self):
+        from net_benefit_legs import qpip_benefit_total
+        cfg = {"people": ["nonsense", 42, None]}
+        assert qpip_benefit_total(cfg) == 0.0
+
+    def test_a_malformed_birth_date_refuses(self):
+        from net_benefit_legs import qpip_benefit_total
+        cfg = {"people": [{"person_id": "spouse", "gross_income": 37_000.0,
+                           "parental_leave": {"child_birth_date": "2024-7-1",
+                                              "plan": "basic",
+                                              "parent_role": "birthing",
+                                              "parental_weeks": 27}}]}
+        with pytest.raises(ValueError, match="ISO date"):
+            qpip_benefit_total(cfg)
+
+    def test_non_numeric_weeks_refuse(self):
+        from net_benefit_legs import qpip_benefit_total
+        cfg = {"people": [{"person_id": "spouse", "gross_income": 37_000.0,
+                           "parental_leave": {"child_birth_date": "2024-11-28",
+                                              "plan": "basic",
+                                              "parent_role": "birthing",
+                                              "parental_weeks": "many"}}]}
+        with pytest.raises(ValueError, match="parental_weeks"):
+            qpip_benefit_total(cfg)
