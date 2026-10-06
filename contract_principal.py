@@ -129,6 +129,17 @@ def _map_principal_sale(principal: Optional[Dict], mortgage: Optional[Dict],
     # property household falls back to its own window, unchanged (DP#32).
     if family_pre_window is not None:
         sale_entry["family_pre_window"] = family_pre_window
+    # Issue #363: a MIXED-USE principal's disposition is only PARTLY a principal
+    # residence, so the sale carries the income-producing SHARE for the
+    # disposition rule to apportion the exemption by -- a fully designated
+    # duplex at a 0.4 rental share is 40% taxable, not exempt. Carried only when
+    # the property declares a rental share, so an ordinary home's sale is
+    # byte-identical (DP#32).
+    _rental = principal.get("rental") if principal else None
+    if _rental is not None:
+        _mu_share = _rental.get("share")
+        if _mu_share is not None:
+            sale_entry["mixed_use_share"] = _mu_share
     # Issue #963 (epic #956 bite F): carry the principal's `appreciation_rate`
     # onto the sale so the disposition rule can price the APPRECIATED gross
     # value at the sale year (a downsize/sell realizes the GROWN home, not the

@@ -107,6 +107,17 @@ def _disposition_gain_tax(
         else:
             window = family_window
         taxable_fraction = taxable_gain_fraction(designated_count, window)
+    # Issue #363: on a MIXED-USE home only the owner-occupied part is a
+    # principal residence, so the exemption shelters (1 - share) of the gain and
+    # the income-producing share is taxable REGARDLESS of the designation. The
+    # combination is `share + (1 - share) * taxable_fraction`: a fully designated
+    # duplex at a 0.4 rental share is therefore 40% taxable, not exempt. Absent
+    # (a whole-property home or an ordinary rental) the share is 1.0 for a rental
+    # and 0.0 for a pure principal, both of which reduce to the previous
+    # arithmetic -- byte-identical (DP#32).
+    _mixed_share = sale.get('mixed_use_share')
+    if _mixed_share is not None:
+        taxable_fraction = _mixed_share + (1.0 - _mixed_share) * taxable_fraction
     from countries.canada.estate import tax_on_capital_gain_at_death
     owner_roles = sale.get('owner_roles', {})
     couple_share = sum(owner_roles.values())

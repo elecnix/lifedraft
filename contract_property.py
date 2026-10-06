@@ -534,6 +534,16 @@ def _map_owned_properties(doc: Dict, primary_id: str,
                 "mortgage_interest_annual": mortgage_interest,
                 "owner_roles": owner_roles,
             }
+            # Issue #363: a MIXED-USE principal residence carries the fraction
+            # of the building that is income-producing. Carried ONLY when the
+            # document declares it, so a whole-property rental (kind=rental)
+            # round-trips byte-identically -- the fold reads an absent share as
+            # 1.0 (DP#32). The schema guarantees a `share` exists on a
+            # kind=principal, and forbids one that is 0 or 1 (each of which
+            # would describe a property that is wholly one thing).
+            _share = rental.get("share")
+            if _share is not None:
+                entry["rental"]["share"] = _share
             # Issue #967: a financed rental's mortgage interest is DEDUCTIBLE
             # under s.20(1)(c), but the mortgage ORIGINATES at the purchase
             # year -- so the static `mortgage_interest_annual` above (built

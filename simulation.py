@@ -1032,10 +1032,18 @@ def _rental_income_for(
                 if entry['year'] == sim_year:
                     mortgage_interest += entry['interest']
                     break
+        # Issue #363: a MIXED-USE principal residence declares a rental SHARE --
+        # a rented basement or duplex unit, or a home business -- and only that
+        # fraction of the building earns the income, incurs the expenses and
+        # carries the deductible interest. Absent (a kind=rental, whole property)
+        # defaults to 1.0, so every existing rental is byte-identical (DP#32).
+        _share = rental.get('share')
+        if _share is None:
+            _share = 1.0
         effect = classify_rental_income(
-            rental['gross_rent_annual'],
-            rental['expenses_annual'],
-            mortgage_interest)
+            rental['gross_rent_annual'] * _share,
+            rental['expenses_annual'] * _share,
+            mortgage_interest * _share)
         roles = rental['owner_roles']
         p_frac = roles.get('primary', 0.0)
         s_frac = roles.get('spouse', 0.0)
