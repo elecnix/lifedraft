@@ -101,6 +101,12 @@ class QuebecTaxData:
             qc_charitable_donation_rate_top=0.2575,
             qc_charitable_donation_top_threshold=132245,  # top bracket floor 2026
             qc_medical_expense_threshold_pct=0.03,
+            qc_career_extension_min_age=65,
+            qc_career_extension_exclusion=7655,
+            qc_career_extension_max_work_income=12755,
+            qc_career_extension_reduction_threshold=57660,
+            qc_career_extension_reduction_rate=0.07,
+            qc_career_extension_reduction_on_net_income=1.0,
             # ── Senior assistance tax credit (Parameters 2026) ──
             qc_senior_assistance_max_per_person=2000,
             qc_senior_assistance_threshold_single=28405,
@@ -195,6 +201,12 @@ class QuebecTaxData:
             qc_charitable_donation_rate_top=0.2575,
             qc_charitable_donation_top_threshold=129590,  # top bracket floor 2025
             qc_medical_expense_threshold_pct=0.03,
+            qc_career_extension_min_age=65,
+            qc_career_extension_exclusion=7500,
+            qc_career_extension_max_work_income=12500,
+            qc_career_extension_reduction_threshold=56500,
+            qc_career_extension_reduction_rate=0.07,
+            qc_career_extension_reduction_on_net_income=1.0,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
             # ── Senior assistance tax credit (Parameters 2025) ──
             qc_senior_assistance_max_per_person=2000,
@@ -277,6 +289,14 @@ class QuebecTaxData:
             qc_charitable_donation_rate_low=0.20,
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
+            qc_non_refundable_credit_rate=0.14,   # 14% from tax year 2023
+            qc_career_extension_min_age=60,
+            qc_career_extension_exclusion=5000,
+            qc_career_extension_max_work_income=11000,
+            qc_career_extension_max_work_income_under_65=10000,
+            qc_career_extension_reduction_threshold=40925,
+            qc_career_extension_reduction_rate=0.05,
+            qc_career_extension_reduction_on_net_income=0.0,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
             # ── RESP/CESG/QESI/CLB thresholds (DP#12, DP#20) ──
             cesg_first_threshold=55867,
@@ -336,6 +356,14 @@ class QuebecTaxData:
             qc_charitable_donation_rate_low=0.20,
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
+            qc_non_refundable_credit_rate=0.14,   # 14% from tax year 2023
+            qc_career_extension_min_age=60,
+            qc_career_extension_exclusion=5000,
+            qc_career_extension_max_work_income=11000,
+            qc_career_extension_max_work_income_under_65=10000,
+            qc_career_extension_reduction_threshold=40925,
+            qc_career_extension_reduction_rate=0.05,
+            qc_career_extension_reduction_on_net_income=0.0,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
             source="fallback",
         )
