@@ -188,6 +188,10 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         # a genuinely absent key, never coerces it (DP#32). 0.0 is a real
         # declarable "all rigid" value that travels through unchanged.
         discretionary_fraction=cfg.get('household_budget', {}).get('discretionary_fraction'),
+        # Issue #366: same absence-safe read -- None on an absent key, never a
+        # coerced empty block (DP#32). The declared credit facts travel to the
+        # objective's home-support leg, which is a strict no-op when absent.
+        home_support=cfg.get('household_budget', {}).get('home_support'),
         # Issue #760: dated, finite-term living-cost segments. Absence-safe
         # -- .get with no default returns [] (a household with no dated
         # segments), never a fabricated entry; the list is only present

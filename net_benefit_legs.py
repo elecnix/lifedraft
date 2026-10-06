@@ -39,6 +39,9 @@ year refuses loudly, it is never assumed.
 from countries.canada.lsif_credit import (
     LSIFPurchase, compute_lsif_credit, lsif_from_config,
 )
+from countries.canada.provinces.quebec.home_support import (
+    home_support_credit, renter_credit,
+)
 from countries.canada.provinces.quebec.roulez_vert import compute_roulez_vert_rebate
 from countries.canada.retirement import get_oas_annual_max
 from countries.canada.zev_incentive import compute_izev_incentive, zev_purchase_from_dict
@@ -126,6 +129,49 @@ def lsif_credit_total(cfg) -> float:
         spouse_lsif_result = compute_lsif_credit(spouse_lsif_purchase, year=year)
         total += spouse_lsif_result.federal_credit + spouse_lsif_result.quebec_credit
     return total
+
+
+def home_support_credit_total(cfg) -> float:
+    """Issue #366: the Quebec refundable home-support credit for seniors.
+
+    Fires only when the household declares ``household_budget.home_support``
+    (what it paid for eligible home-support services, or its rent, plus the
+    family income and the published situation row). Absent the block this is
+    0.0 and every existing household's number is byte-identical
+    (DP#16/DP#32).
+
+    The block is priced for the household's OWN year -- the same
+    ``cfg['tax']['start_year']`` every leg here uses (``_tax_start_year``) --
+    because the credit's rate and its two reduction thresholds are
+    year-versioned data. An absent year refuses loudly rather than assuming one.
+
+    The credit is REFUNDABLE, so unlike the tuition credit there is no tax
+    payable to bound it against: what the module returns is the payment itself.
+
+    KNOWN SIMPLIFICATION, shared verbatim with ``lsif_credit_total`` and
+    ``zev_incentive_total`` above: the credit is added to the terminal objective
+    undiscounted, as though received at the horizon rather than in the year it is
+    paid, so it is not compounded over the years between. Correcting that means
+    routing a refundable credit through the yearly fold as a real cash inflow,
+    which no seam in the fold does today (no rule books a refundable credit into
+    a year's cash) -- a deliberate follow-up, not a silent approximation.
+    """
+    if 'household_budget' not in cfg:
+        return 0.0
+    declared = cfg['household_budget']
+    if 'home_support' not in declared:
+        return 0.0
+    block = declared['home_support']
+    if block is None:
+        return 0.0
+    year = _tax_start_year(cfg)
+    situation = block['situation']
+    income = block['family_income']
+    if block.get('monthly_rent') is not None:
+        return renter_credit(year, block['monthly_rent'], income,
+                             situation=situation).credit
+    return home_support_credit(year, block['eligible_expenses'], income,
+                               situation=situation).credit
 
 
 def zev_incentive_total(cfg) -> float:
