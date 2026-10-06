@@ -252,6 +252,13 @@ class TaxYearData:
     qc_age_credit_reduction_threshold: float = 0.0  # Shared family-income reduction threshold
     qc_age_credit_reduction_rate: float = 0.0  # Reduction rate above threshold (18.75%)
     qc_non_refundable_credit_rate: float = 0.0 # Conversion rate for QC non-refundable amounts (14%)
+    # ── Quebec deduction for workers (TA s.358.0.3, issue #341) ──
+    # A DEDUCTION (not a credit) that reduces QUEBEC taxable income only, so
+    # federal tax does not move. The rate is statute and fixed; the maximum is
+    # indexed every year since 2009, rounded to $5, so it is year-versioned data.
+    # Source: Finances Québec "Dépenses fiscales", fiche 110906, Tableau C.42.
+    qc_worker_deduction_rate: float = 0.0
+    qc_worker_deduction_max: float = 0.0
     # ── Quebec tuition tax credit (TP-1 Schedule T, issue #783) ──
     # A SPECIFIC non-refundable credit rate on eligible tuition (8% since
     # 2013), NOT the 14% general qc_non_refundable_credit_rate. Sourced from
@@ -851,6 +858,10 @@ class TaxDataProvider:
             qc_age_credit_reduction_rate=base.qc_age_credit_reduction_rate,
             qc_non_refundable_credit_rate=base.qc_non_refundable_credit_rate,
             qc_tuition_credit_rate=base.qc_tuition_credit_rate,
+            # Issue #341: the RATE is statute (6%, unchanged), the MAXIMUM is
+            # indexed annually and therefore escalated like the other money.
+            qc_worker_deduction_rate=base.qc_worker_deduction_rate,
+            qc_worker_deduction_max=round(base.qc_worker_deduction_max * factor, 2) if base.qc_worker_deduction_max else 0,
             qc_work_premium_max_single=round(base.qc_work_premium_max_single * factor, 2) if base.qc_work_premium_max_single else 0,
             qc_work_premium_max_couple=round(base.qc_work_premium_max_couple * factor, 2) if base.qc_work_premium_max_couple else 0,
             qc_work_premium_excluded_single=base.qc_work_premium_excluded_single,
