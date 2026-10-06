@@ -55,34 +55,29 @@ class TestTheLaw:
         assert quebec_worker_deduction(0.0, year=2024) == 0.0
         assert quebec_worker_deduction(-5.0, year=2024) == 0.0
 
-    def test_a_year_whose_record_carries_no_parameters_raises(self):
+    def test_a_year_whose_record_carries_no_parameters_raises(self, monkeypatch):
         """A silent 0.0 here would over-tax every working Quebec household in
         that year, so the function refuses instead.
 
-        Registered directly rather than by asking for an old year: the provider
-        PROJECTS a year with no record of its own (backwards as well as forwards),
-        so "a year with no data" is not reachable that way -- the only way to see
-        a record that carries no parameters is to put one there, which is exactly
-        the state a newly added year would be in.
+        Stubbed at the data-accessor seam rather than by REGISTERING a year on the
+        process-wide provider. Registering one is a trap: `register_year` writes
+        into the provider every other test in the same worker shares, so a
+        deliberately-incomplete stub row (no `basic_personal_amount`, say) leaks
+        into unrelated tests and breaks them far from here. This test does the
+        same job through `monkeypatch`, which is scoped and undone for you.
         """
-        from tax_data import TaxYearData, TaxBracket, default_tax_provider
-        provider = default_tax_provider()
-        key = "canada:quebec:2031"
-        saved = provider._fallbacks.get(key)
-        provider.register_year(TaxYearData(
+        from tax_data import TaxYearData
+        from countries.canada.provinces.quebec import quebec_credits
+
+        incomplete = TaxYearData(
             year=2031, country="canada", province="quebec",
-            federal_brackets=[TaxBracket(0, 60_000, 0.14)],
             # Deliberately left at their 0.0 defaults: a year whose
             # worker-deduction parameters were never sourced.
-            qc_worker_deduction_rate=0.0, qc_worker_deduction_max=0.0))
-        try:
-            with pytest.raises(ValueError, match="worker-deduction parameters"):
-                quebec_worker_deduction(30_000.0, year=2031, provider=provider)
-        finally:
-            if saved is not None:
-                provider._fallbacks[key] = saved
-            else:
-                provider._fallbacks.pop(key, None)
+            qc_worker_deduction_rate=0.0, qc_worker_deduction_max=0.0)
+        monkeypatch.setattr(quebec_credits, "_get_quebec_data",
+                            lambda year, provider=None: incomplete)
+        with pytest.raises(ValueError, match="worker-deduction parameters"):
+            quebec_worker_deduction(30_000.0, year=2031)
 
 
 class TestTheQuebecSlice:

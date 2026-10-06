@@ -410,8 +410,15 @@ class TestFederalCreditsDontReduceProvincialTax(unittest.TestCase):
         combined = result['breakdown']['combined_after_credits']
         expected = fed_after + prov_tax - net_qc
         self.assertAlmostEqual(combined, expected, places=2)
-        # Provincial tax should equal the gross provincial tax
-        gross_prov = quebec_tax(15780, 2026)
+        # Provincial tax should equal the gross provincial tax ON THE QUEBEC
+        # TAXABLE INCOME -- which since issue #341 is the federal base less the
+        # Quebec deduction for workers (6% of work income, capped; $946.80 here,
+        # under the year's $1,450 maximum). The point of this test is unchanged
+        # and is preserved: the FEDERAL credits reduce federal tax only, so the
+        # provincial charge still equals the gross provincial tax on whatever
+        # base Quebec actually taxes. Comparing against a base the engine no
+        # longer uses would be asserting the deduction away.
+        gross_prov = quebec_tax(result['breakdown']['qc_taxable_income'], 2026)
         self.assertAlmostEqual(prov_tax, gross_prov, places=2)
 
 
