@@ -1186,7 +1186,26 @@ def _child_age(ch: Dict, ref_year: int) -> int:
     (issue #295: the per-child block dates the child, the summary did not)."""
     if 'birth_year' in ch:
         return ref_year - ch['birth_year']
-    return ch.get('age', 0)
+    if ch.get('age') is None:
+        # DP#32: an absent age is not age zero. Returning 0 here made a child
+        # with neither key report as a newborn -- CESG-eligible through the
+        # year they turn 17 -- so the REPORT claimed grant room the loader
+        # (``resp_child_from_config``) refuses to build. The two surfaces must
+        # agree: both refuse, and the refusal names the child so it can be
+        # fixed rather than silently over-credited.
+        #
+        # The label is built with explicit None tests, never
+        # ``ch.get('id') or ch.get('name')``: that idiom is the DP#32 pattern
+        # itself, and a guard that has to special-case a message about DP#32
+        # would be the wrong kind of exception.
+        who = ch['id'] if ch.get('id') is not None else (
+            ch['name'] if ch.get('name') is not None else repr(ch))
+        raise ValueError(
+            f"RESP beneficiary {who!r} declares neither 'birth_year' nor "
+            f"'age', so its age in {ref_year} is unknown. An absent age cannot "
+            f"default to 0 (that would grant CESG eligibility through age 17 "
+            f"on a missing fact, DP#32); state the birth year, or the age.")
+    return ch['age']
 
 
 def analyze_resp_for_family(cfg: Dict) -> Dict:

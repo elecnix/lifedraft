@@ -987,3 +987,33 @@ class TestThePredicateGuardItselfIsStillExercised:
             direction=Direction.UNDERSTATES, applies=None,
         )
         assert approx.is_active(object()) is True
+
+
+def test_a_child_with_neither_birth_year_nor_age_is_refused():
+    """DP#32: an absent age is not age 0.
+
+    ``_child_age`` used to fall back to ``ch.get('age', 0)``, so a beneficiary
+    declaring neither ``birth_year`` nor ``age`` reported as a newborn --
+    CESG-eligible through the year they turn 17 -- while the engine's loader
+    refuses that same child outright. The report claimed grant room the engine
+    would never build.
+
+    This calls ``_child_age`` DIRECTLY, on purpose. Driving it through
+    ``analyze_resp_for_family`` looks stronger and is not: that path refuses
+    such a child earlier, for a different reason, so the test passes without
+    ever reaching the branch it means to pin. A unit test of a pure function
+    calling that function is the honest shape here (DP#11).
+    """
+    from countries.canada.resp_rules import _child_age
+
+    with pytest.raises(ValueError, match="neither 'birth_year' nor 'age'"):
+        _child_age({"id": "child_a"}, 2026)
+
+
+def test_a_declared_age_still_resolves_without_a_birth_year():
+    """The refusal must not swallow the legitimate shape it sits beside: a
+    child that declares only ``age`` resolves, as it always did."""
+    from countries.canada.resp_rules import _child_age
+
+    assert _child_age({"name": "child_a", "age": 9}, 2026) == 9
+    assert _child_age({"name": "child_a", "birth_year": 2017}, 2026) == 9
