@@ -473,6 +473,14 @@ def _map_member(doc: Dict, person_id: str, role: str,
     # engine turns it on in the right calendar year instead of reading the
     # salary as $0 forever. Absent (no future income) => key omitted => no-op.
     future_segments = _future_employment_segments(p, as_of)
+    # Issue #358: a declared QPIP parental leave rides the SAME channel -- the
+    # leave weeks earn the benefit, the uncovered days earn the base salary, and
+    # the salary is therefore replaced by construction (see
+    # _parental_leave_segment). Joined to any future-start segments rather than
+    # replacing them, so a household can declare both.
+    leave_segment = _parental_leave_segment(doc, p, as_of, person_id)
+    if leave_segment is not None:
+        future_segments = list(future_segments) + [leave_segment]
     if future_segments:
         member["income_segments"] = future_segments
     if p.get("birth_date"):
@@ -852,6 +860,12 @@ def map_members(doc: Dict, primary_id: str, spouse_id: Optional[str],
     iterate them: the primary, the spouse (when there is one), then each
     admitted additional accumulating adult in declared order.
 
+    Issue #358: when the declared QPIP leaves are shareable-week claims, the two
+    parents' declared shares must cover exactly the plan's shareable weeks --
+    checked HERE because it is a HOUSEHOLD fact (one parent's 2 weeks only makes
+    sense against the other's 5), and a document that under-declares them would
+    otherwise silently drop benefit weeks nobody noticed were missing.
+
     Every one of them must have a dateable birth date (issue #100, DP#28/#32):
     without a DOB the retirement gate would silently map the member as 'never
     retires' -- zero CPP/OAS/pension, indistinguishable from a correctly
@@ -902,4 +916,173 @@ def map_members(doc: Dict, primary_id: str, spouse_id: Optional[str],
                 f"dropped (issue #286, DP#32)."
             )
         members.append(extra)
+    _validate_parental_leave_shares(doc, members)
     return members
+
+
+def _validate_parental_leave_shares(doc: Dict, members: List[Dict]) -> None:
+    """Issue #358: the declared QPIP shareable weeks must add up, across the
+    household, to what the plan actually pays.
+
+    A household fact, not a per-person one (one parent's 2 weeks only makes sense
+    against the other's 5), so it is checked once the members are assembled. A
+    document that declares a leave but no shares at all sums to ZERO weeks and is
+    refused too -- silently paying only the exclusive weeks would look like a
+    household that chose not to share, which is a different decision from not
+    having declared one.
+
+    A single-adult household is exempt: there is nobody to share with, so the one
+    parent takes the whole block, exactly as the plan allows.
+    """
+    declares = [(m.get("id") or m.get("role"), m) for m in members]
+    shares: Dict[str, Dict[str, int]] = {}
+    plans = set()
+    people = _people_by_id(doc)
+    for pid, _ in declares:
+        leave = (people.get(pid) or {}).get("parental_leave")
+        if leave is None:
+            continue
+        plans.add(leave["plan"])
+        shares[pid] = {
+            "first_rate": int(leave.get("first_rate_weeks") or 0),
+            "long_rate": int(leave.get("long_rate_weeks") or 0),
+        }
+    if not shares:
+        return
+    # DP#25: the law is Quebec's; imported inside the body.
+    from countries.canada.provinces.quebec.qpip_benefits import validate_shares
+    if len(shares) == 1:
+        # Nobody to share with: the plan allows one parent to take it all, so
+        # there is no sum to check beyond the plan's own shape.
+        return
+    if len(plans) > 1:
+        raise ContractAdaptationError(
+            f"The household declares QPIP parental leaves under more than one "
+            f"plan ({sorted(plans)}). Both parents must choose the SAME plan -- "
+            f"the first application binds the other -- so two plans in one "
+            f"document cannot both be paid (issue #358)."
+        )
+    try:
+        validate_shares(plans.pop(), shares)
+    except ValueError as exc:
+        # The law module raises ValueError (it is a pure library); at the
+        # contract boundary the same fact is a ContractAdaptationError, which is
+        # what every other mapping in this file raises and what a caller can act
+        # on. Letting the bare ValueError escape would lose the file, the person
+        # and the issue reference that this message carries.
+        raise ContractAdaptationError(str(exc))
+
+
+def _parental_leave_segment(doc: Dict, person: Dict, as_of: str,
+                            person_id: str) -> Optional[Dict]:
+    """Issue #358: a declared QPIP parental leave, as a dated income segment.
+
+    Returns ``{kind, amount, from, to}`` for the engine's ``income_segments``, or
+    ``None`` when no leave is declared (the ordinary case -- DP#32).
+
+    Why a SEGMENT and not a new engine channel: the engine blends income by DAY
+    COUNT over the stored ``[from, to)`` windows, so a segment covering the leave
+    weeks does two things at once and needs no new machinery -- the leave weeks
+    earn the BENEFIT (this segment) and the remaining days earn the base salary
+    (the ``gross_income`` scalar, pro-rated over the uncovered days). That is
+    precisely the salary REPLACEMENT the issue asks for, expressed in the
+    mechanism #674 already uses for a job loss.
+
+    ``amount`` is ANNUALISED (the benefit the leave would pay if it ran all year)
+    because ``simulation._income_components_for_year`` pro-rates a segment by the
+    fraction of the year it covers. The household therefore receives the leave's
+    actual gross benefit over its actual weeks, which is what the acceptance test
+    asserts. Getting this wrong by a factor of 52/N is the obvious trap.
+
+    The law is NOT re-implemented here (DP#10): ``qpip_benefits`` owns the weeks,
+    rates and the cap, and this function invokes it with the year's maximum
+    insurable earnings off the Quebec record, exactly as the STR mapping invokes
+    the jurisdiction's legality rule rather than restating it.
+
+    Refuses (loudly, never silently -- DP#32):
+
+    - a leave declared outside Quebec. QPIP is a Quebec program; a household in
+      another province declaring one has written the wrong thing, and paying it
+      nothing would read as "the leave pays nothing" rather than "this is not
+      your province's program";
+    - a household whose declared shareable weeks do not add up to what the plan
+      pays (``qpip_benefits.validate_shares``), because under-declaring drops
+      benefit weeks with no trace and over-declaring invents them.
+    """
+    leave = person.get("parental_leave")
+    if leave is None:
+        return None
+    province = (doc.get("jurisdiction") or {}).get("province")
+    if province is None or str(province).lower() not in ("quebec", "qc"):
+        raise ContractAdaptationError(
+            f"Person {person_id!r} declares a parental leave, but the household's "
+            f"province is {province!r}. QPIP (RQAP) is a QUEBEC program -- the "
+            f"federal Employment Insurance maternity/parental benefit is a "
+            f"different program with different weeks and rates, and this engine "
+            f"models neither for another province. A leave declared outside "
+            f"Quebec is refused rather than paid $0, which would read as 'this "
+            f"leave pays nothing' (issue #358)."
+        )
+    # DP#25: the benefit law is Canadian/Quebec; imported inside the body so this
+    # jurisdiction-agnostic mapper keeps no such import at module scope.
+    from countries.canada.provinces.quebec.qpip_benefits import (
+        exclusive_entitlement, gross_benefit, leave_weeks, parental_entitlement,
+        validate_shares,
+    )
+
+    plan = leave["plan"]
+    first_rate = int(leave.get("first_rate_weeks") or 0)
+    long_rate = int(leave.get("long_rate_weeks") or 0)
+    multiple = bool(leave.get("multiple_birth"))
+    entitlement = (exclusive_entitlement(plan, leave["parent_role"], multiple)
+                   + parental_entitlement(plan, first_rate, long_rate))
+    weeks = leave_weeks(entitlement)
+    birth = leave["child_birth_date"]
+    year = int(birth[:4])
+    from tax_data import default_tax_provider
+    year_data = default_tax_provider()._load_year(year, "canada", "quebec")
+    mie = year_data.qpip_max_insurable_earnings
+    annual_insurable = _active_employment_income(person, as_of)
+    gross = gross_benefit(annual_insurable, entitlement, mie)
+    if weeks and gross:
+        # Annualise so the day-blending delivers exactly `gross` over the leave.
+        amount = gross * (365.0 / (weeks * 7.0))
+    else:
+        amount = 0.0
+    return {
+        "kind": PARENTAL_BENEFIT_KIND,
+        "amount": amount,
+        # The benefit period runs forward from the birth, which is the model's
+        # stand-in for the reference-period rules (see the module docstring).
+        "from": birth,
+        "to": _iso_plus_weeks(birth, weeks),
+    }
+
+
+# The income kind a QPIP benefit carries: ``ei``.
+#
+# Not a new kind, and that is a deliberate choice rather than a shortcut. The
+# contract's ``income_kind`` enum is the DECLARABLE vocabulary, and the engine
+# asserts that enum partitions exactly into earned and non-earned kinds
+# (countries/canada/earned_income.py). A QPIP benefit is never declared by a
+# household -- it is derived from a leave -- so adding a kind for it would mean
+# putting an engine-internal value into the contract vocabulary and moving a
+# partition guard to accommodate it.
+#
+# What the engine needs from the kind is the ITA s.146(1) treatment and the
+# premium treatment, and ``ei`` is precisely right for both: a government
+# benefit replacing earnings is TAXABLE, accrues NO RRSP room, and attracts no
+# QPP/QPIP/EI premium. The QPIP-specific facts (plan, weeks, rates, the cap) are
+# all carried by the leave declaration and the Quebec module, so nothing about
+# the program is lost by the channel it travels on -- and the federal and
+# Quebec parental benefits are the same animal in every respect this engine
+# models.
+PARENTAL_BENEFIT_KIND = "ei"
+
+
+def _iso_plus_weeks(iso_date: str, weeks: int) -> str:
+    """``iso_date`` shifted forward by ``weeks`` -- the end of the benefit
+    period, exclusive (the engine's windows are ``[from, to)``)."""
+    from datetime import date, timedelta
+    start = date.fromisoformat(iso_date)
+    return (start + timedelta(weeks=weeks)).isoformat()

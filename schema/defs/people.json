@@ -43,6 +43,21 @@
       "enum": ["employment", "self_employment", "rental", "investment", "ei", "other"],
       "description": "Issue #674: shared by both `income` and `income_override` so a job-loss scenario and a currently-in-pay income declare the same vocabulary, never two spellings of the same fact (DP#9). Deliberately excludes 'pension' and 'government_benefit' — CPP, OAS and employer-pension facts belong ONLY in the structured `person.benefits` object, never duplicated here as a second, less precise income line (#595). 'ei' (Employment Insurance) is included here, not in `person.benefits`, because unlike CPP/OAS it is not an elected, ongoing claim — it is exactly the kind of temporary, dated income a job-loss `income_override` exists to express. `kind` is not decoration: it decides whether an amount is 'earned income' for RRSP room accrual (ITA s.146(1) excludes EI benefits — see EARNED_INCOME_KINDS in simulation.py), how it is taxed, and whether CPP/QPP contributions apply." },
 
+    "parental_leave": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["child_birth_date", "plan", "parent_role"],
+      "description": "Issue #358: a QPIP (RQAP) parental leave, declared on the PARENT who takes it. QPIP benefits are temporary, dated, weeks-based income -- the shape the contract already gives Employment Insurance through income.kind='ei' rather than person.benefits, because a benefit that is not an elected ongoing claim does not belong in the retirement-benefit object. The engine derives the weekly benefit from this person's insurable earnings (the year's employment income / 52), capped at the year's maximum insurable earnings, and replaces the salary over the leave weeks. Both parents must choose the SAME plan; the shareable weeks are split between them, so each parent declares their own share and the household's two declarations must add up (refused otherwise -- under-declaring would drop benefit weeks with no trace). Quebec-only: a leave declared elsewhere is refused rather than paid $0, because the federal EI maternity/parental benefit is a different program this engine does not model.",
+      "properties": {
+        "child_birth_date": { "$ref": "#/$defs/date", "description": "The child's date of birth. The benefit period is modelled as running forward from it, which stands in for the plan's reference-period rules (the declared annual income is treated as the insurable earnings)." },
+        "plan": { "type": "string", "enum": ["basic", "special"], "description": "QPIP offers two plans, and the choice binds both parents. 'basic' (long term) pays MORE weeks at a LOWER rate -- maternity 18 weeks at 70%, paternity 5 at 70%, and 32 shareable weeks split 7 at 70% then 25 at 55%. 'special' (short term) pays fewer weeks at a higher rate -- 15 at 75%, 3 at 75%, and 25 shareable at 75%. Neither dominates the other, which is what makes the choice worth sweeping." },
+        "parent_role": { "type": "string", "enum": ["birthing", "other"], "description": "'birthing' = the person who gave birth, entitled to maternity (exclusive) benefits. 'other' = the parent who did not give birth, entitled to paternity (exclusive) benefits. This is the one fact the plan's week structure cannot be derived without, and inventing it from a relationship would be a guess." },
+        "first_rate_weeks": { "type": "integer", "minimum": 0, "description": "This parent's share of the SHAREABLE block's first-rate portion: the basic plan's 7 weeks at 70%, or the special plan's 25 weeks at 75%. The two parents' shares must sum to that portion; the household check refuses a document where they do not." },
+        "long_rate_weeks": { "type": "integer", "minimum": 0, "description": "This parent's share of the basic plan's 25 weeks at 55%. Always 0 under the special plan, which has no second-rate portion. Its own leaf because the basic plan's shareable block changes rate halfway through: treating it as one 32-week benefit at 70% would overstate it by 25 weeks x 15 percentage points." },
+        "multiple_birth": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "description": "A multiple birth (twins, triplets...) adds 5 weeks (basic) or 3 weeks (special) to EACH parent's exclusive benefit. Omitted/null = a single birth." }
+      }
+    },
+
     "income": {
       "type": "object",
       "additionalProperties": false,
@@ -166,7 +181,8 @@
         "incomes": { "type": "array", "items": { "$ref": "#/$defs/income" } },
         "benefits": { "$ref": "#/$defs/benefit_claim" },
         "entitlements": { "$ref": "#/$defs/benefit_entitlement" },
-        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } }
+        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } },
+        "parental_leave": { "anyOf": [{ "$ref": "#/$defs/parental_leave" }, { "type": "null" }], "description": "Issue #358: this person's QPIP parental leave, if they take one. Omitted/null = no leave (the ordinary case), which keeps every household that declares none byte-identical (DP#32)." }
       }
     }
 
