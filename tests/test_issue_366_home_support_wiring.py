@@ -77,6 +77,13 @@ class TestTheLegPricesTheDeclaredBlock(unittest.TestCase):
         cfg["household_budget"] = {"home_support": None}   # declared null
         self.assertEqual(home_support_credit_total(cfg), 0.0)
 
+    def test_a_budget_block_without_the_credit_leaf_is_a_no_op(self):
+        """A household that declares its living costs but not this credit is
+        untouched -- the leg reads its own leaf, not the block's presence."""
+        cfg = _cfg()
+        cfg["household_budget"] = {"living_costs": 48_000.0}
+        self.assertEqual(home_support_credit_total(cfg), 0.0)
+
     def test_the_declared_block_is_priced_at_the_published_maximum(self):
         """39% of the $19,500 cap in 2025, with no reduction at $40,000."""
         self.assertAlmostEqual(

@@ -200,6 +200,26 @@ class TestAbsenceRefusesRatherThanGuessing(unittest.TestCase):
         with self.assertRaises(ValueError):
             eligible_service_expenses_from_rent(-1.0)
 
+    def test_the_cap_helper_refuses_the_non_autonomous_situation_too(self):
+        """The refusal is one fact used by every entry point, not a check in
+        one of them: `autonomous_expense_cap` is public and is what a future
+        caller would reach for first."""
+        with self.assertRaises(ValueError) as ctx:
+            autonomous_expense_cap(2025, "non_autonomous")
+        self.assertIn("grille de calcul 458", str(ctx.exception))
+
+    def test_the_reduction_refuses_a_year_with_no_registered_thresholds(self):
+        """A guard against a DATA EDIT rather than against a caller: the rate
+        table and the threshold table are separate, so adding a rate without its
+        indexed thresholds (exactly the 2022-2024 situation) must refuse inside
+        the reduction rather than fall through to another year's numbers."""
+        from countries.canada.provinces.quebec.home_support import (
+            _autonomous_reduction,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            _autonomous_reduction(2024, 100_000.0)
+        self.assertIn("reduction thresholds", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

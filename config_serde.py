@@ -529,16 +529,24 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
         # means "never supplied" (DP#32), not a value to round-trip as
         # a fabricated 0. Issue #761: the discretionary_fraction travels
         # alongside living_costs when the household declared a split.
+        # Issue #366: the block is emitted when EITHER of its two facts is
+        # declared -- the home-support credit facts do not require
+        # living_costs, so they cannot ride the gate that tests it.
         **({'household_budget': {
-                'living_costs': config.living_costs,
+                **({'living_costs': config.living_costs}
+                   if config.living_costs is not None else {}),
                 **({'discretionary_fraction': config.discretionary_fraction}
                    if config.discretionary_fraction is not None else {}),
                 # Issue #760 (DP#24): the dated segments travel alongside
                 # living_costs when declared -- an empty list round-trips to
                 # "absent" (no dated segments), never a fabricated block.
                 **({'expense_segments': config.expense_segments}
-                   if config.expense_segments else {})}}
-           if config.living_costs is not None else {}),
+                   if config.expense_segments else {}),
+                # Issue #366: the declared home-support credit facts (DP#24).
+                **({'home_support': config.home_support}
+                   if config.home_support is not None else {})}}
+           if (config.living_costs is not None
+               or config.home_support is not None) else {}),
         # Issue #763: only re-emitted when the household actually declared
         # consumer loans -- an empty list round-trips to "absent" (no
         # consumer debt), never to a fabricated block (DP#24/DP#32).

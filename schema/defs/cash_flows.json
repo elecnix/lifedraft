@@ -69,7 +69,11 @@
     "household_budget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["annual_living_costs"],
+      "$comment": "Issue #366: the block carries the household's MEASURED budget facts, and the two it can hold are the living-cost scalar and the home-support credit facts. At least one must be present, but the credit does NOT require annual_living_costs: it is computed from its own declared expenses, and forcing an unrelated declaration (which would also engage the solvency identity) just to claim a credit would be a coupling nobody asked for.",
+      "anyOf": [
+        { "required": ["annual_living_costs"] },
+        { "required": ["home_support"] }
+      ],
       "properties": {
         "annual_living_costs": {
           "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
