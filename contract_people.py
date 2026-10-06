@@ -920,6 +920,28 @@ def map_members(doc: Dict, primary_id: str, spouse_id: Optional[str],
     return members
 
 
+def _optional_int(value) -> int:
+    """A declared integer, or 0 when the key is ABSENT.
+
+    An explicit absence test rather than ``value or 0``: a document that declares
+    ``0`` weeks and one that declares none are different facts, and ``or`` makes
+    them indistinguishable -- the DP#32 trap the architecture guard exists to
+    catch. Here they happen to price the same, which is exactly the kind of
+    coincidence that must be written down rather than encoded in a falsy test.
+    """
+    return 0 if value is None else int(value)
+
+
+def _member_key(member: Dict) -> Optional[str]:
+    """A member's ledger key: its ``id``, else its ``role``.
+
+    ``role`` cannot be None on this path -- ``_taxed_slots`` admits a member only
+    for 'primary'/'spouse' -- so the two branches are both real values and the
+    choice between them is deliberate rather than a falsy fallback.
+    """
+    member_id = member.get("id")
+    return member.get("role") if member_id is None else member_id
+
 def _validate_parental_leave_shares(doc: Dict, members: List[Dict]) -> None:
     """Issue #358: the declared QPIP shareable weeks must add up, across the
     household, to what the plan actually pays.
@@ -934,18 +956,19 @@ def _validate_parental_leave_shares(doc: Dict, members: List[Dict]) -> None:
     A single-adult household is exempt: there is nobody to share with, so the one
     parent takes the whole block, exactly as the plan allows.
     """
-    declares = [(m.get("id") or m.get("role"), m) for m in members]
+    declares = [(_member_key(m), m) for m in members]
     shares: Dict[str, Dict[str, int]] = {}
     plans = set()
     people = _people_by_id(doc)
     for pid, _ in declares:
-        leave = (people.get(pid) or {}).get("parental_leave")
+        person = people.get(pid)
+        leave = person.get("parental_leave") if person is not None else None
         if leave is None:
             continue
         plans.add(leave["plan"])
         shares[pid] = {
-            "first_rate": int(leave.get("first_rate_weeks") or 0),
-            "long_rate": int(leave.get("long_rate_weeks") or 0),
+            "first_rate": _optional_int(leave.get("first_rate_weeks")),
+            "long_rate": _optional_int(leave.get("long_rate_weeks")),
         }
     if not shares:
         return
@@ -1012,7 +1035,8 @@ def _parental_leave_segment(doc: Dict, person: Dict, as_of: str,
     leave = person.get("parental_leave")
     if leave is None:
         return None
-    province = (doc.get("jurisdiction") or {}).get("province")
+    jurisdiction = doc.get("jurisdiction")
+    province = jurisdiction.get("province") if jurisdiction is not None else None
     if province is None or str(province).lower() not in ("quebec", "qc"):
         raise ContractAdaptationError(
             f"Person {person_id!r} declares a parental leave, but the household's "
@@ -1031,8 +1055,8 @@ def _parental_leave_segment(doc: Dict, person: Dict, as_of: str,
     )
 
     plan = leave["plan"]
-    first_rate = int(leave.get("first_rate_weeks") or 0)
-    long_rate = int(leave.get("long_rate_weeks") or 0)
+    first_rate = _optional_int(leave.get("first_rate_weeks"))
+    long_rate = _optional_int(leave.get("long_rate_weeks"))
     multiple = bool(leave.get("multiple_birth"))
     entitlement = (exclusive_entitlement(plan, leave["parent_role"], multiple)
                    + parental_entitlement(plan, first_rate, long_rate))
