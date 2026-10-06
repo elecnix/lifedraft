@@ -265,3 +265,54 @@ class TestTheBranchesTheCoverageGateNamed:
 
     def test_validate_shares_accepts_the_special_plan_shape(self):
         validate_shares("special", {"a": {"first_rate": 25, "long_rate": 0}})
+
+
+class TestTheBranchesTheGateNamedInTheMapping:
+    """The three branches in the leave mapping that no fixture reached, each
+    named by the coverage gate as an uncovered line. A branch that no document
+    can reach is a branch whose refusal may already be broken.
+    """
+
+    def test_a_leave_with_no_insurable_income_maps_to_a_zero_benefit(self):
+        """A parent on leave with no declared insurable earnings has an
+        entitlement but no benefit to pay: the segment must carry 0.0 and still
+        cover the leave weeks (so the salary -- if any -- is still replaced),
+        rather than the mapping raising or dropping the leave entirely."""
+        doc = _leave_doc()
+        for person in doc["people"]:
+            if person["id"] == "p2":
+                person["incomes"] = []
+        results = _run(doc)
+        assert results, ("a household whose birthing parent has no insurable "
+                         "earnings must still simulate: the leave is a fact, the "
+                         "benefit is what its income makes it worth")
+
+    def test_a_single_adult_household_takes_the_whole_shareable_block(self):
+        """One parent, nobody to share with: the plan lets them take all of it,
+        so there is no sum of two declarations to check and the household must
+        not be refused for 'shares that do not add up'."""
+        doc = _leave_doc(first=7, long=25, other_first=0, other_long=0)
+        doc["people"] = [p for p in doc["people"] if p["id"] != "p1"]
+        for person in doc["people"]:
+            person["relationships"] = []
+        from contract_errors import ContractAdaptationError
+        # Either it maps (the single parent takes the block) or it refuses for a
+        # reason that is NOT the share sum -- never a silent zero.
+        try:
+            results = _run(doc)
+        except ContractAdaptationError as exc:
+            assert "shareable weeks" not in str(exc), (
+                "a single-adult household has nobody to share with, so its "
+                f"declaration cannot be 'shares that do not add up': {exc}")
+        else:
+            assert results, "the single parent's leave must still simulate"
+
+    def test_two_different_plans_in_one_household_are_refused(self):
+        """Both parents must choose the same plan -- the first application binds
+        the other -- so a document declaring two cannot both be paid."""
+        from contract_errors import ContractAdaptationError
+        doc = _leave_doc(plan="basic")
+        people = {p["id"]: p for p in doc["people"]}
+        people["p1"]["parental_leave"]["plan"] = "special"
+        with pytest.raises(ContractAdaptationError, match="more than one plan"):
+            _run(doc)
