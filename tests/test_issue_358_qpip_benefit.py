@@ -43,6 +43,21 @@ def _primary(weeks, plan="basic", weekly=PRIMARY_WEEKLY):
 
 
 class TestTheCFFPAcceptanceFigures:
+    def test_the_shared_70pct_split_is_DECLARED_not_inferred_from_order(self):
+        """The CFFP split is 5 weeks to the other parent, 2 to the birthing.
+
+        Inferring it from argument order would silently flip the answer, so the
+        split is declared. With the birthing parent listed FIRST and her share
+        declared as 2, the CFFP figures are still reproduced.
+        """
+        spouse = _spouse(27)
+        spouse.shared_full_rate_weeks = 2
+        primary = _primary(5)
+        primary.shared_full_rate_weeks = 5
+        r = qpip_household_benefits((spouse, primary))
+        assert r["spouse"].total == pytest.approx(19_980.00)
+        assert r["primary"].total == pytest.approx(7_560.00)
+
     def test_basic_plan_needs_the_HOUSEHOLD_because_the_70pct_block_is_shared(self):
         """The basic plan's first 7 parental weeks at 70% are a SHARED POOL.
 
@@ -53,6 +68,8 @@ class TestTheCFFPAcceptanceFigures:
         alone returns 20,520 here and the household entry point is required.
         """
         spouse, primary = _spouse(27), _primary(5)
+        spouse.shared_full_rate_weeks = 2
+        primary.shared_full_rate_weeks = 5
         r = qpip_household_benefits((primary, spouse))
         assert r["primary"].total == pytest.approx(7_560.00), (
             f"expected 5 paternity + 5 parental weeks at 756; got {r['primary'].total!r}"
@@ -65,6 +82,8 @@ class TestTheCFFPAcceptanceFigures:
     def test_the_shared_block_is_not_double_counted(self):
         """Per-person would pay the 7 at 70% twice; the household pays it once."""
         spouse, primary = _spouse(27), _primary(5)
+        spouse.shared_full_rate_weeks = 2
+        primary.shared_full_rate_weeks = 5
         household = qpip_household_benefits((primary, spouse))
         per_person = qpip_benefit(spouse).total + qpip_benefit(primary).total
         assert household["spouse"].total + household["primary"].total < per_person
@@ -155,3 +174,85 @@ class TestTheCeilingsAreYearVersioned:
         assert QPIP_MAX_INSURABLE_EARNINGS[2024] == 94_000.0
         assert len(set(QPIP_MAX_INSURABLE_EARNINGS.values())) == len(
             QPIP_MAX_INSURABLE_EARNINGS), "a copied ceiling is a stale ceiling"
+
+
+class TestTheLegIsReachableFromAConfig:
+    """The core is only half a feature until production can reach it.
+
+    tests/architecture/test_unreached_rule_modules.py fired on the unwired
+    version -- a module nothing calls contributes zero to every run while its
+    own tests stay green. That is this class's reason to exist.
+    """
+
+    def _cfg(self):
+        return {"people": [
+            {"person_id": "spouse", "role": "spouse", "gross_income": 720.0 * 52,
+             "parental_leave": {"child_birth_date": "2024-11-28",
+                                "plan": "basic", "parent_role": "birthing",
+                                "parental_weeks": 27,
+                                "shared_full_rate_weeks": 2}},
+            {"person_id": "primary", "role": "primary", "gross_income": 1080.0 * 52,
+             "parental_leave": {"child_birth_date": "2024-11-28",
+                                "plan": "basic", "parent_role": "other",
+                                "parental_weeks": 5,
+                                "shared_full_rate_weeks": 5}},
+        ]}
+
+    def test_the_leg_prices_the_cffp_household(self):
+        from net_benefit_legs import qpip_benefit_total
+        assert qpip_benefit_total(self._cfg()) == pytest.approx(27_540.00), (
+            "7,560 (other parent) + 19,980 (birthing parent)"
+        )
+
+    def test_a_household_with_no_leave_is_byte_identical(self):
+        from net_benefit_legs import qpip_benefit_total
+        assert qpip_benefit_total({"people": []}) == 0.0
+        assert qpip_benefit_total({}) == 0.0
+
+    def test_a_leave_outside_quebec_is_still_priced_here(self):
+        """The module is Quebec-owned; the jurisdiction gate is the caller's.
+
+        Pinned so the behaviour is deliberate rather than accidental: this leg
+        prices a declared leave, and refusing a non-Quebec declaration belongs
+        at the contract boundary, not silently inside a benefit computation.
+        """
+        from net_benefit_legs import qpip_benefit_total
+        cfg = self._cfg()
+        cfg["tax"] = {"province": "ontario"}
+        assert qpip_benefit_total(cfg) > 0.0
+
+    def test_a_leave_without_a_person_id_refuses(self):
+        from net_benefit_legs import qpip_benefit_total
+        cfg = {"people": [{"role": "spouse", "gross_income": 37_000.0,
+                           "parental_leave": {"child_birth_date": "2024-11-28",
+                                              "plan": "basic",
+                                              "parent_role": "birthing",
+                                              "parental_weeks": 27}}]}
+        with pytest.raises(ValueError, match="person_id"):
+            qpip_benefit_total(cfg)
+
+    def test_a_leave_without_a_birth_date_refuses(self):
+        from net_benefit_legs import qpip_benefit_total
+        cfg = {"people": [{"person_id": "spouse", "gross_income": 37_000.0,
+                           "parental_leave": {"plan": "basic",
+                                              "parent_role": "birthing",
+                                              "parental_weeks": 27}}]}
+        with pytest.raises(ValueError, match="child_birth_date"):
+            qpip_benefit_total(cfg)
+
+    def test_a_non_numeric_income_refuses(self):
+        from net_benefit_legs import qpip_benefit_total
+        cfg = {"people": [{"person_id": "spouse", "gross_income": "lots",
+                           "parental_leave": {"child_birth_date": "2024-11-28",
+                                              "plan": "basic",
+                                              "parent_role": "birthing",
+                                              "parental_weeks": 27}}]}
+        with pytest.raises(ValueError, match="gross_income"):
+            qpip_benefit_total(cfg)
+
+    def test_the_two_parents_may_not_declare_different_plans(self):
+        from net_benefit_legs import qpip_benefit_total
+        cfg = self._cfg()
+        cfg["people"][1]["parental_leave"]["plan"] = "special"
+        with pytest.raises(ValueError, match="different QPIP plans"):
+            qpip_benefit_total(cfg)

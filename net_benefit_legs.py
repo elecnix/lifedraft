@@ -162,3 +162,91 @@ def zev_incentive_total(cfg) -> float:
                 is_quebec_resident=True,
             ).amount
     return total
+
+def qpip_benefit_total(cfg) -> float:
+    """Total QPIP (RQAP) parental benefits across the household (#358).
+
+    Fires only when a person declares a ``parental_leave``; absent it this is
+    0.0 and every existing household is byte-identical (DP#16).
+
+    Both parents' leaves are priced TOGETHER, because the basic plan's first
+    7 parental weeks at 70 % are a SHARED POOL: pricing each parent separately
+    pays that block twice (20,520 instead of 19,980 on the CFFP case). The
+    household function allocates it once.
+
+    The weekly benefit is derived from this person's own insurable earnings,
+    capped at the leave year's maximum insurable earnings, and the leave
+    replaces their salary over those weeks. These amounts are taxable income
+    and add nothing to RRSP earned income; they carry no QPP, QPIP or EI
+    premium. No year, rate or ceiling is hard-coded here.
+    """
+    from datetime import date as _date
+
+    from countries.canada.provinces.quebec.qpip_benefit import (
+        QPIPLeave,
+        qpip_household_benefits,
+    )
+
+    members = cfg.get('people')
+    if members is None:
+        family = cfg.get('family')
+        members = family.get('members') if isinstance(family, dict) else None
+    if not members:
+        return 0.0
+
+    leaves = []
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        declared = member.get('parental_leave')
+        if declared is None:
+            continue
+        person_id = member.get('person_id')
+        if not person_id:
+            raise ValueError(
+                "a member declares a parental_leave but has no person_id; the "
+                "leave is priced per parent and the two shares must be told "
+                "apart (DP#4, DP#32)."
+            )
+        raw_birth = declared.get('child_birth_date')
+        if not raw_birth:
+            raise ValueError(
+                f"parental_leave for {person_id!r} has no child_birth_date; the "
+                f"benefit depends on that year's maximum insurable earnings "
+                f"(DP#32)."
+            )
+        try:
+            birth = _date.fromisoformat(str(raw_birth))
+        except ValueError as exc:
+            raise ValueError(
+                f"parental_leave.child_birth_date {raw_birth!r} is not an ISO "
+                f"date: {exc} (DP#32)."
+            ) from exc
+        income = member.get('gross_income')
+        if isinstance(income, bool) or not isinstance(income, (int, float)):
+            raise ValueError(
+                f"parental_leave for {person_id!r} needs a numeric "
+                f"gross_income to derive weekly insurable earnings; "
+                f"{income!r} is {type(income).__name__} (DP#32)."
+            )
+        weeks = declared.get('parental_weeks')
+        if isinstance(weeks, bool) or not isinstance(weeks, (int, float)):
+            raise ValueError(
+                f"parental_leave for {person_id!r} needs a numeric "
+                f"parental_weeks; {weeks!r} is {type(weeks).__name__} (DP#32)."
+            )
+        leaves.append(QPIPLeave(
+            person_id=person_id,
+            event_date=birth,
+            plan=declared.get('plan'),
+            weekly_insurable_earnings=float(income) / 52.0,
+            is_birthing_parent=(declared.get('parent_role') == 'birthing'),
+            parental_weeks_taken=float(weeks),
+            shared_full_rate_weeks=(
+                float(declared["shared_full_rate_weeks"])
+                if declared.get("shared_full_rate_weeks") is not None else None),
+        ))
+
+    if not leaves:
+        return 0.0
+    return sum(b.total for b in qpip_household_benefits(tuple(leaves)).values())

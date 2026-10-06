@@ -59,6 +59,7 @@ from net_benefit_legs import (
     _default_oas_annual,
     lsif_credit_total as _lsif_credit_total,
     zev_incentive_total as _zev_incentive_total,
+    qpip_benefit_total as _qpip_benefit_total,
 )
 # DP#25 (issue #732): the estate tax math lives in the jurisdiction package;
 # the optimization layer resolves it through the provider registry seam
@@ -367,6 +368,13 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     # moved out of this module so objective.py stays countries-free).
     zev_incentive_total = _zev_incentive_total(cfg)
 
+    # DP#16/issue #358: QPIP (RQAP) parental benefits. Fires only when a person
+    # declares a parental_leave; absent it this is 0.0 and every existing
+    # household is byte-identical (DP#32). The two parents are priced TOGETHER,
+    # because the basic plan's first 7 parental weeks at 70% are a shared pool --
+    # pricing them per parent pays that block twice.
+    qpip_benefits = _qpip_benefit_total(cfg)
+
     # Issue #290 / #1034: the registered balances and the SM sleeve are priced
     # as the terminal deemed disposition with the SAME estate code path
     # compute_after_tax_estate uses (DP#9 -- one spelling, not a parallel
@@ -388,7 +396,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     return (final.total_assets - final.total_debt
             + total_rrsp_savings + total_sm_savings + total_traced_savings
             - registered_tax - cg_tax - resp_tax - sm_deemed_tax
-            + lsif_credit_total + zev_incentive_total)
+            + lsif_credit_total + zev_incentive_total + qpip_benefits)
 
 
 def _terminal_wealth(results: List[YearResult], cfg: Dict) -> float:

@@ -73,6 +73,12 @@ class QPIPLeave:
     # How many of the SHAREABLE parental weeks this person takes. The two
     # parents' shares must not exceed the plan's parental total.
     parental_weeks_taken: float = 0.0
+    # How many of the SHARED higher-rate parental weeks this parent takes. The
+    # basic plan's 7 weeks at 70% are one pool across the parents, so the split
+    # is a household CHOICE, not something to infer from argument order. None
+    # means "allocate in declaration order", which is deterministic but only
+    # right when the document means it (#358).
+    shared_full_rate_weeks: Optional[float] = None
 
     @property
     def year(self) -> Optional[int]:
@@ -218,7 +224,10 @@ def qpip_household_benefits(
             b.paternity = sum(w * r * base for w, r in plan["paternity"])
 
         take = min(leave.parental_weeks_taken, remaining_weeks)
-        at_full = min(take, remaining_shared)
+        if leave.shared_full_rate_weeks is None:
+            at_full = min(take, remaining_shared)
+        else:
+            at_full = min(float(leave.shared_full_rate_weeks), take, remaining_shared)
         b.parental = (at_full * parental_schedule[0][1] * base
                       if at_full and len(parental_schedule) > 1
                       else at_full * base)
