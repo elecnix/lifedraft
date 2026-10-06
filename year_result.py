@@ -589,6 +589,15 @@ class YearResult:
     primary_tuition_carryforward: float = 0.0
     spouse_tuition_carryforward: float = 0.0
 
+    # Issue #371: the student_loan_credit rule's per-member tax reduction for the
+    # year -- the federal (ITA s.118.62) + Quebec (TP-1 line 385) credits on
+    # interest paid on a QUALIFYING government student loan, after the
+    # non-refundable floor. The credit lowers tax, so it is real cash the
+    # household keeps; `apply_solvency` counts it in the cash-flow identity the
+    # same way it counts the tuition credit. 0.0 for a household with no
+    # qualifying student loan (the golden path, DP#32).
+    student_loan_credit_applied: float = 0.0
+
     # Issue #140: the capital-loss carry-forward ledger. ``capital_loss_
     # carryforward`` is the pool at the END of this year (in taxable-basis,
     # i.e. includable dollars) -- the loss carried forward to shelter a later

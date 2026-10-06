@@ -89,6 +89,8 @@ def apply_consumer_loans(ws: YearWorkingState, ctx: RuleContext) -> bool:
     new_balances: list = []
     total_payment = 0.0
     total_interest = 0.0
+    # Issue #371: the year's interest per loan id (see the credit rule).
+    interest_by_loan: dict = {}
     for loan, bal in zip(loans, opening):
         rate = loan['rate']
         term = loan['amortization_years']
@@ -119,9 +121,16 @@ def apply_consumer_loans(ws: YearWorkingState, ctx: RuleContext) -> bool:
         new_balances.append(max(0.0, bal - principal))
         total_payment += payment
         total_interest += interest
+        # Issue #371: the year's interest PER LOAN, not just the household total,
+        # because the student-loan-interest credits are claimed by the person who
+        # pays the interest and only on a QUALIFYING loan. The credit rule reads
+        # this beside `config.consumer_loans` (which carries each loan's owner and
+        # the qualifying flag); without it the rule could only see the sum.
+        interest_by_loan[loan["id"]] = interest
     ws.new_consumer_loan_balances = new_balances
     ws.consumer_loan_payment = total_payment
     ws.consumer_loan_interest = total_interest
+    ws.consumer_loan_interest_by_loan = interest_by_loan
     return total_payment > 0
 
 # Issue #759: the date-scheduled payment math for a fixed-term installment

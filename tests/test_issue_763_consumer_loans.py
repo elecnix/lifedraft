@@ -55,8 +55,14 @@ import contract_schema
 
 def _closed_end_liability(kind, *, balance, rate, payment_monthly, years,
                           owner="p1", lid=None, collateral=None,
-                          deductibility=None):
-    """A minimal schema-valid closed-end consumer liability (fabricated)."""
+                          deductibility=None, qualifying_government_loan=None):
+    """A minimal schema-valid closed-end consumer liability (fabricated).
+
+    Issue #371 made `qualifying_government_loan` REQUIRED on kind=student_loan
+    (it decides whether the interest earns the federal / Quebec credits, so it
+    cannot be guessed). Callers that build a student loan must say, exactly as
+    the contract now does.
+    """
     liab = {
         "id": lid or f"{kind}_test",
         "owner": owner,
@@ -69,6 +75,11 @@ def _closed_end_liability(kind, *, balance, rate, payment_monthly, years,
     }
     if deductibility is not None:
         liab["deductibility"] = deductibility
+    if kind == "student_loan":
+        liab["qualifying_government_loan"] = bool(
+            True if qualifying_government_loan is None else qualifying_government_loan)
+    elif qualifying_government_loan is not None:
+        liab["qualifying_government_loan"] = qualifying_government_loan
     return liab
 
 
