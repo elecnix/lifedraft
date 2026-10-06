@@ -236,3 +236,32 @@ class TestTheLeaveReachesTheEngine:
         for person in doc["people"]:
             person.pop("parental_leave", None)
         assert _run(doc), "premise: the plain household still simulates"
+
+
+class TestTheBranchesTheCoverageGateNamed:
+    """Every raise in the law module must have a test -- a refusal nobody
+    exercises is a refusal that can rot into a silent zero.
+    """
+
+    def test_parental_entitlement_refuses_an_unknown_plan(self):
+        with pytest.raises(ValueError, match="unknown QPIP plan"):
+            parental_entitlement("basic-plus", 7, 25)
+
+    def test_parental_entitlement_refuses_negative_weeks(self):
+        with pytest.raises(ValueError, match="cannot be negative"):
+            parental_entitlement("basic", -1, 0)
+        with pytest.raises(ValueError, match="cannot be negative"):
+            parental_entitlement("basic", 0, -5)
+
+    def test_parental_entitlement_pays_nothing_for_no_share(self):
+        """A parent who takes none of the shareable block is the normal case for
+        the non-birthing parent under the special plan."""
+        assert parental_entitlement("basic", 0, 0) == ()
+        assert parental_entitlement("special", 25, 0) == ((25, SPECIAL_RATE),)
+
+    def test_validate_shares_refuses_an_unknown_plan(self):
+        with pytest.raises(ValueError, match="unknown QPIP plan"):
+            validate_shares("long-term", {"a": {"first_rate": 7, "long_rate": 25}})
+
+    def test_validate_shares_accepts_the_special_plan_shape(self):
+        validate_shares("special", {"a": {"first_rate": 25, "long_rate": 0}})
