@@ -158,8 +158,8 @@ class QuebecTaxData:
             qpp_rate=0.0640,            # DP#52: QPP rate 6.40% (2025)
             qpp_max_benefit_65=17334,   # DP#52: QPP max benefit at 65 (2025)
             qpp_survivor_flat_rate=6498, # DP#52: QPP survivor flat-rate (annual, 2025)
-            oas_annual_max=8381,
-            oas_clawback_threshold=90997,
+            oas_annual_max=8791.14,   # #345: ESDC 2025 (income year); was 8381
+            oas_clawback_threshold=93454,  # #345: CRA/ESDC 2025; the 2025 row held the 2024 figure
             provincial_eligible_dtc_rate=0.11510,
             provincial_non_eligible_dtc_rate=0.05575,
             # ── Quebec solidarity tax credit (2024-2025 benefit year) ──
@@ -252,8 +252,8 @@ class QuebecTaxData:
             qpp_rate=0.0640,            # DP#52: QPP rate 6.40% (2024)
             qpp_max_benefit_65=17334,   # DP#52: QPP max benefit at 65 (2024)
             qpp_survivor_flat_rate=6498, # DP#52: QPP survivor flat-rate (annual, 2024)
-            oas_annual_max=8291,
-            oas_clawback_threshold=87068,
+            oas_annual_max=8618.04,   # #345: ESDC 2024 (income year); was 8291
+            oas_clawback_threshold=90997,  # #345: CRA 2024 (see old-age-security/repayment)
             provincial_eligible_dtc_rate=0.11510,
             provincial_non_eligible_dtc_rate=0.05575,
             # ── Quebec solidarity tax credit (2023-2024 benefit year) ──
@@ -311,8 +311,8 @@ class QuebecTaxData:
             qpp_rate=0.0640,            # DP#52: QPP rate 6.40% (2023)
             qpp_max_benefit_65=15170,   # DP#52: QPP max benefit at 65 (2023)
             qpp_survivor_flat_rate=5640, # DP#52: QPP survivor flat-rate (annual, 2023)
-            oas_annual_max=8083,
-            oas_clawback_threshold=83917,
+            oas_annual_max=8354.52,   # #345: ESDC 2023 (income year); was 8083
+            oas_clawback_threshold=86912,  # #345: 2023 income year; 83917 matches no published figure
             provincial_eligible_dtc_rate=0.11510,
             provincial_non_eligible_dtc_rate=0.05575,
             # ── Quebec solidarity tax credit (2022-2023 benefit year) ──
