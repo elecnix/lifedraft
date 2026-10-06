@@ -121,6 +121,7 @@ import rules_leverage         # noqa: F401
 import rules_management_fee   # noqa: F401
 import rules_registered_plans  # noqa: F401
 import rules_retirement_income  # noqa: F401
+import rules_personal_credits  # noqa: F401
 import rules_solvency         # noqa: F401
 import rules_superficial_loss  # noqa: F401
 import rules_tuition_credit   # noqa: F401
@@ -310,6 +311,14 @@ RULE_ORDER: tuple = (
     # pre-credit tax + the opening carry-forwards + member/child data, not on
     # any account balance a rule writes, so its position is free above
     # 'solvency'; it is placed here to sit beside the rule that reads it.
+    # Issue #367: the personal credits a household DECLARES (medical,
+    # donations, a federal political contribution) plus Quebec's own
+    # medical and charitable credits. Like 'tuition_credit' below it is
+    # a NON-REFUNDABLE tax reduction, capped at the member's own
+    # pre-credit tax, which 'solvency' consumes; it reads only ctx (the
+    # prologue's tax and taxable income) and the mapped config, never a
+    # balance a rule writes, so its position above 'solvency' is free.
+    'personal_credits',
     'tuition_credit',
     'solvency',
     # Issue #141: ITA s.53(1)(c) superficial-loss anti-avoidance. Runs AFTER

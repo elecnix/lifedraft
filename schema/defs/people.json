@@ -141,6 +141,19 @@
       "properties": {}
     },
 
+    "annual_claim": {
+      "type": "object",
+      "description": "Issue #367: one year's personal outlays that generate a NON-REFUNDABLE personal tax credit or a deduction - medical expenses, charitable donations, a federal political contribution, and union or professional dues. Dated per year (DP#1) because the caps, thresholds and the 3%-of-net-income floor are all year-versioned, and because a household's giving is not constant. Every amount is the CALENDAR-YEAR total actually paid in that year; the engine applies the statutory floor, cap and rate.",
+      "additionalProperties": false,
+      "required": ["year"],
+      "properties": {
+        "year": { "type": "integer", "description": "The calendar year these outlays were paid in. Must fall inside the projection; an outlay dated outside it is refused at load rather than silently dropped (DP#32)." },
+        "medical_expenses": { "type": "number", "minimum": 0, "description": "Eligible medical expenses paid in the year (CRA line 33099/33199). The 3%-of-net-income floor and the indexed cap are applied by the engine, so this is the gross amount, not the claimable one." },
+        "charitable_donations": { "type": "number", "minimum": 0, "description": "Gifts to registered charities and other qualified donees (CRA line 34900). The federal low-rate/high-rate split at $200 and the Quebec split are the engine's to apply." },
+        "political_contributions_federal": { "type": "number", "minimum": 0, "description": "Contributions to a registered federal political party or candidate (CRA lines 40900/41000). A credit on its own three-bracket schedule, not a donation: it has separate annual maxima per recipient class, so it is a distinct leaf rather than part of charitable_donations." },
+        "union_dues": { "type": "number", "minimum": 0, "description": "Annual union, professional or like dues (CRA line 21200). A DEDUCTION from income (ITA s.8(1)(i)), not a credit, so it lowers the member's taxable income before the year's tax is computed rather than reducing tax afterwards." }
+      }
+    },
     "person": {
       "type": "object",
       "additionalProperties": false,
@@ -166,7 +179,8 @@
         "incomes": { "type": "array", "items": { "$ref": "#/$defs/income" } },
         "benefits": { "$ref": "#/$defs/benefit_claim" },
         "entitlements": { "$ref": "#/$defs/benefit_entitlement" },
-        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } }
+        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } },
+        "annual_claims": { "type": "array", "items": { "$ref": "#/$defs/annual_claim" }, "description": "Issue #367: the member's year-by-year personal outlays that generate a non-refundable credit or a deduction. Absent or empty = the household declares none, and is modelled claiming none (the golden path)." }
       }
     }
 
