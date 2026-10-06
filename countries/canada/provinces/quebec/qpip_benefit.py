@@ -152,3 +152,79 @@ def qpip_benefit(leave: QPIPLeave) -> QPIPBenefit:
         remaining -= use
     out.parental = parental
     return out
+
+
+def qpip_household_benefits(
+    leaves: Tuple[QPIPLeave, ...],
+) -> dict:
+    """QPIP benefits for a household's leaves, sharing the parental block.
+
+    The BASIC plan's parental entitlement is 7 weeks at 70 % FOLLOWED BY 25
+    weeks at 55 %, and those 7 weeks are a SHARED POOL across the two parents --
+    not a schedule each parent consumes in full. The CFFP arithmetic proves it:
+    18x504 + 2x504 + 25x396 = 19,980 gives the birthing parent only 2 of the 7
+    at 70 %, because the other parent takes 5.
+
+    So a per-person function double-counts the 70 % block. This allocates it
+    across the household instead, consuming the shared 70 % allowance in the
+    order the leaves are given, then the 55 % tail.
+
+    A single-parent household is unaffected: they simply consume the 70 %
+    allowance first, which is what the per-person schedule did anyway.
+    """
+    for leave in leaves:
+        if leave.year is None:
+            raise ValueError("a QPIP leave must carry the birth or adoption date (DP#32).")
+        if leave.plan not in PLANS:
+            raise ValueError(f"unknown QPIP plan {leave.plan!r} (DP#32).")
+        if leave.weekly_insurable_earnings < 0:
+            raise ValueError("weekly insurable earnings cannot be negative (DP#32).")
+
+    if not leaves:
+        return {}
+    plan_name = leaves[0].plan
+    for leave in leaves[1:]:
+        if leave.plan != plan_name:
+            raise ValueError(
+                f"the two parents declare different QPIP plans "
+                f"({plan_name!r} and {leave.plan!r}); the plan is a household "
+                f"choice, so this refuses rather than pricing a mixture (DP#32)."
+            )
+    year = leaves[0].year
+    for leave in leaves[1:]:
+        if leave.year != year:
+            raise ValueError(
+                "leaves in different years must be priced separately; the "
+                "maximum insurable earnings is per year (DP#32)."
+            )
+
+    plan = PLANS[plan_name]
+    parental_schedule = plan["parental"]
+    total_parental = sum(w for w, _ in parental_schedule)
+    # The shared at-70 % block is the first entry when it pays more than the next.
+    shared_full_rate = 0.0
+    if len(parental_schedule) > 1 and parental_schedule[0][1] > parental_schedule[1][1]:
+        shared_full_rate = parental_schedule[0][0]
+
+    out = {}
+    remaining_shared = shared_full_rate
+    remaining_weeks = total_parental
+    for leave in leaves:
+        base = _capped_weekly(leave, year)
+        b = QPIPBenefit()
+        if leave.is_birthing_parent:
+            b.maternity = sum(w * r * base for w, r in plan["maternity"])
+        else:
+            b.paternity = sum(w * r * base for w, r in plan["paternity"])
+
+        take = min(leave.parental_weeks_taken, remaining_weeks)
+        at_full = min(take, remaining_shared)
+        b.parental = (at_full * parental_schedule[0][1] * base
+                      if at_full and len(parental_schedule) > 1
+                      else at_full * base)
+        rest = take - at_full
+        b.parental += rest * parental_schedule[-1][1] * base
+        remaining_shared -= at_full
+        remaining_weeks -= take
+        out[leave.person_id] = b
+    return out

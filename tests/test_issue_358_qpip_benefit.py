@@ -22,6 +22,7 @@ from countries.canada.provinces.quebec.qpip_benefit import (
     QPIPLeave,
     QPIP_MAX_INSURABLE_EARNINGS,
     qpip_benefit,
+    qpip_household_benefits,
 )
 
 BIRTH = date(2024, 11, 28)
@@ -42,19 +43,32 @@ def _primary(weeks, plan="basic", weekly=PRIMARY_WEEKLY):
 
 
 class TestTheCFFPAcceptanceFigures:
-    def test_basic_plan_birthing_parent_is_19980(self):
-        """45 weeks: 18 maternity + 2 parental at 70%, 25 parental at 55%."""
-        got = qpip_benefit(_spouse(27)).total
-        assert got == pytest.approx(19_980.00), (
-            f"expected 18x504 + 2x504 + 25x396 = 19,980; got {got!r}"
-        )
+    def test_basic_plan_needs_the_HOUSEHOLD_because_the_70pct_block_is_shared(self):
+        """The basic plan's first 7 parental weeks at 70% are a SHARED POOL.
 
-    def test_basic_plan_other_parent_is_7560(self):
-        """10 weeks at 70% of $1,080 = 756/week."""
-        got = qpip_benefit(_primary(5)).total
-        assert got == pytest.approx(7_560.00), (
-            f"expected 5 paternity + 5 parental weeks at 756; got {got!r}"
+        The CFFP arithmetic proves it: 18x504 + 2x504 + 25x396 = 19,980 gives
+        the birthing parent only 2 of the 7 at 70%, because the OTHER parent
+        takes 5. A per-person call would give each parent the whole 70% block
+        and double-count it -- which is exactly why the per-person function
+        alone returns 20,520 here and the household entry point is required.
+        """
+        spouse, primary = _spouse(27), _primary(5)
+        r = qpip_household_benefits((primary, spouse))
+        assert r["primary"].total == pytest.approx(7_560.00), (
+            f"expected 5 paternity + 5 parental weeks at 756; got {r['primary'].total!r}"
         )
+        assert r["spouse"].total == pytest.approx(19_980.00), (
+            f"expected 18x504 + 2x504 + 25x396 = 19,980; got {r['spouse'].total!r}"
+        )
+        assert len({id(x) for x in (spouse, primary)}) == 2
+
+    def test_the_shared_block_is_not_double_counted(self):
+        """Per-person would pay the 7 at 70% twice; the household pays it once."""
+        spouse, primary = _spouse(27), _primary(5)
+        household = qpip_household_benefits((primary, spouse))
+        per_person = qpip_benefit(spouse).total + qpip_benefit(primary).total
+        assert household["spouse"].total + household["primary"].total < per_person
+        assert household["spouse"].total + household["primary"].total == pytest.approx(27_540.00)
 
     def test_special_plan_birthing_parent_is_17820(self):
         """33 weeks at 75% of $720 = 540/week."""
