@@ -184,3 +184,51 @@ class TestCpp2MaxBenefitMatchesStatutoryRate:
     def test_2025_is_no_longer_the_2024_value(self):
         """Regression guard for the specific defect Cite reported."""
         assert CPP_OAS_BY_YEAR[2025]["cpp2_max_benefit"] != CPP_OAS_BY_YEAR[2024]["cpp2_max_benefit"]
+
+
+class EveryRowImpliesTheStatutoryAccrualRate:
+    """The stored CPP2 maximum must be 4% of that year's second-ceiling band.
+
+    This is the identity that makes the table self-checking, and it is the
+    check that was missing: the ceiling was pinned (CRA_AYMPE, above) but the
+    BENEFIT the ceiling implies never was, so a stale copy of one year's
+    benefit could sit in another year's row looking plausible. Two rounds of
+    review flagged exactly that shape -- a 2025 row carrying 2024's value, and
+    a 2026 row carrying a figure no rate can produce.
+
+    CPP2 began in 2024, so a pre-2024 row carries no CPP2 benefit at all; the
+    2023 row read 188 (a stale copy of 2024's) and now reads 0. Absence is
+    treated as 0 there because for a year before CPP2 existed the two mean the
+    same thing -- there is no second-ceiling pension to claim -- and the
+    2023 second ceiling itself is issue #416's (PR #418) to correct.
+    """
+
+    ACCRUAL_RATE = 0.04   # CPP2: 4% of earnings between the YMPE and the AYMPE
+
+    def test_pre_cpp2_rows_carry_no_cpp2_benefit(self):
+        for year, row in CPP_OAS_BY_YEAR.items():
+            if year >= CPP2_START_YEAR:
+                continue
+            assert row.get("cpp2_max_benefit", 0.0) == 0.0, (
+                f"{year} predates CPP2 but stores a benefit of "
+                f"{row.get('cpp2_max_benefit')!r}")
+
+    def test_every_cpp2_row_implies_four_percent_of_its_band(self):
+        checked = []
+        for year, row in CPP_OAS_BY_YEAR.items():
+            if year < CPP2_START_YEAR:
+                continue
+            band = row["cpp2_max_pensionable"] - row["cpp_max_pensionable"]
+            stored = row["cpp2_max_benefit"]
+            assert stored == pytest.approx(self.ACCRUAL_RATE * band, abs=0.01), (
+                f"{year}: stored {stored} but 4% of the {band} band is "
+                f"{self.ACCRUAL_RATE * band} -- one of the two is wrong")
+            checked.append(year)
+        assert checked, "no CPP2 year was checked; the table or the start year moved"
+
+    def test_the_module_fallback_is_the_newest_published_row(self):
+        """The fallback is what a year outside the table is priced at, so a
+        fallback that disagrees with the newest row silently mis-prices every
+        year the table has not caught up with."""
+        newest = max(CPP_OAS_BY_YEAR)
+        assert CPP2_MAX_BENEFIT == CPP_OAS_BY_YEAR[newest]["cpp2_max_benefit"]

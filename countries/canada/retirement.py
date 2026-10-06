@@ -235,7 +235,7 @@ def get_cpp_max_benefit_65(year: int) -> float:
 # (2026 $85,000 @ 4% = $416; 2025 $81,200 = $396; 2024 $73,200 = $188):
 # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/calculating-deductions/making-deductions/second-additional-cpp-contribution-rates-maximums.html
 CPP_OAS_BY_YEAR = {
-    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 68500, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 188, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
+    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 68500, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 0, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
     2024: {"cpp_max_pensionable": 68500, "cpp2_max_pensionable": 73200, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8291, "oas_annual_max_75plus": 9118, "oas_clawback_threshold": 87068, "gis_max_single": 1616, "gis_max_coupled": 9739},
     2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81200, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 396, "oas_annual_max": 8381, "oas_annual_max_75plus": 9218, "oas_clawback_threshold": 90997, "gis_max_single": 1657, "gis_max_coupled": 9987},
     2026: {"cpp_max_pensionable": 74600, "cpp2_max_pensionable": 85000, "cpp_max_benefit_65": 18092, "cpp2_max_benefit": 416, "oas_annual_max": 8908, "oas_annual_max_75plus": 9800, "oas_clawback_threshold": 95323, "gis_max_single": 1726, "gis_max_coupled": 10384},
