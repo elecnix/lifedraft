@@ -69,7 +69,11 @@
     "household_budget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["annual_living_costs"],
+      "$comment": "Issue #366: the block carries the household's MEASURED budget facts, and the two it can hold are the living-cost scalar and the home-support credit facts. At least one must be present, but the credit does NOT require annual_living_costs: it is computed from its own declared expenses, and forcing an unrelated declaration (which would also engage the solvency identity) just to claim a credit would be a coupling nobody asked for.",
+      "anyOf": [
+        { "required": ["annual_living_costs"] },
+        { "required": ["home_support"] }
+      ],
       "properties": {
         "annual_living_costs": {
           "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
@@ -91,6 +95,41 @@
           "type": "array",
           "items": { "$ref": "#/$defs/expense_segment" },
           "description": "Issue #760: dated, finite-term living-cost segments ON TOP OF the perpetual annual_living_costs scalar -- a private-school tuition that ENDS when a child ages out, childcare that ages out, a term expense that stops on a date. The scalar can only smear such a cost across the whole horizon (carrying a child's tuition through retirement and into the estate -- wrong, and wrong in the direction that makes the household look poorer than it is). Each segment is an ANNUAL recurring amount active over [from, to): it contributes its amount prorated by the days of that window falling in each calendar year (day-count blend, the outflow-side analog of #674's dated income windows), and a non-null `to` means the expense STOPS after that date (reverts to $0, never carried to the horizon). Optional and deliberately NOT required (DP#16): omitting it reproduces today's behaviour exactly (the golden invariant does not move, DP#32). Each segment folds into the solvency identity's spending outflow (simulation_rules.apply_solvency) beside annual_living_costs; a discretionary segment (non_discretionary=false) compresses to zero under an income shock exactly as #761's scalar split does, a non-discretionary one stays rigid. Requires annual_living_costs to be declared -- a dated segment WITHOUT the measured base fails loudly at the contract boundary (DP#32), never defaulting the base to zero."
+        },
+        "home_support": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["situation", "family_income"],
+              "properties": {
+                "situation": {
+                  "type": "string",
+                  "enum": ["single_autonomous", "couple_autonomous"],
+                  "description": "Issue #366: which row of Revenu Québec's published table the claimant is in, because it decides the annual cap on eligible expenses ($19,500 single / $39,000 couple). An ENUM rather than a `couple: true/false` flag, and required rather than defaulted: a caller that forgot the flag would silently take the single cap and halve a couple's payment. The two NON-AUTONOMOUS rows are deliberately absent -- Revenu Québec computes that case on the grille de calcul 458 and the two published summaries disagree on the reduction cap, so lifedraft refuses it loudly rather than pricing it on the wrong formula."
+                },
+                "family_income": {
+                  "$ref": "#/$defs/money",
+                  "description": "Issue #366: the family income the credit's reduction is computed on -- line 275 of the return plus the spouse's. Declared explicitly rather than derived from the engine's own income model, which is NOT line 275 (it nets different deductions), so deriving it would silently overstate the reduction and understate the payment."
+                },
+                "eligible_expenses": {
+                  "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
+                  "description": "Issue #366: what the household actually paid in the year for eligible home-support services (housekeeping, grounds/snow, personal care, meal preparation, nursing, surveillance, laundry, grocery delivery), net of any reimbursement. null/absent = none paid this way. Capped by the year's limit for `situation`; the result reports which cap bound."
+                },
+                "monthly_rent": {
+                  "anyOf": [{ "$ref": "#/$defs/money" }, { "type": "null" }],
+                  "description": "Issue #366: for a renter in an ordinary rental building, Revenu Québec treats 5% of the monthly rent as eligible services, with the rent floored at $600 and capped at $1,200 a month. Declare the rent here rather than an `eligible_expenses` figure, so the floor and cap are applied by the engine and not by hand."
+                }
+              },
+              "oneOf": [
+                { "required": ["eligible_expenses"], "properties": { "monthly_rent": { "type": "null" } } },
+                { "required": ["monthly_rent"], "properties": { "eligible_expenses": { "type": "null" } } }
+              ],
+              "description": "Issue #366: the Quebec refundable credit for home-support services for seniors (crédit d'impôt pour maintien à domicile des aînés, Taxation Act art. 1029.8.61.1-.7.1) -- a PAYMENT, not a reduction of tax. Declare it for a claimant 70 or over on December 31 who is resident in Quebec. Exactly one of `eligible_expenses` (services paid directly) or `monthly_rent` (the renter's share) must be given: two spellings of one quantity would have to be reconciled, and the contract refuses that rather than picking one."
+            },
+            { "type": "null" }
+          ],
+          "description": "Issue #366: absent/null = the household does not claim this credit, and nothing changes (DP#16, the golden invariant does not move). Present = the credit is priced from the declared facts and added to the household's ranked net benefit. Deliberately NOT derived from annual_living_costs: that scalar is a total spend, not home-support services, and pricing a government program from a proxy is how a plausible wrong number gets in."
         }
       }
     },

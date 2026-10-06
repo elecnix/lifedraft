@@ -266,6 +266,48 @@ def map_retirement(doc: Dict) -> Dict[str, Any]:
     return retirement_out
 
 
+def _map_home_support(block: Dict) -> Dict[str, Any]:
+    """Issue #366: ``household_budget.home_support`` -> the internal shape.
+
+    The schema carries the shape (a ``oneOf`` over the two ways of declaring
+    the same quantity); this refuses it a second time, at the boundary the
+    engine actually reads, because a contract document is not the only caller
+    of an adapter and "two spellings of one quantity" has to be refused where
+    the pricing happens, not only where the JSON is validated (DP#32).
+    """
+    out: Dict[str, Any] = {
+        "situation": block["situation"],
+        "family_income": block["family_income"],
+    }
+    has_expenses = block.get("eligible_expenses") is not None
+    has_rent = block.get("monthly_rent") is not None
+    if has_expenses and has_rent:
+        raise ContractAdaptationError(
+            "household_budget.home_support declares BOTH eligible_expenses and "
+            "monthly_rent. They are two spellings of one quantity -- what the "
+            "household paid for eligible services, and the renter's 5%-of-rent "
+            "share of it -- so a document carrying both would have to be "
+            "reconciled, and guessing which one the household meant is exactly "
+            "the silent substitution this engine exists to prevent (DP#32). "
+            "Declare the services paid directly, OR the rent, not both "
+            "(issue #366)."
+        )
+    if not has_expenses and not has_rent:
+        raise ContractAdaptationError(
+            "household_budget.home_support declares neither eligible_expenses "
+            "nor monthly_rent, so there is nothing to price. A declared credit "
+            "with no expenses behind it would silently book $0 and read as a "
+            "genuine zero -- the data-gap-as-zero shape (DP#32). Declare the "
+            "services paid, or the rent, or omit the block entirely "
+            "(issue #366)."
+        )
+    if has_expenses:
+        out["eligible_expenses"] = block["eligible_expenses"]
+    else:
+        out["monthly_rent"] = block["monthly_rent"]
+    return out
+
+
 def map_household_budget(doc: Dict) -> Dict[str, Any]:
     """``household_budget`` -> the internal budget block: the MEASURED
     working-phase living-cost scalar, its discretionary split (#761), and any
@@ -311,6 +353,16 @@ def map_household_budget(doc: Dict) -> Dict[str, Any]:
                 )
             household_budget_out["discretionary_fraction"] = (
                 household_budget_cfg["discretionary_fraction"])
+
+        # Issue #366: the Quebec refundable credit for home-support services for
+        # seniors. A declared block is carried into the internal budget shape the
+        # objective reads (net_benefit_legs.home_support_credit_total), so the
+        # credit reaches a decision rather than sitting as a dead leaf (DP#18).
+        # Absent/null = the household does not claim it and nothing changes
+        # (DP#16).
+        home_support_in = household_budget_cfg.get("home_support")
+        if home_support_in is not None:
+            household_budget_out["home_support"] = _map_home_support(home_support_in)
 
         # Issue #760: dated, finite-term living-cost segments layered on top of
         # the perpetual annual_living_costs scalar (a private-school tuition

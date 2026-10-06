@@ -231,7 +231,12 @@ def test_objective_cfg_is_the_ranking_cfg():
     inline, now from objective_cfg."""
     config = SimulationConfig.from_dict(golden_household_config())
     ocfg = objective.objective_cfg(config)
-    assert set(ocfg) == {'assumptions', 'family', 'property', 'tax', 'estate'}
+    assert set(ocfg) == {'assumptions', 'family', 'property', 'tax', 'estate',
+                         # Issue #366: the declared home-support credit facts,
+                         # read by the home-support leg. Additive like every
+                         # other key here -- an objective that does not read it
+                         # is unaffected.
+                         'household_budget'}
     assert ocfg['assumptions'] == {
         'capital_gains_inclusion': config.capital_gains_inclusion,
         'resp_eap_taxable_portion': config.resp_eap_taxable_portion,
