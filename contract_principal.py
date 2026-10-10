@@ -121,6 +121,23 @@ def _map_principal_sale(principal: Optional[Dict], mortgage: Optional[Dict],
         "value_share": value_share,
         "acb_share": acb_share,
     }
+    # Issue #378 (ITA s.12(12)): the flipping rule turns on how long the home
+    # has been held, which needs two DATES the sale does not otherwise carry.
+    # `acquired_on` is the household's declared acquisition (a home bought
+    # before the projection has no `purchase` block, so this is the only place
+    # that fact can live), and the sale's exact `date` is what the holding
+    # period is measured against. Both are copied ONLY when present -- an
+    # absent date must not become an epoch date, which would make every holding
+    # period enormous and silently disapply the rule (DP#32).
+    _sale_date = sale.get("date")
+    if _sale_date is not None:
+        sale_entry["date"] = _sale_date
+    _acquired_on = principal.get("acquired_on")
+    if _acquired_on is not None:
+        sale_entry["acquired_on"] = _acquired_on
+    _flip_event = sale.get("flipping_exemption_event")
+    if _flip_event is not None:
+        sale_entry["flipping_exemption_event"] = _flip_event
     # Issue #969: carry the family-level PRE window onto the sale so the
     # disposition rule prices the gain against the FAMILY denominator (ITA
     # s.40(2)(b)), not this property's own span in isolation. Carried ONLY
