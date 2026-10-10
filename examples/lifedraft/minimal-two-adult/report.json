@@ -246,6 +246,14 @@
         "id": "rrsp_refund_excludes_credits",
         "issue": "#286",
         "summary": "The RRSP refund is the bracket tax the deduction removes from the contributor's taxable income, before non-refundable credits (basic personal amount, etc.): at low income, where credits already bring the tax to zero, the modelled refund is too high"
+      },
+      {
+        "biased_figure": "net Old Age Security received, and every downstream figure derived from it -- terminal wealth, the retirement drawdown path, the after-tax estate, and the net_benefit ranking",
+        "detail": "The recovery base is CPP + pension + gross OAS + the year's recognized taxable draw, and nothing else. retirement_transition.member_retirement_income() calls oas_after_clawback(net_income=other_net_income + cpp) with other_net_income defaulting to 0.0 and no production caller passing it, so ONSET is tested on CPP alone; rules_retirement_income and plan_drawdown_net fold in the draw's per-owner taxable slice but no term derives from the non-reg pot's declared yield. countries/canada/portfolio.compute_investment_income has exactly one production caller -- rules_leverage, feeding the Quebec deduction cap -- and `portfolio.accounts.non_reg` is otherwise read only as a RATE. Direction is OVERSTATES: the CRA would recover up to 75% of the OAS, so every year of omitted clawback is money this model reports the household as receiving and keeps. Tracked as #438; its fix is sequenced behind #437, which settles whether a distributed portfolio dollar is taxed once or twice and therefore what the correct base is. This entry DELETES when that fix lands -- it is anchored to the known-limit clause in rules_drawdown.py that names the same gap, so TestNoStaleCaveats fails the moment the clause goes.",
+        "direction": "overstates",
+        "id": "distributed_portfolio_income_never_enters_oas_base",
+        "issue": "#438",
+        "summary": "The taxable portfolio's distributed income never enters the OAS recovery-tax base: the income is priced into the pot's GROWTH RATE and compounds inside the balance, but is never booked as income, so a household living on its distributions is modelled as keeping full, unclawed-back OAS. CRA counts that investment income toward net income whether or not it has been withdrawn"
       }
     ],
     "objective": "max_net_benefit",
@@ -274,8 +282,8 @@
     }
   ],
   "projection": {
-    "full_report_bytes": 13589213,
-    "full_report_digest": "sha256:0225d5b4fff9ae9e14fc6ebf9d910da7dcb071f9e101047d83663a73feaac50c",
+    "full_report_bytes": 13591179,
+    "full_report_digest": "sha256:0a90dbf3b459d97661f563e819325ef10ee70615c6ff802ea0127b38059c61c8",
     "function": "tools/examples.py::project_report",
     "key_year_columns": [
       "year",
