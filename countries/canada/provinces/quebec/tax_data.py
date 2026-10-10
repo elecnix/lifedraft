@@ -27,8 +27,24 @@ class QuebecTaxData:
 
     PROVINCE = "quebec"
     ABATEMENT = 0.165  # 16.5% Quebec abatement on federal tax
-    BASIC_PERSONAL_AMOUNT_2026 = 17383
-    BASIC_PERSONAL_AMOUNT_2025 = 17183
+    # Issue #351 (Cite round 1): the basic personal amount for these years is
+    # indexed annually, and three of the four rows carried the wrong value --
+    # 2025 and 2026 were BELOW 2024, which an indexed amount cannot be. Sourced
+    # from Finances Quebec "Parametres du regime d'imposition des particuliers",
+    # Tableau 3, for the years of imposition 2023 and 2026 (the two editions
+    # cover 2022/2023 and 2025/2026), and cross-checked against that publication's
+    # own indexation rates, which reproduce every step exactly:
+    #
+    #   2022 16 143  (published, for reference)
+    #   2023 17 183  = 16 143 x 1.0644  (the 2023 rate, 6.44%)
+    #   2024 18 056  = 17 183 x 1.0508  (the 2024 rate, 5.08%)
+    #   2025 18 571  = 18 056 x 1.0285  (the 2025 rate, 2.85%)
+    #   2026 18 952  = 18 571 x 1.0205  (the 2026 rate, 2.05%)
+    #
+    # Revenu Quebec's line 350 page states the 2025 figure in as many words:
+    # "Le montant personnel de base pour l'annee 2025 est de 18 571 $."
+    BASIC_PERSONAL_AMOUNT_2026 = 18952
+    BASIC_PERSONAL_AMOUNT_2025 = 18571
 
     @classmethod
     def all_years(cls) -> list:
@@ -243,7 +259,7 @@ class QuebecTaxData:
                 TaxBracket(126000, 0, 0.2575, "25.75%"),
             ],
             provincial_abatement=cls.ABATEMENT,
-            basic_personal_amount=17183,
+            basic_personal_amount=18056,  # 2023 x 1.0508 (the 2024 indexation rate)
             cpp_max_pensionable=68500,
             cpp_rate=0.0595,
             cpp2_max_pensionable=73200,  # DP#20: CPP2 YAMPE 2024 (first year of second ceiling)
@@ -286,7 +302,33 @@ class QuebecTaxData:
             clb_threshold_1_3_children=55867,
             clb_threshold_4_children=63036,
             clb_threshold_5plus_children=70234,
-            source="fallback",
+            source="fallback",            # Issue #351: Finances Quebec, "Parameters of the personal income
+            # tax system for 2024", Table 3. These were UNSET for 2023/2024, so
+            # every reader fell back to the TaxYearData default of 0.0 and the
+            # credit came out $0 with no error -- the silent zero DP#32 exists
+            # to prevent.
+            qc_non_refundable_credit_rate=0.14,       # 14% conversion (unchanged by year)
+            qc_age_credit_reduction_rate=0.1875,      # line-361 reduction (unchanged by year)
+            qc_senior_assistance_max_per_person=2000,
+            qc_fss_individual_first_cap=150,
+            qc_fss_individual_max=1000,
+            qc_fss_individual_rate=0.01,
+            qc_work_premium_reduction_rate=0.10,
+            qc_age_amount=3798,
+            qc_living_alone_amount=2069,
+            qc_retirement_income_amount=3374,
+            qc_age_credit_reduction_threshold=40925,
+            qc_senior_assistance_threshold_single=27065,
+            qc_senior_assistance_threshold_couple=44015,
+            qc_senior_assistance_reduction_rate=0.0531,
+            qc_fss_individual_exemption=17630,
+            qc_fss_individual_second_threshold=61315,
+            qc_work_premium_max_single=1152.34,
+            qc_work_premium_max_couple=1797.07,
+            qc_work_premium_reduction_threshold_single=12334,
+            qc_work_premium_reduction_threshold_couple=19092,
+            qc_drug_insurance_max_premium=737.5,
+
         )
 
     @classmethod
@@ -302,7 +344,7 @@ class QuebecTaxData:
                 TaxBracket(119910, 0, 0.2575, "25.75%"),
             ],
             provincial_abatement=cls.ABATEMENT,
-            basic_personal_amount=15980,
+            basic_personal_amount=17183,  # Cite round 1: was 15980, which matches no published year
             cpp_max_pensionable=66600,
             cpp_rate=0.0595,
             cpp2_max_pensionable=66600,  # DP#20: CPP2 YAMPE 2023 (= YMPE, no second ceiling yet)
@@ -337,5 +379,31 @@ class QuebecTaxData:
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
-            source="fallback",
+            source="fallback",            # Issue #351: Finances Quebec, "Parameters of the personal income
+            # tax system for 2024", Table 3. These were UNSET for 2023/2024, so
+            # every reader fell back to the TaxYearData default of 0.0 and the
+            # credit came out $0 with no error -- the silent zero DP#32 exists
+            # to prevent.
+            qc_non_refundable_credit_rate=0.14,       # 14% conversion (unchanged by year)
+            qc_age_credit_reduction_rate=0.1875,      # line-361 reduction (unchanged by year)
+            qc_senior_assistance_max_per_person=2000,
+            qc_fss_individual_first_cap=150,
+            qc_fss_individual_max=1000,
+            qc_fss_individual_rate=0.01,
+            qc_work_premium_reduction_rate=0.10,
+            qc_age_amount=3614,
+            qc_living_alone_amount=1969,
+            qc_retirement_income_amount=3211,
+            qc_age_credit_reduction_threshold=38945,
+            qc_senior_assistance_threshold_single=25755,
+            qc_senior_assistance_threshold_couple=41885,
+            qc_senior_assistance_reduction_rate=0.0516,
+            qc_fss_individual_exemption=16780,
+            qc_fss_individual_second_threshold=58350,
+            qc_work_premium_max_single=1095.27,
+            qc_work_premium_max_couple=1709.61,
+            qc_work_premium_reduction_threshold_single=11842,
+            qc_work_premium_reduction_threshold_couple=18338,
+            qc_drug_insurance_max_premium=731.0,
+
         )
