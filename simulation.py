@@ -1064,6 +1064,141 @@ def _rental_income_for(
     return p_op, s_op, p_ded, s_ded, p_cca, s_cca, new_ucc_by_prop
 
 
+@dataclass
+class _BusinessUseYear:
+    """Issue #377: one year of every declared BUSINESS-USE portion of a property.
+
+    The claim is a NON-CASH deduction against the declaring role's net
+    self-employment income; ``recapture_ordinary`` and the fraction's
+    ``(acb, fmv)`` pair are what that claim COSTS, and pricing them is the
+    reason the feature exists (see ``countries.canada.business_use``). Every
+    field is 0.0 / {} for a household that declares no business portion -- the
+    golden household -- which is what keeps the trajectory byte-identical
+    (DP#32).
+    """
+
+    primary_claim: float = 0.0
+    spouse_claim: float = 0.0
+    # The closing undepreciated capital cost per PROPERTY, threaded to next
+    # year through ``jurisdiction_state['canada']['business_use_ucc']`` and read
+    # by the estate's recapture (ITA s.13(1)).
+    ucc_by_prop: Dict[str, float] = field(default_factory=dict)
+    # The ORDINARY-income recapture (100% inclusion, ITA s.13(1)) that the CCA
+    # claimed so far would cost at a disposition right now. The estate prices
+    # the terminal value of exactly this figure, so the number a report shows
+    # mid-projection is the same arithmetic that taxes at death (DP#9).
+    recapture_ordinary: float = 0.0
+    # The business fraction's ``(acb, fmv)``: the cost base ITA s.45(1)(c)
+    # fixed when the business use began, and the portion's value now. The
+    # difference is the gain the principal-residence exemption no longer
+    # shelters, and the estate prices it through its ``property_gain_bases``
+    # seam. Both 0.0 for a NON-principal property, whose gain is already fully
+    # taxable and so has no exemption to lose -- there is nothing to add.
+    fraction_acb: float = 0.0
+    fraction_fmv: float = 0.0
+
+
+def _business_use_for_year(cfg, cal_year: int,
+                           self_emp_by_role: Dict[str, float],
+                           opening_ucc_by_prop: Dict[str, float],
+                           ) -> _BusinessUseYear:
+    """Issue #377: this year's CCA claim, UCC, recapture and lost-exemption gain
+    over every declared business-use portion.
+
+    A portion of a property put to a business is a CHANGE IN USE under ITA
+    s.45(1)(c): the business fraction is deemed disposed of and reacquired at FMV
+    when the income-producing use commences, and from then on the portion may be
+    depreciated (ITA s.13, s.20(1)(a)) against the owner's net self-employment
+    income. The claim is the SAME ``cca_claim`` primitive the rental path uses
+    (DP#9 -- one spelling of the declining-balance math), and the SAME cap: it
+    can reduce net business income to zero but never make it negative, so a year
+    whose business earns nothing claims nothing rather than carrying a loss
+    forward (that is a tax-loss fact this engine does not model -- an unmodelled
+    fact is stated, not faked).
+
+    The claim starts in the first FULL year AFTER the change in use: s.45(1)(c)
+    deems the fraction acquired at FMV in the change year, and the half-year
+    rule on that deemed addition is not modelled (``opening_ucc`` is the
+    fraction's tracked class balance, not a net addition -- DP#19). Before the
+    change year the block is inert -- DP#16, exactly as a rental block is inert
+    before its purchase year.
+
+    It lands on ONE member: s.20(1)(a) is an individual's deduction and Canada
+    has no joint filing, so the block's ``role`` names whose return it offsets.
+    The caller subtracts it from that role's net self-employment income BEFORE
+    the tax / contribution-base / RRSP-room figures are derived, so all three
+    move together (one spelling of "net business income", DP#9).
+
+    The PRICE of the election is computed here too, not at the end of the
+    horizon: the recapture a disposition right now would claw back (ITA
+    s.13(1), 100% ordinary income -- the SAME ``recapture_on_disposition`` the
+    rental path uses) and the business fraction's gain since the s.45(1)(c)
+    deemed disposition, which carries no principal-residence exemption.
+    Reporting both every year is what makes the trade-off visible instead of
+    silent -- the defect that folding CCA into ``income.expenses_annual`` by
+    hand produces.
+
+    Absence-safe (DP#32): a household with no ``business_use`` block -- the
+    golden household -- returns an all-zero :class:`_BusinessUseYear` with an
+    empty UCC map, so nothing downstream reads a fabricated balance. A declared
+    portion with NO ``cca`` election claims nothing, carries no UCC, and owes no
+    recapture: electing the election is what creates the recapture liability.
+    Its lost exemption still applies, though -- the change in use settles the
+    fraction whether or not anyone depreciates it.
+    """
+    blocks = cfg.business_use
+    if not blocks:
+        return _BusinessUseYear()
+    # DP#25: the ITA capital-cost-allowance law is Canadian; lazy-import it
+    # (no jurisdiction import at simulation.py module scope).
+    from countries.canada.cca import ucc_after_claim, recapture_on_disposition
+    from countries.canada.business_use import (
+        business_fraction_cost_and_value, business_use_claim)
+    from rules_leverage import _principal_value_for_year
+
+    year = _BusinessUseYear()
+    claims = {'primary': 0.0, 'spouse': 0.0}
+    for block in blocks:
+        prop_id = block['property_id']
+        fraction = block['fraction']
+        if block['is_principal']:
+            # The principal residence's value in this year and in the year the
+            # business use began, read through the ONE spelling every consumer
+            # of the principal's gross value shares
+            # (``rules_leverage._principal_value_for_year``, DP#9).
+            acb, fmv = business_fraction_cost_and_value(
+                _principal_value_for_year(cfg, cal_year),
+                _principal_value_for_year(cfg, block['change_in_use_year']),
+                fraction)
+            year.fraction_acb += acb
+            year.fraction_fmv += fmv
+        cca = block.get('cca')
+        if cca is None:
+            continue
+        # The change-in-use year is inert (DP#16); the claim runs from the
+        # first full year after it.
+        opening = opening_ucc_by_prop.get(prop_id, cca['opening_ucc'])
+        claim = business_use_claim(
+            opening, cca['rate'], self_emp_by_role[block['role']],
+            block['change_in_use_year'], cal_year)
+        # Nothing claimed (the class is empty, the business earned nothing this
+        # year, or the change in use has not happened yet). The UCC is carried
+        # forward unchanged so the ledger does not lose a balance a later year
+        # still depreciates -- and so the recapture below still sees the whole
+        # unclaimed class.
+        closing = ucc_after_claim(opening, claim) if claim > 0.0 else opening
+        year.ucc_by_prop[prop_id] = closing
+        claims[block['role']] += claim
+        # What the depreciation claimed so far would cost if the property were
+        # disposed of TODAY: proceeds capped at the fraction's original capital
+        # cost, less what is left undepreciated (ITA s.13(1)). Priced from the
+        # SAME ``recapture_on_disposition`` the rental's #694 path uses.
+        year.recapture_ordinary += recapture_on_disposition(
+            cca['fmv_at_disposition'], cca['capital_cost'], closing)['recapture']
+    year.primary_claim, year.spouse_claim = claims['primary'], claims['spouse']
+    return year
+
+
 def _short_term_rental_facts(cfg) -> Tuple[float, bool]:
     """Issue #697 (epic #690 bite 6): the household's SHORT-TERM-rental (Airbnb)
     reporting facts for a year -- the total net BUSINESS income earned by declared
@@ -1290,6 +1425,37 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         spouse_earned_income = 0.0
         spouse_self_emp = 0.0
 
+    # Issue #377: Capital Cost Allowance on a declared BUSINESS-USE PORTION of a
+    # property -- a home office, or part of a principal residence converted to a
+    # shop. The claim is capped at the owner's net business income (it cannot
+    # create or deepen a business loss), so it is computed from that net slice
+    # and then SUBTRACTED from it and from the earned income that accrues RRSP
+    # room -- ITA s.20(1)(a) lowers the net business income the contribution
+    # stack (QPP/QPIP/HSF) and the s.146(1) earned-income room are both built
+    # on. It is NOT subtracted from cash income: CCA is non-cash, so the
+    # taxable-income adjustment below carries it (exactly as #694's rental CCA
+    # does) and savings capacity is untouched. All zero for a household with no
+    # business-use portion (the golden path, DP#32).
+    #
+    # Computed AFTER the retirement transition above, not before it: the cap is
+    # this year's net business income, and a member who retired this year has
+    # none. Reading the pre-transition figure instead would let a retired
+    # member claim against income they no longer earn AND drive
+    # `primary_self_emp` negative -- the claim would exceed the very base it is
+    # supposed to be bounded by (found by Cite on this PR).
+    _bu = _business_use_for_year(
+        cfg, sim_year,
+        {'primary': primary_self_emp, 'spouse': spouse_self_emp},
+        state.jurisdiction_state.get('canada', {}).get('business_use_ucc', {}))
+    _p_bu_cca, _s_bu_cca = _bu.primary_claim, _bu.spouse_claim
+    _business_ucc = _bu.ucc_by_prop
+    if _p_bu_cca > 0.0:
+        primary_self_emp -= _p_bu_cca
+        primary_earned_income -= _p_bu_cca
+    if _s_bu_cca > 0.0:
+        spouse_self_emp -= _s_bu_cca
+        spouse_earned_income -= _s_bu_cca
+
     total_income = primary_income + spouse_income
     for ch in cfg.children:
         if ch.get('gross_income', 0) > 0:
@@ -1361,8 +1527,10 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
     # lowers the tax bill without consuming cash.
     _income_by_role, _loan_by_role = _adult_income_maps(
         primary_income, spouse_income,
-        (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
-        (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
+        (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca
+         + _p_bu_cca),
+        (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca
+         + _s_bu_cca),
         _extra_specs)
     _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
     primary_rate = _adult_tax['primary']['rate']
@@ -1814,9 +1982,31 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
     result.net_rental_income = (
         (_p_rent_op - _p_rent_ded) + (_s_rent_op - _s_rent_ded) - _total_cca)
     result.rental_interest_deductible = _p_rent_ded + _s_rent_ded
-    result.cca_claimed = _total_cca
+    # Issue #377: `cca_claimed` is the household's TOTAL Capital Cost Allowance
+    # for the year -- the rental path's plus any business-use portion's. The
+    # net_rental_income above nets only the RENTAL claim (a business portion
+    # offsets self-employment income, which is a different base), so the two
+    # figures stay separately correct.
+    result.cca_claimed = _total_cca + _p_bu_cca + _s_bu_cca
     result.rental_ucc = _rental_ucc
+    # Issue #377: the running per-business-use-portion UCC, keyed by property id
+    # -- the same ledger shape as `rental_ucc`, threaded to next year and read by
+    # the estate to recapture the claimed CCA at the deemed disposition (ITA
+    # s.13(1)). Empty for a household with no business portion (DP#32).
+    result.business_use_ucc = _business_ucc
+    # The PRICE of the election, as it stands: the ORDINARY-income recapture
+    # (100% inclusion, ITA s.13(1)) a disposition TODAY would claw back, and the
+    # capital gain the business fraction has accrued since the s.45(1)(c) change
+    # in use -- the slice the principal-residence exemption no longer shelters.
+    # The estate prices the terminal value of exactly these two figures
+    # (`objective._estate_call_args`), so what a report shows mid-projection is
+    # the same arithmetic that taxes at death (DP#9), not an estimate of it.
+    result.cca_recapture_ordinary = _bu.recapture_ordinary
+    result.property_business_fraction_acb = _bu.fraction_acb
+    result.property_business_fraction_fmv = _bu.fraction_fmv
     next_state.jurisdiction_state.setdefault('canada', {})['rental_ucc'] = _rental_ucc
+    next_state.jurisdiction_state.setdefault('canada', {})['business_use_ucc'] = (
+        _business_ucc)
     # Issue #697 (epic #690 bite 6): surface the SHORT-TERM-rental (Airbnb)
     # facts. `str_business_income` is the STR subset of `net_rental_income`
     # (business income, ITA s.9); `gst_hst_registration_required` is True when
@@ -2628,6 +2818,27 @@ class FamilySimulation:
                 spouse_earned_income = 0.0
                 spouse_self_emp = 0.0
 
+            # Issue #377: the business-use-portion CCA, computed and deducted
+            # EXACTLY as the yearly path does (see the identical block in
+            # `simulate_year_pure`) -- including AFTER the retirement
+            # transition, for the same reason: the claim is capped at this
+            # year's net business income, and a retired member has none. The
+            # monthly and yearly folds must agree (the parity tests), so this
+            # reads the same `business_use_ucc` ledger as the yearly path.
+            _bu = _business_use_for_year(
+                cfg, sim_year,
+                {'primary': primary_self_emp, 'spouse': spouse_self_emp},
+                state.jurisdiction_state.get('canada', {}).get(
+                    'business_use_ucc', {}))
+            _p_bu_cca, _s_bu_cca = _bu.primary_claim, _bu.spouse_claim
+            _business_ucc = _bu.ucc_by_prop
+            if _p_bu_cca > 0.0:
+                primary_self_emp -= _p_bu_cca
+                primary_earned_income -= _p_bu_cca
+            if _s_bu_cca > 0.0:
+                spouse_self_emp -= _s_bu_cca
+                spouse_earned_income -= _s_bu_cca
+
             total_income = primary_income + spouse_income
             for ch in cfg.children:
                 if ch.get('gross_income', 0) > 0:
@@ -2692,8 +2903,10 @@ class FamilySimulation:
             _extra_specs = _extra_adult_specs(cfg, sim_year, salary_growth, year, year_brackets)
             _income_by_role, _loan_by_role = _adult_income_maps(
                 primary_income, spouse_income,
-                (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
-                (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
+                (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca
+                 + _p_bu_cca),
+                (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca
+                 + _s_bu_cca),
                 _extra_specs)
             _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
             primary_rate = _adult_tax['primary']['rate']
@@ -3029,9 +3242,21 @@ class FamilySimulation:
             result.net_rental_income = (
                 (_p_rent_op - _p_rent_ded) + (_s_rent_op - _s_rent_ded) - _total_cca)
             result.rental_interest_deductible = _p_rent_ded + _s_rent_ded
-            result.cca_claimed = _total_cca
+            # Issue #377: the household's TOTAL CCA for the year (rental + any
+            # business-use portion), and the running per-portion UCC ledger --
+            # exactly as the yearly path surfaces them (see simulate_year's
+            # identical block), so the two folds agree.
+            result.cca_claimed = _total_cca + _p_bu_cca + _s_bu_cca
             result.rental_ucc = _rental_ucc
+            result.business_use_ucc = _business_ucc
+            # The recapture / lost-exemption gain, identical to the yearly
+            # path's (DP#9 -- one spelling of each price).
+            result.cca_recapture_ordinary = _bu.recapture_ordinary
+            result.property_business_fraction_acb = _bu.fraction_acb
+            result.property_business_fraction_fmv = _bu.fraction_fmv
             state.jurisdiction_state.setdefault('canada', {})['rental_ucc'] = _rental_ucc
+            state.jurisdiction_state.setdefault('canada', {})['business_use_ucc'] = (
+                _business_ucc)
             # Issue #697 (bite 6): surface the STR (Airbnb) facts (see
             # simulate_year's identical block). Inert for a household with no STR.
             result.str_business_income, result.gst_hst_registration_required = (

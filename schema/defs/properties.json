@@ -52,6 +52,36 @@
       }
     },
 
+    "business_use": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fraction", "role"],
+      "oneOf": [{ "required": ["change_in_use_date"] }, { "required": ["change_in_use_year"] }],
+      "description": "A portion of a property used to run a business (issue #377) -- a home office, or part of a principal residence converted to a shop. Converting part of a principal residence to business use is a CHANGE IN USE under ITA s.45(1)(c): the business fraction is deemed disposed of and reacquired at FMV on the date the income-producing use began. CRA keeps the whole property in principal-residence status ONLY while no CCA is claimed on it (Income Tax Folio S1-F3-C2 para 2.59-2.60); electing CCA below ends that treatment, so the business fraction's gain from that date onward carries no principal-residence exemption, and the CCA is recaptured as ORDINARY income at the s.70(5) deemed disposition at death. That is why claiming CCA is usually the wrong choice, and why the trade-off has to be modellable rather than folded silently into income.expenses_annual. Allowed on ANY kind: a business portion of a rental, a recreational property or a principal residence all depreciate the same way (DP#7 -- the mechanism, not the branded use). Exactly one of `change_in_use_date` or `change_in_use_year` must be given (the dated form is the real fact; `year` is the sweepable numeric alternative, the same oneOf the purchase/sale blocks use, DP#1/DP#32).",
+      "properties": {
+        "fraction": {
+          "$ref": "#/$defs/percent0to1",
+          "description": "The share of the property used for the business (0.25 = a quarter of the home). The claim is computed on the business fraction's own undepreciated capital cost, so this scales both the claim and the recapture ceiling."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["primary", "spouse"],
+          "description": "Whose self-employment income the CCA offsets. The claim reduces THAT income's net business income, and so that person's QPP/QPIP base and RRSP-room accrual (ITA s.20(1)(a) is an individual's deduction, and this tool models no joint filing)."
+        },
+        "change_in_use_date": {
+          "$ref": "#/$defs/date",
+          "description": "The date the income-producing use commenced. ITA s.45(1)(c) deems the business fraction disposed of and reacquired at FMV on THAT date, which is when the principal-residence exemption stops covering its gain. Before it the business portion claims nothing and the whole property keeps its PRE (DP#16 -- the block is inert until its trigger date, exactly as a rental block is inert before its purchase)."
+        },
+        "change_in_use_year": {
+          "anyOf": [{ "type": "integer" }, { "type": "null" }],
+          "description": "Sweepable alternative to `change_in_use_date`: the CALENDAR year the income-producing use commenced (the same numeric-leaf alternative the purchase/sale blocks carry, #956 bite C). Exactly one of the two is given (the schema's oneOf). An explicit `is not None` test is applied at map time, never `or` (DP#32). Declared NULLABLE and the dated leaf a plain `$ref`, exactly as `property_purchase`'s `year`/`date` pair is: the oneOf then requires exactly one of the two keys to be PRESENT, so the numeric twin may be carried as null. A document that supplies BOTH is ambiguous about when the use commenced and is refused -- the same reading the purchase and sale blocks take."
+        },
+        "cca": {
+          "anyOf": [{"$ref": "#/$defs/cca_election"}, {"type": "null"}],
+          "description": "Optional Capital Cost Allowance election on the business fraction. Absent or null means no CCA is claimed, which is the treatment that preserves principal-residence status. The SAME cca_election def the rental path uses (DP#9 -- one spelling of the election) and the same cca_claim / ucc_after_claim / recapture_on_disposition math in countries/canada/cca.py, so the two paths cannot drift apart. capital_cost here is the BUSINESS FRACTION's own capital cost, not the whole building's. The claim begins in the first FULL year after the change in use (the deemed acquisition's half-year allowance is not modelled) and is capped at that year's net business income, so it can never create or deepen a business loss. A property that declares BOTH this election and a dated `sale` is REFUSED by the adapter: the recapture and the lost principal-residence exemption would have to be priced in the sale year, which the disposition rules do not do, so pricing only the death path would leave the household with a silently understated tax."
+        }
+      }
+    },
     "property_purchase": {
       "type": "object",
       "additionalProperties": false,
@@ -144,6 +174,7 @@
         },
         "rental": { "anyOf": [{ "$ref": "#/$defs/rental_facts" }, { "type": "null" }], "description": "Non-null only for kind=rental. Its presence is what auto-includes cash-damming (DP#16), replacing rental_properties.properties[] and the top-level rental_income trigger." },
         "purchase": { "anyOf": [{ "$ref": "#/$defs/property_purchase" }, { "type": "null" }], "description": "Optional (#696): a dated mid-horizon purchase. Omitted/null = the property is held from the projection's first year (byte-identical to #692)." },
+        "business_use": { "anyOf": [{"$ref": "#/$defs/business_use"}, {"type": "null"}], "description": "A business-use portion of THIS property (issue #377). Null for the ordinary household, which is what keeps the golden trajectory byte-identical (DP#32 -- absence is the common case, not a fallback)." },
         "sale": { "anyOf": [{ "$ref": "#/$defs/property_sale" }, { "type": "null" }], "description": "OPTIONAL (#956 bite B): a dated mid-horizon voluntary SALE. Omitted/null = the property is held to the horizon (byte-identical to #692/#696). When present, the property leaves the balance sheet in the sale year (equity gates to zero from that year on, see `_property_equity_for_year`) and its net proceeds (value less mortgage, selling costs, and disposition tax) are invested — see the sale-year handler." },
         "carrying_costs": { "anyOf": [{ "$ref": "#/$defs/property_carrying_costs" }, { "type": "null" }], "description": "OPTIONAL (#1010): the property's RECURRING carrying costs (property tax, maintenance, insurance) charged each year over the ownership window through the solvency waterfall. Omitted/null = $0 => byte-identical to today (DP#32). Forbidden on the principal residence (its costs live in household_budget.annual_living_costs; declaring them here would be a silent dead read)." }
       },

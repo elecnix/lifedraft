@@ -2,8 +2,8 @@
   "engine_entry": "input_contract.load_and_map -> SimulationConfig.from_dict -> FamilySimulation(config, adapter=CanadaAdapter(config)).run()",
   "mode": "simulate",
   "projection": {
-    "full_report_bytes": 337247,
-    "full_report_digest": "sha256:51f53ccc68ec0bb0fdef621a42ad9b0ac5dacf15cb860dd52ad8389875c2b6c2",
+    "full_report_bytes": 343497,
+    "full_report_digest": "sha256:76c8be6cf9b37d6ec0517efe464df781520e2c29270a4c9585ee42aedf1d7add",
     "function": "tools/examples.py::project_simulation",
     "series_columns": [
       "year",
@@ -1168,6 +1168,7 @@
     "capital_loss_offset_applied": 0.0,
     "capital_loss_offset_priced": 0.0,
     "cca_claimed": 0.0,
+    "cca_recapture_ordinary": 0.0,
     "consumer_loan_balance": 0.0,
     "consumer_loan_interest": 0.0,
     "consumer_loan_payment": 0.0,
@@ -1232,6 +1233,8 @@
     "principal_sale_disposition_tax": 0.0,
     "principal_sale_proceeds_invested": 0.0,
     "principal_sale_realized_gain": 0.0,
+    "property_business_fraction_acb": 0.0,
+    "property_business_fraction_fmv": 0.0,
     "qc_imr_credit_recovered": 0.0,
     "qc_imr_surcharge": 0.0,
     "readvance_blocked": 0.0,

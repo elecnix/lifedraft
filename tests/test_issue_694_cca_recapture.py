@@ -231,7 +231,15 @@ class CCARecaptureAtEstate(unittest.TestCase):
         entry in ``properties`` is skipped, and a terminal result WITHOUT the
         fold's UCC ledger (``rental_ucc`` is None -- e.g. a hand-built
         YearResult) falls back to each rental's DECLARED opening UCC rather than
-        crashing. Recapture is then computed on that opening UCC."""
+        crashing. Recapture is then computed on that opening UCC.
+
+        Issue #377: the stub also has to carry ``cca_recapture_ordinary``, the
+        business-use portion's recapture the same helper now sums. It defaults to
+        0.0 on a real ``YearResult`` (nothing claimed -> nothing to recapture),
+        so a stub that omits it would be a record of a year the fold never
+        produced; carrying it explicitly keeps this test about the two branches
+        it names.
+        """
         import types
         cfg = {"properties": [
             "not-a-dict",  # a non-dict entry -> skipped
@@ -239,7 +247,9 @@ class CCARecaptureAtEstate(unittest.TestCase):
                 "rate": 0.04, "capital_cost": 380000,
                 "opening_ucc": 300000, "fmv_at_disposition": 500000}}},
         ]}
-        final = types.SimpleNamespace(rental_ucc=None)  # no UCC ledger on result
+        # No UCC ledger on the result, and no business-use claim either.
+        final = types.SimpleNamespace(rental_ucc=None,
+                                      cca_recapture_ordinary=0.0)
         rec = objective._cca_recapture_for(final, cfg)
         # UCC falls back to the declared opening 300000; proceeds capped at the
         # 380000 capital cost -> 380000 - 300000 = 80000 recaptured.
