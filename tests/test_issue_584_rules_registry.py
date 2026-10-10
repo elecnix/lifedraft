@@ -456,33 +456,40 @@ def test_every_rule_fires_somewhere_in_representative_households():
     # post-conversion LIF-withdrawal year (direct simulate_year_pure calls,
     # mirroring tests/test_lira_wiring.py's pattern).
     config = _make_config()
-    lira_state = _state_with_lira(lira_balance=100_000, lira_birth_year=1950)  # turns 71 in 2021
+    # #346: 1950 turned 71 in 2021, and no tax schedule exists before 2023 --
+    # the engine now refuses that year rather than taxing it on a later year's
+    # tables. 1955 turns 71 in 2026, keeping the sweep's coverage (accumulation
+    # year, conversion year, post-conversion withdrawal year) intact.
+    lira_state = _state_with_lira(lira_balance=100_000, lira_birth_year=1955)  # turns 71 in 2026
     with trace_firing() as fired:
         # Accumulation year (LIRA present, not yet 71).
         _, lira_state_2020 = simulate_year_pure(
             state=lira_state,
-            year=2020,
+            year=2025,
             inputs=_build_year_inputs(
                 allocations={'_primary_income': 130000, '_annual_savings': 0},
-                config=config, investment_return=0.06, primary_marginal_rate=0.40
+                config=config, investment_return=0.06, primary_marginal_rate=0.40,
+                calendar_year=2025,
             ),
         )
         # Conversion year.
         _, converted_state = simulate_year_pure(
             state=lira_state_2020,
-            year=2021,
+            year=2026,
             inputs=_build_year_inputs(
                 allocations={'_primary_income': 130000, '_annual_savings': 0},
-                config=config, investment_return=0.06, primary_marginal_rate=0.40
+                config=config, investment_return=0.06, primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         # Post-conversion: mandatory LIF withdrawal.
         simulate_year_pure(
             state=converted_state,
-            year=2022,
+            year=2027,
             inputs=_build_year_inputs(
                 allocations={'_primary_income': 130000, '_annual_savings': 0},
-                config=config, investment_return=0.06, primary_marginal_rate=0.40
+                config=config, investment_return=0.06, primary_marginal_rate=0.40,
+                calendar_year=2027,
             ),
         )
     _merge(fired)
