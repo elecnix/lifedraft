@@ -129,6 +129,11 @@ def _map_principal_sale(principal: Optional[Dict], mortgage: Optional[Dict],
     # property household falls back to its own window, unchanged (DP#32).
     if family_pre_window is not None:
         sale_entry["family_pre_window"] = family_pre_window
+    # Issue #352: carry the RAW acquisition date/year so the disposition
+    # rule can count C per property (ITA s.40(2)(b)). Resolved in the rule,
+    # not here: the contract layer keeps no jurisdiction import (DP#25).
+    if principal.get("acquired") is not None:
+        sale_entry["acquired"] = principal["acquired"]
     # Issue #963 (epic #956 bite F): carry the principal's `appreciation_rate`
     # onto the sale so the disposition rule can price the APPRECIATED gross
     # value at the sale year (a downsize/sell realizes the GROWN home, not the
