@@ -118,7 +118,7 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
     from countries.canada.tax_calc import (
         compute_non_refundable_credits,
         federal_tax_before_abatement,
-        quebec_abatement_amount,
+        quebec_abatement_on_credits,
         quebec_tax,
     )
 
@@ -165,11 +165,19 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # (solidarity/QPIP/FSS -- their own deliberate non-wiring, #745) are not part
     # of it and are not computed here.
     gross_fed = federal_tax_before_abatement(taxable_income, year, province, provider)
-    abatement = quebec_abatement_amount(taxable_income, year, province, provider)
     nr_credits = compute_non_refundable_credits(
         employment_income, taxable_income, year, province, provider,
     )['total']
-    federal_after_credits = max(0.0, gross_fed - abatement - nr_credits)
+    # Issue #350: the abatement is a share of BASIC federal tax, so the credits
+    # come off FIRST and the rate applies to what is left. The previous order
+    # credited each federal dollar twice -- once at full rate, and again by
+    # inflating an abatement the credit should have shrunk. This uses the same
+    # helper as compute_total_tax, so the two cannot drift apart (DP#9); they
+    # must agree, since the minimum amount is measured against this very figure.
+    abatement = quebec_abatement_on_credits(
+        gross_fed, nr_credits, year=year, province=province, provider=provider,
+    )
+    federal_after_credits = max(0.0, gross_fed - nr_credits - abatement)
 
     # Pass the same federal non-refundable credits the regular tax is net of:
     # 50% of them reduce the minimum amount (ITA s.127.531, #747), so both sides
