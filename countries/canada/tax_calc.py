@@ -758,10 +758,25 @@ def compute_total_tax(taxable_income: float,
         provider = TaxDataProvider()
 
     # Step 1: Gross federal tax and provincial tax
+    #
+    # Issue #341: the Quebec deduction for workers (TP-1 line 201, TA s.358.0.3)
+    # reduces QUEBEC TAXABLE INCOME only. It therefore lands HERE, on the
+    # provincial slice, and not on `taxable_income` itself -- which is what keeps
+    # federal taxable income, federal tax and the abatement byte-identical. The
+    # deduction is also passed to every Quebec income test below, because those
+    # tests read net income, which the deduction reduces too.
+    from countries.canada.provinces.quebec.quebec_credits import (
+        quebec_worker_deduction)
+    qc_worker_deduction_amount = 0.0
+    if province.lower() in ('quebec', 'qc'):
+        qc_worker_deduction_amount = quebec_worker_deduction(
+            employment_income + self_employment_income, year, provider)
+    qc_taxable_income = max(0.0, taxable_income - qc_worker_deduction_amount)
+
     gross_fed = federal_tax_before_abatement(taxable_income, year, province, provider)
     abatement = quebec_abatement_amount(taxable_income, year, province, provider)
     if province.lower() in ('quebec', 'qc'):
-        prov_tax = quebec_tax(taxable_income, year, provider)
+        prov_tax = quebec_tax(qc_taxable_income, year, provider)
     else:
         prov_tax = _provincial_tax(taxable_income, year, province, provider)
 
@@ -787,7 +802,7 @@ def compute_total_tax(taxable_income: float,
     qc_fss = 0.0
     if province.lower() in ('quebec', 'qc'):
         qc_solidarity = quebec_solidarity_credit(
-            taxable_income, is_couple=is_couple, year=year, provider=provider)
+            qc_taxable_income, is_couple=is_couple, year=year, provider=provider)
         qc_qpip = quebec_qpip_premium(
             employment_income, is_self_employed=False, year=year, provider=provider)
         if self_employment_income > 0:
@@ -834,6 +849,11 @@ def compute_total_tax(taxable_income: float,
             'federal_before_abatement': gross_fed,
             'quebec_abatement': abatement,
             'provincial_tax': prov_tax,
+            # Issue #341: surfaced so a caller can see the Quebec-only deduction
+            # and the Quebec taxable income it produces (which differs from the
+            # federal base for a Quebec worker, and must).
+            'qc_worker_deduction': qc_worker_deduction_amount,
+            'qc_taxable_income': qc_taxable_income,
             'federal_after_abatement': federal_after_abatement,
             'credits_total': nr_credits['total'],
             'federal_after_credits': federal_after_credits,
