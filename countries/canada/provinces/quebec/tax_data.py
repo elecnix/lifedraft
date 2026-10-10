@@ -117,6 +117,8 @@ class QuebecTaxData:
             # ── Work premium (general, persons without children, 2026) ──
             qc_work_premium_max_single=1207.33,
             qc_work_premium_max_couple=1882.45,
+            qc_work_premium_max_single_parent=3122.40,
+            qc_work_premium_max_couple_children=4057.00,
             qc_work_premium_excluded_single=2400,
             qc_work_premium_excluded_couple=3600,
             qc_work_premium_growth_rate=0.116,    # 11.6%
@@ -211,6 +213,8 @@ class QuebecTaxData:
             # ── Work premium (general, persons without children, 2025) ──
             qc_work_premium_max_single=1185.52,
             qc_work_premium_max_couple=1848.34,
+            qc_work_premium_max_single_parent=3066.00,
+            qc_work_premium_max_couple_children=3983.50,
             qc_work_premium_excluded_single=2400,
             qc_work_premium_excluded_couple=3600,
             qc_work_premium_growth_rate=0.116,
@@ -277,6 +281,22 @@ class QuebecTaxData:
             qc_charitable_donation_rate_low=0.20,
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
+            # Issue #356: the work premium's 2024 parameters, previously absent so
+            # every qc_work_premium_* field defaulted to 0.0 and the credit
+            # silently returned nothing for this year. Source: Ministere des
+            # Finances du Quebec, "Parametres du regime d'imposition des
+            # particuliers pour l'annee d'imposition 2024" (decembre 2023),
+            # Tableau 3, "Prime au travail generale".
+            qc_work_premium_max_single=1152.34,
+            qc_work_premium_max_couple=1797.07,
+            qc_work_premium_max_single_parent=2980.20,
+            qc_work_premium_max_couple_children=3873.00,
+            qc_work_premium_excluded_single=2400,
+            qc_work_premium_excluded_couple=3600,
+            qc_work_premium_growth_rate=0.116,
+            qc_work_premium_reduction_threshold_single=12334,
+            qc_work_premium_reduction_threshold_couple=19092,
+            qc_work_premium_reduction_rate=0.10,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
             # ── RESP/CESG/QESI/CLB thresholds (DP#12, DP#20) ──
             cesg_first_threshold=55867,
@@ -336,6 +356,18 @@ class QuebecTaxData:
             qc_charitable_donation_rate_low=0.20,
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
+            # Issue #356: the work premium's 2023 parameters. Source: the same
+            # Tableau 3 (2023 column).
+            qc_work_premium_max_single=1095.27,
+            qc_work_premium_max_couple=1709.61,
+            qc_work_premium_max_single_parent=2832.60,
+            qc_work_premium_max_couple_children=3684.50,
+            qc_work_premium_excluded_single=2400,
+            qc_work_premium_excluded_couple=3600,
+            qc_work_premium_growth_rate=0.116,
+            qc_work_premium_reduction_threshold_single=11842,
+            qc_work_premium_reduction_threshold_couple=18338,
+            qc_work_premium_reduction_rate=0.10,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
             source="fallback",
         )

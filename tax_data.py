@@ -263,6 +263,13 @@ class TaxYearData:
     # Finances, Parameters of the Personal Income Tax System (general work premium).
     qc_work_premium_max_single: float = 0.0    # Max for person living alone
     qc_work_premium_max_couple: float = 0.0    # Max for couple without children
+    # Issue #356: the two variants the program's MAXIMUM differs for, and which
+    # the function could not represent at all. Source: Revenu Quebec, "Montant
+    # des credits d'impot relatifs a la prime au travail" (2025 and 2026 tables);
+    # Ministere des Finances du Quebec, "Parametres du regime d'imposition des
+    # particuliers", Tableau 3, for 2023 and 2024.
+    qc_work_premium_max_single_parent: float = 0.0   # Max for a single-parent family
+    qc_work_premium_max_couple_children: float = 0.0  # Max for a couple with >= 1 child
     qc_work_premium_excluded_single: float = 0.0  # Excluded work income (one adult)
     qc_work_premium_excluded_couple: float = 0.0  # Excluded work income (couple)
     qc_work_premium_growth_rate: float = 0.0   # Growth rate on work income above excluded amount
@@ -853,6 +860,10 @@ class TaxDataProvider:
             qc_tuition_credit_rate=base.qc_tuition_credit_rate,
             qc_work_premium_max_single=round(base.qc_work_premium_max_single * factor, 2) if base.qc_work_premium_max_single else 0,
             qc_work_premium_max_couple=round(base.qc_work_premium_max_couple * factor, 2) if base.qc_work_premium_max_couple else 0,
+            # Issue #356: all four household-type maxima are indexed on the
+            # same `factor` every other money amount uses.
+            qc_work_premium_max_single_parent=round(base.qc_work_premium_max_single_parent * factor, 2) if base.qc_work_premium_max_single_parent else 0,
+            qc_work_premium_max_couple_children=round(base.qc_work_premium_max_couple_children * factor, 2) if base.qc_work_premium_max_couple_children else 0,
             qc_work_premium_excluded_single=base.qc_work_premium_excluded_single,
             qc_work_premium_excluded_couple=base.qc_work_premium_excluded_couple,
             qc_work_premium_growth_rate=base.qc_work_premium_growth_rate,
