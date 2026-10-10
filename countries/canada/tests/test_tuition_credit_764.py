@@ -354,7 +354,7 @@ class TestAdapterMemberAndChildWiring(unittest.TestCase):
                              'tuition': 4000}]}],
                'decisions': {'retirement_age': []}}
         with self.assertNoLogs(level='WARNING'):
-            child = _map_child(doc, 'ca', {})
+            child = _map_child(doc, 'ca', {}, {})
         self.assertEqual(child['tuition_by_year'], {2026: 4000.0})
 
 
