@@ -1094,3 +1094,44 @@ def asset_location_suggestion(
     # Derive suggestion order from tax impact data (lowest drag first)
     tax_impact = asset_location_tax_impact(etf_type, marginal_rate, province)
     return sorted(tax_impact, key=tax_impact.get)
+
+
+def fold_non_refundable_credit(config, income: float,
+                              taxable_income: float) -> float:
+    """This adult's non-refundable tax credits, as the FOLD must apply them.
+
+    Issue #325. The fold taxed brackets only, so the basic personal amount and
+    the Canada employment amount were never applied and every household's tax
+    -- and its disposable income, runway and solvency -- was overstated in
+    every year it had income.
+
+    Lives here, in the Canada package, because it needs PROVINCE data and the
+    province literal; ``simulation.py`` is jurisdiction-agnostic and a guard
+    enforces that.
+
+    A QUEBEC RESIDENT'S FEDERAL CREDIT IS ABATED. The refundable Quebec
+    abatement is computed on line 42900 -- BASIC federal tax, i.e. AFTER the
+    federal non-refundable credits (ITA s.120(4)) -- so each dollar of credit
+    shrinks the 16.5% abatement by 16.5% of itself. Subtracting the
+    un-abatemented credit from an already-abatemented combined tax would
+    overstate the relief by exactly that much: the defect #348 fixed for the
+    tuition credit and #350 for the whole credit ordering.
+
+    Floored at zero: a credit cannot make tax payable negative (DP#32).
+    """
+    year = int(config.start_year)
+    province = config.province
+    credits = compute_non_refundable_credits(
+        income, taxable_income, year=year, province=province)
+    # 'total' is a key `compute_non_refundable_credits` always returns, so it
+    # is read directly. A `.get(...) or 0.0` here would be exactly the shape
+    # the DP#32 guard rejects: a missing aggregate becoming a plausible zero.
+    total = float(credits['total'])
+    if total <= 0:
+        return 0.0
+
+    if province is not None and province.lower() in ('quebec', 'qc'):
+        provider = TaxDataProvider()
+        record = provider.get_year_data(year, 'canada', 'quebec')
+        total *= (1.0 - float(record.provincial_abatement))
+    return total
