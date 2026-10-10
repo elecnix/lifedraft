@@ -36,6 +36,7 @@ from typing import Dict, List, Optional, Tuple
 from copy import deepcopy
 
 from simulation_config import SimulationConfig
+from contract_errors import ContractAdaptationError
 from year_result import YearResult
 # Issue #688: reserve sizing is pure, jurisdiction-agnostic arithmetic and
 # lives in the same module as the waterfall that draws it (DP#25: no
@@ -454,17 +455,23 @@ def apply_child_first_home_purchases(accounts: list, children: list,
         return accounts
     buyers_this_year = {p['buyer'] for p in first_home_purchases
                         if int(p['year']) == calendar_year}
+    # Issue #359: each buyer's DECLARED HBP amount, absent unless declared.
+    hbp_amount_by_buyer = {p['buyer']: p['hbp_amount']
+                           for p in first_home_purchases
+                           if int(p['year']) == calendar_year
+                           and 'hbp_amount' in p}
     out = []
     for i, acc in enumerate(accounts):
         child_id = children[i].get('id') if i < len(children) else None
         out.append(_apply_first_home_to_account(
             acc, child_id is not None and child_id in buyers_this_year,
-            calendar_year))
+            calendar_year, hbp_amount_by_buyer.get(child_id)))
     return out
 
 
 def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
-                                 calendar_year: int) -> dict:
+                                 calendar_year: int,
+                                 hbp_amount: Optional[float] = None) -> dict:
     """One member's first-home step on a SINGLE account dict (issue #704/#931).
 
     Shared verbatim by the child fold (``apply_child_first_home_purchases``, one
@@ -483,6 +490,15 @@ def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
     * Every year an OPEN HBP repays that year's scheduled amount (RRSP<-cash),
       whether it opened this year or a prior one -- a no-op until the repayment
       window (the 3rd year after withdrawal).
+
+    ``hbp_amount`` (issue #359) is the buyer's DECLARED withdrawal. ``None`` --
+    the default -- keeps the historical ``min(RRSP, $60k)`` exactly, so a
+    document that declares nothing is byte-identical to its pre-#359 output. A
+    declared amount is used verbatim and REFUSED when it cannot be honoured,
+    rather than clipped (DP#32): CRA's $60,000 is a MAXIMUM and the buyer's own
+    RRSP is the other ceiling, and quietly withdrawing less than the household
+    asked for would understate both the down payment and the RRSP balance it
+    leaves behind.
     """
     from countries.canada.fhsa import FHSAAccount
     from countries.canada.hbp_rules import HBPAccount, HBP_MAX_WITHDRAWAL
@@ -492,7 +508,53 @@ def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
         fhsa = FHSAAccount(balance=acc['fhsa_balance'], open_year=calendar_year)
         fhsa_result = fhsa.qualifying_withdrawal(calendar_year)
         fhsa_out = fhsa_result['amount'] if fhsa_result['eligible'] else 0.0
-        hbp_out = min(acc['rrsp_balance'], HBP_MAX_WITHDRAWAL)
+        # Issue #359: a DECLARED amount is honoured exactly, or refused. Absent
+        # declaration keeps the historical min(RRSP, $60k).
+        ceiling = min(acc['rrsp_balance'], HBP_MAX_WITHDRAWAL)
+        if hbp_amount is None:
+            hbp_out = ceiling
+        else:
+            # A non-numeric amount raises a bare ValueError out of float(),
+            # which reads as a crash rather than a refusal. On the CONTRACT path
+            # the schema's `type: number` already rejects it, so this is the
+            # hand-built-internal-config path (which bypasses validation) -- and
+            # there it should still refuse with the same loud, naming shape
+            # (DP#32), not raise a conversion error (issue #359 review).
+            try:
+                hbp_out = float(hbp_amount)
+            except (TypeError, ValueError) as exc:
+                raise ContractAdaptationError(
+                    f"first_home_purchase declares hbp_amount={hbp_amount!r} for "
+                    f"the {calendar_year} purchase, which is not a number. An HBP "
+                    f"withdrawal is an amount in dollars (issue #359; DP#32: "
+                    f"refused, not coerced -- and not a raw conversion error)."
+                ) from exc
+            if not math.isfinite(hbp_out):
+                raise ContractAdaptationError(
+                    f"first_home_purchase declares hbp_amount={hbp_out} for the "
+                    f"{calendar_year} purchase. An HBP withdrawal must be FINITE: "
+                    f"a NaN passes every numeric guard and would propagate a NaN "
+                    f"balance into the down payment (issue #359; DP#32)."
+                )
+            if hbp_out < 0.0:
+                raise ContractAdaptationError(
+                    f"first_home_purchase declares hbp_amount={hbp_out} for the "
+                    f"{calendar_year} purchase. An HBP withdrawal cannot be "
+                    f"negative (DP#32: a nonsensical declared value is refused, "
+                    f"not coerced)."
+                )
+            if hbp_out > ceiling:
+                raise ContractAdaptationError(
+                    f"first_home_purchase declares hbp_amount={hbp_out} for the "
+                    f"{calendar_year} purchase, but the buyer can withdraw at most "
+                    f"{ceiling} -- the statutory Home Buyers' Plan maximum is "
+                    f"${HBP_MAX_WITHDRAWAL:,.0f} and this buyer's own RRSP holds "
+                    f"${acc['rrsp_balance']:,.2f}. Withdrawing less than declared "
+                    f"would silently understate the down payment AND overstate "
+                    f"the RRSP left sheltered (DP#32: refused, not clipped). "
+                    f"Declare an amount within the ceiling, or omit the leaf to "
+                    f"take the min(RRSP, ${HBP_MAX_WITHDRAWAL:,.0f}) default."
+                )
         hbp = HBPAccount(withdrawal=hbp_out, withdrawal_year=calendar_year)
         schedule = hbp.generate_repayment_schedule()
         down_payment = fhsa_out + hbp_out
@@ -560,6 +622,13 @@ def apply_adult_first_home_purchases(prior_adult_hbp: dict,
     slot_of = {aid: i for i, aid in enumerate(adult_ids)}
     buyers_this_year = {p['buyer'] for p in first_home_purchases
                         if int(p['year']) == calendar_year and p['buyer'] in slot_of}
+    # Issue #359: each buyer's DECLARED HBP amount, absent unless declared.
+    hbp_amount_by_buyer = {p['buyer']: p['hbp_amount']
+                           for p in first_home_purchases
+                           if int(p['year']) == calendar_year
+                           and p['buyer'] in slot_of
+                           and 'hbp_amount' in p}
+
     # Every adult that either buys this year or is repaying a prior HBP needs a
     # step; a buyer that is a CHILD (not in slot_of) is handled by the child fold.
     active_ids = buyers_this_year | set(prior_adult_hbp)
@@ -580,7 +649,8 @@ def apply_adult_first_home_purchases(prior_adult_hbp: dict,
         if aid in prior_adult_hbp:
             acc['hbp'] = {k: v for k, v in prior_adult_hbp[aid].items()
                           if k != 'slot'}
-        new = _apply_first_home_to_account(acc, buys, calendar_year)
+        new = _apply_first_home_to_account(
+            acc, buys, calendar_year, hbp_amount_by_buyer.get(aid))
         if buys:
             fhsa_balance = new['fhsa_balance']
             fhsa_closed = True
