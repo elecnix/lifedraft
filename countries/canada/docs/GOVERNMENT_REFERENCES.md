@@ -112,6 +112,7 @@ RRSP dollar limits, TFSA limits, YMPE, YAMPE (updated annually by CRA):
 - **Data source**: https://www.revenuquebec.ca/en/individuals/income-tax-rates/
 - **Quebec abatement (16.5%)**: ITA s.8(1)
 - **TP-1 form**: https://www.revenuquebec.ca/en/individuals/income-tax-return/
+- **Indexed parameters (basic personal amount, tax table, credit amounts) — Tableau 4, "Paramètres du régime d'imposition des particuliers", Ministère des Finances du Québec**: https://cdn-contenu.quebec.ca/cdn-contenu/adm/min/finances/publications-adm/parametres/AUTEN_IncomeTax2026.pdf (2026 edition; substitute the year)
 
 ## Ontario Provincial Tax
 - **Data source**: https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/gst-hst-businesses/gst-hst-place-supply/chart-place-supply-ontario.html
