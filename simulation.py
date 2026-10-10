@@ -593,6 +593,94 @@ def _income_shock_active_for_year(base_amount: float, segments: Optional[List[Di
     return actual < baseline_full_year - 1e-6
 
 
+def _post_retirement_income_for_year(member: Dict, calendar_year: int,
+                                    year_index: int) -> Optional[Dict[str, float]]:
+    """Issue #375 (foundation): what a RETIRED member earns in ``calendar_year``.
+
+    The fold zeroes a retired member's income outright, which silently forbids
+    the single most common real retirement transition there is: stopping the
+    career job and taking a lighter one, or going back to work for a few years.
+    It is a silent ZERO — the engine prints a confident number from an income it
+    assumed away rather than one it was told about.
+
+    A retired member's earnings are therefore taken ONLY from an explicit,
+    dated declaration: an ``income_segment`` whose ``[from, to)`` window OPENS
+    on or after the year the member reaches retirement age. That window is the
+    source of truth (DP#1) and it is the household asserting "this job starts
+    after I retired".
+
+    The pre-retirement ``gross_income`` snapshot is deliberately NOT carried
+    forward: it describes the career job, which the retirement transition is
+    precisely the declaration that ended. So a member who returns to work gets
+    what they declared for that job and nothing more.
+
+    Returns ``None`` when no post-retirement segment is declared, and otherwise
+    a breakdown keyed by income kind -- ``employment`` and ``self_employment``.
+
+    **The three-way answer is the point** (Cite, r_f45b5693). ``None``,
+    ``0.0`` and a positive number are three different facts: nothing was
+    declared, a year of declared zero wages was declared, and wages were
+    declared. Collapsing a declared ``0.0`` into the ``> 0.0`` guard at the
+    call site would re-create the very silent zero this change exists to
+    remove -- a household that declares "no earnings this year" is making a
+    statement the engine should be able to tell apart from saying nothing.
+
+    The kind split exists because a declared post-retirement SELF-EMPLOYMENT
+    segment is still self-employment income: it has to reach the self-employed
+    contribution stack (#978 zeroes the CAREER salary, not a business the
+    household says it started after retiring), so the caller needs the two
+    components apart rather than one blended number.
+    """
+    from countries.canada.retirement_transition import DEFAULT_RETIREMENT_AGE
+    birth_year = member.get('birth_year', 0)
+    if not birth_year:
+        return None                     # undatable retirement: nothing declared
+    retirement_age = member.get('retirement_age')
+    if retirement_age is None:
+        retirement_age = DEFAULT_RETIREMENT_AGE
+    retirement_year = birth_year + retirement_age
+    segments = member.get('income_segments')
+    if not segments:
+        return None
+    declared = {'employment': 0.0, 'self_employment': 0.0}
+    for seg in segments:
+        seg_from = seg.get('from')
+        if seg_from is None:
+            continue                    # an undated segment asserts nothing
+        try:
+            start_year = int(str(seg_from)[:4])
+        except (TypeError, ValueError):
+            continue                    # a malformed date is not a year
+        if start_year < retirement_year:
+            continue                    # began before retiring: the old job
+        # Active in this calendar year? The [from, to) window decides, exactly
+        # as everywhere else in the fold (DP#1).
+        seg_to = seg.get('to')
+        if seg_to is None:
+            end_year = None              # open-ended: the job runs on
+        else:
+            try:
+                end_year = int(str(seg_to)[:4])
+            except (TypeError, ValueError):
+                # An unparseable end is not "no end" -- it is an unusable
+                # bound, and a window we cannot read is a window we cannot
+                # claim this year falls inside (DP#32: absence never invents).
+                continue
+        if calendar_year < start_year:
+            continue
+        if end_year is not None and calendar_year >= end_year:
+            continue
+        amount = seg.get('amount')
+        if amount is None:
+            continue
+        kind = seg.get('kind')
+        if kind == 'self_employment':
+            declared['self_employment'] += float(amount)
+        else:
+            declared['employment'] += float(amount)
+    return declared
+
+
 def _private_loan_interest_for(
         cfg, sim_year: int, primary_member: dict, spouse_member: dict
 ) -> Tuple[float, float, float, float]:
@@ -1285,10 +1373,33 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         # Issue #978: the stack is on WORKING self-employment income -- a
         # retired member earns no self-employment salary, so charge no stack.
         primary_self_emp = 0.0
+        # Issue #375 (foundation): returning to work is real, so a retired
+        # member keeps any wage a DATED segment declares for a job opening on
+        # or after retirement. Without this the engine cannot represent the
+        # decision at all -- it assumes the income away (a silent zero) and
+        # then prices neither the contributions nor the benefit (#375).
+        _p_back = _post_retirement_income_for_year(
+            primary_member, sim_year, year)
+        if _p_back is not None:
+            # A DECLARED year of zero wages is a real declaration, so this
+            # assigns on presence rather than on `> 0.0` (Cite, r_f45b5693).
+            primary_income = _p_back['employment']
+            primary_earned_income = _p_back['employment']
+            # A post-retirement self-employment segment is still
+            # self-employment income and must reach the contribution stack
+            # (#978 zeroes the CAREER salary, not a business started after
+            # retiring) -- Cite, r_c11ce2b8.
+            primary_self_emp = _p_back['self_employment']
     if s_retired:
         spouse_income = 0.0
         spouse_earned_income = 0.0
         spouse_self_emp = 0.0
+        _s_back = _post_retirement_income_for_year(
+            spouse_member, sim_year, year)
+        if _s_back is not None:
+            spouse_income = _s_back['employment']
+            spouse_earned_income = _s_back['employment']
+            spouse_self_emp = _s_back['self_employment']
 
     total_income = primary_income + spouse_income
     for ch in cfg.children:
@@ -2623,10 +2734,28 @@ class FamilySimulation:
                 # Issue #978: the stack is on WORKING self-employment income --
                 # a retired member earns no self-employment salary.
                 primary_self_emp = 0.0
+                # Issue #375 (foundation), MONTHLY path: the same declared
+                # post-retirement wage the annual path keeps. Without it the
+                # monthly engine still assumed the income away -- the identical
+                # silent zero, in the other time-step, and clone-detection
+                # flagged the untouched copy of this block for exactly that
+                # reason.
+                _p_back_m = _post_retirement_income_for_year(
+                    primary_member, sim_year, year)
+                if _p_back_m is not None:
+                    primary_income = _p_back_m['employment']
+                    primary_earned_income = _p_back_m['employment']
+                    primary_self_emp = _p_back_m['self_employment']
             if s_retired:
                 spouse_income = 0.0
                 spouse_earned_income = 0.0
                 spouse_self_emp = 0.0
+                _s_back_m = _post_retirement_income_for_year(
+                    spouse_member, sim_year, year)
+                if _s_back_m is not None:
+                    spouse_income = _s_back_m['employment']
+                    spouse_earned_income = _s_back_m['employment']
+                    spouse_self_emp = _s_back_m['self_employment']
 
             total_income = primary_income + spouse_income
             for ch in cfg.children:
