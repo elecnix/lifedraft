@@ -27,8 +27,24 @@ class QuebecTaxData:
 
     PROVINCE = "quebec"
     ABATEMENT = 0.165  # 16.5% Quebec abatement on federal tax
-    BASIC_PERSONAL_AMOUNT_2026 = 17383
-    BASIC_PERSONAL_AMOUNT_2025 = 17183
+    # Issue #351 (Cite round 1): the basic personal amount for these years is
+    # indexed annually, and three of the four rows carried the wrong value --
+    # 2025 and 2026 were BELOW 2024, which an indexed amount cannot be. Sourced
+    # from Finances Quebec "Parametres du regime d'imposition des particuliers",
+    # Tableau 3, for the years of imposition 2023 and 2026 (the two editions
+    # cover 2022/2023 and 2025/2026), and cross-checked against that publication's
+    # own indexation rates, which reproduce every step exactly:
+    #
+    #   2022 16 143  (published, for reference)
+    #   2023 17 183  = 16 143 x 1.0644  (the 2023 rate, 6.44%)
+    #   2024 18 056  = 17 183 x 1.0508  (the 2024 rate, 5.08%)
+    #   2025 18 571  = 18 056 x 1.0285  (the 2025 rate, 2.85%)
+    #   2026 18 952  = 18 571 x 1.0205  (the 2026 rate, 2.05%)
+    #
+    # Revenu Quebec's line 350 page states the 2025 figure in as many words:
+    # "Le montant personnel de base pour l'annee 2025 est de 18 571 $."
+    BASIC_PERSONAL_AMOUNT_2026 = 18952
+    BASIC_PERSONAL_AMOUNT_2025 = 18571
 
     @classmethod
     def all_years(cls) -> list:
@@ -243,7 +259,7 @@ class QuebecTaxData:
                 TaxBracket(126000, 0, 0.2575, "25.75%"),
             ],
             provincial_abatement=cls.ABATEMENT,
-            basic_personal_amount=18056,  # Issue #351: was 17183, the 2023 value,
+            basic_personal_amount=18056,  # 2023 x 1.0508 (the 2024 indexation rate)
             cpp_max_pensionable=68500,
             cpp_rate=0.0595,
             cpp2_max_pensionable=73200,  # DP#20: CPP2 YAMPE 2024 (first year of second ceiling)
@@ -328,7 +344,7 @@ class QuebecTaxData:
                 TaxBracket(119910, 0, 0.2575, "25.75%"),
             ],
             provincial_abatement=cls.ABATEMENT,
-            basic_personal_amount=15980,
+            basic_personal_amount=17183,  # Cite round 1: was 15980, which matches no published year
             cpp_max_pensionable=66600,
             cpp_rate=0.0595,
             cpp2_max_pensionable=66600,  # DP#20: CPP2 YAMPE 2023 (= YMPE, no second ceiling yet)
