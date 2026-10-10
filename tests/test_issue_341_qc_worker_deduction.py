@@ -80,6 +80,32 @@ class TestTheLaw:
             quebec_worker_deduction(30_000.0, year=2031)
 
 
+class TestTheProjectedCap:
+    """Beyond the last published year the provider indexates the maximum
+    forward. It must round the way the statute does -- to the nearest $5 -- and
+    not the way every other money field here does (to the cent), because a
+    cent-precision cap is a figure the statute cannot produce (Cite round 1 on
+    PR #465, and the source says so: "l'arrondissement se fait à 5 $ près")."""
+
+    @pytest.mark.parametrize("year", [2027, 2028, 2029, 2035, 2045])
+    def test_a_projected_cap_is_a_multiple_of_five_dollars(self, year):
+        # Work income high enough that the cap binds, so this reads the cap.
+        cap = quebec_worker_deduction(10_000_000.0, year=year)
+        assert cap % 5 == 0, f"{year}: cap {cap} is not a multiple of $5"
+        assert cap == int(cap), f"{year}: cap {cap} is not a whole dollar amount"
+
+    def test_the_projection_follows_the_published_progression(self):
+        """2026 is published at $1,450; at the provider's 2% indexation the next
+        year is 1,450 x 1.02 = 1,479, which rounds to $1,480."""
+        assert quebec_worker_deduction(10_000_000.0, year=2026) == 1_450.0
+        assert quebec_worker_deduction(10_000_000.0, year=2027) == 1_480.0
+
+    def test_the_cap_never_falls_as_the_years_advance(self):
+        caps = [quebec_worker_deduction(10_000_000.0, year=y)
+                for y in range(2023, 2036)]
+        assert caps == sorted(caps), f"a projected cap fell: {caps}"
+
+
 class TestTheQuebecSlice:
     """The deduction must move QUEBEC taxable income and nothing federal."""
 
