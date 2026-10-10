@@ -19,6 +19,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from countries.canada.income_type import (
     IncomeType, effective_tax_rate, capital_gains_inclusion_rate,
     wht_drag, after_tax_return,
@@ -222,10 +224,14 @@ class TestCorrectedDividendFormula(unittest.TestCase):
 
 
 class TestTieredCapitalGainsInclusion(unittest.TestCase):
-    """Test tiered capital gains inclusion rate (DP#27).
-    
-    For 2024+: 50% inclusion for first $250K, 66.67% for amounts above $250K.
-    For years before 2024: flat 50% inclusion rate.
+    """Test the capital gains inclusion rate (DP#27).
+
+    Flat one-half inclusion for EVERY year, including 2024 onwards. The 2/3
+    upper tier above $250K was never enacted (issue #344); see the module-level
+    note in federal_tax_data.py. The tiered arithmetic is retained and still
+    exercised -- the tier mechanism is data-driven, so it is tested directly
+    against injected tier data below rather than against a year that never had
+    one.
     """
 
     def test_2023_flat_50pct_inclusion(self):
@@ -243,27 +249,50 @@ class TestTieredCapitalGainsInclusion(unittest.TestCase):
         rate = capital_gains_inclusion_rate(gain_amount=250000, year=2024)
         self.assertAlmostEqual(rate, 0.50, places=4)
 
-    def test_2024_above_threshold(self):
-        """In 2024, gains above $250K: blended inclusion rate.
-        
-        $300K gain: first $250K at 50%, next $50K at 66.67%.
-        Taxable = $125K + $33.33K = $158.33K
-        Effective inclusion = $158.33K / $300K = 0.5278
+        # Issue #344: these two assertions previously hardcoded the 2/3 upper
+        # tier. That tier was a Ways and Means motion in Budget 2024,
+        # deferred 31 Jan 2025 and CANCELLED 21 Mar 2025 -- individuals have
+        # never paid it, so the expected values were wrong, not just stale.
+
+    def test_2024_above_the_never_enacted_threshold_is_still_flat_half(self):
+        """Issue #344: 2024 gains above $250K are a FLAT one-half, not blended.
+
+        This asserted (250000*0.50 + 50000*2/3)/300000 = 0.5278, which is a rate
+        no individual has ever faced. It is now 0.50, same as 2023.
         """
         rate = capital_gains_inclusion_rate(gain_amount=300000, year=2024)
-        # (250000 * 0.50 + 50000 * 2/3) / 300000 = 0.5278
-        expected = (250000 * 0.50 + 50000 * (2/3)) / 300000
-        self.assertAlmostEqual(rate, expected, places=4)
+        self.assertAlmostEqual(rate, 0.50, places=4)
 
-    def test_2026_high_gain_blended(self):
-        """In 2026, large gains: mostly at 66.67% rate.
-        
-        $1M gain: first $250K at 50%, next $750K at 66.67%.
-        Effective = (125000 + 500000) / 1000000 = 0.625
+    def test_2026_high_gain_is_still_flat_half(self):
+        """Issue #344: a $1M gain in 2026 is a flat one-half.
+
+        This asserted 0.625 by blending to 2/3 above $250K. Never enacted.
         """
         rate = capital_gains_inclusion_rate(gain_amount=1000000, year=2026)
-        expected = (250000 * 0.50 + 750000 * (2/3)) / 1000000
-        self.assertAlmostEqual(rate, expected, places=4)
+        self.assertAlmostEqual(rate, 0.50, places=4)
+
+    def test_the_tier_mechanism_still_works_when_a_tier_exists(self):
+        """The blended arithmetic is retained and correct -- no year HAS a tier.
+
+        Drives the real capital_gains_inclusion_rate with an enacted tier
+        supplied through the same provider the function reads, so the mechanism
+        stays covered on its own terms without a year that never had one. If a
+        future budget enacts a tier, this is the test to revisit.
+        """
+        enacted = SimpleNamespace(
+            capital_gains_inclusion_rate=0.50,
+            capital_gains_upper_inclusion_rate=2 / 3,
+            capital_gains_threshold=250_000,
+        )
+        provider = SimpleNamespace(
+            _load_year=lambda *a, **k: enacted)
+        with patch('countries.canada.income_type._get_tax_provider',
+                   return_value=provider):
+            below = capital_gains_inclusion_rate(gain_amount=250_000, year=2024)
+            blended = capital_gains_inclusion_rate(gain_amount=300_000, year=2024)
+        self.assertAlmostEqual(below, 0.50, places=4)
+        expected = (250_000 * 0.50 + 50_000 * (2 / 3)) / 300_000
+        self.assertAlmostEqual(blended, expected, places=4)
 
     def test_effective_tax_rate_capital_gains_tiered(self):
         """effective_tax_rate for capital gains uses tiered inclusion for 2024+."""
