@@ -218,7 +218,8 @@ def quebec_tax(income: float, year: int = 2026,
 def tuition_tax_credit(tuition: float,
                        year: int = 2026,
                        provider: TaxDataProvider = None,
-                       province: Optional[str] = None) -> float:
+                       province: Optional[str] = None,
+                       federal_only: bool = False) -> float:
     """Tuition tax credit -- the SIMPLE case of issue #764, extended in #783
     to include the Quebec PROVINCIAL tuition credit: a student claims their
     OWN non-refundable credit(s) on the eligible tuition they paid.
@@ -263,9 +264,39 @@ def tuition_tax_credit(tuition: float,
     except (ValueError, IndexError):
         lowest_rate = 0.15  # DP#13: round fallback (matches _load_fed_data's own)
     credit = tuition * lowest_rate
+    # Issue #348: a Quebec resident's FEDERAL portion of the tuition credit is
+    # worth only ``lowest_rate * (1 - provincial_abatement)``.
+    #
+    # The federal tuition credit (ITA s.118.5) is a NON-refundable credit, and
+    # the Quebec abatement is computed by the CRA on line 42900 -- basic
+    # federal tax, which is after the s.118-to-s.118.9 credits have been
+    # subtracted (ITA s.120(4), "tax otherwise payable under this Part"). A
+    # federal credit therefore lowers basic federal tax, which shrinks the
+    # 16.5% abatement by 16.5% of the credit. Crediting the full 15% overstates
+    # the saving by exactly that much.
+    #
+    # Read from the Quebec TaxYearData record rather than hardcoded, so the
+    # rate tracks the year versioned data (DP#2/DP#20). Every other province
+    # has an abatement of 0, so non-Quebec results are unchanged.
+    abatement = 0.0
+    if province is not None and province.lower() in ('quebec', 'qc'):
+        try:
+            qc_data = provider._load_year(year, 'canada', 'quebec')
+            abatement = float(qc_data.provincial_abatement)
+        except (ValueError, IndexError, AttributeError):
+            # DP#32: no data -> no provincial rate AND no abatement claim.
+            # Falling back to the un-abatemented federal credit would
+            # overstate the saving for a Quebec resident; refusing to invent
+            # an abatement understates it. Absent data is loud, not guessed:
+            # the credit below is still computed, and the caller sees no
+            # Quebec-specific adjustment rather than a fabricated one.
+            abatement = 0.0
+        if abatement:
+            credit = tuition * lowest_rate * (1.0 - abatement)
     # Issue #783: Quebec PROVINCIAL tuition credit (TP-1 Schedule T, 8%). Only
     # for a Quebec resident -- a non-QC student gets the federal credit only.
-    if province is not None and province.lower() in ('quebec', 'qc'):
+    if (not federal_only) and province is not None \
+            and province.lower() in ('quebec', 'qc'):
         try:
             qc_data = provider._load_year(year, 'canada', 'quebec')
             qc_rate = qc_data.qc_tuition_credit_rate

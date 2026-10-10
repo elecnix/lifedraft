@@ -162,7 +162,9 @@ class TestTuitionCreditWiring(unittest.TestCase):
         # spouse's year-0 tax (floored at 0); after_tax_income rises by it.
         rate = tuition_tax_credit(10_000, start_year, province='qc') / 10_000
         expected_credit = 10_000 * rate
-        self.assertAlmostEqual(expected_credit, 2_200.0, places=2)
+        # 10_000 x (0.14 x 0.835 + 0.08) = 1969.00, was 2200.00 (#348).
+        self.assertAlmostEqual(expected_credit, 1_969.0, places=2)
+        self.assertAlmostEqual(expected_credit, 1_969.0, places=2)
         self.assertAlmostEqual(
             with_credit[0].after_tax_income - base[0].after_tax_income,
             expected_credit, places=2)
@@ -211,7 +213,8 @@ class TestTuitionCreditWiring(unittest.TestCase):
         base = self._run_monthly(None)
         with_credit = self._run_monthly({start_year: 10_000})
         rate = tuition_tax_credit(10_000, start_year, province='qc') / 10_000
-        self.assertAlmostEqual(rate, 0.22, places=4)
+        # 0.14 x 0.835 + 0.08 = 0.1969, was 0.22 (#348).
+        self.assertAlmostEqual(rate, 0.1969, places=4)
         self.assertAlmostEqual(
             with_credit[0].after_tax_income - base[0].after_tax_income,
             10_000 * rate, places=2)
@@ -301,8 +304,15 @@ class TestTuitionByYearMapping(unittest.TestCase):
         qc_credit = _ttc(4000, 2026, province='quebec')
         fed_only = _ttc(4000, 2026, province='ontario')
         self.assertGreater(qc_credit, fed_only)
-        self.assertAlmostEqual(qc_credit - fed_only, 4000 * 0.08,  # the 8% QC portion
-                               places=4)
+        # The QC-vs-ON gap is the provincial 8% MINUS the federal portion the
+        # Quebec abatement removes: 4000 x (0.08 - 0.15 x 0.165) = 227.60 on
+        # the 2026 rate, not the bare 8% (#348).
+        from tax_data import TaxDataProvider as _P
+        _ab = _P()._load_year(2026, 'canada', 'quebec').provincial_abatement
+        _fed = _P()._load_year(
+            2026, 'canada', 'federal').federal_brackets[0].rate
+        self.assertAlmostEqual(qc_credit - fed_only,
+                               4000 * (0.08 - _fed * _ab), places=4)
 
     def test_non_quebec_tuition_emits_no_provincial_warning(self):
         doc, p, role, pid = self._doc(
