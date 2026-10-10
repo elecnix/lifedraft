@@ -114,6 +114,9 @@ class QuebecTaxData:
             qc_age_credit_reduction_rate=0.1875,  # 18.75%
             qc_non_refundable_credit_rate=0.14,   # lowest QC rate (14%)
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
+            # Issue #371: TP-1 line 385, the non-refundable credit on interest
+            # paid on a qualifying government student loan (Revenu Québec).
+            qc_student_loan_credit_rate=0.20,
             # ── Work premium (general, persons without children, 2026) ──
             qc_work_premium_max_single=1207.33,
             qc_work_premium_max_couple=1882.45,
@@ -196,6 +199,9 @@ class QuebecTaxData:
             qc_charitable_donation_top_threshold=129590,  # top bracket floor 2025
             qc_medical_expense_threshold_pct=0.03,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
+            # Issue #371: TP-1 line 385, the non-refundable credit on interest
+            # paid on a qualifying government student loan (Revenu Québec).
+            qc_student_loan_credit_rate=0.20,
             # ── Senior assistance tax credit (Parameters 2025) ──
             qc_senior_assistance_max_per_person=2000,
             qc_senior_assistance_threshold_single=27835,
@@ -278,6 +284,9 @@ class QuebecTaxData:
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
+            # Issue #371: TP-1 line 385, the non-refundable credit on interest
+            # paid on a qualifying government student loan (Revenu Québec).
+            qc_student_loan_credit_rate=0.20,
             # ── RESP/CESG/QESI/CLB thresholds (DP#12, DP#20) ──
             cesg_first_threshold=55867,
             cesg_second_threshold=111733,
@@ -337,5 +346,8 @@ class QuebecTaxData:
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
+            # Issue #371: TP-1 line 385, the non-refundable credit on interest
+            # paid on a qualifying government student loan (Revenu Québec).
+            qc_student_loan_credit_rate=0.20,
             source="fallback",
         )
