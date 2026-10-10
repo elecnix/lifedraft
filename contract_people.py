@@ -440,12 +440,48 @@ def _tuition_by_year(doc: Dict, p: Dict, role: str, person_id: str) -> Dict[int,
         if tuition is None:
             continue
         declared_any = True
+        # Issue #372: `reimbursed` is the part of THIS study period's tuition an
+        # employer (or anyone else) paid back. Reimbursed fees earn NEITHER the
+        # s.118.5 tuition credit NOR the Canada Training Credit (CRA allows
+        # neither where the learner did not bear the cost), so the per-year
+        # eligible map subtracts it. Overstating the reimbursement is REFUSED
+        # below rather than clamped: a clamp would silently turn an incoherent
+        # document into a smaller -- still wrong -- tuition claim, and could
+        # manufacture eligible tuition the learner never paid for.
+        reimbursed = s.get("reimbursed")
+        try:
+            tuition_amount = float(tuition)
+            reimbursed_amount = (float(reimbursed)
+                                if reimbursed is not None else None)
+        except (TypeError, ValueError):
+            # The schema types both as money, so this is unreachable through the
+            # validator -- but this function is also reached from hand-built
+            # internal dicts, and a bare float() error escaping the contract
+            # boundary is exactly the kind of failure a caller cannot act on.
+            raise ContractAdaptationError(
+                f"Person {person_id!r} declares a study period starting "
+                f"{s.get('start_date')!r} whose tuition/reimbursed amounts are not "
+                f"numbers: tuition={tuition!r}, reimbursed={reimbursed!r}. "
+                f"Both are money amounts (issue #372)."
+            )
+        if reimbursed_amount is not None and reimbursed_amount > tuition_amount:
+            raise ContractAdaptationError(
+                f"Person {person_id!r} declares a study period starting "
+                f"{s.get('start_date')!r} with tuition={tuition!r} but "
+                f"reimbursed={reimbursed!r} -- more was reimbursed than was "
+                f"paid. Reimbursed fees are not eligible for the tuition tax "
+                f"credit or the Canada Training Credit, so this document would "
+                f"claim credit on fees the learner never bore. Fix the "
+                f"reimbursed amount (issue #372)."
+            )
+        net = tuition_amount - (reimbursed_amount
+                                if reimbursed_amount is not None else 0.0)
         start_year = int(s["start_date"][:4])
         end = s.get("end_date")
         # null end = single known year (see docstring); do not annualise to infinity.
         years = range(start_year, (int(end[:4]) + 1) if end else (start_year + 1))
         for yr in years:
-            out[yr] = out.get(yr, 0.0) + float(tuition)
+            out[yr] = out.get(yr, 0.0) + net
     # Issue #785: the child-tuition warning is REMOVED -- transfer to a
     # supporting spouse/parent (federal $5,000 limit) is now modelled. A
     # child's tuition is no longer just recorded; it is TRANSFERRED to the
@@ -689,12 +725,23 @@ def _map_member(doc: Dict, person_id: str, role: str,
     tuition_by_year = _tuition_by_year(doc, p, role, person_id)
     if tuition_by_year:
         member["tuition_by_year"] = tuition_by_year
-        # Issue #785: extract the declared transfer target (the supporting
-        # spouse/parent the student transfers unused credit to, ITA s.118.8
-        # $5,000 limit). A taxed member transfers only AFTER applying to own
-        # tax; a child transfers the full credit (no own tax, #701).
-        transfer_to = _tuition_transfer_to(p)
-        member.update({"tuition_transfer_to": transfer_to} if transfer_to else {})
+    # Issue #372: the person's UNUSED Canada training amount limit carried into
+    # the projection's first year -- the balance their notice of assessment
+    # shows for the year before it. Declared on the PERSON (not on a study
+    # period) because the limit is a per-individual balance that outlives any
+    # one course, and a learner with several study periods has ONE of them.
+    # Emitted only when declared, so a household with no such balance is
+    # byte-identical to before (DP#32) and the opening room defaults to $0 --
+    # which is the honest reading of a limit that starts empty, not a guess.
+    opening_limit = p.get("training_amount_limit_opening")
+    if opening_limit is not None:
+        member["training_amount_limit_opening"] = float(opening_limit)
+    # Issue #785: extract the declared transfer target (the supporting
+    # spouse/parent the student transfers unused credit to, ITA s.118.8
+    # $5,000 limit). A taxed member transfers only AFTER applying to own
+    # tax; a child transfers the full credit (no own tax, #701).
+    transfer_to = _tuition_transfer_to(p)
+    member.update({"tuition_transfer_to": transfer_to} if transfer_to else {})
 
     return member
 

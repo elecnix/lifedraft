@@ -154,6 +154,17 @@ class TaxYearData:
     gis_max_coupled: float = 0.0         # GIS annual maximum for coupled pensioner (DP#20)
     gis_income_exemption: float = 0.0    # GIS income exemption (first $K ignored, DP#20)
     fhsa_limit: float = 0.0            # FHSA annual contribution limit (DP#20)
+    # ── Canada Training Credit (ITA s.122.91, issue #372) ──
+    # The REFUNDABLE federal credit for eligible tuition. The amounts are
+    # year-versioned here because the working-income THRESHOLD is indexed by
+    # CRA each year (it was $10,000 in 2020 and is $12,058 in 2026), while the
+    # $250 accrual and the $5,000 lifetime cap are statutory and NOT indexed --
+    # they are carried through unchanged by `_project_from_base` below, which is
+    # exactly the distinction a projection must get right.
+    # Source: ITA s.122.91; CRA, "Canada training credit" (line 45350).
+    ctc_annual_accrual: float = 0.0        # $250 added per qualifying year (not indexed)
+    ctc_lifetime_cap: float = 0.0         # $5,000 lifetime limit (not indexed)
+    ctc_working_income_threshold: float = 0.0  # INDEXED: min working income in the PRECEDING year
     basic_personal_amount: float = 0.0
     bpa_phaseout_threshold: float = 0.0  # Net income where BPA enhancement begins to phase out (CRA year-versioned)
     bpa_phaseout_end: float = 0.0      # Net income where BPA reaches minimum after phaseout (CRA year-versioned)
@@ -805,6 +816,16 @@ class TaxDataProvider:
             qpp_max_benefit_65=round(base.qpp_max_benefit_65 * factor, 2) if base.qpp_max_benefit_65 else 0,
             qpp_survivor_flat_rate=round(base.qpp_survivor_flat_rate * factor, 2) if base.qpp_survivor_flat_rate else 0,
             fhsa_limit=round(base.fhsa_limit * factor, 2) if base.fhsa_limit else 0,
+            # Issue #372: the CTC's INDEXED threshold is escalated with the
+            # rest of the money amounts, while the $250 accrual and the $5,000
+            # lifetime cap are statutory and ride through UNCHANGED -- a
+            # projection that indexed them would silently inflate the credit.
+            # (tests/architecture/test_ctc_projection.py is the detector: a new
+            # `ctc_*` field that is not carried here fails the build.)
+            ctc_annual_accrual=base.ctc_annual_accrual,
+            ctc_lifetime_cap=base.ctc_lifetime_cap,
+            ctc_working_income_threshold=(round(base.ctc_working_income_threshold * factor, 2)
+                                           if base.ctc_working_income_threshold else 0),
             basic_personal_amount=round(base.basic_personal_amount * factor, 2) if base.basic_personal_amount else 0,
             bpa_phaseout_threshold=round(base.bpa_phaseout_threshold * factor, 2) if base.bpa_phaseout_threshold else 0,
             bpa_phaseout_end=round(base.bpa_phaseout_end * factor, 2) if base.bpa_phaseout_end else 0,
@@ -973,6 +994,16 @@ class TaxDataProvider:
             rrsp_limit=data.get("rrsp_limit", 0),
             tfsa_limit=data.get("tfsa_limit", 0),
             fhsa_limit=data.get("fhsa_limit", 0),
+            # Issue #372: the CTC's parameters on the CACHED path too. A field
+            # read here but not in `_project_from_base` (or vice versa) comes
+            # back as its dataclass default, so a cached year would carry a $0
+            # working-income threshold -- which the accrual gate correctly
+            # treats as "no data, no credit", silently denying every learner
+            # their $250. Both directions of that mismatch are detected by
+            # tests/architecture/test_ctc_projection.py.
+            ctc_annual_accrual=data.get("ctc_annual_accrual", 0),
+            ctc_lifetime_cap=data.get("ctc_lifetime_cap", 0),
+            ctc_working_income_threshold=data.get("ctc_working_income_threshold", 0),
             federal_eligible_dtc_rate=data.get("federal_eligible_dtc_rate", 0),
             federal_non_eligible_dtc_rate=data.get("federal_non_eligible_dtc_rate", 0),
             federal_eligible_gross_up=data.get("federal_eligible_gross_up", 0.38),

@@ -76,12 +76,35 @@ def _run_tuition(time_step):
     sim = FamilySimulation(cfg, adapter=CanadaAdapter(cfg),
                            use_readvanceable=False, deduct_later=False)
     return sim.run()
+# RE-PINNED by #372 (the Canada Training Credit). The move is the feature
+# working, not drift. The household's members are 46 and 44 in 2026 on working
+# incomes of $120k and $45k, so each accrues the first $250 of training-amount
+# limit in 2026 and claims it in 2027 (and again in 2028) against that year's
+# tuition. A claim of $250 pays $250 of REFUNDABLE cash and removes $250 from
+# the s.118.5 base, worth 250 x 22% = $55 at the federal 14% + Quebec 8% rates
+# -- a net +$195 per member claiming, +$390 for the household when both claim.
+#
+# The after-tax-income deltas against the PREVIOUS pin, year by year (compare
+# each new row with the OLD row of the same year, not with the row above it):
+#   year 1  unchanged   (0 claimed)
+#   year 2  +$390.00    (both members claim: 2 x 195)
+#   year 3  +$390.00    (both claim again: 2 x 195)
+#   year 4   +$195.00   (primary's tuition ended in 2028, so only the spouse
+#                       claims: 1 x 195)
+#   years 5-8 unchanged (the balance is spent and no tuition is declared)
+# Year 1 cannot move whatever the household earns: a claim draws on the
+# balance carried in from the PREVIOUS year (ITA s.122.91), and this household
+# starts with none.
+#
+# The `monthly` list must stay IDENTICAL to `yearly`: that equality is the
+# two-folds-agree check, and it is why the numbers are written out twice rather
+# than computed.
 TUITION_CHARACTERIZATION_BASELINE = {
     'yearly': [
         (1, 120000.0, 45000.0, 117928.91440000001, 165000.0, 0.0),
-        (2, 120000.0, 45000.0, 119028.91440000001, 165000.0, 0.0),
-        (3, 120000.0, 45000.0, 118808.91440000001, 165000.0, 0.0),
-        (4, 120000.0, 45000.0, 116608.91440000001, 165000.0, 0.0),
+        (2, 120000.0, 45000.0, 119418.91440000001, 165000.0, 0.0),
+        (3, 120000.0, 45000.0, 119198.91440000001, 165000.0, 0.0),
+        (4, 120000.0, 45000.0, 116803.91440000001, 165000.0, 0.0),
         (5, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (6, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (7, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
@@ -89,9 +112,9 @@ TUITION_CHARACTERIZATION_BASELINE = {
     ],
     'monthly': [
         (1, 120000.0, 45000.0, 117928.91440000001, 165000.0, 0.0),
-        (2, 120000.0, 45000.0, 119028.91440000001, 165000.0, 0.0),
-        (3, 120000.0, 45000.0, 118808.91440000001, 165000.0, 0.0),
-        (4, 120000.0, 45000.0, 116608.91440000001, 165000.0, 0.0),
+        (2, 120000.0, 45000.0, 119418.91440000001, 165000.0, 0.0),
+        (3, 120000.0, 45000.0, 119198.91440000001, 165000.0, 0.0),
+        (4, 120000.0, 45000.0, 116803.91440000001, 165000.0, 0.0),
         (5, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (6, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (7, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
