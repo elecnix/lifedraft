@@ -495,6 +495,100 @@ def quebec_age_amount_credit(
     return amount * data.qc_non_refundable_credit_rate
 
 
+def quebec_career_extension_credit(
+    eligible_work_income: float,
+    net_income: float,
+    age: int,
+    year: int = 2026,
+    provider: Optional[TaxDataProvider] = None,
+    province: str = "quebec",
+) -> float:
+    """Quebec non-refundable credit: career extension (TP-1 line 391).
+
+    A credit for EXPERIENCED WORKERS who keep working, or return to work, past
+    the usual retirement age. It is 14% of eligible WORK income above an
+    excluded first slice, capped at a maximum eligible amount; the result is
+    then reduced on income above a threshold and floors at zero.
+
+    Two regime changes are DATA rather than branching code (DP#2/#20), because
+    both are year-versioned parameters:
+
+      * the AGE floor rose from 60 to 65 for the 2025 taxation year;
+      * the REDUCTION BASE moved from eligible WORK income (pre-2025) to the
+        individual's NET income, line 275 (2025 onward). Reducing on net income
+        is why a high-earning worker's credit can be clawed back by income that
+        is not work income at all.
+
+    A pre-2025 year additionally caps eligible work income at a LOWER amount for
+    a 60-64 claimant than for a 65+ one, which is why the cap is a pair.
+
+    The credit is NOT refundable: the caller caps it at the member's tax
+    otherwise payable, and any unused part is neither transferable nor
+    carryable forward.
+
+    Pure function (DP#3): same inputs -> same output.
+
+    Args:
+        eligible_work_income: the year's eligible work income -- wages and
+            salary, plus the net income of a business the member actively
+            carries on. PENSION, CPP/QPP, investment, rental and other income
+            are NOT work income and must not be passed here.
+        net_income: the individual's net income for the reduction test (the
+            line 275 figure). Ignored for a year whose regime reduces on work
+            income instead.
+        age: the member's age at December 31 of ``year`` (the statute tests age
+            at year end, not on the day the work was performed).
+        year: Tax year.
+        provider: Optional TaxDataProvider.
+
+    Returns:
+        The credit, in dollars, >= 0 and already floored at zero.
+
+    Source: Revenu Quebec, Line 391 -- Credit d'impot pour prolongation de
+        carriere; Ministere des Finances du Quebec, Depenses fiscales --
+        Edition 2024 (mars 2025), p. C.131; Loi sur les impots
+        art. 752.0.10.0.2 and 752.0.10.0.3.
+    """
+    # Province dispatch lives HERE, in the jurisdiction module, not as a
+    # literal in jurisdiction-agnostic core (DP#10/#25). The core passes the
+    # province as DATA -- the same contract `self_employed_contribution_stack`
+    # already follows -- so this credit is Quebec's alone and answers 0.0 for
+    # every other jurisdiction rather than needing a guard at the call site.
+    if province != "quebec":
+        return 0.0
+    if isinstance(age, bool) or not isinstance(age, int) or age < 0:
+        return 0.0
+    data = _get_quebec_data(year, provider)
+    if age < data.qc_career_extension_min_age:
+        return 0.0
+    # The lower cap for a 60-64 claimant existed only before 2025; from 2025 the
+    # field is 0 (no such tier) AND the age floor is 65, so this branch cannot
+    # fire on a post-reform year.
+    cap = data.qc_career_extension_max_work_income
+    if age < 65 and data.qc_career_extension_max_work_income_under_65 > 0:
+        cap = data.qc_career_extension_max_work_income_under_65
+    if cap <= 0:
+        return 0.0
+    work = max(0.0, eligible_work_income)
+    # The EXCLUSION comes off the work income FIRST, and the CAP then applies
+    # to what is left -- not the other way round. The order is load-bearing and
+    # the Ministère states it directly: the maximum credit is reached once work
+    # income hits 20,000 in 2025, which is 7,500 of exclusion plus the 12,500
+    # cap. Capping first and excluding afterwards would silently understate
+    # every claim above the exclusion.
+    base = min(work - data.qc_career_extension_exclusion, cap)
+    if base <= 0:
+        return 0.0
+    credit = base * data.qc_non_refundable_credit_rate
+    reduction_base = (net_income
+                      if data.qc_career_extension_reduction_on_net_income
+                      else work)
+    excess = max(0.0, reduction_base
+                 - data.qc_career_extension_reduction_threshold)
+    credit -= data.qc_career_extension_reduction_rate * excess
+    return max(0.0, credit)
+
+
 def quebec_medical_expense_credit(
     medical_expenses: float,
     net_income: float,
@@ -536,6 +630,8 @@ def quebec_non_refundable_credits(
     lowest_mtr: float = 0,
     year: int = 2026,
     provider: Optional[TaxDataProvider] = None,
+    eligible_work_income: float = 0,
+    age: Optional[int] = None,
 ) -> Dict[str, float]:
     """Aggregate Quebec non-refundable tax credits.
 
@@ -562,8 +658,20 @@ def quebec_non_refundable_credits(
         lowest_mtr=lowest_mtr,
         year=year,
         provider=provider)
+    # Issue #365: the career-extension credit. Claimed only when the caller
+    # supplied a dateable age AND some eligible work income; `age is None` is
+    # the absence-safe no-op (DP#32), never a silent 0-year-old.
+    career_credit = 0.0
+    if age is not None:
+        career_credit = quebec_career_extension_credit(
+            eligible_work_income=eligible_work_income,
+            net_income=net_income,
+            age=age,
+            year=year,
+            provider=provider)
     return {
         'charitable_donation_credit': donation_credit,
         'medical_expense_credit': medical_credit,
-        'total_credit': donation_credit + medical_credit,
+        'career_extension_credit': career_credit,
+        'total_credit': donation_credit + medical_credit + career_credit,
     }

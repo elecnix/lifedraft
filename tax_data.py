@@ -252,6 +252,38 @@ class TaxYearData:
     qc_age_credit_reduction_threshold: float = 0.0  # Shared family-income reduction threshold
     qc_age_credit_reduction_rate: float = 0.0  # Reduction rate above threshold (18.75%)
     qc_non_refundable_credit_rate: float = 0.0 # Conversion rate for QC non-refundable amounts (14%)
+    # ── Quebec career-extension credit (TP-1 line 391, issue #365) ──
+    # Source: MINISTÈRE DES FINANCES DU QUÉBEC, Dépenses fiscales — Édition 2024
+    # (mars 2025), p. C.131, and the parameters table reproduced in the CFFP
+    # sheet "Crédit d'impôt pour la prolongation de carrière" (2025), which
+    # cites Loi sur les impôts art. 752.0.10.0.2 and 752.0.10.0.3. Every figure
+    # is year-versioned data (DP#20), never a constant in code (DP#2/#12).
+    #
+    # The credit is 14% (the conversion rate above) of eligible WORK income
+    # above `qc_career_extension_exclusion`, capped at
+    # `qc_career_extension_max_work_income`. It is then reduced by
+    # `qc_career_extension_reduction_rate` on the amount by which the reduction
+    # base exceeds `qc_career_extension_reduction_threshold`, and the result
+    # floors at zero (the credit is fully gone above that point).
+    #
+    # Two details distinguish the regimes, and both are DATA rather than an
+    # `if year >= 2025` in the credit function:
+    #   (a) the age floor rose from 60 to 65 for the 2025 taxation year;
+    #   (b) the REDUCTION BASE moved from the eligible WORK income (pre-2025)
+    #       to the individual's NET income, line 275 (2025 onward).
+    # `qc_career_extension_reduction_on_net_income` carries (b). A pre-2025 year
+    # additionally caps eligible work income at a LOWER amount for a 60-64
+    # claimant than for a 65+ one, which is why the cap is a pair.
+    qc_career_extension_min_age: int = 0      # Age floor at December 31 (60 to 2024, 65 from 2025)
+    qc_career_extension_exclusion: float = 0.0  # First dollars of work income excluded
+    qc_career_extension_max_work_income: float = 0.0  # Cap at 65+
+    qc_career_extension_max_work_income_under_65: float = 0.0  # Pre-2025 cap at 60-64 (0 = same as 65+)
+    qc_career_extension_reduction_threshold: float = 0.0  # Reduction threshold
+    qc_career_extension_reduction_rate: float = 0.0        # Reduction rate above it
+    # 1 => reduce on individual NET income (line 275); 0 => on eligible work
+    # income. A float, not a bool, so the forward-projection block can carry it
+    # through the same dataclass-wide numeric convention as its neighbours.
+    qc_career_extension_reduction_on_net_income: float = 0.0
     # ── Quebec tuition tax credit (TP-1 Schedule T, issue #783) ──
     # A SPECIFIC non-refundable credit rate on eligible tuition (8% since
     # 2013), NOT the 14% general qc_non_refundable_credit_rate. Sourced from
@@ -850,6 +882,19 @@ class TaxDataProvider:
             qc_age_credit_reduction_threshold=round(base.qc_age_credit_reduction_threshold * factor, 2) if base.qc_age_credit_reduction_threshold else 0,
             qc_age_credit_reduction_rate=base.qc_age_credit_reduction_rate,
             qc_non_refundable_credit_rate=base.qc_non_refundable_credit_rate,
+            # Issue #365: the career-extension credit's money amounts are
+            # INDEXED (the Ministère says so explicitly for 2026 onward), so
+            # they ride the same `factor` as their neighbours. The age floor,
+            # the reduction rate and the reduction-base flag are NOT indexed --
+            # they are policy switches, and scaling them would invent a
+            # fractional age floor.
+            qc_career_extension_min_age=base.qc_career_extension_min_age,
+            qc_career_extension_exclusion=round(base.qc_career_extension_exclusion * factor, 2) if base.qc_career_extension_exclusion else 0,
+            qc_career_extension_max_work_income=round(base.qc_career_extension_max_work_income * factor, 2) if base.qc_career_extension_max_work_income else 0,
+            qc_career_extension_max_work_income_under_65=round(base.qc_career_extension_max_work_income_under_65 * factor, 2) if base.qc_career_extension_max_work_income_under_65 else 0,
+            qc_career_extension_reduction_threshold=round(base.qc_career_extension_reduction_threshold * factor, 2) if base.qc_career_extension_reduction_threshold else 0,
+            qc_career_extension_reduction_rate=base.qc_career_extension_reduction_rate,
+            qc_career_extension_reduction_on_net_income=base.qc_career_extension_reduction_on_net_income,
             qc_tuition_credit_rate=base.qc_tuition_credit_rate,
             qc_work_premium_max_single=round(base.qc_work_premium_max_single * factor, 2) if base.qc_work_premium_max_single else 0,
             qc_work_premium_max_couple=round(base.qc_work_premium_max_couple * factor, 2) if base.qc_work_premium_max_couple else 0,

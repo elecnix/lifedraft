@@ -1104,7 +1104,55 @@ def _short_term_rental_facts(cfg) -> Tuple[float, bool]:
     return str_income, registration_required
 
 
-def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets):
+def _quebec_career_extension_for(config, birth_year, work_income: float,
+                                  net_income: float,
+                                  calendar_year) -> float:
+    """Issue #365: the Quebec career-extension credit for ONE adult, or 0.0.
+
+    The credit is an INDIVIDUAL, non-refundable credit on a member's own work
+    income, so it is computed per adult inside ``_income_tax_by_adult`` rather
+    than once for the household (Canada has no joint filing here either).
+
+    Absence-safe at every gate (DP#32): no calendar year, no dateable birth
+    year, no work income, or a province other than Quebec each yield 0.0 --
+    which is the correct no-op for every non-Quebec and every retired household,
+    and is what keeps the golden trajectory byte-identical.
+
+    ``work_income`` is the member's EARNED income as this engine already
+    computes it (employment pay + net self-employment income, ITA s.146(1)).
+    That is the same population the credit's "eligible work income" describes
+    and it deliberately excludes pension, CPP/QPP, investment and rental income,
+    which the statute also excludes. Reusing the one existing spelling of "work
+    income" rather than introducing a second is DP#9; the two are not identical
+    in law (the statute also tests dependent-employer and
+    former-employment-benefit cases the contract does not collect), and that
+    residual is disclosed in the model_fidelity entry rather than guessed here.
+
+    ``net_income`` is the member's taxable income before credits -- the closest
+    figure the fold carries to the line 275 net income the 2025+ reduction uses.
+    That is an approximation of the statutory base and is disclosed as such.
+    """
+    if calendar_year is None or not isinstance(work_income, (int, float)):
+        return 0.0
+    if work_income <= 0 or not birth_year:
+        return 0.0
+    age = calendar_year - birth_year
+    from countries.canada.provinces.quebec.quebec_credits import (
+        quebec_career_extension_credit,
+    )
+    # The province is DATA (DP#10/#25): the jurisdiction module decides whether
+    # the credit exists, so no Quebec literal appears in this file.
+    return quebec_career_extension_credit(
+        eligible_work_income=work_income,
+        net_income=net_income,
+        age=age,
+        year=calendar_year,
+        province=getattr(config, 'province', ''),
+    )
+
+
+def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets,
+                         work_by_role=None, calendar_year=None):
     """Issue #701 (Step 5 of #643): tax each adult individually via a loop.
 
     Canada has no joint filing, so each adult's marginal rate and pre-credit
@@ -1126,12 +1174,29 @@ def _income_tax_by_adult(config, income_by_role, loan_by_role, brackets):
         income = income_by_role[role]
         loan_inc, loan_ded = loan_by_role[role]
         taxable = income + loan_inc - loan_ded
+        tax_before = tax_on_income(taxable, brackets)
+        # Issue #365: the Quebec career-extension credit. Non-refundable, so it
+        # reduces the tax otherwise payable and never drives it below zero --
+        # the cap is the whole meaning of "non-refundable", and without it the
+        # credit would become a payment.
+        career_credit = 0.0
+        if work_by_role is not None:
+            career_credit = _quebec_career_extension_for(
+                config, birth_by_role.get(role, 0),
+                work_by_role.get(role, 0.0), taxable, calendar_year)
+            career_credit = min(career_credit, max(0.0, tax_before))
         return {
             'rate': marginal_rate(income, brackets),
             'taxable_income': taxable,
-            'tax_before': tax_on_income(taxable, brackets),
+            'tax_before': tax_before,
+            'career_extension_credit': career_credit,
+            'tax_after_credits': tax_before - career_credit,
         }
 
+    # Issue #365: the age a credit gate needs is date-computed from the
+    # member's OWN birth_year (DP#1), never stored.
+    birth_by_role = {adult.get('role'): adult.get('birth_year', 0)
+                     for adult in config.adults()}
     result = {adult['role']: _slot(adult['role']) for adult in config.adults()}
     # Backfill the roles the retained two-slot signature still consumes.
     for role in ('primary', 'spouse'):
@@ -1364,7 +1429,11 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
         (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
         _extra_specs)
-    _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
+    _adult_tax = _income_tax_by_adult(
+        cfg, _income_by_role, _loan_by_role, year_brackets,
+        work_by_role={'primary': primary_earned_income,
+                          'spouse': spouse_earned_income},
+                         calendar_year=sim_year)
     primary_rate = _adult_tax['primary']['rate']
     spouse_rate = _adult_tax['spouse']['rate']
 
@@ -2695,7 +2764,11 @@ class FamilySimulation:
                 (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
                 (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
                 _extra_specs)
-            _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
+            _adult_tax = _income_tax_by_adult(
+        cfg, _income_by_role, _loan_by_role, year_brackets,
+        work_by_role={'primary': primary_earned_income,
+                          'spouse': spouse_earned_income},
+                         calendar_year=sim_year)
             primary_rate = _adult_tax['primary']['rate']
             spouse_rate = _adult_tax['spouse']['rate']
             primary_tax_before = _adult_tax['primary']['tax_before']
