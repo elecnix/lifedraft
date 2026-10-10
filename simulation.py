@@ -36,7 +36,7 @@ Usage:
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Tuple
 from copy import deepcopy
 from pathlib import Path
@@ -591,6 +591,46 @@ def _income_shock_active_for_year(base_amount: float, segments: Optional[List[Di
     actual, _ = _income_components_for_year(
         base_amount, segments, calendar_year, salary_growth, year_index)
     return actual < baseline_full_year - 1e-6
+
+
+def _member_for_role(cfg, role):
+    for member in getattr(cfg, 'adults', lambda: [])():
+        if member.get('role') == role:
+            return member
+    return {}
+
+
+def _moving_expense_deductions(
+        cfg, sim_year: int, primary_income: float, spouse_income: float,
+        carry_forward: Optional[Dict[str, float]] = None,
+) -> Tuple[float, float, float, float]:
+    """Issue #376: each adult's moving-expense deduction for ``sim_year``, and
+    the balance that carries forward. Computed ONCE for both time-steps
+    (DP#9: one spelling, not two).
+
+    Reads the DECLARED moves off each member (an absent block claims nothing)
+    and prices them against that member's own income for the year, which is
+    what the deduction is capped at. That cap is an UPPER BOUND on the
+    statutory "income earned at the new location": this engine holds no
+    locations, so it prices against the member's whole declared income, which
+    can permit more than the statute would and never less. See
+    ``countries.canada.moving_expenses`` for why that is the honest side.
+
+    Pure (DP#3) apart from reading the two member dicts it is handed; returns
+    ``(primary_deduction, primary_carry, spouse_deduction, spouse_carry)``.
+    """
+    from countries.canada.moving_expenses import (
+        claimed_moving_expenses, moving_expense_deduction,
+    )
+    carried = carry_forward if carry_forward is not None else {}
+    out = []
+    for role, income in (('primary', primary_income), ('spouse', spouse_income)):
+        member = _member_for_role(cfg, role)
+        claimed = claimed_moving_expenses(member, sim_year)
+        held = carried.get(role, 0.0)
+        deduction, remaining = moving_expense_deduction(claimed, income, held)
+        out.extend((deduction, remaining))
+    return tuple(out)
 
 
 def _private_loan_interest_for(
@@ -1359,11 +1399,31 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
     # added, deduction + CCA subtracted) but -- unlike the interest -- it is NOT
     # subtracted from after-tax cash below (see _after_tax_by_role): depreciation
     # lowers the tax bill without consuming cash.
+    # Issue #376 (ITA s.62 / TA s.348): the moving-expense deduction rides the
+    # SAME (income_add, deduction) slot as private-loan interest and rental
+    # interest, so it reduces TAXABLE income before tax_on_income through the
+    # one existing mechanism rather than a new one (DP#9). The unused balance
+    # carries forward per member, in the same canada jurisdiction_state the
+    # Quebec interest carry-forward uses. Zero for every household that
+    # declares no move (the golden household), so byte-identical there.
+    (_p_move_ded, _p_move_carry,
+     _s_move_ded, _s_move_carry) = _moving_expense_deductions(
+        cfg, sim_year, primary_income, spouse_income,
+        state.jurisdiction_state.get('canada', {}).get(
+            'moving_expense_carry_forward', {}))
     _income_by_role, _loan_by_role = _adult_income_maps(
         primary_income, spouse_income,
-        (_p_loan_inc + _p_rent_op, _p_loan_ded + _p_rent_ded + _p_rent_cca),
-        (_s_loan_inc + _s_rent_op, _s_loan_ded + _s_rent_ded + _s_rent_cca),
+        (_p_loan_inc + _p_rent_op,
+         _p_loan_ded + _p_rent_ded + _p_rent_cca + _p_move_ded),
+        (_s_loan_inc + _s_rent_op,
+         _s_loan_ded + _s_rent_ded + _s_rent_cca + _s_move_ded),
         _extra_specs)
+    # Issue #376: the unused moving-expense balance carries forward per member
+    # in the canada jurisdiction_state. Held here and written onto next_state
+    # below, since the fold's step is pure (DP#26) and must not touch input.
+    _move_carry_state = {k: v for k, v in (('primary', _p_move_carry),
+                                           ('spouse', _s_move_carry))
+                         if v > 0.0}
     _adult_tax = _income_tax_by_adult(cfg, _income_by_role, _loan_by_role, year_brackets)
     primary_rate = _adult_tax['primary']['rate']
     spouse_rate = _adult_tax['spouse']['rate']
@@ -1829,6 +1889,17 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
     # no private loan is declared (the golden household, DP#32).
     result.attribution_summary = _attribution_checks_for(
         cfg, sim_year, primary_member, spouse_member)
+    # Issue #376: carry the outstanding moving-expense balance onto the NEXT
+    # state. Written ONLY when something is genuinely outstanding, so a
+    # household that shelters its move in full leaves no key and every
+    # pre-existing trajectory is byte-identical (DP#32). Done here rather than
+    # inside the fold because simulate_year_pure is a pure function of explicit
+    # state (DP#26) and must not mutate what it was handed.
+    if _move_carry_state:
+        _next_canada = dict(next_state.jurisdiction_state.get('canada', {}))
+        _next_canada['moving_expense_carry_forward'] = _move_carry_state
+        next_state = replace(next_state, jurisdiction_state={
+            **next_state.jurisdiction_state, 'canada': _next_canada})
     return result, next_state
 
 
