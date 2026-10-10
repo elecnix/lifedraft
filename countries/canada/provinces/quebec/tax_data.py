@@ -49,10 +49,21 @@ class QuebecTaxData:
             basic_personal_amount=cls.BASIC_PERSONAL_AMOUNT_2026,
             cpp_max_pensionable=74600,   # YMPE 2026
             cpp_rate=0.0595,
-            cpp2_max_pensionable=81900,  # DP#20: CPP2 YAMPE 2026
+            # DP#20: second earnings ceiling 2026 = $85,000 (CRA 'Second additional
+            # CPP contribution rates and maximums', AYMPE 2026 $85,000, max $416;
+            # Retraite Quebec: 'earnings between $74 600 and $85 000'):
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/calculating-deductions/making-deductions/second-additional-cpp-contribution-rates-maximums.html
+            # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+            cpp2_max_pensionable=85000,
             cpp2_rate=0.04,
             cpp_max_benefit_65=18092,
-            qpp_rate=0.0640,            # DP#52: QPP rate 6.40% (higher than CPP 5.95%)
+            # DP#52: QPP employee rate 2026 = 6.30% -- basic plan 5.3% + first
+            # additional plan 1% (the basic rate fell from 5.4% in 2025). Retraite
+            # Quebec: 'contributing to the basic plan under the QPP at a rate of
+            # 5.3%' / 'to the additional plan at a rate of 1%'; its worked
+            # example is $2,930 on $50,000 = (50,000 - 3,500) x 6.3%:
+            # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+            qpp_rate=0.0630,
             qpp_max_benefit_65=17334,   # DP#52: QPP max benefit at 65 (2026)
             qpp_survivor_flat_rate=6498, # DP#52: QPP survivor flat-rate (annual, 2026)
             oas_annual_max=8908,
@@ -133,6 +144,23 @@ class QuebecTaxData:
             clb_threshold_1_3_children=58523,
             clb_threshold_4_children=66078,
             clb_threshold_5plus_children=73633,
+            # ── Employee payroll premiums (issue #289) ──
+            # Reduced EI employee rate for Quebec employees (2026; EI Act
+            # s.69(2): QPIP replaces EI maternity/parental benefits), CRA
+            # "EI premium rates and maximums" (Quebec column):
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/employment-insurance-ei/ei-premium-rates-maximums.html
+            ei_employee_rate_provincial_plan=0.013,
+            # QPP first additional plan employee rate (1%, fully phased in
+            # 2023): deductible, the base plan part is a federal s.118.7
+            # credit. Retraite Québec contributions page:
+            # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+            qpp_first_additional_rate=0.01,
+            # Quebec grants NO separate non-refundable credit for QPP / EI /
+            # QPIP premiums on TP-1 (they are not a Schedule B credit); it
+            # allows only the deduction for enhanced QPP contributions on
+            # employment income (TP-1 line 248, point 1):
+            # https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/how-to-complete-your-income-tax-return/line-by-line-help/201-to-260-net-income/line-248/point-1/
+            provincial_payroll_credit=False,
             source="fallback",
         )
 
@@ -150,7 +178,10 @@ class QuebecTaxData:
             ],
             provincial_abatement=cls.ABATEMENT,
             basic_personal_amount=cls.BASIC_PERSONAL_AMOUNT_2025,
-            cpp_max_pensionable=68500,
+            # Issue #289: 2025 maximum pensionable earnings is $71,300 (was
+            # 68,500, the 2024 figure). Retraite Québec / CRA 2025 YMPE:
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/canada-pension-plan-cpp/cpp-contribution-rates-maximums-exemptions.html
+            cpp_max_pensionable=71300,
             cpp_rate=0.0595,
             cpp2_max_pensionable=81200,  # DP#20: CPP2 YAMPE 2025
             cpp2_rate=0.04,
@@ -227,6 +258,23 @@ class QuebecTaxData:
             clb_threshold_1_3_children=57375,
             clb_threshold_4_children=64733,
             clb_threshold_5plus_children=72123,
+            # ── Employee payroll premiums (issue #289) ──
+            # Reduced EI employee rate for Quebec employees (2025; EI Act
+            # s.69(2): QPIP replaces EI maternity/parental benefits), CRA
+            # "EI premium rates and maximums" (Quebec column):
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/employment-insurance-ei/ei-premium-rates-maximums.html
+            ei_employee_rate_provincial_plan=0.0131,
+            # QPP first additional plan employee rate (1%, fully phased in
+            # 2023): deductible, the base plan part is a federal s.118.7
+            # credit. Retraite Québec contributions page:
+            # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+            qpp_first_additional_rate=0.01,
+            # Quebec grants NO separate non-refundable credit for QPP / EI /
+            # QPIP premiums on TP-1 (they are not a Schedule B credit); it
+            # allows only the deduction for enhanced QPP contributions on
+            # employment income (TP-1 line 248, point 1):
+            # https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/how-to-complete-your-income-tax-return/line-by-line-help/201-to-260-net-income/line-248/point-1/
+            provincial_payroll_credit=False,
             source="fallback",
         )
 
@@ -286,6 +334,23 @@ class QuebecTaxData:
             clb_threshold_1_3_children=55867,
             clb_threshold_4_children=63036,
             clb_threshold_5plus_children=70234,
+            # ── Employee payroll premiums (issue #289) ──
+            # Reduced EI employee rate for Quebec employees (2024; EI Act
+            # s.69(2): QPIP replaces EI maternity/parental benefits), CRA
+            # "EI premium rates and maximums" (Quebec column):
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/employment-insurance-ei/ei-premium-rates-maximums.html
+            ei_employee_rate_provincial_plan=0.0132,
+            # QPP first additional plan employee rate (1%, fully phased in
+            # 2023): deductible, the base plan part is a federal s.118.7
+            # credit. Retraite Québec contributions page:
+            # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+            qpp_first_additional_rate=0.01,
+            # Quebec grants NO separate non-refundable credit for QPP / EI /
+            # QPIP premiums on TP-1 (they are not a Schedule B credit); it
+            # allows only the deduction for enhanced QPP contributions on
+            # employment income (TP-1 line 248, point 1):
+            # https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/how-to-complete-your-income-tax-return/line-by-line-help/201-to-260-net-income/line-248/point-1/
+            provincial_payroll_credit=False,
             source="fallback",
         )
 
@@ -337,5 +402,22 @@ class QuebecTaxData:
             qc_charitable_donation_rate_high=0.24,  # 24% on above-$200 not in top bracket
             qc_medical_expense_threshold_pct=0.03,
             qc_tuition_credit_rate=0.08,   # issue #783: TP-1 Schedule T line 45 (8% specific rate, not 14%)
+            # ── Employee payroll premiums (issue #289) ──
+            # Reduced EI employee rate for Quebec employees (2023; EI Act
+            # s.69(2): QPIP replaces EI maternity/parental benefits), CRA
+            # "EI premium rates and maximums" (Quebec column):
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/employment-insurance-ei/ei-premium-rates-maximums.html
+            ei_employee_rate_provincial_plan=0.0127,
+            # QPP first additional plan employee rate (1%, fully phased in
+            # 2023): deductible, the base plan part is a federal s.118.7
+            # credit. Retraite Québec contributions page:
+            # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+            qpp_first_additional_rate=0.01,
+            # Quebec grants NO separate non-refundable credit for QPP / EI /
+            # QPIP premiums on TP-1 (they are not a Schedule B credit); it
+            # allows only the deduction for enhanced QPP contributions on
+            # employment income (TP-1 line 248, point 1):
+            # https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/how-to-complete-your-income-tax-return/line-by-line-help/201-to-260-net-income/line-248/point-1/
+            provincial_payroll_credit=False,
             source="fallback",
         )

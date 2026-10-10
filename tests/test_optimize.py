@@ -555,6 +555,47 @@ class TestSimulatedDeductTiming(unittest.TestCase):
         self.assertIsNone(simulated_deduct_timing({}, "input.json"))
 
 
+# ── Issue #251: the CLI must print the "deduct later wins" branch too ───────
+
+def test_cli_reports_an_advantage_to_deducting_later(tmp_path, monkeypatch, capsys):
+    """``main()``'s RRSP deduct-timing block has three mutually exclusive
+    report lines (deduct later / deduct now / neutral). Only two of them
+    were ever exercised, so the whole "deducting LATER is better" report --
+    the one that actually justifies deferring a contribution -- could
+    regress silently.
+
+    The shipped example household at a 5% salary growth is the case: growth
+    lifts later-year income above the current year's, so claiming the $73k
+    of carried RRSP room across higher brackets beats claiming it all now.
+    (At the example's default 2% growth the comparison is a near-tie either
+    way, so this fixture is deliberately not that one.) The HELOC liability
+    is dropped so the Smith Manoeuvre strategies -- whose deduct-later arm
+    is the BEST bucket once a readvanceable facility exists -- do not win
+    the comparison and mask the plain RRSP timing the block is reporting.
+    """
+    import output_paths
+    from test_input_contract import _load_example, _two_generation_subset
+
+    doc = _two_generation_subset(_load_example())
+    doc["liabilities"] = [l for l in doc["liabilities"] if l["kind"] != "heloc"]
+    doc["assumptions"]["salary_growth"] = 0.05
+    path = tmp_path / "input.json"
+    path.write_text(json.dumps(doc))
+    monkeypatch.setattr(output_paths, 'CACHE_DIR', str(tmp_path / "cache"))
+    monkeypatch.setattr(sys, 'argv', ['optimize.py', '--input', str(path)])
+
+    import optimize
+    optimize.main()
+
+    out = capsys.readouterr().out
+    assert 'RRSP DEDUCTION TIMING' in out
+    assert 'Advantage of deduct later' in out, (
+        "the simulation says deducting later wins, so main() must say so -- "
+        "otherwise the deferral advice is never printed")
+    assert 'Advantage of deduct now' not in out
+    assert 'Deduct timing is neutral' not in out
+
+
 # ── Issue #1058: include_year_by_year flag ────────────────────────────────
 
 class TestIncludeYearByYearFlag(unittest.TestCase):

@@ -27,12 +27,17 @@ import unittest
 
 from countries.canada.adapter import CanadaAdapter
 from countries.canada.cpp_sharing import compute_cpp2_contribution
+from countries.canada.employee_contributions import (
+    employee_contribution_breakdown,
+)
 from countries.canada.provinces.quebec.quebec_credits import (
     quebec_qpip_premium,
     quebec_health_services_fund_individual,
 )
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
+from tax_calculator import tax_on_income
+from tax_data import TaxDataProvider
 
 GROSS = 100_000          # a fabricated round number (DP#4/DP#15)
 YEAR = 2026               # the engine's default start year (year-versioned data)
@@ -54,11 +59,52 @@ def _self_employed_stack(gross: float, province: str, year: int) -> float:
     return qpp + qpip + hsf
 
 
+def _net_payroll(result) -> float:
+    """Issue #289: the employee payroll premiums (CPP/QPP + EI + QPIP) net of
+    their s.60(e)/s.118.7 relief, read off the engine's own YearResult. An
+    employee now pays these; a self-employed earner pays the #978 stack
+    instead (0.0 here for a self-employed run)."""
+    return (result.payroll_pension_contributions + result.payroll_ei_premiums
+            + result.payroll_qpip_premiums - result.payroll_tax_relief)
+
+
+def _expected_net_payroll(gross: float, province: str, year: int) -> float:
+    """The employee's net payroll cost for one year, priced by the STANDALONE
+    calculator (``employee_contribution_breakdown``) plus the shared pure
+    ``tax_on_income`` -- never read back off the fold's own ``YearResult``.
+
+    The delta assertions below compare an employee's and a self-employed
+    earner's ``after_tax_income``. Subtracting ``_net_payroll(result)`` from
+    such a delta would be an identity: the fold computed ``after_tax_income``
+    as ``gross - relieved_tax - premiums``, so ``se - emp - (premiums -
+    relief)`` is zero BY CONSTRUCTION whatever the premiums are, and the
+    assertion could not fail on the behaviour it names.
+
+    ``relief`` is what the fold reports as ``payroll_tax_relief``: the s.118.7
+    credit PLUS the bracket tax the ITA s.60(e) deduction removes. The
+    credit's non-refundable floor (ITA s.118(1)) is not binding at the grosses
+    these fixtures use, which is asserted by the exactness of the equality.
+    """
+    provider = TaxDataProvider()
+    c = employee_contribution_breakdown(gross, province, year, provider)
+    brackets = provider.get_combined_brackets(year=year, province=province)
+    relief = c.s118_7_credit_value + (
+        tax_on_income(gross, brackets)
+        - tax_on_income(gross - c.s60e_deduction, brackets))
+    return c.total_premiums - relief
+
+
 def _run(province: str, kind: str) -> float:
     """Run ONE working year for a single earner of the given income ``kind``
     at GROSS, and return the year's after-tax (disposable) income the solvency
     identity saw. ``savings_rate=0`` so nothing is contributed and the
     comparison is purely the tax + contribution stack, not room consumption."""
+    return _run_result(province, kind).after_tax_income
+
+
+def _run_result(province: str, kind: str):
+    """``_run``'s year-0 ``YearResult`` (issue #289: carries the payroll
+    fields)."""
     cfg = SimulationConfig(
         projection_years=1,
         house_value=0, mortgage_balance=0, margin_available=0,
@@ -77,7 +123,7 @@ def _run(province: str, kind: str) -> float:
     )
     sim = FamilySimulation(cfg, adapter=CanadaAdapter(cfg))
     results = sim.run()
-    return results[0].after_tax_income
+    return results[0]
 
 
 class TestSelfEmployedContributionStack(unittest.TestCase):
@@ -87,7 +133,8 @@ class TestSelfEmployedContributionStack(unittest.TestCase):
         """The load-bearing assertion: a self-employed QC earner's disposable
         income is LOWER than an employee's at the same gross, by EXACTLY the
         QPP(both-halves) + QPIP(self-employed) + individual-HSF total."""
-        employee = _run('quebec', 'employment')
+        employee_result = _run_result('quebec', 'employment')
+        employee = employee_result.after_tax_income
         self_employed = _run('quebec', 'self_employment')
 
         # Sanity: both ran and surfaced a disposable figure.
@@ -101,8 +148,14 @@ class TestSelfEmployedContributionStack(unittest.TestCase):
 
         # And the delta is EXACTLY the stack the existing calculators produce
         # (DP#9 -- the test reuses the fold's own calculators, so this is a
-        # structural equality, not a hand-typed constant).
-        expected_delta = _self_employed_stack(GROSS, 'quebec', YEAR)
+        # structural equality, not a hand-typed constant) -- less the
+        # employee's own net payroll cost, which #289 now charges. That cost
+        # is priced by the STANDALONE calculator, not read back off the
+        # employee's YearResult: subtracting a figure derived from the value
+        # under test would make the equality an identity.
+        expected_delta = (_self_employed_stack(GROSS, 'quebec', YEAR)
+                          - _expected_net_payroll(GROSS, 'quebec', YEAR))
+        self.assertGreater(_net_payroll(employee_result), 0.0)
         self.assertAlmostEqual(employee - self_employed, expected_delta, places=2,
                               msg="the disposable-income delta must equal the "
                               "QPP(both-halves) + QPIP(SE) + individual-HSF total.")
@@ -149,12 +202,16 @@ class TestSelfEmployedContributionStack(unittest.TestCase):
                 ],
             )
             sim = FamilySimulation(cfg, adapter=CanadaAdapter(cfg))
-            return sim.run()[0].after_tax_income
+            return sim.run()[0]
 
-        emp = _run_at('employment')
-        se = _run_at('self_employment')
+        emp_result = _run_at('employment')
+        emp = emp_result.after_tax_income
+        se = _run_at('self_employment').after_tax_income
         self.assertLess(se, emp)
-        self.assertAlmostEqual(emp - se, _self_employed_stack(gross, 'quebec', YEAR),
+        # Issue #289: less the employee's own net payroll cost, priced by the
+        # standalone calculator (see ``_expected_net_payroll``).
+        self.assertAlmostEqual(emp - se, _self_employed_stack(gross, 'quebec', YEAR)
+                               - _expected_net_payroll(gross, 'quebec', YEAR),
                                places=2)
 
     def test_non_quebec_self_employed_pays_no_stack_here(self):
@@ -163,14 +220,20 @@ class TestSelfEmployedContributionStack(unittest.TestCase):
         returns 0.0 outside Quebec, so the self-employed and employee dispose
         of the same gross minus the same bracket tax -- the delta is zero)."""
         ont_se = _run('ontario', 'self_employment')
-        ont_emp = _run('ontario', 'employment')
-        # No stack is charged outside Quebec in this fix, so the delta is 0
-        # (both pay the same bracket tax on the same gross). They may differ by
-        # rounding in marginal-rate application, but NOT by a ~$10k stack.
-        self.assertLess(abs(ont_emp - ont_se), 1.0,
-                        "outside Quebec #978 charges no self-employed stack "
-                        "(QPP-vs-CPP is a separate gap); the delta must be ~0, "
-                        "not the ~$10k Quebec stack.")
+        ont_emp_result = _run_result('ontario', 'employment')
+        ont_emp = ont_emp_result.after_tax_income
+        # No stack is charged outside Quebec in this fix, so the self-employed
+        # earner keeps gross minus bracket tax. Issue #289: the EMPLOYEE now
+        # pays CPP + EI (net of relief), so the only delta is that net
+        # payroll cost -- NOT a ~$10k self-employed stack.
+        self.assertGreater(_net_payroll(ont_emp_result), 0.0)
+        self.assertAlmostEqual(
+            ont_se - ont_emp,
+            _expected_net_payroll(GROSS, 'ontario', YEAR), places=2,
+            msg="outside Quebec #978 charges no self-employed stack "
+            "(QPP-vs-CPP is a separate gap), so the employee nets LESS by "
+            "exactly their own net payroll cost -- not more, and not by the "
+            "~$10k Quebec stack.")
 
     def test_self_employment_segment_outside_the_year_contributes_zero(self):
         """DP#1 / coverage: a self-employment segment whose [from, to) window does
