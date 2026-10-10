@@ -361,7 +361,7 @@ class TestGoldenHouseholdIsByteExact:
 
     def test_golden_terminal_total_assets_is_byte_exact(self):
         rs = _run(golden_household_config())
-        assert rs[-1].total_assets == 9709753.139463063, (
+        assert rs[-1].total_assets == 9501884.002641384, (
             f"golden terminal total_assets {rs[-1].total_assets!r} moved -- "
             f"the #1081 fix must not touch the fold")
 

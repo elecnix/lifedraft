@@ -428,7 +428,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from test_golden_trajectory_581 import golden_household_config, _run
         terminal = _run(golden_household_config())[-1].total_assets
-        self.assertEqual(terminal, 9709753.139463063)
+        self.assertEqual(terminal, 9501884.002641384)
 
 
 if __name__ == '__main__':

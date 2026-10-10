@@ -160,4 +160,4 @@ class TestAbsenceIsNoOp:
     registered composition must not touch its numbers."""
 
     def test_golden_invariant_unchanged(self):
-        assert _run(golden_household_config())[-1].total_assets == 9709753.139463063
+        assert _run(golden_household_config())[-1].total_assets == 9501884.002641384

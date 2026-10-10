@@ -411,7 +411,7 @@ class TestExplorationRanksTheProduct:
 
 class TestGoldenHouseholdGateHolds:
     def test_a_household_declaring_no_structure_options_never_enters_the_cross(self):
-        """The gate the golden invariant (9709753.139463063) rides on: no
+        """The gate the golden invariant (9501884.002641384) rides on: no
         declared structure_options, no exploration, no cross, no change."""
         doc = _doc([NO_CASH_OUT, CASH_OUT_80], [ADVANCE, LINE])
         doc["decisions"]["mortgage"].pop("structure_options")

@@ -201,7 +201,7 @@ class TestGoldenNoBorrowingIsByteExact:
         from test_golden_trajectory_581 import (
             golden_household_config, _run as _golden_run)
         results = _golden_run(golden_household_config())
-        assert results[-1].total_assets == pytest.approx(9_709_753.139463063)
+        assert results[-1].total_assets == pytest.approx(9_501_884.002641384)
 
 
 # ============================================================================

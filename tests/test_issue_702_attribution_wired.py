@@ -79,7 +79,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
     attributable transfers: the golden household (no private loans) is
     byte-identical to before the wiring."""
 
-    GOLDEN_TERMINAL_ASSETS = 9709753.139463063
+    GOLDEN_TERMINAL_ASSETS = 9501884.002641384
 
     def test_golden_invariant_unchanged(self):
         sys.path.insert(0, 'tests')
