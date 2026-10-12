@@ -58,6 +58,7 @@ from tax_calculator import marginal_rate
 from net_benefit_legs import (
     _default_oas_annual,
     lsif_credit_total as _lsif_credit_total,
+    mg_reno_credit_total as _mg_reno_credit_total,
     zev_incentive_total as _zev_incentive_total,
 )
 # DP#25 (issue #732): the estate tax math lives in the jurisdiction package;
@@ -359,6 +360,13 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     # out of this module by issue #232 so objective.py stays countries-free).
     lsif_credit_total = _lsif_credit_total(cfg)
 
+    # DP#16/issue #369: the Multigenerational Home Renovation Tax Credit
+    # (ITA s.122.92). Fires only when a principal residence declares an
+    # mg_reno block; absent it this is 0.0 and every existing household is
+    # byte-identical (DP#32). Priced per renovation, in that renovation's
+    # own year, by net_benefit_legs.mg_reno_credit_total.
+    mg_reno_credit = _mg_reno_credit_total(cfg)
+
     # DP#16: zero-emission vehicle incentives. Fires only when the household
     # declares a zev_purchases[] acquisition; absent the block this is 0.0 and
     # every existing household's number is byte-identical (DP#32). Pricing per
@@ -388,7 +396,7 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     return (final.total_assets - final.total_debt
             + total_rrsp_savings + total_sm_savings + total_traced_savings
             - registered_tax - cg_tax - resp_tax - sm_deemed_tax
-            + lsif_credit_total + zev_incentive_total)
+            + lsif_credit_total + zev_incentive_total + mg_reno_credit)
 
 
 def _terminal_wealth(results: List[YearResult], cfg: Dict) -> float:
