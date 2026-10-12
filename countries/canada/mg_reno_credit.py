@@ -178,10 +178,12 @@ def multigenerational_reno_credit(
         if already < MHRTC_LIFETIME_CAP:
             return _lowest_federal_rate(renovation.year) * min(
                 renovation.qualifying_expenditures, RENOVATION_CREDIT_MAX)
+    # No fallback here: every named person is either unqualified or has already
+    # claimed their one lifetime renovation, so the credit is nil. An
+    # unconditional `rate * min(expenditures, CAP)` used to sit below this line
+    # from before the per-person rule and was unreachable -- reviving it as a
+    # "fallback" would hand the credit to a household that has exhausted it.
     return 0.0
-
-    rate = _lowest_federal_rate(renovation.year)
-    return rate * min(renovation.qualifying_expenditures, RENOVATION_CREDIT_MAX)
 
 def _prior_by_person(facts: dict) -> Tuple[Tuple[str, int], ...]:
     """The per-person lifetime counts, keyed by person_id.
