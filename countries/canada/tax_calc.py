@@ -548,6 +548,18 @@ class FederalCreditParameters:
             ITA s.118.1).
         charitable_top_rate: Credit rate on above-$200 donations to the extent
             of income taxed in the top (33%) bracket (s.118.1(3), 2016+).
+        political_first_amount: Amount of a federal political contribution
+            credited at the top rate ($400, CRA line 40900/41000).
+        political_first_rate: 75% on the first $400.
+        political_second_amount: The NEXT $350, credited at 50%.
+        political_second_rate: 50% on the next $350.
+        political_third_amount: The NEXT $525, credited at 33 1/3%.
+        political_third_rate: 33 1/3% on the next $525.
+        political_max_amount: Contributions per recipient class that carry the
+            maximum credit ($1,275). A household may give this much to a party
+            AND to a candidate AND to a leadership contestant, each with its own
+            limit; the engine treats one declared amount as ONE class and says
+            so (see `political_contribution_credit`).
     """
     year: int
     lowest_rate: float
@@ -557,6 +569,13 @@ class FederalCreditParameters:
     charitable_low_rate: float
     charitable_high_rate: float
     charitable_top_rate: float
+    political_first_amount: float
+    political_first_rate: float
+    political_second_amount: float
+    political_second_rate: float
+    political_third_amount: float
+    political_third_rate: float
+    political_max_amount: float
 
     @classmethod
     def for_year(cls, year: int, provider: TaxDataProvider = None) -> "FederalCreditParameters":
@@ -594,6 +613,20 @@ class FederalCreditParameters:
             charitable_low_rate=lowest_rate,    # first $200 at lowest rate
             charitable_high_rate=0.29,          # above $200 general rate
             charitable_top_rate=0.33,           # s.118.1(3) top-bracket portion
+            # Federal political contribution tax credit (ITA s.127(3); CRA
+            # lines 40900/41000). The three-bracket schedule is a schedule, not
+            # an indexed amount: 75% of the first $400, 50% of the next $350 and
+            # 33 1/3% of the next $525, which plateaus at a $650 credit on
+            # $1,275 -- the per-recipient annual maximum. These have been
+            # stable since 2016, so unlike the medical cap they need no
+            # year-by-year table (DP#20 applies to the amounts that move).
+            political_first_amount=400.0,
+            political_first_rate=0.75,
+            political_second_amount=350.0,
+            political_second_rate=0.50,
+            political_third_amount=525.0,
+            political_third_rate=1.0 / 3.0,
+            political_max_amount=1275.0,
         )
 
 
@@ -630,6 +663,61 @@ def medical_expense_credit(medical_expenses: float,
                     params.medical_threshold_cap)
     eligible = max(0.0, medical_expenses - threshold)
     return eligible * params.lowest_rate
+
+
+def political_contribution_credit(contributions: float,
+                                   year: int = 2026,
+                                   params: FederalCreditParameters = None,
+                                   provider: TaxDataProvider = None) -> float:
+    """Federal political contribution tax credit (ITA s.127(3), CRA 40900/41000).
+
+    A credit, not a deduction, on a three-bracket schedule rather than a flat
+    rate: 75% of the first $400, 50% of the next $350, and 33 1/3% of the next
+    $525. It plateaus at a $650 credit on a contribution of $1,275 -- the
+    per-recipient annual maximum -- so an amount above the ceiling earns no
+    more, and the eligible base is capped there explicitly rather than relied on
+    to emerge from the arithmetic.
+
+    KNOWN SCOPE LIMIT. The $1,275 maximum and the $650 credit are PER RECIPIENT
+    CLASS: a household may give that much to a registered party, again to a
+    candidate or their electoral district association, and again to a
+    leadership contestant, and claim three times the credit. This engine models
+    ONE declared amount as ONE class, so a multi-recipient household's credit is
+    UNDERSTATED. That is disclosed rather than guessed at, because splitting the
+    total across classes would need a declaration the contract does not carry
+    (DP#32).
+
+    Source: CRA lines 40900/41000, "Federal political contribution tax credit".
+    Pure (DP#3): a function of the contribution and the year's parameters.
+
+    Args:
+        contributions: the year's total federal political contributions.
+        year: tax year, for the published schedule (DP#20).
+        params: pre-built FederalCreditParameters, or None to resolve them.
+        provider: optional TaxDataProvider override.
+
+    Returns:
+        The credit, never negative.
+    """
+    if contributions is None or contributions <= 0:
+        return 0.0
+    if params is None:
+        params = FederalCreditParameters.for_year(year, provider)
+
+    remaining = min(float(contributions), params.political_max_amount)
+    credit = 0.0
+    for amount, rate in ((params.political_first_amount,
+                          params.political_first_rate),
+                         (params.political_second_amount,
+                          params.political_second_rate),
+                         (params.political_third_amount,
+                          params.political_third_rate)):
+        if remaining <= 0:
+            break
+        slice_amount = min(remaining, amount)
+        credit += slice_amount * rate
+        remaining -= slice_amount
+    return credit
 
 
 def charitable_donation_credit(donations: float,

@@ -99,6 +99,7 @@ py-modules = [
     "rules_contributions", "rules_debt",
     "rules_disposition", "rules_drawdown", "rules_growth", "rules_leverage",
     "rules_management_fee", "rules_registered_plans",
+    "rules_personal_credits",
     "rules_retirement_income", "rules_superficial_loss", "rules_solvency",
     "rules_tuition_credit",
     "simulation", "simulation_config", "simulation_deps", "simulation_rules",

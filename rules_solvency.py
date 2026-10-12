@@ -557,6 +557,13 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
                      # no tuition (the golden path) -- a strict no-op.
                      + ws.tuition_credit_applied_primary
                      + ws.tuition_credit_applied_spouse
+                     # Issue #367: the personal_credits rule's per-member tax
+                     # reduction (medical, donations, federal political, plus
+                     # Quebec's medical and charitable credits). A tax
+                     # reduction, not cash -- the credits are non-refundable.
+                     # 0.0 with no declared claims (the golden path).
+                     + ws.personal_credit_applied_primary
+                     + ws.personal_credit_applied_spouse
                      # Issue #1083: the s.20(1)(c) deduction's statutory saving
                      # on the primary's prologue-taxed rental/loan slice -- the
                      # tax the prologue already embedded in
@@ -613,7 +620,12 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
                      # epic #795 bite 3: the tuition_credit rule's per-member
                      # tax reduction (0.0 for a no-tuition household).
                      + ws.tuition_credit_applied_primary
-                     + ws.tuition_credit_applied_spouse)
+                     + ws.tuition_credit_applied_spouse
+                     # Issue #367: the personal_credits rule's per-member tax
+                     # reduction (see the identical line in the solvent branch
+                     # above). 0.0 with no declared claims.
+                     + ws.personal_credit_applied_primary
+                     + ws.personal_credit_applied_spouse)
     required = debt_service + spending_outflow + contributions
 
     # epic #795 bite 3: ctx.after_tax_income is the PRE-credit after-tax
@@ -627,6 +639,13 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
         ctx.after_tax_income
         + ws.tuition_credit_applied_primary
         + ws.tuition_credit_applied_spouse
+        # Issue #367: the personal_credits rule's reduction is the same kind of
+        # tax reduction on income already inside ``ctx.after_tax_income``, so the
+        # REPORTED after-tax income carries it exactly as the tuition credits
+        # above do. 0.0 for a household with no declared claims, so the golden
+        # invariant is unchanged.
+        + ws.personal_credit_applied_primary
+        + ws.personal_credit_applied_spouse
         # Issue #1083: the s.20(1)(c) nondrawdown routing's saving is a tax
         # reduction on income already inside ``ctx.after_tax_income`` -- report
         # the POST-saving figure, exactly as the tuition credits above report
