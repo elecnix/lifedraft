@@ -54,12 +54,13 @@ class TestCapitalGainsRealization(unittest.TestCase):
         acct.grow(-0.20)  # loss
         self.assertEqual(acct.capital_gains_tax(0.45), 0.0)
 
-    def test_tiered_inclusion_on_realization(self):
-        """Post-2024 tiered inclusion applied via the realization method (DP#27).
+    def test_inclusion_rate_reaches_the_account_and_taxes_the_whole_gain(self):
+        """The rate from capital_gains_inclusion_rate reaches the account (DP#27).
 
-        A large realized gain crosses the $250K boundary: first $250K at 50%,
-        the excess at 66.67%. The blended rate is supplied to the account, and
-        capital_gains_tax() must apply it to the whole gain.
+        Issue #344: this asserted a blended 2/3 tier above $250K, a rate no
+        individual has paid. It now asserts the real law end to end -- the rate
+        the data layer produces for 2026 is what capital_gains_tax() applies --
+        which is what this test was actually for.
         """
         acct = NonRegAccount()
         acct.contribute(200_000)
@@ -73,8 +74,10 @@ class TestCapitalGainsRealization(unittest.TestCase):
         mtr = 0.45
 
         tax = acct.capital_gains_tax(mtr)
-        expected_inclusion = (250_000 * 0.50 + 50_000 * (2 / 3))
-        expected = expected_inclusion * mtr
+        # Flat one-half for 2026: the rate the engine hands us is the whole
+        # inclusion, so the expected taxable amount is simply half the gain.
+        self.assertAlmostEqual(blended_rate, 0.50, places=4)
+        expected = gain * blended_rate * mtr
         self.assertAlmostEqual(tax, expected)
 
 

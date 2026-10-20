@@ -167,13 +167,21 @@ def _provincial_dtc_fallback(province: str) -> Dict[str, float]:
 
 def capital_gains_inclusion_rate(gain_amount: float = 0, year: int = 2026) -> float:
     """Compute the effective capital gains inclusion rate.
-    
-    DP#27: For 2024+, the inclusion rate is tiered:
-    - 50% for the first $250,000 of capital gains
-    - 66.67% (2/3) for capital gains above $250,000
-    
-    For years before 2024: flat 50% inclusion rate.
-    
+
+    The capital gains inclusion rate has been a FLAT one-half for every year
+    this engine can currently model.
+
+    Issue #344: the two-thirds upper tier that used to be applied for 2024+ was
+    never enacted. It was a Ways and Means motion in Budget 2024, deferred on
+    31 January 2025, and the government announced on 21 March 2025 that it
+    WOULD BE CANCELLED. Modelling it taxed a large gain at a rate no individual
+    has ever paid: `capital_gains_inclusion_rate(400_000, 2025)` returned
+    0.5625 instead of 0.50, and 0.625 on a $1M gain.
+
+    The tiered arithmetic below is KEPT, because it is the mechanism the
+    year-versioned data drives, and it becomes correct again the day a rate is
+    actually enacted for a future year. What changed is that no year carries one.
+
     DP#20: The threshold and rates come from year-versioned tax_data.
     
     Args:
@@ -190,13 +198,12 @@ def capital_gains_inclusion_rate(gain_amount: float = 0, year: int = 2026) -> fl
         upper_rate = fed_data.capital_gains_upper_inclusion_rate
         threshold = fed_data.capital_gains_threshold
     except (ValueError, AttributeError):
-        # Fallback: flat 50% before 2024, tiered for 2024+
-        if year >= 2024:
-            base_rate = 0.50
-            upper_rate = 2 / 3
-            threshold = 250000
-        else:
-            return 0.50
+        # Issue #344: this fallback used to hardcode the 2/3 tier for any year
+        # >= 2024, so a year whose data failed to load got the UNENACTED rate
+        # while a year whose data loaded correctly did not. A fallback that
+        # invents a rate nobody pays is worse than the failure it papers over
+        # (DP#32). There is no tier for any modelled year.
+        return 0.50
     
     # No tier → flat rate
     if upper_rate <= 0 or threshold <= 0:

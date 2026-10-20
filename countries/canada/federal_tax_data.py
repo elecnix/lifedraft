@@ -54,8 +54,9 @@ def federal_all_years():
             federal_eligible_gross_up=0.38,
             federal_non_eligible_gross_up=0.15,
             capital_gains_inclusion_rate=0.50,
-            capital_gains_upper_inclusion_rate=2/3,  # 66.67% for gains above $250K
-            capital_gains_threshold=250000,
+            # Issue #344: never enacted -- see the 2024 row below.
+            capital_gains_upper_inclusion_rate=0.0,
+            capital_gains_threshold=0.0,
             # DP#20: CPP2 second earnings ceiling (YMPE2)
             cpp2_max_pensionable=81900,    # CRA 2026: YMPE2 = $81,900
             cpp2_rate=0.04,                  # CPP2 contribution rate 4% (2024+)
@@ -90,8 +91,8 @@ def federal_all_years():
             federal_eligible_gross_up=0.38,
             federal_non_eligible_gross_up=0.15,
             capital_gains_inclusion_rate=0.50,
-            capital_gains_upper_inclusion_rate=2/3,
-            capital_gains_threshold=250000,
+            capital_gains_upper_inclusion_rate=0.0,
+            capital_gains_threshold=0.0,
             # DP#20: CPP2 second earnings ceiling (YMPE2)
             cpp2_max_pensionable=81200,    # CRA 2025: YMPE2 = $81,200
             cpp2_rate=0.04,                  # CPP2 contribution rate 4% (2024+)
@@ -132,8 +133,9 @@ def federal_all_years():
             federal_eligible_gross_up=0.38,
             federal_non_eligible_gross_up=0.15,
             capital_gains_inclusion_rate=0.50,
-            capital_gains_upper_inclusion_rate=2/3,  # 66.67% enacted June 25, 2024
-            capital_gains_threshold=250000,
+            # Issue #344: never enacted -- see the 2024 row below.
+            capital_gains_upper_inclusion_rate=0.0,
+            capital_gains_threshold=0.0,
             # DP#20: CPP2 second earnings ceiling (YMPE2)
             cpp2_max_pensionable=73200,    # CRA 2024: YMPE2 = $73,200 (first year of second ceiling)
             cpp2_rate=0.04,                  # CPP2 contribution rate 4%
