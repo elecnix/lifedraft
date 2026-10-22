@@ -266,6 +266,20 @@ class QuebecTaxData:
             qc_solidarity_high_threshold=46595,
             # ── Quebec health services fund (FSS) ──
             qc_fss_self_employed_rate=0.0165,  # 1.65% for 2024
+            # ── Quebec health services fund (FSS), INDIVIDUAL (Schedule F) ──
+            # A Quebec resident owes this on income OTHER THAN employment
+            # income, so nearly every retiree above the exemption pays it every
+            # year of retirement. These were ABSENT for 2024, so every field
+            # defaulted to 0 and the function returned 0.0 for every base
+            # (issue #330) -- a loud absence that read as "nobody owes this".
+            # Source: Revenu Quebec, Schedule F 2024,
+            # TP-1.D.F-V(2024-12) -- exemption $17,630, first cap $150,
+            # second threshold $61,315, maximum $1,000, rate 1%.
+            qc_fss_individual_exemption=17630,
+            qc_fss_individual_first_cap=150,
+            qc_fss_individual_second_threshold=61315,
+            qc_fss_individual_max=1000,
+            qc_fss_individual_rate=0.01,
             # ── QPIP ──
             # Source: RQAP official rate page
             qpip_employee_rate=0.00494,         # 0.494% employee
