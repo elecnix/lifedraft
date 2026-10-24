@@ -39,7 +39,32 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
     """Pick ONE couple to drive the legacy engine (documented Phase 1
     limitation -- see module docstring). Preference order: the person named
     by ``decisions.horizon.person`` (and their spouse, if any); else the
-    first ``spouse_of`` pair found; else the first person alone."""
+    first ``spouse_of`` pair found; else the first person alone.
+
+    Issue #360, scope one: a ``spouse_of`` edge DATED to a union that is not
+    ongoing at ``as_of`` is REFUSED here, loudly, rather than coerced into an
+    ongoing couple. The schema lets a household date its union
+    (``from`` = marriage, ``to`` = divorce/dissolution) and this engine reads
+    neither date, so a couple separated in 2020 modelled on a 2026 snapshot
+    used to serialise byte-identically to an ongoing couple -- and would then
+    be granted spousal income splitting, a spousal RRSP, couple GIS tables and
+    a survivor estate for a union that no longer exists (DP#32: a declared
+    fact is dropped and a confident wrong number is printed).
+
+    Refusing is the honest answer until the dated-household-status series lands
+    (#360 scope two): the alternative is to invent a per-year coupled flag this
+    engine has no way to carry. The refusal names the relationship and the
+    offending date so the household knows exactly which fact is unsupported.
+
+    Only the edge that actually FORMS the couple is checked. This engine models
+    one couple and never reads the other ``spouse_of`` edges in a document, so a
+    divorce among, say, a grandparent generation is not a fact this run acts on
+    -- refusing a blended family over a union the engine ignores would be a
+    refusal of a contract that was never going to model that couple anyway. The
+    shipped ``schema/example.json`` is exactly that shape (a divorced
+    ``ggm``/``ggf`` edge alongside the ongoing ``p1``/``p2`` one) and must keep
+    loading.
+    """
     people = _people_by_id(doc)
     horizon_person = doc["decisions"]["horizon"]["person"]  # schema-required; caller has already validated
     if horizon_person and horizon_person in people:
@@ -53,18 +78,197 @@ def _find_primary_and_spouse(doc: Dict) -> (str, Optional[str]):
         if primary_id is None:
             primary_id = next(iter(people))
 
+    # Issue #360: this engine forms ONE couple, so a person who declares edges to
+    # MORE THAN ONE distinct partner makes "which union is this?" ambiguous --
+    # and the dates that decide eligibility are per-edge. Picking the first would
+    # silently model one union while the document declares several (DP#33: a
+    # declaration is a lens, not a blindfold). Refused, loudly, naming the
+    # partners. The ORDINARY reciprocal declaration (p1 -> p2 AND p2 -> p1) is
+    # one partner, not two, and stays legal.
+    _refuse_multiple_partners(people[primary_id])
+
     spouse_id = None
     for r in people[primary_id].get("relationships", []):
         if r["type"] == "spouse_of":
             spouse_id = r["person"]
+            _refuse_dated_union(doc, primary_id, r)
             break
     if spouse_id is None:
-        for pid, p in people.items():
-            for r in p.get("relationships", []):
+        # Issue #360: this scan used to `break` out of the INNER loop only, so the
+        # outer loop kept going and the LAST edge pointing at the primary won.
+        # Measured: with `p2 -> p1` and `p3 -> p1` it returned ('p1', 'p3') and
+        # dropped p2 without a word.
+        #
+        # Adding a `break` would make that deterministic and still arbitrary --
+        # "which union is this?" would be answered by document order. Two people
+        # naming the same partner while that partner names nobody makes the
+        # document ambiguous, so it is REFUSED, naming all of them, exactly as
+        # `_refuse_multiple_partners` does for the other direction of the same
+        # ambiguity.
+        #
+        # Not reachable through the validated contract path today: whichever
+        # partner is not chosen still holds a `spouse_of` edge, and
+        # `_needs_adult_compute` trips on ANY such edge, so `admit_people`
+        # refuses the leftover by name. This is a latent trap, not a live wrong
+        # answer, and it is fixed because the guard that happens to mask it is
+        # incidental -- relaxing the N-adult boundary would unmask it silently.
+        # DISTINCT partners, not edges. A person who declares the same union
+        # twice is still one partner -- `_refuse_multiple_partners` counts a set
+        # for exactly that reason, and counting edges here refused a legal
+        # one-way declaration while announcing "(p2, p2)" as two people.
+        reciprocals = sorted(
+            {pid
+             for pid, p in people.items()
+             for r in p.get("relationships", [])
+             if r["type"] == "spouse_of" and r["person"] == primary_id}
+        )
+        if len(reciprocals) > 1:
+            raise ContractAdaptationError(
+                f"person {primary_id!r} is named as the spouse of more than one "
+                f"person ({', '.join(reciprocals)}) while declaring no partner of "
+                f"their own. This engine forms ONE couple, so which union it "
+                f"models would be decided by document order rather than by "
+                f"anything declared (issue #360; DP#33 -- a declaration is a lens, "
+                f"not a blindfold). Declare the union on {primary_id!r} itself, "
+                f"or leave only one partner."
+            )
+        for pid in reciprocals:
+            spouse_id = pid
+            # EVERY edge that formed this pairing is date-checked, not just the
+            # first. Breaking after the first made the answer depend on EDGE
+            # ORDER: a partner declaring the same union twice, once ongoing and
+            # once ended, was accepted in one order and refused in the other
+            # (measured: `[ongoing, ended]` -> LOADED, `[ended, ongoing]` ->
+            # REFUSED). An ended union hidden behind an ongoing one would be
+            # modelled as a couple, which is the DP#32 failure this layer
+            # exists to prevent.
+            for r in people[pid].get("relationships", []):
                 if r["type"] == "spouse_of" and r["person"] == primary_id:
-                    spouse_id = pid
-                    break
+                    _refuse_dated_union(doc, pid, r)
+    # Issue #384 review: the multiple-partner refusal used to run on the PRIMARY
+    # only, before the spouse was resolved -- so a document whose SPOUSE declared
+    # two distinct partners (and whose primary declared one) loaded silently, and
+    # the #357 eligibility gate then read only the FIRST edge's history. Verified:
+    # with no new adult introduced, such a document produced NO refusal at all.
+    # The couple is resolved now, so check both members: either one declaring two
+    # unions makes "which union is this?" ambiguous.
+    if spouse_id is not None:
+        _refuse_multiple_partners(people[spouse_id])
     return primary_id, spouse_id
+
+
+def _refuse_multiple_partners(person: Dict) -> None:
+    """Refuse a person declaring ``spouse_of`` edges to more than ONE partner.
+
+    This engine forms a single couple (``_find_primary_and_spouse``), so with
+    two distinct partners the engine would silently pick the first edge while the
+    document declares two unions -- and the DATED-union eligibility check is
+    per-edge, so which union's dates were consulted would be an accident of
+    ordering rather than a declared fact.
+
+    Declaring the SAME union from both sides (p1 -> p2 and p2 -> p1, which the
+    shipped example does) is one partner and stays legal: the check counts
+    DISTINCT partners, not edges.
+    """
+    partners = sorted({r["person"] for r in person.get("relationships", [])
+                       if r["type"] == "spouse_of"})
+    if len(partners) > 1:
+        raise ContractAdaptationError(
+            f"person {person['id']!r} declares spouse_of unions with "
+            f"{partners}. This engine forms ONE couple per household (a "
+            f"documented Phase-1 limitation), and the dated-union eligibility "
+            f"test reads one union's dates -- so with several unions the engine "
+            f"would silently model whichever edge came first (issue #360; "
+            f"DP#33 -- a declaration is a lens, not a blindfold). Declare a "
+            f"single union, or wait for the dated household-status work in "
+            f"#360 scope two."
+        )
+
+
+def _as_date(value, person_id: str, rel: Dict) -> _date:
+    """Parse a declared date for COMPARISON, refusing an unusable one.
+
+    The union checks used to compare `str(value)[:10]` TEXTUALLY. `$defs.date`
+    is `{"type": "string", "format": "date"}` with no `pattern`, and `format` is
+    not enforced by the validator, so `2026-7-1` is ACCEPTED input -- and
+    lexicographically `"2026-7-1" > "2026-12-01"`. Two consequences, one loud
+    and one silent:
+
+    - an unpadded `from` SPURIOUSLY refuses a valid union;
+    - an unpadded `to` MISSES the refusal, so a union that ended before the
+      snapshot is modelled as an ongoing couple and granted spousal income
+      splitting, a spousal RRSP, couple GIS tables and a survivor estate.
+
+    Measured against `_find_primary_and_spouse` with `as_of = 2026-01-05`:
+
+        to=2026-01-01  padded   -> REFUSED   (correct)
+        to=2026-1-1    unpadded -> LOADED    (wrong)
+
+    Parsing also refuses an impossible date such as `2026-02-30`, which the
+    schema accepts and which would otherwise compare as text (DP#32: refused,
+    never coerced).
+    """
+    try:
+        return _date.fromisoformat(str(value)[:10])
+    except ValueError as exc:
+        raise ContractAdaptationError(
+            f"person {person_id!r} declares a spouse_of union with "
+            f"{rel.get('person')!r} carrying the date {value!r}, which is not a "
+            f"usable date ({exc}). A union's start and end decide whether this "
+            f"household is a couple at as_of, so an unreadable date cannot be "
+            f"compared (issue #360; DP#32 -- refused, not coerced)."
+        ) from exc
+
+
+def _refuse_dated_union(doc: Dict, person_id: str, rel: Dict) -> None:
+    """Refuse the ``spouse_of`` edge the couple is FORMED from when its union is
+    not ongoing at ``as_of``.
+
+    Returns ``None`` when the union is ongoing at the snapshot (the case this
+    engine models), otherwise raises :class:`ContractAdaptationError` naming the
+    person, the partner and the date that makes the union unpriceable.
+
+    A union is "ongoing at as_of" when it has started (``from`` is absent or
+    ``from <= as_of``) and has not ended (``to`` is absent or ``to > as_of``).
+    A union whose ``from``/``to`` are not ISO dates falls through to
+    :func:`contract_schema.validate_contract`, which already validates their
+    format -- this function only judges what is well-formed.
+
+    Only the ONE edge the couple is formed from is passed in, so a divorce among
+    people this engine does not model (a grandparent generation, an ex-partner
+    the primary is not paired with) is left alone: the engine never read it, so
+    no fact is being silently dropped on this run.
+    """
+    as_of = doc["as_of"]
+    snapshot = _as_date(as_of, person_id, rel)
+    start = rel.get("from")
+    end = rel.get("to")
+    if start is not None and _as_date(start, person_id, rel) > snapshot:
+        raise ContractAdaptationError(
+            f"person {person_id!r} declares a spouse_of union with "
+            f"{rel['person']!r} starting {start!r}, which is AFTER the "
+            f"document's as_of {as_of!r}. A union that has not begun cannot "
+            f"be modelled as a couple today: this engine has no dated "
+            f"household-status series, so it would apply spousal income "
+            f"splitting, a spousal RRSP, couple GIS tables and a survivor "
+            f"estate for a marriage that does not exist yet (DP#32 -- a "
+            f"declared fact silently dropped). Either declare the union as "
+            f"ongoing, or wait for the dated couple status work in #360 "
+            f"scope two."
+        )
+    if end is not None and _as_date(end, person_id, rel) <= snapshot:
+        raise ContractAdaptationError(
+            f"person {person_id!r} declares a spouse_of union with "
+            f"{rel['person']!r} ending {end!r}, which is on or before the "
+            f"document's as_of {as_of!r}. A union that has ended cannot be "
+            f"modelled as a couple today: this engine has no dated "
+            f"household-status series, so it would apply spousal income "
+            f"splitting, a spousal RRSP, couple GIS tables and a survivor "
+            f"estate to two separated people (DP#32 -- a declared fact "
+            f"silently dropped). Remove the end date to model an ongoing "
+            f"union, or wait for the dated couple status work in #360 scope "
+            f"two."
+        )
 
 
 def _parent_of_targets(doc: Dict) -> set:
