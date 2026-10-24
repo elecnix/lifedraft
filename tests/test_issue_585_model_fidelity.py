@@ -445,6 +445,12 @@ class TestCaveatVocabularyIsCoveredOrAllowlisted(unittest.TestCase):
 # (delete or change the anchored code) and this test goes red until the
 # registry entry is removed too.
 _CODE_ANCHORS = {
+    # Issue #381: the fee-free-sleeve caveat is anchored to the growth rule that
+    # applies a DECLARED sleeve fee. If that rule stops applying `mer`, the caveat
+    # has nothing left to describe and must go with it -- the disclosure cannot
+    # outlive the behaviour it discloses.
+    'sm_sleeve_fee_free_when_undeclared': (
+        'rules_leverage.py', 'config.sm_investment_mer'),
     'terminal_wealth_is_pretax': (
         'objective.py', 'def _terminal_wealth('),
     # Issue #170: the refused-contribution caveat is anchored to the clamp
