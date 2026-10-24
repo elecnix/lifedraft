@@ -428,6 +428,26 @@ def map_property_config(principal: Optional[Dict], mortgage: Optional[Dict],
         #    identical to the pre-#1036 capitalization path (DP#32: absence is
         #    the fallback, never a coercion of a supplied value).
         prop_cfg["capitalize_interest"] = heloc["capitalize_interest"]
+        # Issue #381: the MER paid by the INVESTMENT this line funds -- the
+        # sleeve the Smith Manoeuvre readvances into. It is a SEPARATE pot from
+        # the non-registered account, so it never inherits that account's mer
+        # (#291/#316); without a fee of its own it compounded fee-free, which
+        # overstates terminal assets by an amount that GROWS with the horizon.
+        # Mapped only when declared, so an absent leaf leaves the sleeve growing
+        # exactly as before (DP#32: absence is a no-op, never a silent zero).
+        # A fee outside [0, 1] is refused loudly here: above 100% the fund would
+        # owe more than it holds, and a "fee" that exceeds the return is not a
+        # fee this model can honour.
+        if "investment_mer" in heloc:
+            mer = heloc["investment_mer"]
+            if mer < 0.0 or mer > 1.0:
+                raise ContractAdaptationError(
+                    f"Liability {heloc['id']!r} declares investment_mer={mer}, which is "
+                    f"outside [0, 1]. A MER is a fraction of assets under management, so a "
+                    f"value above 1.0 describes a fund that owes more than it holds rather "
+                    f"than a fee (issue #381; DP#32: refused, not coerced)."
+                )
+            prop_cfg["sm_investment_mer"] = mer
         # 2. balance (the DRAWN amount) -- HONOURED as the opening position
         #    when > 0 (issue #1039): mapped to property.heloc_opening_balance
         #    (+ property.heloc_opening_investment_portion off the declared

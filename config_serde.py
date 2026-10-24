@@ -117,6 +117,8 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         # None on a genuinely absent key, never coerces it (DP#32).
         heloc_rate=prop.get('heloc_rate'),
         heloc_rate_type=prop.get('heloc_rate_type'),
+        # issue #381: absence-safe (None = never declared), never a 0.0 default.
+        sm_investment_mer=prop.get('sm_investment_mer'),
         cash_out=prop.get('cash_out', 0.0),
         # issue #689: absence-safe, same convention as heloc_rate above.
         credit_facility_limit=prop.get('credit_facility_limit', 0.0),
@@ -439,6 +441,8 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
             # round-trip as an explicit null.
             **({'heloc_rate': config.heloc_rate} if config.heloc_rate is not None else {}),
             **({'heloc_rate_type': config.heloc_rate_type} if config.heloc_rate_type is not None else {}),
+            # issue #381: only re-emitted when declared (None = never declared).
+            **({'sm_investment_mer': config.sm_investment_mer} if config.sm_investment_mer is not None else {}),
             # Issue #1036 (DP#24): only re-emit capitalize_interest when
             # it is NOT the default (True) -- True round-trips to 'absent'
             # (the pre-#1036 capitalization path, byte-identical), False is

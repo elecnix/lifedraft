@@ -154,6 +154,14 @@ class SimulationConfig:
     # for "variable" to switch on (that would be assumptions.rate_paths.
     # heloc's job, which is unwired end-to-end; see #654's PR notes).
     heloc_rate_type: Optional[str] = None
+    # Issue #381: liabilities[kind=heloc].investment_mer -- the annual MER (a
+    # fraction) paid by the INVESTMENT this line funds, i.e. the Smith
+    # Manoeuvre sleeve. That sleeve is a separate pot from the non-registered
+    # account and never inherits that account's mer (#291/#316), so without a
+    # fee of its own it compounded fee-free. None = never declared, which
+    # leaves the sleeve growing exactly as before (DP#32: absence is a no-op,
+    # never a silent zero); contract_principal refuses a value outside [0, 1].
+    sm_investment_mer: Optional[float] = None
     # issue #257: refinance cash-out (mortgage increase whose proceeds are
     # invested). Recorded as debt once (via mortgage_balance); the proceeds are
     # added to the invested lump sum. margin_available is NOT inflated by this.

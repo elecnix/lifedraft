@@ -580,11 +580,33 @@ def apply_sm_investment_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:
     contract account (it opens at 0 and is funded only by readvances), so
     charging it another account's fee would invent a fee on money that never
     declared one.
+
+    Issue #381: giving the sleeve its OWN declarable fee
+    (``liabilities[kind=heloc].investment_mer`` ->
+    ``SimulationConfig.sm_investment_mer``) fixes the opposite problem: money the
+    household BORROWED TO INVEST is held in funds or ETFs that pay a MER like any
+    other holding, and compounding it fee-free overstates terminal assets by an
+    amount that GROWS with the horizon. The same #291 convention applies -- a
+    fund's fee is paid inside the fund, out of its total return, before anything
+    is distributed, so it comes out of the deferred capital-appreciation term at
+    its FULL rate, i.e. a linear shift of the after-tax rate by ``-mer``. The
+    sleeve keeps the shared rate as its BASE (no ``expected_return`` blend: that
+    is the non-reg account's own input, #316), and the fee is its own separate
+    fact.
+
+    Undeclared (``None``) is a genuine no-op: the growth is exactly
+    ``* (1 + taxable_after_tax_rate)``, byte-identical to the pre-#381 sleeve
+    (DP#32). A declared fee cannot drive the factor below 0.0 -- ``contract_
+    principal`` already refuses a fee outside [0, 1] -- and the clamp below is
+    belt-and-braces so a fee plus a deep negative rate can never MINT money by
+    flipping a pot's sign.
     """
     if ctx.use_readvanceable:
         pre = ws.new_sm_investment
-        ws.new_sm_investment *= (1 + ws.taxable_after_tax_rate)
-        return pre > 0 and ws.taxable_after_tax_rate != 0
+        fee = ctx.config.sm_investment_mer
+        net_rate = ws.taxable_after_tax_rate - (0.0 if fee is None else fee)
+        ws.new_sm_investment *= max(0.0, 1.0 + net_rate)
+        return pre > 0 and net_rate != 0
     return False
 
 @rule('margin_heloc_interest')
