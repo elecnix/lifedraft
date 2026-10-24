@@ -350,7 +350,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
     use it (DP#32). The golden household declares no installment plan, so its
     terminal total_assets must be the committed invariant."""
 
-    GOLDEN = 9709753.139463063
+    GOLDEN = 9501884.002641384
 
     def test_golden_invariant_unchanged(self):
         """Method: ran the golden_household_config() fixture through _run and

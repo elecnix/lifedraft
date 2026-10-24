@@ -581,14 +581,14 @@ class TestGoldenInvariantUnchanged(unittest.TestCase):
         builds its internal `property` dict directly (bypasses input_contract),
         so this PR cannot move it. The byte-exact value is whatever current
         origin/main produces (main advanced via #1075/#1046/#1057 while this
-        branch was open, moving the golden to 9709753.139463063); this branch,
+        branch was open, moving the golden to 9501884.002641384); this branch,
         rebased onto that main, reproduces it identically -- the PR adds no
         movement. (The 9816435.13530067 value in earlier revisions was the
         golden at the branch's start; it is stale.)"""
         from test_golden_trajectory_581 import golden_household_config, _run
         self.assertEqual(
             repr(_run(golden_household_config())[-1].total_assets),
-            "9709753.139463063")
+            "9501884.002641384")
 
     def test_golden_config_defaults_capitalize_interest_true(self):
         from test_golden_trajectory_581 import golden_household_config

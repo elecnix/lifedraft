@@ -243,7 +243,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
         from test_golden_trajectory_581 import golden_household_config, _run as _grun
         self.assertEqual(
             repr(_grun(golden_household_config())[-1].total_assets),
-            "9709753.139463063")
+            "9501884.002641384")
 
 
 if __name__ == "__main__":

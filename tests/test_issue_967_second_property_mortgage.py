@@ -27,7 +27,7 @@ amortization_years}``. At the purchase year:
     the deduction, by construction).
 
 Absence-safe (DP#32): a property with no ``financing`` is equity-financed,
-byte-identical to #696. The golden invariant (9709753.139463063) does not
+byte-identical to #696. The golden invariant (9501884.002641384) does not
 move -- verified in test_golden_trajectory_581 (no financing ⇒ no-op).
 
 All fixtures use fabricated ids and round numbers (DP#15).

@@ -185,7 +185,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
             terminal = _run(golden_household_config())[-1].total_assets
         finally:
             logging.disable(logging.NOTSET)
-        self.assertEqual(terminal, 9709753.139463063)
+        self.assertEqual(terminal, 9501884.002641384)
 
 
 # ============================================================================

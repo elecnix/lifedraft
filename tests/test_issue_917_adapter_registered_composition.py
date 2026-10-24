@@ -183,4 +183,4 @@ class TestAbsenceIsNoOp:
         # computed from an internally-constructed config that never crosses that
         # boundary, so it cannot move by construction.
         from test_golden_trajectory_581 import golden_household_config, _run
-        assert _run(golden_household_config())[-1].total_assets == 9709753.139463063
+        assert _run(golden_household_config())[-1].total_assets == 9501884.002641384

@@ -236,7 +236,7 @@ def test_golden_unchanged_when_non_reg_mer_and_expected_return_absent():
     cfg = SimulationConfig.from_dict(copy.deepcopy(golden))
     assert "non_reg" not in cfg.account_mer_drag
     assert "non_reg" not in cfg.account_return_overrides
-    assert _run(golden)[-1].total_assets == 9709753.139463063
+    assert _run(golden)[-1].total_assets == 9501884.002641384
 
 
 # ── (d) rule level: the registered rules with a NON-None after-tax rate ──────

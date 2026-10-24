@@ -260,7 +260,7 @@ class TestAbsenceIsNoOp(unittest.TestCase):
         sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
         from test_golden_trajectory_581 import golden_household_config, _run
         self.assertEqual(
-            _run(golden_household_config())[-1].total_assets, 9709753.139463063)
+            _run(golden_household_config())[-1].total_assets, 9501884.002641384)
 
 
 if __name__ == "__main__":

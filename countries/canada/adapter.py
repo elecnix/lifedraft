@@ -35,7 +35,7 @@ from countries.canada.rate_model import (
     annual_summary, monthly_payment,
 )
 from countries.canada.strategies import (
-    STRATEGY_READVANCE_PRIORITY, discover_strategies,
+    STRATEGY_NO_READVANCE, discover_strategies,
 )
 from countries.canada.market_rates import MarketRatesProvider
 
@@ -225,8 +225,24 @@ class CanadaAdapter:
     # ── Strategy discovery ──
     
     def get_default_strategy(self):
-        """Get the default Canadian strategy (Smith Manoeuvre priority)."""
-        return STRATEGY_READVANCE_PRIORITY
+        """The strategy a single run uses when the household declared none.
+
+        Issue #384 (DP#13): a default is a fallback for ABSENT input, never an
+        opinion about the household. This used to return
+        ``STRATEGY_READVANCE_PRIORITY`` -- the Smith Manoeuvre: 55% non-reg,
+        ``prioritize_readvanceable=True``, ``deduct_later=True`` -- so a family
+        that declared no strategy at all was silently simulated LEVERAGED, and
+        a direct ``FamilySimulation(config).run()`` reported that as the answer.
+
+        The neutral baseline is ``STRATEGY_NO_READVANCE`` -- the same no-readvance
+        posture ``discover_strategies`` falls back to when no readvanceable
+        facility exists, so the single-run default now agrees with the baseline
+        the optimizer's own search starts from instead of contradicting it.
+        Leverage is an OPTIMISER's candidate (``discover_strategies`` prices it
+        when the rules admit it), never a silent default (DP#6: strategies are
+        discovered from conditions, not named by convention).
+        """
+        return STRATEGY_NO_READVANCE
     
     def discover_strategies(self, state, config: Dict,
                             return_model=None,

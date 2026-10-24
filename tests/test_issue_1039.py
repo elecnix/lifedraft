@@ -280,7 +280,7 @@ class TestGoldenInvariantUnchanged(unittest.TestCase):
         from test_golden_trajectory_581 import _run, golden_household_config
         self.assertEqual(
             repr(_run(golden_household_config())[-1].total_assets),
-            "9709753.139463063")
+            "9501884.002641384")
 
     def test_golden_config_defaults_opening_balance_to_zero(self):
         from test_golden_trajectory_581 import golden_household_config

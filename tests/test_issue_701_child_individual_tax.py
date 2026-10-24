@@ -13,7 +13,7 @@ AFTER-TAX remainder.
 Why the golden invariant is unchanged (stated explicitly): the golden household's
 two children earn ``gross_income == 0``; ``tax_on_income(0) == 0`` leaves the
 child savings term at 0 and ``total_assets()`` (which excludes child_accounts) is
-untouched -- so ``9709753.139463063`` is byte-identical. This is verified by the
+untouched -- so ``9501884.002641384`` is byte-identical. This is verified by the
 existing golden-trajectory guard, not re-run here; below is the behaviour proof
 plus a ``TestAbsenceIsNoOp`` locking the zero-income child to bite 2.
 
@@ -139,7 +139,7 @@ class TestAfterTaxHelperMatchesTheAdultTaxSeam(unittest.TestCase):
 class TestAbsenceIsNoOp(unittest.TestCase):
     """A child earning 0 is byte-identical to bite 2 (gross == after-tax when the
     tax is 0). This is the same property that keeps the golden household's
-    ``9709753.139463063`` invariant unmoved."""
+    ``9501884.002641384`` invariant unmoved."""
 
     def test_zero_income_child_after_tax_equals_gross(self):
         children = [{'id': 'c1', 'gross_income': 0},

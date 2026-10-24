@@ -30,7 +30,7 @@ Two gaps, each tested here:
    therefore still needed. The no-op golden proof below is STRUCTURAL (a
    full-trajectory byte comparison, no hardcoded magic constant), so it stays
    correct when the golden invariant moves under an unrelated fix (#1008
-   moved it to 9709753.139463063).
+   moved it to 9501884.002641384).
 
 2. **No objective targets a near-zero estate.** Every wealth/estate objective
    MAXIMIZES what is left. This adds ``min_after_tax_estate`` -- the mirror of
@@ -190,7 +190,7 @@ class TestDrawdownStrandsResidualWealth:
         explicitly False, or True. Proven by a full-trajectory byte comparison
         against the live-computed golden -- NOT a hardcoded magic constant, so
         the test stays correct when the golden invariant moves under an
-        unrelated fix (e.g. #1008 moved it to 9709753.139463063)."""
+        unrelated fix (e.g. #1008 moved it to 9501884.002641384)."""
         import copy
         base = golden_household_config()
         off = copy.deepcopy(base)

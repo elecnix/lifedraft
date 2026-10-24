@@ -32,7 +32,7 @@ names, no real data):
      ineligible: countable income far above the single elimination threshold
      of ~$7,452 = $4,000 exemption + $1,726 max / 0.50).
   3. The GOLDEN household (``golden_household_config``) is GIS-ineligible and
-     its terminal ``total_assets`` is byte-exact ``9709753.139463063`` -- GIS
+     its terminal ``total_assets`` is byte-exact ``9501884.002641384`` -- GIS
      wiring is a no-op there (DP#32).
 
 The pre-65 RRSP->TFSA preservation MANEUVER is deliberately NOT implemented here
@@ -232,7 +232,7 @@ class TestGISWiredIntoFold(unittest.TestCase):
     def test_golden_invariant_unchanged(self):
         """The golden household is GIS-ineligible -> GIS wiring is a no-op.
 
-        Terminal total_assets must stay byte-exact 9709753.139463063 (DP#32:
+        Terminal total_assets must stay byte-exact 9501884.002641384 (DP#32:
         the golden household's prior-year countable income is always far above
         the GIS threshold, so gis_income == 0 across all 46 years).
         """
@@ -241,7 +241,7 @@ class TestGISWiredIntoFold(unittest.TestCase):
         gis_total = sum(getattr(r, 'gis_income', 0.0) for r in results)
         self.assertEqual(gis_total, 0.0,
                          "golden household must receive $0 GIS (ineligible)")
-        self.assertEqual(results[-1].total_assets, 9709753.139463063)
+        self.assertEqual(results[-1].total_assets, 9501884.002641384)
 
 
 if __name__ == '__main__':

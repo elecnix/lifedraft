@@ -70,8 +70,15 @@ Every value is fabricated (round figures, role-based ids `p1`, `p2`, `ca`,
 
 What the engine chose on its own (DP#16 auto-detection, nothing the document
 declares) is recorded in `report.json` under `run`, read from the engine
-objects: strategy `Readvanceable Mortgage Priority`, rate path `Default`,
+objects: strategy `No Readvancing (Baseline)`, rate path `Default`,
 `use_readvanceable` true, `deduct_later` false.
+
+That strategy name is the point of issue #384: before it, this same household
+— which declares NO `contribution_strategy` — was silently simulated with
+`Readvanceable Mortgage Priority`, the Smith Manoeuvre (55% non-reg,
+deduct-later). A leverage posture as the implicit fallback for absent input is
+an opinion, not a fallback (DP#13), so the default is now the neutral
+no-readvance baseline the optimizer's own search starts from.
 
 ## Engine vs publication
 

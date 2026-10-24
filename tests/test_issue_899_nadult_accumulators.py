@@ -12,7 +12,7 @@ benefit-drawing extra adult still needs the spending-target + mortality model
 tracked in #901, so it is LOUDLY REFUSED (message citing #901).
 
 The two-adult primary-couple path stays byte-identical (golden invariant
-9709753.139463063, guarded by test_golden_trajectory_581) -- these tests cover
+9501884.002641384, guarded by test_golden_trajectory_581) -- these tests cover
 only >2-adult households, which that path never sees.
 
 All test data is synthetic (role labels, round numbers -- DP#15).

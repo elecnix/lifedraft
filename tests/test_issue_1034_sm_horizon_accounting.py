@@ -539,7 +539,7 @@ class TestHelocInterestServicingEndToEnd:
 
 class TestGoldenHouseholdByteExact:
     """The golden no-SM household's terminal ``total_assets`` is
-    ``9709753.139463063`` (AGENTS.md, moved by #1046 after this branch's
+    ``9501884.002641384`` (AGENTS.md, moved by #1046 after this branch's
     original golden ``9816435.13530067``). Both fixes are absence-safe for a
     household with no SM sleeve and no drawn HELOC: fix A only changes
     ``compute_net_benefit`` (not the simulation fold), and fix B's disposition
@@ -551,7 +551,7 @@ class TestGoldenHouseholdByteExact:
         from test_golden_trajectory_581 import golden_household_config, _run
         final = _run(golden_household_config())[-1]
         assert final.total_assets == pytest.approx(
-            9709753.139463063, rel=1e-12), (
+            9501884.002641384, rel=1e-12), (
             f"golden terminal total_assets {final.total_assets!r} moved -- a "
             f"fix that touches zero existing files in the simulation path "
             f"should leave it unchanged by construction")

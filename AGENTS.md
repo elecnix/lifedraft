@@ -120,7 +120,15 @@ count, not just the named lines.)
 
 ### The golden invariant
 
-The 46-year golden household's terminal `total_assets` is **`9709753.139463063`** (moved by #1046,
+The 46-year golden household's terminal `total_assets` is **`9501884.002641384`** (moved by #384,
+which replaced the implicit single-run default strategy: `CanadaAdapter.get_default_strategy()` returned
+`STRATEGY_READVANCE_PRIORITY` — the Smith Manoeuvre, 55% non-reg, `prioritize_readvanceable=True`,
+`deduct_later=True` — so a household that declared NO strategy was silently simulated LEVERAGED. The
+neutral baseline `STRATEGY_NO_READVANCE` is now the fallback (DP#13: a default is a fallback for absent
+input, never an opinion), which is the same no-readvance posture `discover_strategies` already starts
+the optimizer's search from. Terminal assets FELL by ~$207,869 because the golden household keeps more
+in registered accounts and less in taxable non-reg under the neutral allocation than the leveraged
+default gave it. It previously read `9709753.139463063`, moved by #1046,
 which wires the RESP annual allocation's per-child contribution cap (`resp_annual_match_cap`) and
 advances each RESPChild's lifetime state (total_cesg_received, total_before_age_15, etc.) after
 each year's CESG/QESI computation — the golden household's two RESP children now accumulate

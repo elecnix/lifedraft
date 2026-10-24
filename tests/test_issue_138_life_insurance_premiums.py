@@ -287,7 +287,7 @@ class TestEnginePricesPremiums(unittest.TestCase):
         from test_golden_trajectory_581 import (
             golden_household_config, _run as _run_golden,
         )
-        TERMINAL_TOTAL_ASSETS = 9709753.139463063
+        TERMINAL_TOTAL_ASSETS = 9501884.002641384
         terminal = _run_golden(golden_household_config())[-1].total_assets
         self.assertEqual(
             terminal, TERMINAL_TOTAL_ASSETS,

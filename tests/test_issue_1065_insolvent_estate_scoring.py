@@ -536,9 +536,9 @@ class TestGoldenHouseholdIsByteExact:
         # touches no engine file, is proven not to move it; if `main` moves the
         # golden again under this branch, update this constant in the SAME PR
         # (the byte-exact guard is structural, not a magic number).
-        assert rs[-1].total_assets == 9709753.139463063, (
+        assert rs[-1].total_assets == 9501884.002641384, (
             f"golden terminal total_assets {rs[-1].total_assets!r} != "
-            f"9709753.139463063 -- the #1065 fix must not move the golden "
+            f"9501884.002641384 -- the #1065 fix must not move the golden "
             f"household (the diff touches no engine file)")
 
     def test_golden_min_after_tax_estate_score_follows_the_die_with_zero_formula(self):

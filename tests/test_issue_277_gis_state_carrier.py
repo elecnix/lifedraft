@@ -153,10 +153,15 @@ def test_grid_fold_matches_run_on_gis_household():
     assert grid_results[-1].total_assets == run_results[-1].total_assets
     # Pinned exactly, so run() itself cannot drift unnoticed: these are the
     # values run() produced before #277 (measured on origin/main 594b6f8).
+    # Issue #384 repinned the two terminal figures only: the household declares
+    # no contribution strategy, so the fold took the implicit default (the
+    # Smith Manoeuvre) until #384 made the fallback the neutral no-readvance
+    # baseline (DP#13). The GIS SUMS are unchanged -- the grant itself never
+    # moved -- and the optimizer-fold/run() equality above still holds.
     assert _gis_sum(run_results) == 702.1875
     assert _gis_sum(grid_results) == 702.1875
-    assert run_results[-1].total_assets == 216492.56702473873
-    assert grid_results[-1].total_assets == 216492.56702473873
+    assert run_results[-1].total_assets == 214935.94065132213
+    assert grid_results[-1].total_assets == 214935.94065132213
 
 
 def test_grid_fold_pays_gis_per_the_rule():

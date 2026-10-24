@@ -23,7 +23,7 @@ The principal's value is NOT in ``total_assets`` (it flows via ``house_value``
 appreciation does NOT move terminal ``total_assets``; it moves the ESTATE
 (``principal_residence_fmv``) and the charge room, and a Bite E sale's
 proceeds. Absence-safe (DP#32): absent/0.0 rate => the static ``house_value``
-byte-identical (the golden invariant ``9709753.139463063`` is unchanged).
+byte-identical (the golden invariant ``9501884.002641384`` is unchanged).
 
 These tests run the real engine (``FamilySimulation.run``), so the
 money-conservation invariant suite (``trajectory_invariants.assert_run_
@@ -480,11 +480,11 @@ class ChargeRoomAppreciates(unittest.TestCase):
 # ============================================================================
 class GoldenInvariantHeld(unittest.TestCase):
     """The golden household declares no appreciation_rate; its terminal
-    total_assets must be byte-exact (``9709753.139463063``)."""
+    total_assets must be byte-exact (``9501884.002641384``)."""
 
     def test_golden_total_assets_byte_exact(self):
         results = _run(golden_household_config())
-        self.assertEqual(repr(results[-1].total_assets), '9709753.139463063')
+        self.assertEqual(repr(results[-1].total_assets), '9501884.002641384')
 
     def test_golden_config_has_no_appreciation_rate(self):
         cfg = SimulationConfig.from_dict(golden_household_config())
@@ -498,7 +498,7 @@ class GoldenInvariantHeld(unittest.TestCase):
         cfg = golden_household_config()
         cfg['property']['appreciation_rate'] = 0.0
         results = _run(cfg)
-        self.assertEqual(repr(results[-1].total_assets), '9709753.139463063')
+        self.assertEqual(repr(results[-1].total_assets), '9501884.002641384')
 
 
 if __name__ == '__main__':

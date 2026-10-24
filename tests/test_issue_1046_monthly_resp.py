@@ -151,12 +151,22 @@ class TestFixAMonthlyRespAllocation:
 
     def test_monthly_resp_compounding_correct(self):
         """The RESP balance must reflect correct compounding at 5% in monthly
-        mode. After 9 years, the balance should be well under $47k (catches
-        a doubled investment return)."""
+        mode, and must stay well under what a DOUBLED investment return would
+        produce (the COMPOUNDING mutation this catches).
+
+        Issue #384: the ceiling moved 47_000 -> 65_000. This household declares
+        no contribution strategy, so the fold took the implicit default, which
+        was the Smith Manoeuvre (resp_pct 0.05). #384 made the fallback the
+        neutral no-readvance baseline (resp_pct 0.07), so the balance a correct
+        fold produces legitimately rises: 56,460.11 at year 9, measured from a
+        live run. The bound keeps the ORIGINAL relative headroom (~15% above the
+        correct value, which is how far the old 47_000 sat above its measured
+        value), so a doubled return is still caught with the same margin.
+        """
         results = _run(_monthly_newborn_config())
         b9 = results[-1].resp_balance
         assert b9 > 0, f"Monthly RESP balance at year 9 is {b9:.2f}, expected positive."
-        assert b9 < 47_000, (
+        assert b9 < 65_000, (
             f"Monthly RESP balance at year 9 is {b9:.2f}, unexpectedly high — "
             f"investment return may be doubled (COMPOUNDING mutation)."
         )

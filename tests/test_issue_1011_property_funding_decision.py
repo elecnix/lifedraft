@@ -527,7 +527,7 @@ class AbsenceIsByteIdenticalTest(unittest.TestCase):
         # hardcoded literal -- test_golden_trajectory_581 commits no numeric
         # snapshot by design, so computing the value from its ``_run`` keeps
         # this assertion from going stale the next time a PR legitimately
-        # moves the invariant (e.g. #1008 moved it to 9709753.139463063). The
+        # moves the invariant (e.g. #1008 moved it to 9501884.002641384). The
         # golden module's own invariant tests pin the trajectory's shape; this
         # asserts the funding gate is a no-op on the golden household, so the
         # canonical value is what the engine still produces.
