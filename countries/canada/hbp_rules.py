@@ -133,6 +133,51 @@ def deductible_contribution_before_hbp(
 # HBP Account Model
 # =============================================================================
 
+#: The ITA s.146.01(1) lookback: a "current year" plus the four calendar years
+#: before it. CRA counts the current year, so a purchase on 2026-01-01 looks
+#: back over 2022-2026.
+HBP_LOOKBACK_YEARS = 5
+
+
+def is_first_time_home_buyer(current_year: int,
+                             own_years=None,
+                             partner_years=None,
+                             relationship_start_year=None) -> bool:
+    """Whether a buyer qualifies as a FIRST-TIME home buyer for the HBP.
+
+    Pure (DP#3): declared years in, one bool out, no clock and no config.
+
+    ITA s.146.01(1): the buyer qualifies only if, in the 4-calendar-year
+    lookback before the purchase, they did not live in a qualifying home that
+    THEY owned. The test explicitly extends to a home owned by their spouse or
+    common-law partner and occupied **during the relationship** (CRA's
+    "in-home" condition) -- so a partner's house they never lived in does not
+    disqualify, and neither does one they sold before they met.
+
+    Args:
+        current_year: the calendar year of the purchase/withdrawal.
+        own_years: calendar years the BUYER owned a principal residence.
+        partner_years: calendar years the PARTNER owned one.
+        relationship_start_year: when the union began, if declared. Partner
+            years strictly before it are ignored -- they cannot have lived in
+            a home together before the relationship existed. ``None`` (not
+            declared) means no such filter: the partner's history counts in
+            full, which is the CONSERVATIVE reading (it can only deny, never
+            wrongly grant, the non-taxable withdrawal).
+
+    Returns:
+        True when the buyer qualifies.
+    """
+    lookback = set(range(current_year - HBP_LOOKBACK_YEARS + 1, current_year + 1))
+    if lookback & set(own_years or ()):
+        return False
+    partner_in_window = set(partner_years or ())
+    if relationship_start_year is not None:
+        partner_in_window = {y for y in partner_in_window
+                             if y >= relationship_start_year}
+    return not (lookback & partner_in_window)
+
+
 @dataclass
 class HBPAccount:
     """Home Buyers' Plan account tracking.
