@@ -109,6 +109,17 @@ class RuleContext:
     # the rule zeroes them itself for the covered_net shortfall math.
     primary_income_pre: float = 0.0
     spouse_income_pre: float = 0.0
+    # Issue #445: the SAME incomes AFTER the retirement transition -- what the
+    # fold's tax path actually priced this year. Equal to `*_income_pre` for a
+    # member who is still working; for a RETIRED one it is the income the
+    # document DATES (`simulation._dated_income_for_year`), which is $0 unless
+    # the member declared a window running past `retirement_age`. A rule that
+    # needs "what this member actually earned this year" must read THESE: the
+    # pre-transition figures still carry the base salary the transition stopped,
+    # so pricing them would tax income the household does not have (the AMT's
+    # employment-income base, `rules_amt`, is the case in point).
+    primary_income_current: float = 0.0
+    spouse_income_current: float = 0.0
     primary_retired: bool = False
     spouse_retired: bool = False
     # Year-0 (base) gross employment incomes per member -- the stable

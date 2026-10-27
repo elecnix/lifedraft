@@ -2045,6 +2045,15 @@ class YearInputs:
     # / direct-unit-test behaviour exactly.
     primary_income_pre: float = 0.0
     spouse_income_pre: float = 0.0
+    # Issue #445: the same incomes AFTER the retirement transition -- the base
+    # salary stops at `retirement_age`, but income the document DATES (a
+    # `income_segments` window running past it) survives. Identical to
+    # `*_income_pre` for a member still working, and $0 for a retired member who
+    # declares no dated window, so every pre-#445 household is byte-identical.
+    # A rule pricing what the member earned THIS YEAR reads these; the
+    # pre-transition pair still carries the salary the transition stopped.
+    primary_income_current: float = 0.0
+    spouse_income_current: float = 0.0
     primary_retired: bool = False
     spouse_retired: bool = False
     base_primary_income: float = 0.0

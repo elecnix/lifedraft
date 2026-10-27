@@ -1190,6 +1190,73 @@ def _adult_income_maps(primary_income, spouse_income, p_loans, s_loans,
     return income_by_role, loan_by_role
 
 
+def _dated_income_for_year(member: Dict, sim_year: int, salary_growth: float,
+                           year: int) -> Tuple[float, float, float]:
+    """Issue #445: the income a member's document DATES for ``sim_year`` --
+    ``(total, earned, self_employment)``, with the UNDATED base salary and any
+    UNDATED window excluded.
+
+    The rule, stated once, because it decides two things at once:
+
+        **An income pays to the end the document declares, and to no later.**
+        A window with a declared ``to`` is honoured to that date -- a wage
+        window running to 2031 pays through 2030 even though the member turned
+        65 in 2025. A window with NO declared end (``to: null``) stops where
+        the undated base salary does, at ``retirement_age``: an open-ended
+        income has no stated end, and the conventional one is the same for
+        both spellings of it (DP#9 -- the base scalar and a window that never
+        closes are the same fact, so they must not end differently).
+
+    That is the whole of the retirement transition. Before #445 the fold zeroed
+    a retired member's income outright, so a dated window was parsed,
+    day-blended into the year's income and then thrown away -- the "declared,
+    then discarded" shape DP#32 exists to forbid, and the reason partial
+    retirement was unexpressible.
+
+    Both helpers are called with a base amount of ``0.0``: not a silent-zero
+    fallback but the DEFINITION of the split, since the base term is multiplied
+    by that amount. One call each keeps the three consumers -- taxable income,
+    ITA s.146(1) earned income for RRSP room, and the #978 self-employed
+    contribution base -- on ONE spelling of the same figure (DP#9), the
+    spelling ``_income_components_for_year`` and
+    ``_self_employment_income_for_year`` already share.
+
+    Returns ``(0.0, 0.0, 0.0)`` for a member with no dated window -- the
+    ordinary retired member, whose behaviour is byte-identical to before this
+    issue (DP#32).
+    """
+    segments = member.get('income_segments')
+    if not segments:
+        return 0.0, 0.0, 0.0
+    # DP#25: the retirement transition's own jurisdiction primitives, so the
+    # end this helper imposes is the SAME age gate `is_retired` applies
+    # (including its DEFAULT_RETIREMENT_AGE) rather than a second spelling.
+    from countries.canada.retirement_transition import DEFAULT_RETIREMENT_AGE
+    birth_year = member.get('birth_year')
+    if not birth_year:
+        # `is_retired` cannot date this member's transition (no birth year ->
+        # never retires within the projection), so nothing is bounded here
+        # either -- the SAME predicate, not a second opinion (DP#32: absence
+        # stays absent, it is not resolved into a guess).
+        bounded = list(segments)
+    else:
+        retirement_year = birth_year + member.get(
+            'retirement_age', DEFAULT_RETIREMENT_AGE)
+        bounded = [
+            # `[from, to)` is half-open, so a window ending at the retirement
+            # year pays for every year BEFORE it -- which is exactly what
+            # `is_retired` switches off.
+            seg if seg.get('to') is not None
+            else {**seg, 'to': f"{retirement_year}-01-01"}
+            for seg in segments
+        ]
+    total, earned = _income_components_for_year(
+        0.0, bounded, sim_year, salary_growth, year)
+    self_emp = _self_employment_income_for_year(
+        0.0, bounded, sim_year, salary_growth, year)
+    return total, earned, self_emp
+
+
 def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult, 'object']:
     """Pure annual step (DP#26/#583): ``(state, year, ctx) -> (YearResult, next_state)``.
 
@@ -1277,18 +1344,22 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         spouse_member.get('retirement_age', DEFAULT_RETIREMENT_AGE),
         sim_year) if spouse_member else False
     # Keep the grown pre-retirement incomes for the retirement_income rule
-    # (it zeroes them itself for the covered_net shortfall math).
+    # (it reads them for the net-replacement target baseline).
     primary_income_pre, spouse_income_pre = primary_income, spouse_income
+    # Issue #445: retiring stops the UNDATED base salary, not the income the
+    # document dates. A member whose `income_segments` window runs past
+    # retirement_age KEEPS that income -- and the earned-income and
+    # self-employment slices with it, since all three are the same declared
+    # figure read three ways (RRSP room keeps accruing, and the Quebec
+    # self-employed stack is charged on the business that is still trading).
+    # A member with no dated window is unchanged: the helper returns zeros, so
+    # the retirement-year figures are byte-identical to before (DP#32).
     if p_retired:
-        primary_income = 0.0
-        primary_earned_income = 0.0
-        # Issue #978: the stack is on WORKING self-employment income -- a
-        # retired member earns no self-employment salary, so charge no stack.
-        primary_self_emp = 0.0
+        primary_income, primary_earned_income, primary_self_emp = \
+            _dated_income_for_year(primary_member, sim_year, salary_growth, year)
     if s_retired:
-        spouse_income = 0.0
-        spouse_earned_income = 0.0
-        spouse_self_emp = 0.0
+        spouse_income, spouse_earned_income, spouse_self_emp = \
+            _dated_income_for_year(spouse_member, sim_year, salary_growth, year)
 
     total_income = primary_income + spouse_income
     for ch in cfg.children:
@@ -1730,6 +1801,10 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
             # the resolved year-brackets, and the tax indexation rate.
             primary_income_pre=primary_income_pre,
             spouse_income_pre=spouse_income_pre,
+            # Issue #445: the post-transition incomes (what this year's tax was
+            # computed on) -- see RuleContext's comment.
+            primary_income_current=primary_income,
+            spouse_income_current=spouse_income,
             primary_retired=p_retired,
             spouse_retired=s_retired,
             base_primary_income=ctx.primary_income,
@@ -2617,16 +2692,18 @@ class FamilySimulation:
                 spouse_member.get('retirement_age', DEFAULT_RETIREMENT_AGE),
                 sim_year) if spouse_member else False
             primary_income_pre, spouse_income_pre = primary_income, spouse_income
+            # Issue #445: identical transition to the yearly path's -- retiring
+            # stops the UNDATED base salary and keeps the income the document
+            # dates (see `_dated_income_for_year`). The two paths must agree or
+            # the monthly/yearly parity tests fail on the difference.
             if p_retired:
-                primary_income = 0.0
-                primary_earned_income = 0.0
-                # Issue #978: the stack is on WORKING self-employment income --
-                # a retired member earns no self-employment salary.
-                primary_self_emp = 0.0
+                primary_income, primary_earned_income, primary_self_emp = \
+                    _dated_income_for_year(
+                        primary_member, sim_year, salary_growth, year)
             if s_retired:
-                spouse_income = 0.0
-                spouse_earned_income = 0.0
-                spouse_self_emp = 0.0
+                spouse_income, spouse_earned_income, spouse_self_emp = \
+                    _dated_income_for_year(
+                        spouse_member, sim_year, salary_growth, year)
 
             total_income = primary_income + spouse_income
             for ch in cfg.children:
@@ -2950,6 +3027,10 @@ class FamilySimulation:
                     # simulate_year's identical block for the full rationale).
                     primary_income_pre=primary_income_pre,
                     spouse_income_pre=spouse_income_pre,
+                    # Issue #445: post-transition incomes (monthly path, as the
+                    # yearly one above).
+                    primary_income_current=primary_income,
+                    spouse_income_current=spouse_income,
                     primary_retired=p_retired,
                     spouse_retired=s_retired,
                     base_primary_income=self._primary_income,

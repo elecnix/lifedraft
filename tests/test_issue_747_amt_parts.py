@@ -99,7 +99,11 @@ class TestCarryForwardRecoversAmtPaid:
 
         fired = RULES['amt'](ws, _amt_ctx(
             calendar_year=2029, amt_credit_opening=opening,
-            primary_retired=False, primary_income_pre=400_000.0))
+            primary_retired=False, primary_income_pre=400_000.0,
+            # Issue #445: the AMT rule reads the POST-transition income; a
+            # working member's post-transition income IS the pre-transition
+            # figure, so both carry the same $400k here.
+            primary_income_current=400_000.0))
 
         assert fired is True
         assert ws.amt_surcharge == 0.0                    # no new AMT (no gain)
@@ -119,7 +123,8 @@ class TestCarryForwardRecoversAmtPaid:
         ws.new_nonreg_acb = 100_000.0
         RULES['amt'](ws, _amt_ctx(
             calendar_year=2029, amt_credit_opening=opening,
-            primary_retired=False, primary_income_pre=1_000_000.0))
+            primary_retired=False, primary_income_pre=1_000_000.0,
+            primary_income_current=1_000_000.0))
         assert ws.amt_credit_recovered == pytest.approx(5_000.0)
         assert ws.amt_credit_closing == ()
 

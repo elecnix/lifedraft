@@ -63,9 +63,6 @@ def apply_retirement_income(ws: YearWorkingState, ctx: RuleContext) -> bool:
     if not any_retired:
         return False
 
-    primary_income = ctx.primary_income_pre
-    spouse_income = ctx.spouse_income_pre
-
     # Year-versioned OAS figures, with explicit input.retirement overrides.
     # Issue #592: `0` is a value ("this household gets no OAS"), not an
     # absent key -- `or` treats it as falsy and silently reinstates the
@@ -108,9 +105,16 @@ def apply_retirement_income(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # ws.liquidate_to_target; absent => the configured order runs unchanged.
     liquidate_to_target = bool(ret.get('liquidate_to_target', False))
 
-    # Stop employment income for retired members (no salary, no growth).
-    new_primary = 0.0 if p_retired else primary_income
-    new_spouse = 0.0 if s_retired else spouse_income
+    # Employment income this year, AFTER the transition. Issue #445: the
+    # transition stopped the UNDATED base salary and kept whatever the document
+    # dates (`simulation._dated_income_for_year`), so this rule no longer
+    # re-zeroes a retired member's income -- it reads the figure the fold's tax
+    # path already priced. For the ordinary retired member that figure IS $0 and
+    # this is byte-identical to the `0.0 if retired else income` it replaces;
+    # for a member still working past retirement_age, their wages cover part of
+    # the spending target here, which is the whole point of modelling them.
+    new_primary = ctx.primary_income_current
+    new_spouse = ctx.spouse_income_current
 
     # Issue #363 PR 4: keep the PER-MEMBER government income, not just the
     # household sums. A retired member's cpp/oas/pension seeds THAT spouse's own

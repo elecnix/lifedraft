@@ -129,17 +129,17 @@ def apply_amt(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # This year's ordinary taxable income: actual employment income (grown, and
     # pre-net of deductions -- a conservative overstatement that RAISES regular
     # tax and so can only SHRINK the surcharge, never fabricate one) plus every
-    # taxable retirement component. A RETIRED member earns no salary this year,
-    # so their (still-populated) pre-retirement grown income is excluded -- else
-    # a retiree realizing a large gain would have regular tax computed as if the
-    # salary were still coming in, wrongly suppressing the very AMT the gain owes.
+    # taxable retirement component. Issue #445: the base is the income AFTER the
+    # retirement transition (`*_income_current`), which is what the fold actually
+    # taxed this year. A retired member's still-populated PRE-transition income
+    # carries the base salary the transition stopped -- counting it would compute
+    # a retiree realizing a large gain as if the salary were still coming in,
+    # wrongly suppressing the very AMT the gain owes. For a member still working
+    # past `retirement_age` the surviving dated income IS included, which is the
+    # other half of the same correctness point.
     # The taxable (50%-included) slice of the realized gain already lives inside
     # drawdown_taxable (#754), so it is NOT re-added.
-    employment_income = 0.0
-    if not ctx.primary_retired:
-        employment_income += ctx.primary_income_pre
-    if not ctx.spouse_retired:
-        employment_income += ctx.spouse_income_pre
+    employment_income = ctx.primary_income_current + ctx.spouse_income_current
     taxable_income = (
         employment_income
         + ws.drawdown_taxable

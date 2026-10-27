@@ -96,6 +96,9 @@ def _ctx(**overrides):
         drawdown_net_target=0.0, retiree_marginal_rate=0.40,
         drawdown_bracket_target=None, drawdown_other_taxable_income=0.0,
         primary_income_pre=150_000.0, spouse_income_pre=0.0,
+        # Issue #445: the AMT base reads the post-transition income; a working
+        # member's post-transition income is the same figure.
+        primary_income_current=150_000.0, spouse_income_current=0.0,
         primary_retired=False, spouse_retired=False,
         base_primary_income=150_000.0, base_spouse_income=0.0,
         year_brackets=_brackets(),
