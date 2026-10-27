@@ -304,6 +304,51 @@ def quebec_work_premium(
     return max(0.0, premium)
 
 
+def quebec_worker_deduction(
+    work_income: float,
+    year: int = 2026,
+    provider: Optional[TaxDataProvider] = None,
+) -> float:
+    """Quebec deduction for workers (TP-1 line 201, Taxation Act s. 358.0.3).
+
+    A DEDUCTION, not a credit: 6% of eligible work income, capped at an amount
+    indexed every year since 2009 and rounded to the nearest $5. It reduces
+    QUEBEC taxable income only, so federal taxable income -- and therefore every
+    federal figure -- is untouched. Because the golden household is a Quebec
+    employee, omitting it biased that household's Quebec tax every working year.
+
+    Eligible work income is employment income plus net business income; the
+    caller adds those (the same sum the QPIP premium base uses, DP#9).
+
+    Args:
+        work_income: Eligible work income (employment + net self-employment).
+        year: Tax year. A year whose Quebec data carries no rate or cap RAISES
+            (see below) rather than deducting nothing.
+        provider: Optional TaxDataProvider.
+
+    Returns:
+        The deduction, ``min(rate x work_income, cap)``, never negative.
+
+    A missing year fails LOUDLY (issue #341 asks for it): a zero rate or a zero
+    cap means the year's parameters were never published or never loaded, and
+    returning 0.0 there would quietly over-tax every working Quebec household in
+    that year -- a deduction silently omitted, which is the shape of defect this
+    engine exists to refuse. The cap is year-versioned data, so an unlisted year
+    is a data gap, not a deliberate zero.
+    """
+    data = _get_quebec_data(year, provider)
+    rate = data.qc_worker_deduction_rate
+    cap = data.qc_worker_deduction_max
+    if rate <= 0.0 or cap <= 0.0:
+        raise ValueError(
+            f"Quebec worker-deduction parameters are missing for {year} "
+            f"(rate={rate!r}, cap={cap!r}). The deduction is 6% of eligible work "
+            f"income up to an annually indexed maximum, so a zero here means the "
+            f"year's data was never loaded -- not that the deduction is zero. "
+            f"Add qc_worker_deduction_rate / qc_worker_deduction_max to that "
+            f"year's Quebec record (issue #341).")
+    return min(rate * max(0.0, work_income), cap)
+
 def quebec_drug_insurance_premium(
     is_covered_by_private_plan: bool = False,
     income_tested_fraction: float = 1.0,

@@ -92,6 +92,9 @@ class QuebecTaxData:
             qpip_employer_rate=0.00602,        # 0.602% employer
             qpip_self_employed_rate=0.00764,   # 0.764% self-employed
             qpip_max_insurable_earnings=103000,  # 2026 max insurable
+            # Issue #341: TA s.358.0.3 -- 6% of eligible work income, capped.
+            qc_worker_deduction_rate=0.06,
+            qc_worker_deduction_max=1450,  # 2026: Finances Quebec, Depenses fiscales 110906 Tableau C.42
             # ── Quebec non-refundable credits ──
             qc_charitable_donation_threshold=200,
             qc_charitable_donation_rate_low=0.20,
@@ -188,6 +191,9 @@ class QuebecTaxData:
             qpip_employer_rate=0.00692,        # 0.692% employer (1.4× employee)
             qpip_self_employed_rate=0.00878,   # 0.878% self-employed (without sickness)
             qpip_max_insurable_earnings=98000,  # 2025 max insurable
+            # Issue #341: TA s.358.0.3 -- 6% of eligible work income, capped.
+            qc_worker_deduction_rate=0.06,
+            qc_worker_deduction_max=1420,  # 2025: Finances Quebec, Depenses fiscales 110906 Tableau C.42
             # ── Quebec non-refundable credits ──
             qc_charitable_donation_threshold=200,
             qc_charitable_donation_rate_low=0.20,
@@ -272,6 +278,9 @@ class QuebecTaxData:
             qpip_employer_rate=0.00692,        # 0.692% employer (1.4× employee)
             qpip_self_employed_rate=0.00878,   # 0.878% self-employed (without sickness)
             qpip_max_insurable_earnings=94000,  # 2024 max insurable
+            # Issue #341: TA s.358.0.3 -- 6% of eligible work income, capped.
+            qc_worker_deduction_rate=0.06,
+            qc_worker_deduction_max=1380,  # 2024: Finances Quebec, Depenses fiscales 110906 Tableau C.42
             # ── Quebec non-refundable credits ──
             qc_charitable_donation_threshold=200,
             qc_charitable_donation_rate_low=0.20,
@@ -331,6 +340,9 @@ class QuebecTaxData:
             qpip_employer_rate=0.00692,        # 0.692% employer (1.4× employee)
             qpip_self_employed_rate=0.00878,   # 0.878% self-employed (without sickness)
             qpip_max_insurable_earnings=91000,  # 2023 max insurable
+            # Issue #341: TA s.358.0.3 -- 6% of eligible work income, capped.
+            qc_worker_deduction_rate=0.06,
+            qc_worker_deduction_max=1315,  # 2023: Finances Quebec, Depenses fiscales 110906 Tableau C.42
             # ── Quebec non-refundable credits ──
             qc_charitable_donation_threshold=200,
             qc_charitable_donation_rate_low=0.20,
