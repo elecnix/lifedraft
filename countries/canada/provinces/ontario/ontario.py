@@ -117,7 +117,7 @@ class OntarioTaxData:
             ],
             provincial_abatement=cls.ABATEMENT,
             basic_personal_amount=cls.BASIC_PERSONAL_AMOUNT_2025,
-            cpp_max_pensionable=68500,
+            cpp_max_pensionable=71300,   # CRA 2025: YMPE = $71,300
             cpp_rate=0.0595,
             cpp2_max_pensionable=81200,  # DP#20: CPP2 YAMPE 2025
             cpp2_rate=0.04,

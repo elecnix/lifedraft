@@ -550,9 +550,12 @@ class TaxDataProvider:
         data = self._load_year(year, country, "federal")
         if data.cpp_max_benefit_65 > 0:
             return data.cpp_max_benefit_65
-        if year in _OAS_FALLBACK_BY_YEAR:
-            return _OAS_FALLBACK_BY_YEAR[year].get("cpp_max_benefit_65", 0)
-        return 14448  # DP#13: 2024 fallback
+        raise ValueError(
+            f"No CPP maximum benefit at 65 for {country} in {year}: the "
+            f"schedule loaded for that year carries no ceiling. Absence of a "
+            f"sourced figure is not a zero benefit — refusing rather than "
+            f"answering with the 2024 literal (issue #416, DP#32)."
+        )
 
     def get_gis_max_single(self, year: int, country: str = "canada") -> float:
         """Get the GIS annual maximum for a single pensioner (DP#12/DP#20, issue #330).
@@ -814,6 +817,20 @@ class TaxDataProvider:
             federal_non_eligible_dtc_rate=base.federal_non_eligible_dtc_rate,
             federal_eligible_gross_up=base.federal_eligible_gross_up,
             federal_non_eligible_gross_up=base.federal_non_eligible_gross_up,
+            # ── Benefit ceilings (issue #416) ──
+            # These are money amounts and escalate with the same factor as
+            # every other limit above. They were absent from this call, so
+            # the dataclass default 0.0 was written and the getter could not
+            # distinguish "this program pays nothing" from "this field was
+            # never copied" — get_cpp_max_benefit_65(2030) answered with the
+            # 2024 literal 14448.
+            cpp_max_benefit_65=round(base.cpp_max_benefit_65 * factor, 2) if base.cpp_max_benefit_65 else 0,
+            oas_annual_max=round(base.oas_annual_max * factor, 2) if base.oas_annual_max else 0,
+            oas_annual_max_75plus=round(base.oas_annual_max_75plus * factor, 2) if base.oas_annual_max_75plus else 0,
+            oas_clawback_threshold=round(base.oas_clawback_threshold * factor, 2) if base.oas_clawback_threshold else 0,
+            gis_max_single=round(base.gis_max_single * factor, 2) if base.gis_max_single else 0,
+            gis_max_coupled=round(base.gis_max_coupled * factor, 2) if base.gis_max_coupled else 0,
+            gis_income_exemption=round(base.gis_income_exemption * factor, 2) if base.gis_income_exemption else 0,
             capital_gains_inclusion_rate=base.capital_gains_inclusion_rate,
             capital_gains_upper_inclusion_rate=base.capital_gains_upper_inclusion_rate,
             capital_gains_threshold=round(base.capital_gains_threshold * factor, 2) if base.capital_gains_threshold else 0,
