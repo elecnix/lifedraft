@@ -224,7 +224,7 @@ class TestJurisdictionAdapterProtocol(unittest.TestCase):
         mock.create_readvanceable_mortgage(heloc_rate=0.05)
         mock.create_fhsa(contribution_room=8000)
         mock.create_resp_calculator()
-        mock.create_resp_child(name="Child1", birth_year=2016)
+        mock.create_resp_children(MagicMock(children=[{'name': 'Child1', 'birth_year': 2016}]))
         mock.create_heloc_tracing(name="SM HELOC")
         mock.create_qc_deduction()
         mock.compute_qc_sm_benefit(
@@ -295,11 +295,15 @@ class TestCanadaAdapter(unittest.TestCase):
         calc = self.adapter.create_resp_calculator()
         self.assertIsNotNone(calc)
     
-    def test_create_resp_child(self):
-        """Canada adapter creates RESP child records."""
-        child = self.adapter.create_resp_child(name="Child1", birth_year=2016)
+    def test_create_resp_children(self):
+        """Canada adapter creates one RESP child record per config child
+        (issue #295: the one shared constructor)."""
+        from simulation_config import SimulationConfig
+        config = SimulationConfig(children=[{'name': 'Child1', 'birth_year': 2016}])
+        (child,) = self.adapter.create_resp_children(config)
         self.assertEqual(child.name, "Child1")
         self.assertTrue(child.cesg_eligible(2026))
+        self.assertIsNone(child.grant_history)
     
     def test_create_heloc_tracing(self):
         """Canada adapter creates HELOC tracing trackers."""

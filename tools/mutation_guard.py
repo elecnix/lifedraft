@@ -130,12 +130,12 @@ ALLOC_RESP_APPLY = textwrap.dedent("""\
     import strategy as _st
     _original = _st.StrategyEngine.allocate
     def _patched(self, state, initial_investment=None):
-        original_cap = state.resp_annual_match_cap
-        state.resp_annual_match_cap = 0  # #1046: recreate the original bug
+        original_cap = state.resp_grant_matched_cap
+        state.resp_grant_matched_cap = 0  # #1046: recreate the original bug (#295: the unified cap)
         try:
             return _original(self, state, initial_investment)
         finally:
-            state.resp_annual_match_cap = original_cap
+            state.resp_grant_matched_cap = original_cap
     _st.StrategyEngine.allocate = _patched
 """)
 
@@ -173,7 +173,7 @@ MUTATIONS = [
     },
     {
         "id": "ALLOC_RESP",
-        "description": "Remove resp_annual_match_cap from allocate min-term",
+        "description": "Zero resp_grant_matched_cap in the allocate min-term",
         "apply_src": ALLOC_RESP_APPLY,
         "test_files": RESP_AND_COMPOUNDING,
         "expected": "loud",

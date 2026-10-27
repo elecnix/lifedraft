@@ -77,7 +77,9 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from contract_accounts import _map_account_overrides, map_account_pots
+from contract_accounts import (
+    _map_account_overrides, map_account_pots, map_resp_beneficiary_histories,
+)
 from contract_assumptions import (
     apply_rate_path_reconciliation, apply_spending_reconciliation,
     map_assumptions, map_emergency_reserve, map_household_budget,
@@ -136,7 +138,12 @@ def to_internal_config(doc: Dict) -> Dict:
         doc, primary_id, spouse_id, child_ids, extra_adult_ids)
     members = map_members(doc, primary_id, spouse_id, extra_adult_ids,
                           registered_balances)
-    children = [_map_child(doc, cid, registered_balances) for cid in child_ids]
+    # Issue #295: each RESP beneficiary's declared history, per child --
+    # refused loudly here, before any partial mapping, when an account's
+    # totals disagree with its beneficiaries or a history is impossible.
+    resp_histories = map_resp_beneficiary_histories(doc, child_ids)
+    children = [_map_child(doc, cid, registered_balances, resp_histories)
+                for cid in child_ids]
 
     as_of = doc["as_of"]
     start_year = int(as_of[:4])

@@ -538,6 +538,15 @@ def apply_overlay(base_cfg: dict, overlay: ScenarioOverlay) -> dict:
         cfg['accounts']['resp_current_balance'] = 0
         if 'resp_composition' in cfg['accounts']:
             del cfg['accounts']['resp_composition']
+        # Issue #295 (DP#18): the opening state reads each child's in-plan
+        # RESP figures (resp_opening), not only the household balance, so the
+        # cash-out must empty those too. The lifetime history (resp_history)
+        # stays: withdrawing the plan does not un-make past contributions for
+        # the $50,000 limit or the grants already counted.
+        for child in cfg.get('family', {}).get('children', []):
+            if 'resp_opening' in child:
+                child['resp_opening'] = {'balance': 0.0, 'contributions': 0.0,
+                                         'grants': 0.0, 'qesi': 0.0}
         cfg['property']['free_cash'] = overlay.resp_cash_out
 
     if overlay.investment_return is not None:

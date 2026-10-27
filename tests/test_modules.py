@@ -685,28 +685,28 @@ class TestRESPCalculator(unittest.TestCase):
         self.calc = RESPCalculator()
 
     def test_eligible_child(self):
-        child = RESPChild(name="Test", birth_year=2015, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="Test", birth_year=2015, is_quebec_resident=True)
         self.assertTrue(child.cesg_eligible(2026))
 
     def test_over_17_child(self):
-        child = RESPChild(name="Teen", birth_year=2008, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="Teen", birth_year=2008, is_quebec_resident=True)
         self.assertFalse(child.cesg_eligible(2026))
 
     def test_basic_cesg(self):
         """Basic CESG: 20% on first $2,500."""
-        child = RESPChild(name="D2", birth_year=2011, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="D2", birth_year=2011, is_quebec_resident=True)
         result = self.calc.calculate_cesg(2500, child, 2026, 200000)
         self.assertAlmostEqual(result['total_cesg'], 500)  # 20% of $2,500
 
     def test_qesi(self):
         """QESI: 10% on first $2,500."""
-        child = RESPChild(name="D2", birth_year=2011, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="D2", birth_year=2011, is_quebec_resident=True)
         result = self.calc.calculate_qesi(2500, child, 2026, 200000)
         self.assertAlmostEqual(result['total_qesi'], 250)
 
     def test_total_matching(self):
         """At $200k income: 20% CESG + 10% QESI = 30% on first $2,500 = $750."""
-        child = RESPChild(name="D2", birth_year=2011, is_quebec_resident=True)
+        child = RESPChild(grant_history=None, name="D2", birth_year=2011, is_quebec_resident=True)
         cesg = self.calc.calculate_cesg(2500, child, 2026, 200000)
         qesi = self.calc.calculate_qesi(2500, child, 2026, 200000)
         total = cesg['total_cesg'] + qesi['total_qesi']

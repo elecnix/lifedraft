@@ -708,9 +708,27 @@ class AccountKindCoverageTest(unittest.TestCase):
         second["resp"]["contributions_total"] = 8000
         second["resp"]["cesg_received"] = 1600
         second["resp"]["qesi_received"] = 400
+        # Issue #295: the account totals must equal the sum over the
+        # account's beneficiaries -- here one beneficiary, ca, who is also on
+        # the first account.
+        second["resp"]["beneficiaries"] = [{
+            "person": "ca", "contributions_total": 8000,
+            "contributions_before_age_15": 8000, "cesg_basic_received": 1600,
+            "cesg_additional_received": 0, "qesi_received": 400,
+            "clb_received": 0, "years_with_100_before_age_15": 0}]
         doc["accounts"].append(second)
         legacy = ic.to_internal_config(doc)
         comp = legacy["accounts"]["resp_composition"]
+        # ca's history is summed over BOTH accounts (never first-match only):
+        # the lifetime maxima are per beneficiary across plans.
+        ca = next(c for c in legacy["family"]["children"] if c["id"] == "ca")
+        ca_first = next(b for b in first["resp"]["beneficiaries"] if b["person"] == "ca")
+        self.assertEqual(ca["resp_history"]["contributions_total"],
+                         ca_first["contributions_total"] + 8000)
+        self.assertEqual(ca["resp_history"]["cesg_basic_received"],
+                         ca_first["cesg_basic_received"] + 1600)
+        self.assertEqual(ca["resp_history"]["qesi_received"],
+                         ca_first["qesi_received"] + 400)
         self.assertEqual(
             comp["total_contributions"],
             first["resp"]["contributions_total"] + 8000,
