@@ -124,6 +124,7 @@ import rules_retirement_income  # noqa: F401
 import rules_solvency         # noqa: F401
 import rules_superficial_loss  # noqa: F401
 import rules_tuition_credit   # noqa: F401
+import rules_student_loan_credit  # noqa: F401
 
 
 # Ordering is declared as data, not left to emerge from dict/insertion order
@@ -311,6 +312,16 @@ RULE_ORDER: tuple = (
     # any account balance a rule writes, so its position is free above
     # 'solvency'; it is placed here to sit beside the rule that reads it.
     'tuition_credit',
+    # Issue #371 (DP#26): the federal (ITA s.118.62) + Quebec (TP-1 line 385)
+    # student-loan-interest credits, with the per-member interest carry-forward.
+    # Same seam as 'tuition_credit' above and for the same reasons: it reads the
+    # year's interest that 'consumer_loans' published
+    # (`ws.consumer_loan_interest_by_loan`, hence its position AFTER that rule),
+    # applies each member's credit against the prologue-passed pre-credit tax, and
+    # writes the reduction for 'solvency' (next) to count as available. Sitting
+    # beside the tuition credit keeps the two non-refundable-credit rules readable
+    # in one place.
+    'student_loan_credit',
     'solvency',
     # Issue #141: ITA s.53(1)(c) superficial-loss anti-avoidance. Runs AFTER
     # 'solvency' (whose forced-liquidation waterfall is one of the two

@@ -717,6 +717,12 @@ def _valid_liability_for_kind(kind: str) -> Dict:
         liab["term_start_date"] = "2024-01-01"
     if kind in ("car_loan", "student_loan", "personal_loan", "intergenerational_loan"):
         liab["amortization"] = {"years": 4, "payment_monthly": 280}
+    if kind == "student_loan":
+        # Issue #371: the leaf is REQUIRED and non-nullable on this kind -- it
+        # decides whether the interest earns the federal (s.118.62) and Quebec
+        # (TP-1 line 385) credits, so the gate's own fixture has to declare it
+        # like every real document must.
+        liab["qualifying_government_loan"] = True
     return liab
 
 

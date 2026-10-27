@@ -85,6 +85,11 @@ ENTRY_MODULES: Tuple[str, ...] = (
     "rules_retirement_income",
     "rules_solvency",
     "rules_tuition_credit",
+    # Issue #371: the student-loan-interest credit rule. A root module like the
+    # others above -- registered in RULE_ORDER, so a walker that starts from the
+    # rule must treat it as an entry point rather than waiting for a static call
+    # edge that registry dispatch cannot produce.
+    "rules_student_loan_credit",
 )
 
 MODULE_BODY = "<module>"

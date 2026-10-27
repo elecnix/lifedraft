@@ -101,6 +101,7 @@ py-modules = [
     "rules_management_fee", "rules_registered_plans",
     "rules_retirement_income", "rules_superficial_loss", "rules_solvency",
     "rules_tuition_credit",
+    "rules_student_loan_credit",
     "simulation", "simulation_config", "simulation_deps", "simulation_rules",
     "simulation_state", "strategy", "stress_scenarios", "superficial_loss", "sweep",
     "tax_calculator", "tax_data", "transaction_costs", "trajectory_invariants", "voi",

@@ -155,9 +155,13 @@ def test_ws_field_inventory(inventory: _Inventory):
 
     # 262: the total ws.<field> surface touched by all rules (#286 added
     #      ws.rrsp_deduction_carried_forward, written by rrsp_deduction).
+    #      Issue #371 added five: consumer_loan_interest_by_loan (written by
+    #      consumer_loans, read by student_loan_credit), the two per-member
+    #      student_loan_credit_applied_* reductions, and the opening/new
+    #      per-member interest-ledger pair -- so 267.
     #  26: fields written by >1 source module (module-level multi-writers).
-    assert total_fields == 262, (
-        f"expected 262 ws fields, got {total_fields} -- the scanner missed "
+    assert total_fields == 267, (
+        f"expected 267 ws fields, got {total_fields} -- the scanner missed "
         "rules_*.py files or failed to resolve a helper; the guard's"
         " measurements are no longer trustworthy."
     )
@@ -202,8 +206,11 @@ def test_seam_inventory(inventory: _Inventory):
             if preceding:
                 seam_pairs.add((preceding[-1], consumer))
 
-    assert len(seam_pairs) == 53, (
-        f"expected 53 producer-consumer rule pairs, got {len(seam_pairs)} -- "
+    # Issue #371 added two: consumer_loans -> student_loan_credit (the per-loan
+    # interest it publishes) and student_loan_credit -> solvency (the per-member
+    # reduction, the same seam tuition_credit already has).
+    assert len(seam_pairs) == 55, (
+        f"expected 55 producer-consumer rule pairs, got {len(seam_pairs)} -- "
         f"a rule was added/removed/reordered. Review the change."
     )
 

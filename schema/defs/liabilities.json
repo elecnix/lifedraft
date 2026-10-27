@@ -64,6 +64,10 @@
         "amortization": { "$ref": "#/$defs/amortization", "description": "Required only for closed-end kinds (mortgage, car_loan, student_loan, personal_loan, intergenerational_loan)." },
         "renewal_date": { "$ref": "#/$defs/date", "description": "Required only for mortgage." },
         "term_start_date": { "$ref": "#/$defs/date", "description": "Required only for mortgage." },
+        "qualifying_government_loan": {
+          "type": "boolean",
+          "description": "Issue #371: whether a kind=student_loan was made under a qualifying government student-loan program -- the Act respecting financial assistance for education expenses (Quebec), the Canada Student Loans Act, the Canada Student Financial Assistance Act, the Apprentice Loans Act, or another province's equivalent post-secondary assistance law. ONLY interest on such a loan earns the federal credit (ITA s.118.62, CRA line 31900) and the Quebec credit (TP-1 line 385): interest on a line of credit, on a private loan, or on a student loan consolidated into another loan does NOT qualify. REQUIRED and NON-NULLABLE on kind=student_loan, and forbidden on every other kind (see the allOf below): an absent value -- and an explicit null, which declares nothing -- is refused rather than treated as qualifying, and a value declared on a car loan would be a silent dead read (DP#32)."
+        },
         "deductibility": { "$ref": "#/$defs/deductibility" },
         "collateral": { "anyOf": [{ "$ref": "#/$defs/property_id" }, { "type": "null" }], "description": "The property this debt is registered against, or null for genuinely unsecured debt (#689). This is the ONE axis that decides whether a revolving facility counts against that property's OSFI B-20 charge limit (#664/#681) and whether it survives a sale of the property -- not the liability `kind`." },
         "readvanceable": { "type": "boolean", "description": "Required only for kind=heloc: whether the credit limit re-grows automatically as the paired mortgage's principal is paid down (the product mechanic the Smith Manoeuvre needs — DP#7: model the mechanism, not the branded product)." },
@@ -82,6 +86,9 @@
           "else": { "allOf": [{ "not": { "required": ["readvanceable"] } }, { "not": { "required": ["capitalize_interest"] } }] } },
         { "if": { "properties": { "kind": { "enum": ["mortgage", "car_loan", "student_loan", "personal_loan", "intergenerational_loan"] } } },
           "then": { "required": ["amortization"] } },
+        { "if": { "properties": { "kind": { "const": "student_loan" } } },
+          "then": { "required": ["qualifying_government_loan"] },
+          "else": { "not": { "required": ["qualifying_government_loan"] } } },
         { "if": { "properties": { "kind": { "const": "mortgage" } } },
           "then": { "required": ["renewal_date", "term_start_date"] },
           "else": { "allOf": [{ "not": { "required": ["renewal_date"] } }, { "not": { "required": ["term_start_date"] } }, { "not": { "required": ["open"] } }, { "not": { "required": ["deductible"] } }, { "not": { "required": ["cash_back"] } }] } }

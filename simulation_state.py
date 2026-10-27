@@ -2447,6 +2447,11 @@ def simulate_year_pure(
         'advance_tracing': ws.new_advance_tracing,
         'margin_tracing': ws.new_margin_tracing,
         'qc_carry_forward': ws.new_qc_carry_forward,
+        # Issue #371: the per-member unused student-loan-interest schedule the
+        # student_loan_credit rule computed this year (interest that has not yet
+        # produced a credit). Threaded because the federal window spans five
+        # years and Quebec's never closes.
+        'student_loan_interest': ws.new_student_loan_interest,
         'spousal_contribution_years': ws.opening_spousal_contribution_years + ([year] if ws.sp_rrsp_actual > 0 else []),
         'rrsp_ledger': ws.new_ledger.contributions,
         'rrsp_deduction_carry_forward': ws.new_ledger.undeducted_total(),
@@ -2980,6 +2985,10 @@ def simulate_year_pure(
         # household that declares no tuition (the golden path).
         primary_tuition_carryforward=ws.new_primary_tuition_carryforward,
         spouse_tuition_carryforward=ws.new_spouse_tuition_carryforward,
+        # Issue #371: surface the student-loan-interest credits the rule
+        # applied this year (0.0 with no qualifying loan -- the golden path).
+        student_loan_credit_applied=(ws.student_loan_credit_applied_primary
+                                     + ws.student_loan_credit_applied_spouse),
         # Issue #140: the capital-loss carry-forward ledger surfaced for
         # transparency (the settled pool, the offset the rule applied this
         # year, and the slice pricing already sheltered). All 0.0 for a

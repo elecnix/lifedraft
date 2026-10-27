@@ -258,6 +258,16 @@ class TaxYearData:
     # Revenu Québec Schedule T (TP-1.D.T-V), line 45. Year-versioned (DP#20);
     # 0.0 for non-Quebec jurisdictions (the field is Quebec-specific).
     qc_tuition_credit_rate: float = 0.0
+    # ── Quebec student-loan-interest credit (TP-1 line 385, issue #371) ──
+    # A 20% non-refundable credit on interest paid on a qualifying government
+    # student loan (a loan under the Act respecting financial assistance for
+    # education expenses, the federal Canada Student Loans / Financial
+    # Assistance / Apprentice Loans Acts, or another province's equivalent).
+    # Sourced from Revenu Québec's line-385 page and Schedule M. Year-versioned
+    # (DP#20); 0.0 for non-Quebec jurisdictions (the field is Quebec-specific),
+    # and 0.0 for a year with no data -- which yields no Quebec credit rather
+    # than a guessed 20%, exactly as `qc_tuition_credit_rate` does (DP#32).
+    qc_student_loan_credit_rate: float = 0.0
     # ── Quebec work premium (prime au travail, refundable, issue #321) ──
     # Source: Revenu Québec, Work Premium Tax Credits; Québec Ministère des
     # Finances, Parameters of the Personal Income Tax System (general work premium).
@@ -851,6 +861,7 @@ class TaxDataProvider:
             qc_age_credit_reduction_rate=base.qc_age_credit_reduction_rate,
             qc_non_refundable_credit_rate=base.qc_non_refundable_credit_rate,
             qc_tuition_credit_rate=base.qc_tuition_credit_rate,
+            qc_student_loan_credit_rate=base.qc_student_loan_credit_rate,
             qc_work_premium_max_single=round(base.qc_work_premium_max_single * factor, 2) if base.qc_work_premium_max_single else 0,
             qc_work_premium_max_couple=round(base.qc_work_premium_max_couple * factor, 2) if base.qc_work_premium_max_couple else 0,
             qc_work_premium_excluded_single=base.qc_work_premium_excluded_single,
@@ -1016,6 +1027,7 @@ class TaxDataProvider:
             qc_age_credit_reduction_rate=data.get("qc_age_credit_reduction_rate", 0),
             qc_non_refundable_credit_rate=data.get("qc_non_refundable_credit_rate", 0),
             qc_tuition_credit_rate=data.get("qc_tuition_credit_rate", 0),
+            qc_student_loan_credit_rate=data.get("qc_student_loan_credit_rate", 0),
             qc_work_premium_max_single=data.get("qc_work_premium_max_single", 0),
             qc_work_premium_max_couple=data.get("qc_work_premium_max_couple", 0),
             qc_work_premium_excluded_single=data.get("qc_work_premium_excluded_single", 0),

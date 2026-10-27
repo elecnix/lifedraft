@@ -476,14 +476,37 @@ def map_consumer_loans(doc: Dict) -> List[Dict[str, Any]]:
                 f"debt, not deductible) or track #703."
             )
         amort = liab["amortization"]  # schema-required on closed-end kinds
-        consumer_loans.append({
+        entry = {
             # `id`/`kind` travel with the loan for reporting/traceability; the
-            # engine's amortization reads only the four numeric facts below.
+            # engine's amortization reads the four numeric facts below, and the
+            # student-loan credit rule needs `owner` (whose return claims the
+            # credit) and `qualifying_government_loan` (whether it earns one).
             "id": liab["id"],
             "kind": kind,
             "balance": liab["balance"]["amount"],
             "rate": liab["rate"],
             "payment_monthly": amort["payment_monthly"],
             "amortization_years": amort["years"],
-        })
+            # Issue #371: the loan's owner, so the credit lands on the return of
+            # the person who pays the interest (Revenu Québec: "you are the only
+            # person who can claim an amount for the interest paid on the student
+            # loan granted to you").
+            "owner": liab["owner"],
+        }
+        if kind == "student_loan":
+            # Issue #371: the schema requires this leaf and forbids it elsewhere,
+            # so its absence here means a config that bypassed validation. Refuse
+            # loudly rather than defaulting to "qualifying" (a fabricated credit)
+            # or to "not qualifying" (erasing a real one) -- DP#32.
+            if "qualifying_government_loan" not in liab:
+                raise ContractAdaptationError(
+                    f"student loan {liab['id']!r} does not declare "
+                    f"`qualifying_government_loan`. Only interest on a loan made "
+                    f"under a qualifying government student-loan program earns "
+                    f"the federal credit (ITA s.118.62) and the Quebec credit "
+                    f"(TP-1 line 385), so this cannot be guessed: declare true "
+                    f"or false. Refusing rather than assuming either."
+                )
+            entry["qualifying_government_loan"] = liab["qualifying_government_loan"]
+        consumer_loans.append(entry)
     return consumer_loans

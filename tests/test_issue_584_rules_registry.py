@@ -99,6 +99,7 @@ EXPECTED_RULE_NAMES = frozenset({
     'sm_unwind',                   # issue #1017: under liquidate_to_target, unwind the SM sleeve to fund the spending shortfall (sell SM, repay HELOC, pay cap-gains tax, deliver net)
     'property_disposition',        # issue #956 bite B: a declared mid-horizon property SALE settles in its sale year (net proceeds invested post-growth, gain taxed + PRE-apportioned, conservation identity Δtotal_assets = -(selling_costs + T))
     'tuition_credit',              # epic #795 bite 3: federal (+ QC) tuition tax credit (own credit + #784 carry-forward + #785 transfers) -- was inline in the fold's prologue
+    'student_loan_credit',         # issue #371: ITA s.118.62 (federal) + TP-1 line 385 (Quebec) non-refundable credits on interest paid on a QUALIFYING government student loan, with the per-member interest carry-forward (federal window: the year + 5 preceding; Quebec: open-ended)
     'solvency',                    # issue #679: cash-flow identity + forced-liquidation waterfall
     'superficial_loss',            # issue #141: ITA s.53(1)(c) deny a loss whose household repurchase lands in the annualized window + defer the denial into the repurchased pot's ACB under s.53(1)(f)
     'capital_loss',                # issue #140: settle the year's signed net capital position against the capital-loss carry-forward pool (same-year offset + carry-forward; never against ordinary income)
@@ -218,6 +219,10 @@ EXPECTED_RULE_ORDER = (
     # `available` so the cash-flow identity counts the POST-credit
     # after-tax income. Was inline in the fold's prologue (two spellings).
     'tuition_credit',
+    # issue #371: the federal (+ QC) student-loan-interest credit, on the same
+    # seam as the tuition credit above -- it reads the interest 'consumer_loans'
+    # published and writes the per-member reduction 'solvency' consumes.
+    'student_loan_credit',
     'solvency',
     # issue #141: ITA s.53(1)(c) superficial-loss anti-avoidance. Runs AFTER
     # 'solvency' (whose forced-liquidation waterfall is one of the two
@@ -450,6 +455,42 @@ def test_every_rule_fires_somewhere_in_representative_households():
         canada['sm_investment_cost_basis'] = 1_000_000
         canada['readvance_heloc_balance'] = 200_000
         sm_sim.run()
+    _merge(fired)
+
+    # ── Scenario R (issue #371): a household carrying a QUALIFYING government
+    # student loan, so the `student_loan_credit` rule has something to claim.
+    # Deliberately its own scenario: every other household here declares no
+    # student loan, so the rule is a correct no-op in all of them -- and a rule
+    # that is registered but never fires in ANY representative household is the
+    # #627 failure shape, which is what this test exists to catch.
+    with trace_firing() as fired:
+        loan_cfg = SimulationConfig.from_dict({
+            'family': {'members': [
+                {'role': 'primary', 'id': 'p1', 'birth_year': 1985,
+                 'retirement_age': 65, 'gross_income': 95_000,
+                 'rrsp_room_accumulated': 0, 'tfsa_room_accumulated': 0}],
+                'children': []},
+            'consumer_loans': [{
+                'id': 'student_r', 'kind': 'student_loan', 'owner': 'p1',
+                'balance': 20_000, 'rate': 0.05, 'payment_monthly': 250,
+                'amortization_years': 10,
+                'qualifying_government_loan': True}],
+            'assumptions': {'start_year': 2026, 'projection_years': 3,
+                            'investment_return': 0.05, 'salary_growth': 0.0,
+                            'inflation': 0.0, 'frozen_brackets': True,
+                            'time_step': 'yearly'},
+            'savings': {'rate': 0.1},
+            'tax': {'province': 'qc'},
+            # living_costs so the solvency identity (the credit's consumer) fires.
+            'household_budget': {'living_costs': 50_000},
+        })
+        from countries.canada.adapter import CanadaAdapter
+        loan_run = FamilySimulation(loan_cfg, adapter=CanadaAdapter(loan_cfg),
+                                    use_readvanceable=False,
+                                    deduct_later=False).run()
+        assert loan_run[0].student_loan_credit_applied > 0.0, (
+            "premise: this scenario exists to make the student_loan_credit rule "
+            "fire with an OBSERVABLE effect, not merely to be present")
     _merge(fired)
 
     # ── Scenario C: LIRA/LIF -- accumulation, conversion at 71, then a

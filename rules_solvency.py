@@ -557,6 +557,10 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
                      # no tuition (the golden path) -- a strict no-op.
                      + ws.tuition_credit_applied_primary
                      + ws.tuition_credit_applied_spouse
+                     # Issue #371: the student_loan_credit rule's per-member tax
+                     # reduction, 0.0 with no qualifying student loan.
+                     + ws.student_loan_credit_applied_primary
+                     + ws.student_loan_credit_applied_spouse
                      # Issue #1083: the s.20(1)(c) deduction's statutory saving
                      # on the primary's prologue-taxed rental/loan slice -- the
                      # tax the prologue already embedded in
@@ -613,7 +617,11 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
                      # epic #795 bite 3: the tuition_credit rule's per-member
                      # tax reduction (0.0 for a no-tuition household).
                      + ws.tuition_credit_applied_primary
-                     + ws.tuition_credit_applied_spouse)
+                     + ws.tuition_credit_applied_spouse
+                     # Issue #371: the student-loan credit's per-member tax
+                     # reduction (0.0 with no qualifying loan).
+                     + ws.student_loan_credit_applied_primary
+                     + ws.student_loan_credit_applied_spouse)
     required = debt_service + spending_outflow + contributions
 
     # epic #795 bite 3: ctx.after_tax_income is the PRE-credit after-tax
@@ -627,6 +635,9 @@ def apply_solvency(ws: YearWorkingState, ctx: RuleContext) -> bool:
         ctx.after_tax_income
         + ws.tuition_credit_applied_primary
         + ws.tuition_credit_applied_spouse
+        # Issue #371: the student-loan credit is a tax reduction too.
+        + ws.student_loan_credit_applied_primary
+        + ws.student_loan_credit_applied_spouse
         # Issue #1083: the s.20(1)(c) nondrawdown routing's saving is a tax
         # reduction on income already inside ``ctx.after_tax_income`` -- report
         # the POST-saving figure, exactly as the tuition credits above report

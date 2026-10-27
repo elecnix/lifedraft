@@ -2,8 +2,8 @@
   "engine_entry": "input_contract.load_and_map -> SimulationConfig.from_dict -> FamilySimulation(config, adapter=CanadaAdapter(config)).run()",
   "mode": "simulate",
   "projection": {
-    "full_report_bytes": 337247,
-    "full_report_digest": "sha256:51f53ccc68ec0bb0fdef621a42ad9b0ac5dacf15cb860dd52ad8389875c2b6c2",
+    "full_report_bytes": 338947,
+    "full_report_digest": "sha256:28676425f2a2fc4f3da7ca7c5d5742a4a8fcf28a042e2cb328c816b04580dbaa",
     "function": "tools/examples.py::project_simulation",
     "series_columns": [
       "year",
@@ -1281,6 +1281,7 @@
     "spouse_tfsa": 0.0,
     "spouse_tuition_carryforward": 0.0,
     "str_business_income": 0.0,
+    "student_loan_credit_applied": 0.0,
     "superficial_loss_acb_added": 0.0,
     "superficial_loss_denied": 0.0,
     "superficial_loss_pended": 0,

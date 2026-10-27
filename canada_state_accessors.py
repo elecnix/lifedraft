@@ -269,6 +269,14 @@ def _default_canada_state() -> dict:
         # disposition. Empty {} for a household with no CCA election (the golden
         # path -- inert, DP#32).
         'rental_ucc': {},
+
+        # Issue #371: the per-member schedule of interest paid on qualifying
+        # government student loans that has not yet produced a credit,
+        # {role: {payment_year: dollars}}. Read and written by the
+        # student_loan_credit rule; it outlives a single year because the federal
+        # window is five years and Quebec's never closes. Empty {} for a
+        # household with no qualifying loan (the golden path -- inert, DP#32).
+        'student_loan_interest': {},
     }
 
 

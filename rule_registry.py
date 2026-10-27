@@ -826,6 +826,10 @@ class YearWorkingState:
     # and the end-of-year per-loan balances carried forward.
     consumer_loan_payment: float = 0.0
     consumer_loan_interest: float = 0.0
+    # Issue #371: this year's interest PER LOAN (id -> dollars), so the
+    # student-loan-interest credit can be attributed to the person who pays it
+    # and only on a QUALIFYING loan. Written by apply_consumer_loans.
+    consumer_loan_interest_by_loan: dict = field(default_factory=dict)
     new_consumer_loan_balances: list = field(default_factory=list)
     # Issue #967: mid-horizon mortgages originated by properties'
     # `purchase.financing` -- the year's total payment (folded into
@@ -907,6 +911,17 @@ class YearWorkingState:
     # the POST-credit after-tax income the pre-refactor prologue passed.
     tuition_credit_applied_primary: float = 0.0
     tuition_credit_applied_spouse: float = 0.0
+    # Issue #371: the student_loan_credit rule's per-member tax reduction (the
+    # credit lowers tax, so it raises after-tax income), and the per-member
+    # schedule of interest that has not yet produced a credit,
+    # {role: {payment_year: dollars}} -- threaded through jurisdiction_state
+    # because the federal window (5 years) and Quebec's open-ended one outlive a
+    # single year's fold. Both default to 0.0 / {} for a household with no
+    # qualifying student loan (the golden path, DP#32).
+    student_loan_credit_applied_primary: float = 0.0
+    student_loan_credit_applied_spouse: float = 0.0
+    opening_student_loan_interest: dict = field(default_factory=dict)
+    new_student_loan_interest: dict = field(default_factory=dict)
     # The END-of-year unused-credit remainder carried to the next year
     # (per-member / per-child; #784/#785). Written to jurisdiction_state by the
     # epilogue and surfaced on YearResult by build_year_result.
@@ -1057,6 +1072,11 @@ class YearWorkingState:
         # Issue #968: the opening rental UCC ledger (the UCC immediately before a
         # mid-year disposition). See the field's docstring above.
         ws.opening_rental_ucc = canada.get('rental_ucc', {})
+        # Issue #371: the per-member unused student-loan-interest schedule.
+        # Absent (a state built before this existed, i.e. a household whose
+        # loans have never produced untaxed interest) -> {} -> no credit and
+        # nothing carried, which is the same no-op as declaring no loan (DP#32).
+        ws.opening_student_loan_interest = canada.get('student_loan_interest', {})
         ws.opening_readvance_heloc_balance = canada.get('readvance_heloc_balance', 0)
         ws.opening_sm_investment_balance = canada.get('sm_investment_balance', 0)
         ws.opening_sm_investment_cost_basis = canada.get('sm_investment_cost_basis', 0)
