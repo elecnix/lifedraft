@@ -445,6 +445,15 @@ class TestCaveatVocabularyIsCoveredOrAllowlisted(unittest.TestCase):
 # (delete or change the anchored code) and this test goes red until the
 # registry entry is removed too.
 _CODE_ANCHORS = {
+    # Issue #391: the $0-CPP caveat is anchored to the ADAPTER branch that
+    # leaves `cpp_monthly_estimated` unset (and `cpp_benefit_source` absent)
+    # for an adult with no Statement and nothing to estimate from. That branch
+    # IS the zero this caveat discloses: if #390 ever grows a CPP source that
+    # fills it, the anchor goes stale and the caveat must go with it. The
+    # load-time `logger.warning` on the same condition is not the anchor --
+    # it is the invisible half of the same fact.
+    'cpp_modelled_as_zero': (
+        'contract_people.py', 'if "cpp_monthly_estimated" not in member:'),
     'terminal_wealth_is_pretax': (
         'objective.py', 'def _terminal_wealth('),
     # Issue #170: the refused-contribution caveat is anchored to the clamp

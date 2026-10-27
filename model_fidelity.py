@@ -1654,3 +1654,196 @@ register(Approximation(
     issue='#137',
     applies=_deployment_lag_declared,
 ))
+
+
+# ── Issue #391: a CPP/QPP pension of $0 must not be silent ────────────────
+#
+# `contract_people` has warned about this at LOAD time since #389/#390 --
+# `logger.warning("person %r ... so cpp_monthly_estimated is unset
+# (cpp_income=0 for the horizon)")`. That warning reaches nobody: it goes to
+# the `contract_people` logger, which nothing configures, so a household that
+# declared no CPP Statement and no earnings history reads a plan whose CPP is
+# silently zero -- exactly the DP#32 failure ("absence must fail loudly").
+#
+# Why this caveat fires on `cpp_monthly_estimated` and NOT on a re-test of the
+# document: the ADAPTER has already decided. It sets `cpp_benefit_source` to
+# one of 'statement' / 'estimated_from_earnings_history' /
+# 'estimated_from_incomes' on every path that found a CPP source, and leaves
+# BOTH keys absent when it found none, and sets the source but not the amount
+# when an estimate computes to $0. Reading the adapter's own output means this
+# caveat cannot drift from the engine's behaviour -- if #390 grows a new CPP
+# source, the adapter teaches this caveat the new case for free. Re-deriving
+# "does this person have a CPP source" from the document here would be a
+# second spelling of a rule the adapter owns, and the failure mode of a second
+# spelling is a FALSE caveat (this registry's own doctrine: a caveat for an
+# approximation that no longer exists teaches the reader to ignore the ones
+# that are still true).
+#
+# The age gate is the same one `contract_people` applies, and it is imported
+# from here (CPP_FIDELITY_MIN_AGE below) rather than repeated there, so the log
+# warning and this caveat can never disagree about who counts as near
+# retirement.
+
+CPP_FIDELITY_MIN_AGE = 50
+"""Age at which a missing CPP/QPP source becomes a planning-relevant omission.
+
+Not a statutory number -- it is this engine's line between "an earner who has
+years of contributions left, so the omission will not bite this plan" and "an
+adult 11+ years from CPP eligibility, whose entire first source of retirement
+income is silently zero". Deliberately BELOW the age-65 claim age, because the
+actionable window is exactly the years in which a Statement can still be
+obtained and the contribution record still corrected. `contract_people`
+imports this constant for its load-time warning, so the two agree by
+construction (DP#9 -- one spelling of the rule)."""
+
+
+def cpp_modelled_as_zero_people(cfg: dict) -> List[Dict]:
+    """The adults this run models with a $0 CPP/QPP pension, and why.
+
+    Pure (DP#3): a function of the mapped config only. Returns one dict per
+    affected adult with `role`, `age` and `source` (the adapter's own
+    `cpp_benefit_source`, or None when the adapter found no CPP source at
+    all). An empty list means no adult is affected -- and that is a real
+    answer, not an absence (DP#32): an adult with a non-zero
+    `cpp_monthly_estimated`, or below CPP_FIDELITY_MIN_AGE, or with no
+    datable age, is deliberately not reported.
+
+    Returns [] for a config shape it cannot read (a non-dict cfg, a missing
+    `family.members`, a missing `assumptions.start_year`, or a member whose
+    `cpp_monthly_estimated` is present but not a number) rather than
+    guessing: this is a disclosure, and inventing a figure to disclose would
+    be the very silence it exists to end. An ABSENT or None amount is not in
+    that class -- it is the $0 case itself, and is reported.
+
+    `assumptions.start_year` is the run's FIRST calendar year, not a
+    date the household chose independently: `input_contract.to_internal_config`
+    computes it as `int(as_of[:4])` and `contract_assumptions.map_assumptions`
+    writes it, and nothing overwrites it afterwards, so the age below is the
+    age at the start of the plan.
+
+    KNOWN LIMIT -- the age basis. This reads whole calendar years
+    (`assumptions.start_year - birth_year`) because the mapped config carries
+    a `birth_year`, not the `birth_date` the adapter's load-time warning uses
+    for an exact-date age. For a member whose birthday falls between the two
+    dates the two ages can differ by one, so for a few days a year a person
+    can get the log warning without the caveat (or the reverse). That is
+    disclosed rather than papered over: closing it would mean carrying
+    `birth_date` onto the internal member dict for one caveat, and the mapped
+    config's own year granularity is the honest one to report a year-1
+    disclosure against.
+    """
+    if not isinstance(cfg, dict):
+        return []
+    family = cfg.get('family')
+    if not isinstance(family, dict):
+        return []
+    members = family.get('members')
+    if not isinstance(members, list):
+        return []
+    assumptions = cfg.get('assumptions')
+    if not isinstance(assumptions, dict):
+        return []
+    start_year = assumptions.get('start_year')
+    if not isinstance(start_year, int) or isinstance(start_year, bool):
+        return []
+
+    affected: List[Dict] = []
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        monthly = member.get('cpp_monthly_estimated')
+        # Only an UNREADABLE amount is declined. Absence, zero and a NEGATIVE
+        # amount are all reported, each with its own finding: a negative is not
+        # a $0 pension, but it is still an amount the plan is using without
+        # saying so, and declining it here would leave that household with no
+        # disclosure at all.
+        if isinstance(monthly, bool) or (
+                monthly is not None and not isinstance(monthly, (int, float))):
+            continue
+        if monthly is not None and monthly > 0:
+            # The ordinary case: a real pension. Nothing to disclose.
+            continue
+        birth_year = member.get('birth_year')
+        if not isinstance(birth_year, int) or isinstance(birth_year, bool):
+            continue
+        age = start_year - birth_year
+        if age < CPP_FIDELITY_MIN_AGE:
+            continue
+        role = member.get('role', 'adult')
+        if not isinstance(role, str) or not role:
+            role = 'adult'
+        affected.append({'role': role, 'age': age,
+                         'source': member.get('cpp_benefit_source'),
+                         'monthly': monthly})
+    return affected
+
+
+def _has_cpp_modelled_as_zero(ctx: FidelityContext) -> bool:
+    return bool(cpp_modelled_as_zero_people(ctx.cfg))
+
+
+def _describe_cpp_modelled_as_zero(ctx: FidelityContext) -> List[str]:
+    """Name each affected adult and the SPECIFIC reason, because the two
+    causes need different fixes: no source at all means "go and get a
+    Statement", while a source that estimates to $0 means "the engine had
+    inputs and still found nothing contributory"."""
+    people = cpp_modelled_as_zero_people(ctx.cfg)
+    lines: List[str] = []
+    for person in people:
+        source = person.get('source')
+        monthly = person.get('monthly')
+        if isinstance(monthly, (int, float)) and monthly < 0:
+            lines.append(
+                f"{person['role']} (age {person['age']}): the CPP amount on "
+                f"file is NEGATIVE (${monthly:,.0f}/month) -- that is not a "
+                f"$0 pension but an amount the plan uses as-is, and it is not "
+                f"a figure any CPP estimator produces")
+            continue
+        if isinstance(source, str) and source:
+            lines.append(
+                f"{person['role']} (age {person['age']}): a CPP source is "
+                f"declared ({source}) but the estimate comes to $0 -- the "
+                f"engine found no contributory earnings in it, so pension "
+                f"income is 0 for every year of the horizon")
+        else:
+            lines.append(
+                f"{person['role']} (age {person['age']}): no benefits.cpp / "
+                f"entitlements.cpp (Service Canada / Retraite Quebec "
+                f"Statement), no earnings_history, and no employment or "
+                f"self-employment income to estimate from -- CPP/QPP pension "
+                f"income is modelled as 0 for every year of the horizon")
+    return lines
+
+
+register(Approximation(
+    id='cpp_modelled_as_zero',
+    summary=("At least one near-retirement adult's CPP/QPP pension is not "
+             "modelled as income the plan can count -- it is modelled at $0, "
+             "or on an amount that is not a valid pension -- for the whole "
+             "horizon; either the document declares no source at all (no "
+             "Statement, no earnings history, nothing to estimate from), or "
+             "the source it does declare produced $0 or a negative figure, "
+             "and the per-adult findings below say which, because only one of "
+             "those is fixed by supplying a Statement"),
+    biased_figure=("CPP/QPP pension income in every retirement year, and "
+                   "through it retirement net cash flow, the portfolio "
+                   "drawdown the shortfall must be funded from, and every "
+                   "objective that ranks on either"),
+    direction=Direction.UNDERSTATES,
+    detail=("contract_people decides this at load time -- it sets "
+            "cpp_benefit_source and, when an estimate is non-zero, "
+            "cpp_monthly_estimated on the member. This caveat reads those "
+            "adapter outputs rather than re-testing the document, so it "
+            "cannot claim a $0 pension the engine is not actually modelling. "
+            "The load-time logger.warning of the same fact (#389/#390) is "
+            "unseen in a normal run; this entry is what puts it in front of a "
+            "reader. Younger adults (below CPP_FIDELITY_MIN_AGE) are omitted "
+            "deliberately: they have contributions left to make, so a missing "
+            "source is a detail, not an omission from the plan. Providing "
+            "entitlements.cpp / benefits.cpp, people[].earnings_history, or "
+            "active employment incomes makes the caveat disappear -- if it "
+            "does not, that is a bug in the adapter or in this predicate."),
+    issue='#391',
+    applies=_has_cpp_modelled_as_zero,
+    findings=_describe_cpp_modelled_as_zero,
+))
