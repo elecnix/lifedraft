@@ -117,6 +117,24 @@ def apply_tuition_credit(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # declared tuition that year (DP#32: absent tuition_by_year -> {} -> 0).
     primary_tuition = primary_member.get('tuition_by_year', {}).get(sim_year, 0.0)
     spouse_tuition = spouse_member.get('tuition_by_year', {}).get(sim_year, 0.0)
+    # Issue #372: ITA s.122.91(3) -- "eligible tuition fees for the Tuition Tax
+    # Credit will be reduced by the amount of the training tax credit deducted".
+    # The `training_credit` rule (which runs immediately above this one) has
+    # already claimed each member's Canada Training Credit against this year's
+    # tuition; what is left is the base for the non-refundable s.118.5 credit
+    # here. Without this reduction the two credits are BOTH computed on the full
+    # declared tuition, which over-credits a learner twice over -- and the CTC is
+    # a refundable credit, so its whole purpose is to be taken off the s.118.5
+    # base first.
+    #
+    # The transfer cap below is deliberately NOT reduced: ITA s.118.8's $5,000
+    # limit is on TUITION FEES PAID, not on the credit after the CTC offset, so a
+    # learner who transfers still transfers against the full $5,000 of fees.
+    from countries.canada.training_credit import tuition_after_credit
+    primary_tuition = tuition_after_credit(
+        primary_tuition, ws.ctc_claimed_primary)
+    spouse_tuition = tuition_after_credit(
+        spouse_tuition, ws.ctc_claimed_spouse)
     primary_tuition_credit = _tuition_tax_credit(
         primary_tuition, sim_year, tax_provider,
         province=province) if primary_tuition else 0.0

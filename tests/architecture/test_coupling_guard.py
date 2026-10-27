@@ -153,11 +153,13 @@ def test_ws_field_inventory(inventory: _Inventory):
     total_fields = len(inventory.fields)
     multi_module_writers = sum(1 for f in inventory.fields.values() if len(f.writer_files) > 1)
 
-    # 262: the total ws.<field> surface touched by all rules (#286 added
-    #      ws.rrsp_deduction_carried_forward, written by rrsp_deduction).
+    # 266: the total ws.<field> surface touched by all rules (#286 added
+    #      ws.rrsp_deduction_carried_forward, written by rrsp_deduction;
+    #      #372 added the four `training_credit` fields -- the two claimed
+    #      amounts plus the opening/closing per-member balance).
     #  26: fields written by >1 source module (module-level multi-writers).
-    assert total_fields == 262, (
-        f"expected 262 ws fields, got {total_fields} -- the scanner missed "
+    assert total_fields == 266, (
+        f"expected 266 ws fields, got {total_fields} -- the scanner missed "
         "rules_*.py files or failed to resolve a helper; the guard's"
         " measurements are no longer trustworthy."
     )
@@ -169,7 +171,7 @@ def test_ws_field_inventory(inventory: _Inventory):
 def test_seam_inventory(inventory: _Inventory):
     """A *seam* is a (producer_rule, consumer_rule) pair where the producer
     is the LATEST writer of a field that precedes a PURE consumer (a reader
-    that does not also write the field).  53 such pairs exist today; the
+    that does not also write the field).  55 such pairs exist today; the
     count is pinned so adding or removing a seam is a deliberate, reviewed
     change rather than a silent drift.
 
@@ -183,6 +185,11 @@ def test_seam_inventory(inventory: _Inventory):
     writes, so a deduction carried at retirement is claimed against
     retirement income instead of sitting undeducted for the rest of the
     horizon.)
+
+    (#372 added two: ``training_credit`` -> ``tuition_credit`` (the CTC claimed
+    reduces the s.118.5 eligible-tuition base, ITA s.122.91(3)) and
+    ``training_credit`` -> ``solvency`` (the refundable credit is CASH, so the
+    cash-flow identity must count it as an inflow).)
 
     (The feasibility brief estimated "52"; the difference is methodology --
     the brief's ad-hoc prototype did not resolve two same-file helper
@@ -202,8 +209,8 @@ def test_seam_inventory(inventory: _Inventory):
             if preceding:
                 seam_pairs.add((preceding[-1], consumer))
 
-    assert len(seam_pairs) == 53, (
-        f"expected 53 producer-consumer rule pairs, got {len(seam_pairs)} -- "
+    assert len(seam_pairs) == 55, (
+        f"expected 55 producer-consumer rule pairs, got {len(seam_pairs)} -- "
         f"a rule was added/removed/reordered. Review the change."
     )
 

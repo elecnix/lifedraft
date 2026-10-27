@@ -123,6 +123,7 @@ import rules_registered_plans  # noqa: F401
 import rules_retirement_income  # noqa: F401
 import rules_solvency         # noqa: F401
 import rules_superficial_loss  # noqa: F401
+import rules_training_credit  # noqa: F401
 import rules_tuition_credit   # noqa: F401
 
 
@@ -310,6 +311,13 @@ RULE_ORDER: tuple = (
     # pre-credit tax + the opening carry-forwards + member/child data, not on
     # any account balance a rule writes, so its position is free above
     # 'solvency'; it is placed here to sit beside the rule that reads it.
+    # Issue #372: the Canada Training Credit (ITA s.122.91) is a REFUNDABLE
+    # federal credit -- cash, not a tax reduction -- so 'solvency' below reads
+    # it off ws as an inflow. It must also run BEFORE 'tuition_credit', which
+    # reduces the s.118.5 eligible-tuition base by whatever is claimed here
+    # (ITA s.122.91(3)); the reverse order would compute the non-refundable
+    # credit on tuition the refundable one has already consumed.
+    'training_credit',
     'tuition_credit',
     'solvency',
     # Issue #141: ITA s.53(1)(c) superficial-loss anti-avoidance. Runs AFTER

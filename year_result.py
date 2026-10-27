@@ -588,6 +588,14 @@ class YearResult:
     # reader can see the credit was carried, not discarded.
     primary_tuition_carryforward: float = 0.0
     spouse_tuition_carryforward: float = 0.0
+    # Issue #372: the Canada Training Credit claimed this year per member (a
+    # REFUNDABLE credit -- cash, already added to `after_tax_income` by the
+    # `solvency` rule, not a tax reduction), and each member's closing training
+    # amount limit keyed by member id (the balance that survives to next year).
+    # All 0.0 / {} for a household that declares no tuition (the golden path).
+    primary_ctc_claimed: float = 0.0
+    spouse_ctc_claimed: float = 0.0
+    training_amount_limit: Dict[str, float] = field(default_factory=dict)
 
     # Issue #140: the capital-loss carry-forward ledger. ``capital_loss_
     # carryforward`` is the pool at the END of this year (in taxable-basis,

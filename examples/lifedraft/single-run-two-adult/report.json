@@ -2,8 +2,8 @@
   "engine_entry": "input_contract.load_and_map -> SimulationConfig.from_dict -> FamilySimulation(config, adapter=CanadaAdapter(config)).run()",
   "mode": "simulate",
   "projection": {
-    "full_report_bytes": 337247,
-    "full_report_digest": "sha256:51f53ccc68ec0bb0fdef621a42ad9b0ac5dacf15cb860dd52ad8389875c2b6c2",
+    "full_report_bytes": 341147,
+    "full_report_digest": "sha256:c9a2bbf3c36bb40f7bb12fdd28c0d3772f567c09f68109ed89fc42a7082cac8c",
     "function": "tools/examples.py::project_simulation",
     "series_columns": [
       "year",
@@ -1223,6 +1223,7 @@
     "oas_clawback": 1399.9587728632177,
     "oas_income": 16416.041227136782,
     "pension_income": 0,
+    "primary_ctc_claimed": 0.0,
     "primary_income": 0.0,
     "primary_marginal": 0.2569,
     "primary_rrsp": 671595.5684949422,
@@ -1275,6 +1276,7 @@
     "solvency_shortfall": 1528.4087728632148,
     "solvency_spending_outflow": 90000.0,
     "spousal_rrsp": 757163.3577197577,
+    "spouse_ctc_claimed": 0.0,
     "spouse_income": 0.0,
     "spouse_marginal": 0.2569,
     "spouse_rrsp": 0.0,

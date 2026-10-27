@@ -381,6 +381,11 @@ class YearWorkingState:
     opening_primary_tuition_carryforward: float = 0.0
     opening_spouse_tuition_carryforward: float = 0.0
     opening_child_tuition_carryforwards: list = field(default_factory=list)
+    # Issue #372 (ITA s.122.91): the opening Canada training amount limit per
+    # member id, and the preceding year's {working_income, net_income} per
+    # member id -- the inputs the $250 accrual is conditioned on. Both {} for a
+    # household that declares no tuition (DP#32).
+    opening_training_amount_limit: Dict[str, float] = field(default_factory=dict)
     # Issue #140: the capital-loss carry-forward pool entering the year (in
     # TAXABLE-BASIS, i.e. includable dollars -- a $40k raw loss at 50%
     # inclusion is $20k of pool). Lives in
@@ -913,6 +918,15 @@ class YearWorkingState:
     new_primary_tuition_carryforward: float = 0.0
     new_spouse_tuition_carryforward: float = 0.0
     new_child_tuition_carryforwards: list = field(default_factory=list)
+    # ── Issue #372: the `training_credit` rule's outputs ──
+    # The CTC claimed per member this year (a REFUNDABLE credit: it is cash in
+    # the household's hand, added to `available` by `solvency`, not a reduction
+    # of tax), and the closing training amount limit per member id. Read by the
+    # `tuition_credit` rule (which reduces the s.118.5 base by the CTC claimed)
+    # and by `build_year_result`.
+    ctc_claimed_primary: float = 0.0
+    ctc_claimed_spouse: float = 0.0
+    new_training_amount_limit: Dict[str, float] = field(default_factory=dict)
 
     # ── capital_loss rule (issue #140, DP#26) ──
     # The year's net capital position settled against the carry-forward pool
@@ -1126,6 +1140,14 @@ class YearWorkingState:
             'spouse_tuition_carryforward', 0.0)
         ws.opening_child_tuition_carryforwards = list(
             canada.get('child_tuition_carryforwards', []))
+        # Issue #372: each TAXED member's unused Canada training amount limit
+        # (ITA s.122.91) at the start of the year, keyed by member id. The rule
+        # seeds the first year from the member's declared
+        # `training_amount_limit_opening`, so a learner who had room before the
+        # projection keeps it. Empty {} for a household that declares no tuition
+        # and no opening limit (the golden fixture) -- a strict no-op (DP#32).
+        ws.opening_training_amount_limit = dict(
+            canada.get('training_amount_limit', {}))
         # Issue #140: the opening capital-loss carry-forward pool (includable
         # dollars). See the field's docstring above.
         ws.opening_capital_loss_carryforward = canada.get(
