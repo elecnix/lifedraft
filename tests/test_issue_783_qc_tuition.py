@@ -70,9 +70,18 @@ class TestTuitionCreditComputesFederalPlusQC(unittest.TestCase):
         p = _provider()
         fed_lowest = p._load_year(2026, 'canada', 'federal').federal_brackets[0].rate
         credit = tuition_tax_credit(10_000, 2026, p, province='quebec')
-        self.assertAlmostEqual(credit, 10_000 * (fed_lowest + 0.08))
-        # With the 2026 data (federal lowest 14%), that is 1400 + 800 = 2200.
-        self.assertAlmostEqual(credit, 2200.0)
+        ab = p._load_year(2026, 'canada', 'quebec').provincial_abatement
+
+        # Issue #348: a Quebec resident's FEDERAL portion is abated by the
+        # province's `provincial_abatement` (16.5%), because the CRA computes
+        # the abatement on line 42900 -- basic federal tax, i.e. AFTER the
+        # s.118 non-refundable credits (ITA s.120(4)). The provincial 8% is
+        # NOT abated. Read the rate from data, never hardcoded.
+        self.assertAlmostEqual(
+            credit, 10_000 * (fed_lowest * (1 - ab) + 0.08))
+        # With the 2026 data (federal lowest 14%, Quebec abatement 16.5%), the
+        # federal portion is 1400 * 0.835 = 1169, plus 800 provincial = 1969.
+        self.assertAlmostEqual(credit, 1969.0)
 
     def test_qc_alias_accepted(self):
         p = _provider()
@@ -97,8 +106,17 @@ class TestTuitionCreditComputesFederalPlusQC(unittest.TestCase):
         the 8% is not baked into the computation."""
         p = _provider()
         p._fallbacks['canada:quebec:2026'].qc_tuition_credit_rate = 0.20
-        self.assertAlmostEqual(tuition_tax_credit(10_000, 2026, p, province='quebec'),
-                               10_000 * (0.14 + 0.20))  # fed lowest 14% + patched 20%
+        # Issue #348: the FEDERAL half is abated too, so the patched 20% sits
+        # beside the un-abated provincial rate and an abated federal one.
+        # The federal rate is READ from the record, not written as 0.14 -- a
+        # hardcoded literal here would pin the test to today's bracket and
+        # fail for the wrong reason the day it is revalued (review finding).
+        ab = p._load_year(2026, 'canada', 'quebec').provincial_abatement
+        fed_lowest = p._load_year(
+            2026, 'canada', 'federal').federal_brackets[0].rate
+        self.assertAlmostEqual(
+            tuition_tax_credit(10_000, 2026, p, province='quebec'),
+            10_000 * (fed_lowest * (1 - ab) + 0.20))
 
     def test_no_qc_data_yields_zero_provincial_credit(self):
         """DP#32: a provider with no Quebec tax data must yield a $0 QC
@@ -143,7 +161,15 @@ class TestQCTuitionCreditIsAppliedEndToEnd(unittest.TestCase):
         no_tuition = self._run(self._cfg(0, 'quebec'))[0]
         with_tuition = self._run(self._cfg(10_000, 'quebec'))[0]
         delta = with_tuition.after_tax_income - no_tuition.after_tax_income
-        self.assertAlmostEqual(delta, 10_000 * (self._fed_lowest() + 0.08),
+        ab = _provider()._load_year(2026, 'canada', 'quebec').provincial_abatement
+
+        # Issue #348: a Quebec resident's FEDERAL portion is abated by the
+        # province's `provincial_abatement` (16.5%), because the CRA computes
+        # the abatement on line 42900 -- basic federal tax, i.e. AFTER the
+        # s.118 non-refundable credits (ITA s.120(4)). The provincial 8% is
+        # NOT abated. Read the rate from data, never hardcoded.
+        self.assertAlmostEqual(
+            delta, 10_000 * (self._fed_lowest() * (1 - ab) + 0.08),
                                places=2,
                                msg="a QC student's after-tax income must rise by "
                                    "federal + QC (8%) provincial tuition credit")
@@ -156,15 +182,29 @@ class TestQCTuitionCreditIsAppliedEndToEnd(unittest.TestCase):
                                msg="an ON student gets the federal credit only")
 
     def test_quebec_credit_is_larger_than_ontario_by_the_qc_portion(self):
-        """The headline: a QC student is credited MORE than an ON student by
-        exactly the QC provincial portion (8% of tuition)."""
+        """A QC student is credited more than an ON student -- but by the
+        provincial 8% MINUS the federal portion the Quebec abatement removes.
+
+        Issue #348. It used to be exactly the 8%: the federal halves were
+        identical because nothing applied the abatement to the CREDIT (only to
+        the tax). Now a QC student's federal half is worth
+        ``fed_lowest * (1 - 0.165)``, so the gap is
+        ``tuition * 0.08 - tuition * fed_lowest * 0.165`` = 800 - 231 = 569 on
+        $10,000. The gap is still positive, and still the province's doing --
+        just no longer the whole of it.
+        """
         qc_delta = (self._run(self._cfg(10_000, 'quebec'))[0].after_tax_income
                     - self._run(self._cfg(0, 'quebec'))[0].after_tax_income)
         on_delta = (self._run(self._cfg(10_000, 'ontario'))[0].after_tax_income
                     - self._run(self._cfg(0, 'ontario'))[0].after_tax_income)
         self.assertGreater(qc_delta, on_delta)
-        self.assertAlmostEqual(qc_delta - on_delta, 10_000 * 0.08, places=2,
-                               msg="the QC-vs-ON difference is the 8% QC provincial credit")
+        ab = _provider()._load_year(2026, 'canada', 'quebec').provincial_abatement
+        self.assertAlmostEqual(
+            qc_delta - on_delta,
+            10_000 * 0.08 - 10_000 * self._fed_lowest() * ab,
+            places=2,
+            msg="the QC-vs-ON gap is the 8% provincial credit MINUS the "
+                "federal portion the Quebec abatement removes (#348)")
 
     def test_zero_tuition_means_zero_applied_credit(self):
         # DP#32: no tuition declared -> no credit applied (absence, not a guess).

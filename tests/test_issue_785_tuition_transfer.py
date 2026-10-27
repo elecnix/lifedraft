@@ -22,6 +22,26 @@ import unittest
 import countries.canada  # noqa: F401
 
 
+def _qc_transfer_cap():
+    """The federal transfer cap as a QUEBEC supporter actually receives it.
+
+    Issue #348. The cap is federal by statute, so the provincial credit never
+    transfers -- but a transfer lands with the SUPPORTER, whose Quebec
+    abatement shrinks the federal amount by `provincial_abatement`. On the
+    2026 data that is 5000 x 0.14 x 0.835 = 584.50, not 700.
+
+    Computed from the data rather than written as a literal, so this file
+    cannot go stale the way a hardcoded figure would.
+    """
+    from tax_data import TaxDataProvider
+    from rules_tuition_credit import _FEDERAL_TUITION_TRANSFER_LIMIT
+
+    provider = TaxDataProvider()
+    ab = provider._load_year(2026, 'canada', 'quebec').provincial_abatement
+    fed_lowest = provider._load_year(
+        2026, 'canada', 'federal').federal_brackets[0].rate
+    return _FEDERAL_TUITION_TRANSFER_LIMIT * fed_lowest * (1 - ab)
+
 class TestChildTuitionTransfer(unittest.TestCase):
     """A child with tuition and zero income transfers to a parent."""
 
@@ -51,7 +71,7 @@ class TestChildTuitionTransfer(unittest.TestCase):
         # Without the child (no transfer):
         r2 = self._run([])
         benefit = r[0].after_tax_income - r2[0].after_tax_income
-        self.assertAlmostEqual(benefit, 700.0, places=2,
+        self.assertAlmostEqual(benefit, _qc_transfer_cap(), places=2,
                                msg="the transfer credit ($700 = 5000×0.14) "
                                    "must reduce the parent's tax")
 
@@ -64,7 +84,7 @@ class TestChildTuitionTransfer(unittest.TestCase):
                         'tuition_transfer_to': 'p1'}], years=2)
         r2 = self._run([], years=2)
         y1_benefit = r[1].after_tax_income - r2[1].after_tax_income
-        self.assertAlmostEqual(y1_benefit, 700.0, places=2,
+        self.assertAlmostEqual(y1_benefit, _qc_transfer_cap(), places=2,
                                msg="year-2: 3500 carry-forward transfers 700 "
                                    "(the cap) again, reducing tax a second time")
 
@@ -173,9 +193,9 @@ class TestTaxedMemberTransfer(unittest.TestCase):
             children=[])
         r2 = FamilySimulation(cfg2, adapter=CanadaAdapter(cfg2)).run()
         transfer = r[0].after_tax_income - r2[0].after_tax_income
-        self.assertAlmostEqual(transfer, 700.0, places=2,
+        self.assertAlmostEqual(transfer, _qc_transfer_cap(), places=2,
                                msg="the student's unused remainder transfers "
-                                   "$700 (5000×0.14) to the primary")
+                                   "the abated cap to the primary (#348)")
 
 
 class TestTransferBranchCoverage(unittest.TestCase):
@@ -217,8 +237,8 @@ class TestTransferBranchCoverage(unittest.TestCase):
                         'tuition_by_year': {2026: 30_000}}]
         r2 = self._run(self._cfg(family_members=members, children=children_no))
         benefit = r[0].after_tax_income - r2[0].after_tax_income
-        self.assertAlmostEqual(benefit, 700.0, places=2,
-                               msg="child->spouse transfer: 700 reduces the "
+        self.assertAlmostEqual(benefit, _qc_transfer_cap(), places=2,
+                               msg="child->spouse transfer: the cap reduces the "
                                    "spouse's (higher-earner's) tax")
 
     def test_primary_member_transfers_remainder_to_spouse(self):
@@ -238,8 +258,8 @@ class TestTransferBranchCoverage(unittest.TestCase):
                       members[1]]
         r2 = self._run(self._cfg(family_members=members_no, children=children))
         transfer = r[0].after_tax_income - r2[0].after_tax_income
-        self.assertAlmostEqual(transfer, 700.0, places=2,
-                               msg="primary's unused remainder transfers 700 "
+        self.assertAlmostEqual(transfer, _qc_transfer_cap(), places=2,
+                               msg="primary's unused remainder transfers the cap "
                                    "to the spouse")
 
     def test_child_transfer_applies_in_monthly_time_step(self):
@@ -266,7 +286,7 @@ class TestTransferBranchCoverage(unittest.TestCase):
                                        time_step='yearly'))
         benefit_yearly = r_yearly[0].after_tax_income - self._run(self._cfg(
             family_members=members, children=children_no, time_step='yearly'))[0].after_tax_income
-        self.assertAlmostEqual(benefit_monthly, 700.0, places=2,
+        self.assertAlmostEqual(benefit_monthly, _qc_transfer_cap(), places=2,
                                msg="monthly fold: child->parent transfer lands")
         self.assertAlmostEqual(benefit_monthly, benefit_yearly, places=2,
                                msg="the transfer is time-step-agnostic: monthly "

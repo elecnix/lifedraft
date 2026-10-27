@@ -24,6 +24,16 @@ The baseline below was captured on origin/main (d9a6283, which includes bite 1)
 by running this exact fabricated household. Round numbers, role-based names
 (DP#4/DP#15) -- no real data.
 
+RECAPTURED for issue #348, and this time it is NOT a behaviour-preserving
+move. #348 fixes a real accuracy bug: a Quebec resident's FEDERAL tuition
+credit is reduced by the province's `provincial_abatement`, because the CRA
+computes the abatement on line 42900 -- basic federal tax, i.e. AFTER the
+s.118 non-refundable credits (ITA s.120(4)). The engine abated the tax but
+credited the full 15%. Years 1-4 moved down; years 5-8, which declare no
+tuition, are unchanged -- which is the evidence that only the credit moved
+and not some unrelated part of the tax path. Both folds moved identically,
+which is the property bite 2 established and this change must not break.
+
 Run: uv run pytest tests/test_epic795_bite2_tuition_credit_characterization.py -q
 """
 
@@ -78,20 +88,20 @@ def _run_tuition(time_step):
     return sim.run()
 TUITION_CHARACTERIZATION_BASELINE = {
     'yearly': [
-        (1, 120000.0, 45000.0, 117928.91440000001, 165000.0, 0.0),
-        (2, 120000.0, 45000.0, 119028.91440000001, 165000.0, 0.0),
-        (3, 120000.0, 45000.0, 118808.91440000001, 165000.0, 0.0),
-        (4, 120000.0, 45000.0, 116608.91440000001, 165000.0, 0.0),
+        (1, 120000.0, 45000.0, 117651.71440000001, 165000.0, 0.0),
+        (2, 120000.0, 45000.0, 118636.21440000001, 165000.0, 0.0),
+        (3, 120000.0, 45000.0, 118439.3144, 165000.0, 0.0),
+        (4, 120000.0, 45000.0, 116470.3144, 165000.0, 0.0),
         (5, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (6, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (7, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (8, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
     ],
     'monthly': [
-        (1, 120000.0, 45000.0, 117928.91440000001, 165000.0, 0.0),
-        (2, 120000.0, 45000.0, 119028.91440000001, 165000.0, 0.0),
-        (3, 120000.0, 45000.0, 118808.91440000001, 165000.0, 0.0),
-        (4, 120000.0, 45000.0, 116608.91440000001, 165000.0, 0.0),
+        (1, 120000.0, 45000.0, 117651.71440000001, 165000.0, 0.0),
+        (2, 120000.0, 45000.0, 118636.21440000001, 165000.0, 0.0),
+        (3, 120000.0, 45000.0, 118439.3144, 165000.0, 0.0),
+        (4, 120000.0, 45000.0, 116470.3144, 165000.0, 0.0),
         (5, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (6, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
         (7, 120000.0, 45000.0, 115288.91440000001, 165000.0, 0.0),
