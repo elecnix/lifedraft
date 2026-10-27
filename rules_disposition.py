@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from rule_registry import RuleContext, YearWorkingState, rule
+from datetime import date as _date
 
 
 # Issue #956 bite B (sale-core, DP#10/#26): the pure disposition arithmetic a
@@ -46,6 +47,87 @@ from rule_registry import RuleContext, YearWorkingState, rule
 # Money is conserved: the equity converted to investable cash, less the
 # friction that genuinely left the household (third-party costs + government
 # tax). The money-conservation invariant (trajectory_invariants.py) passes.
+# Issue #378: the residential-property flipping rule (ITA s.12(12)-(14)), in
+# force for dispositions on or after 2023-01-01. A gain on a HOUSING UNIT
+# held for less than 365 consecutive days is business income: fully included,
+# with both the principal-residence exemption and the 50% capital-gains
+# inclusion denied. s.12(13) disapplies the rule for a sale caused by a listed
+# life event, which the household declares via `flipping_exemption_event`.
+#
+# The rule keys on the HOLDING PERIOD, never on the exemption field: a sale of
+# any age can carry an event, and a short sale with no event is a flip. Keeping
+# that separation is why the field's absence cannot create a flip by itself.
+#
+# What can be known is a separate question, and this helper answers it by
+# refusing rather than guessing (DP#32): the holding period needs BOTH the
+# acquisition date and an exact sale date. A sale declared with `year` alone
+# has no day to measure against, so the rule is NOT evaluated and the gain stays
+# on the capital-gains path. That understates tax for a genuine flip declared
+# imprecisely -- the alternative, inferring a flip from a year alone, would
+# overstate it for the far more common long-held sale, and would do so with no
+# way for the reader to tell.
+_FLIPPING_RULE_IN_FORCE_FROM = (2023, 1, 1)
+_FLIPPING_HOLDING_DAYS = 365
+
+#: ITA s.12(13) — the life events that disapply the flipping rule. Named so the
+#: schema enum and this table cannot drift apart; the schema is the contract
+#: surface and this is the tax surface, and they must agree.
+FLIPPING_EXEMPTION_EVENTS = (
+    'death',
+    'new_household_member',
+    'breakdown_of_marriage',
+    'threat_to_personal_safety',
+    'serious_illness_or_disability',
+    'work_relocation',
+    'involuntary_termination_of_employment',
+    'insolvency',
+    'involuntary_disposition',
+)
+
+
+def _parse_iso_date(value: Any):
+    """``YYYY-MM-DD`` -> a ``date``, or ``None`` when it is absent or unusable.
+
+    Explicit absence-testing (DP#32): a missing date is not an epoch date, and a
+    malformed one must not silently become 1970-01-01 (which would make every
+    holding period enormous and silently disapply the rule).
+    """
+    from datetime import date as _date
+    if not isinstance(value, str) or len(value) < 10:
+        return None
+    try:
+        return _date(int(value[0:4]), int(value[5:7]), int(value[8:10]))
+    except (ValueError, TypeError):
+        return None
+
+
+def is_flipping_disposition(sale: Dict[str, Any]) -> bool:
+    """Whether ITA s.12(12) denies the capital-gains treatment for this sale.
+
+    True only when every element is DECLARED and affirmative:
+
+    1. the disposition is on or after 2023-01-01 (the rule's start);
+    2. an exact sale ``date`` and an ``acquired_on`` are both present, so a
+       holding period can actually be measured;
+    3. that period is fewer than 365 consecutive days;
+    4. no s.12(13) exemption event is declared.
+
+    Returns False — the capital-gains path, unchanged — for every other case,
+    including a home with no ``acquired_on`` and a sale declared by ``year``.
+    See the module note above for why guessing is the worse failure.
+    """
+    sale_date = _parse_iso_date(sale.get('date'))
+    acquired = _parse_iso_date(sale.get('acquired_on'))
+    if sale_date is None or acquired is None:
+        return False
+    if sale_date < _date(*_FLIPPING_RULE_IN_FORCE_FROM):
+        return False
+    event = sale.get('flipping_exemption_event')
+    if event is not None and event in FLIPPING_EXEMPTION_EVENTS:
+        return False
+    return (sale_date - acquired).days < _FLIPPING_HOLDING_DAYS
+
+
 def _disposition_gain_tax(
         gain: float, sale: Dict[str, Any], cal_year: int, brackets: list,
         primary_taxable_income: float, spouse_taxable_income: float,
@@ -84,12 +166,20 @@ def _disposition_gain_tax(
     """
     if gain <= 0.0:
         return 0.0
+    # Issue #378 (ITA s.12(12)): a flipped residence's gain is BUSINESS income
+    # -- 100% included, and the principal-residence exemption denied outright.
+    # Checked BEFORE the PRE apportionment below, because a flip makes the
+    # designation irrelevant rather than merely inapportioned: there is no
+    # taxable_fraction to shrink, the whole gain is ordinary income.
+    flipped = is_flipping_disposition(sale)
     from countries.canada.pre_designation import (
         designated_years, taxable_gain_fraction)
     periods = sale.get('designated_principal_residence_years', [])
     designated = {y for y in designated_years(periods, cal_year) if y <= cal_year}
     designated_count = len(designated)
-    if designated_count <= 0:
+    if flipped:
+        taxable_fraction = 1.0
+    elif designated_count <= 0:
         taxable_fraction = 1.0
     else:
         # Issue #969: the FAMILY window (span across all the couple's
@@ -124,7 +214,11 @@ def _disposition_gain_tax(
                         else spouse_taxable_income)
         disposition_tax += tax_on_capital_gain_at_death(
             fmv=owner_gain_share, acb=0.0, brackets=brackets,
-            other_income=other_income, inclusion_rate=0.5,
+            other_income=other_income,
+            # A flip is business income (s.12(12): "the whole of the gain is
+            # income"), so it takes the 100% inclusion the capital-gains path
+            # otherwise halves.
+            inclusion_rate=1.0 if flipped else 0.5,
             taxable_fraction=taxable_fraction)
     return disposition_tax
 
