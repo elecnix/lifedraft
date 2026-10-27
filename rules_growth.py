@@ -221,7 +221,26 @@ def apply_non_reg_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:
         pot_rate -= mer_rate
     pre = ws.new_nonreg_bal
     ws.new_nonreg_bal *= (1 + pot_rate)
-    # ACB does NOT grow with returns (it's cost basis)
+    # Issue #437: a DISTRIBUTION is new money entering the account, so the
+    # after-tax amount actually reinvested joins cost basis. The pre-#437 line
+    # here read "ACB does NOT grow with returns (it's cost basis)" and pinned
+    # ACB to contributions only -- which left every reinvested dollar of
+    # interest/dividend income sitting inside ``balance - acb``, i.e. inside
+    # ``gain_frac``, so the drawdown realized it as a capital gain at 50%
+    # inclusion and taxed it a SECOND time (once as income when earned, again
+    # as gain when sold). Capital appreciation must NOT be added here: it is
+    # unrealized, is never income, and is exactly what the gain fraction is
+    # supposed to measure (DP#19).
+    #
+    # The unshifted distribution rate is the right one: per the #291 docstring
+    # above, the declared yield is the net distribution actually received and
+    # the fee comes out of the deferred capital-appreciation term -- so neither
+    # the MER nor the expected_return blend reduces what this pot received in
+    # cash and reinvested. The same holds for the SM sleeve, which grows at the
+    # same unshifted ``taxable_after_tax_rate``.
+    dist_rate = ctx.non_reg_after_tax_distribution
+    if dist_rate is not None and dist_rate != 0.0:
+        ws.new_nonreg_acb += pre * dist_rate
     return pre > 0 and pot_rate != 0
 
 @rule('emergency_reserve_growth')

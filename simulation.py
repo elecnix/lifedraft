@@ -202,6 +202,43 @@ def _mortgage_data_for(year: int, *, amort_annual: list, amort: list) -> Dict:
     }
 
 
+def _non_reg_after_tax_distribution_for(year: int, primary_marginal_rate: float,
+                                        *, portfolio,
+                                        non_reg_yield_rate: float,
+                                        province: str) -> float:
+    """DP#27: the AFTER-TAX DISTRIBUTION portion of the non-reg return, as a
+    rate on the pot -- the interest/dividend/foreign component with each
+    income type's effective rate already removed, and nothing else.
+
+    Issue #437. This is the half of the non-reg return that becomes CASH
+    income, and it is what must join cost basis when it is reinvested. The
+    other half -- capital appreciation -- is unrealized, never becomes income,
+    and must NOT touch ACB.
+
+    Split out of ``_non_reg_after_tax_return_for`` so that function composes
+    from it and its existing callers keep their single scalar (DP#9: one
+    spelling of the fact). Pure, and -- like its caller -- it never reads a
+    ``.balance`` off ``portfolio``, only its static composition (#575/DP#8).
+    """
+    non_reg_acct = _non_reg_account_for(portfolio, non_reg_yield_rate)
+    return non_reg_acct.after_tax_return_by_account(
+        'non_reg', primary_marginal_rate, province)
+
+
+def _non_reg_account_for(portfolio, non_reg_yield_rate):
+    """The non-reg ``AccountPortfolio`` whose composition drives the growth
+    rate: the declared one, or a configurable fallback (DP#2/DP#13)."""
+    non_reg_acct = None
+    if portfolio is not None and portfolio.has_data:
+        non_reg_acct = portfolio.accounts.get('non_reg')
+    if non_reg_acct is None:
+        from countries.canada.portfolio import AccountPortfolio, YieldBreakdown
+        non_reg_acct = AccountPortfolio(
+            yield_breakdown=YieldBreakdown(interest=non_reg_yield_rate),
+        )
+    return non_reg_acct
+
+
 def _non_reg_after_tax_return_for(year: int, primary_marginal_rate: float,
                                    gross_return: float, *, portfolio,
                                    non_reg_yield_rate: float, province: str) -> float:
@@ -263,21 +300,12 @@ def _non_reg_after_tax_return_for(year: int, primary_marginal_rate: float,
         declared-yield composition (DP#13: a configurable default, not a
         hardcoded rate, and not "no tax at all").
     """
-    non_reg_acct = None
-    if portfolio is not None and portfolio.has_data:
-        non_reg_acct = portfolio.accounts.get('non_reg')
-
-    if non_reg_acct is None:
-        # No non-reg account in portfolio config — use a configurable
-        # default composition (DP#2/DP#13), not a hardcoded rate.
-        from countries.canada.portfolio import AccountPortfolio, YieldBreakdown
-        non_reg_acct = AccountPortfolio(
-            yield_breakdown=YieldBreakdown(interest=non_reg_yield_rate),
-        )
+    non_reg_acct = _non_reg_account_for(portfolio, non_reg_yield_rate)
 
     declared_yield = non_reg_acct.yield_breakdown.total_yield
-    after_tax_yield = non_reg_acct.after_tax_return_by_account(
-        'non_reg', primary_marginal_rate, province)
+    after_tax_yield = _non_reg_after_tax_distribution_for(
+        year, primary_marginal_rate, portfolio=portfolio,
+        non_reg_yield_rate=non_reg_yield_rate, province=province)
     # #576: capital appreciation -- the part of the total return that is
     # not a declared distribution -- is deferred (untaxed) growth.
     capital_appreciation = gross_return - declared_yield
@@ -1685,6 +1713,13 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         year, primary_rate, ctx.return_model.return_for_year(year),
         portfolio=ctx.portfolio, non_reg_yield_rate=cfg.non_reg_yield_rate,
         province=cfg.province)
+    # Issue #437: the DISTRIBUTION half of that rate, threaded separately so
+    # the growth rule can add the reinvested after-tax distribution to cost
+    # basis. The capital-appreciation half must NOT touch ACB -- it is
+    # unrealized and is never income until it is sold.
+    non_reg_dist_rate = _non_reg_after_tax_distribution_for(
+        year, primary_rate, portfolio=ctx.portfolio,
+        non_reg_yield_rate=cfg.non_reg_yield_rate, province=cfg.province)
 
     # Issue #899 (part a): grow each additional accumulating adult's OWN
     # RRSP/TFSA from their OWN after-tax savings (computed above) against the
@@ -1717,6 +1752,7 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
             rrsp_annual_limit=rrsp_limit,
             tfsa_annual_limit=tfsa_limit,
             non_reg_after_tax_return=non_reg_atr,
+            non_reg_after_tax_distribution=non_reg_dist_rate,
             # Issue #641: registered pots' foreign-WHT drag from their declared
             # holdings (None when no registered composition -- golden no-op).
             registered_wht_drag=_registered_wht_drag_for(ctx.portfolio),
@@ -2245,6 +2281,20 @@ class FamilySimulation:
         """
         return _mortgage_data_for(year, amort_annual=self.amort_annual, amort=self.amort)
 
+    def _get_non_reg_after_tax_distribution(self, year: int,
+                                                   primary_marginal_rate: float,
+                                                   ) -> float:
+        """Issue #437: the after-tax DISTRIBUTION half of the non-reg return --
+        the one that joins cost basis. Same impure-boundary pairing as
+        ``_get_non_reg_after_tax_return``; kept beside it so no call site can
+        supply one without the other (the architecture guard enforces that)."""
+        cfg = self.config
+        return _non_reg_after_tax_distribution_for(
+            year, primary_marginal_rate,
+            portfolio=self._portfolio,
+            non_reg_yield_rate=cfg.non_reg_yield_rate,
+            province=cfg.province)
+
     def _get_non_reg_after_tax_return(self, year: int, primary_marginal_rate: float,
                                           gross_return: float) -> float:
         """DP#27 after-tax return for non-reg / SM investments (#575/#576).
@@ -2530,6 +2580,8 @@ class FamilySimulation:
                     tfsa_annual_limit=self.tax_provider.get_tfsa_limit(self.start_year),
                     non_reg_after_tax_return=self._get_non_reg_after_tax_return(
                         0, primary_rate, lump_return),
+                    non_reg_after_tax_distribution=self._get_non_reg_after_tax_distribution(
+                        0, primary_rate),
                     registered_wht_drag=_registered_wht_drag_for(self._portfolio),
                     # Issue #679: every dollar of this lump is BORROWED (margin draw
                     # + mortgage cash-out), so it is an inflow as well as an outflow.
@@ -2909,6 +2961,9 @@ class FamilySimulation:
             # DP#27: Compute income-type-specific after-tax return for non-reg
             non_reg_atr = self._get_non_reg_after_tax_return(
                 year, primary_rate, ret_effective)
+            # Issue #437: the distribution half of that same rate.
+            non_reg_dist_rate = self._get_non_reg_after_tax_distribution(
+                year, primary_rate)
 
             # Issue #899 (part a): grow each additional accumulating adult's OWN
             # RRSP/TFSA (empty for a two-adult household). Uses the monthly
@@ -2941,6 +2996,7 @@ class FamilySimulation:
                     rrsp_annual_limit=rrsp_limit,
                     tfsa_annual_limit=tfsa_limit,
                     non_reg_after_tax_return=non_reg_atr,
+                    non_reg_after_tax_distribution=non_reg_dist_rate,
                     registered_wht_drag=_registered_wht_drag_for(self._portfolio),
                     # epic #795 bite 1: the retirement transition OUTPUTS are no
                     # longer passed by the prologue -- the registered

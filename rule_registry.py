@@ -233,6 +233,14 @@ class RuleContext:
     # household's pre-retirement years price the gain at the lowest bracket).
     primary_taxable_income: float = 0.0
     spouse_taxable_income: float = 0.0
+    # Issue #437: the after-tax DISTRIBUTION half of ``non_reg_after_tax_return``,
+    # projected from ``YearInputs.non_reg_after_tax_distribution``. Declared at
+    # the end of the dataclass because it carries a default (direct
+    # ``RuleContext(...)`` constructions in tests do not pass it) and a
+    # defaulted field may not precede the non-defaulted ones above. Only this
+    # half of the return is income; only this half joins cost basis when
+    # reinvested (DP#19). None => no distribution tracked (pre-#437 behaviour).
+    non_reg_after_tax_distribution: Optional[float] = None
 
     @classmethod
     def from_year_inputs(cls, inputs: "YearInputs", *, year: int,

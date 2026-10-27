@@ -1911,6 +1911,14 @@ class YearInputs:
     tfsa_annual_limit: Optional[float] = None
     fhsa_annual_limit: Optional[float] = None
     non_reg_after_tax_return: Optional[float] = None
+    # Issue #437: the AFTER-TAX DISTRIBUTION half of that rate, as a rate on
+    # the pot. ``non_reg_after_tax_return`` bundles it with capital
+    # appreciation, but only the distribution becomes cash income -- and so
+    # only the distribution joins cost basis when reinvested. Threaded
+    # separately so the growth rule can add it to ACB without letting
+    # unrealized appreciation (which is never income) touch cost basis too.
+    # None => no distribution is tracked (pre-#437 behaviour, byte-identical).
+    non_reg_after_tax_distribution: Optional[float] = None
     # Issue #641: per-registered-pot foreign-withholding-tax drag derived from
     # each account's OWN declared holdings ({kind: drag_rate} for rrsp/tfsa).
     # None (or an absent kind) preserves the flat gross rate exactly -- the
