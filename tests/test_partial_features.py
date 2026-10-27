@@ -343,8 +343,8 @@ class TestHBPFirstHome(unittest.TestCase):
         schedule = hbp.generate_repayment_schedule()
         self.assertEqual(len(schedule), 15)
         self.assertAlmostEqual(schedule[0]['min_payment'], 35000 / 15, places=0)
-        # First repayment in year 2029 (2026 + 2 + 1)
-        self.assertEqual(schedule[0]['year'], 2029)
+        # First repayment in the SECOND year after withdrawal: 2026 + 1 + 1 (#349)
+        self.assertEqual(schedule[0]['year'], 2028)
 
     def test_hbp_default_tax_consequence(self):
         """HBP default: outstanding balance added to income."""
