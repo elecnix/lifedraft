@@ -117,9 +117,24 @@ def apply_retirement_income(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # bracket stack in the per-spouse drawdown split below; a non-retired member
     # contributes nothing (member_retirement_income returns zeros).
     from countries.canada.retirement_transition import MemberRetirementIncome
-    ri_p = (member_retirement_income(primary, sim_year, oas_max, oas_threshold)
+    # Issue #361: the CLAIMING-AGE rules are the PLAN's, and Quebec's differ --
+    # the QPP slides its early reduction with the pension's level and can be
+    # deferred to 72, where CPP is a flat 0.6%/month to 70. Both the plan and
+    # the year's MAXIMUM pension at 65 come from the member's own province, so a
+    # Quebec member is priced with the QPP rules and every other household is
+    # byte-identical (the plan defaults to 'cpp').
+    _plan = 'qpp' if getattr(config, 'province', None) == 'quebec' else 'cpp'
+    _max_pension = None
+    if _plan == 'qpp':
+        from tax_data import default_tax_provider
+        _max_pension = default_tax_provider().get_cpp_max_benefit_65(sim_year)
+    ri_p = (member_retirement_income(primary, sim_year, oas_max, oas_threshold,
+                                     plan=_plan,
+                                     max_pension_at_65=_max_pension)
             if (primary and p_retired) else MemberRetirementIncome())
-    ri_s = (member_retirement_income(spouse, sim_year, oas_max, oas_threshold)
+    ri_s = (member_retirement_income(spouse, sim_year, oas_max, oas_threshold,
+                                     plan=_plan,
+                                     max_pension_at_65=_max_pension)
             if (spouse and s_retired) else MemberRetirementIncome())
     # Issues #711/#712: CPP/QPP sharing + pension income splitting, as ELECTIONS
     # the optimizer sweeps (DP#22/#30), applied here as PURE income transfers
