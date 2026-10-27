@@ -475,6 +475,14 @@ def _map_member(doc: Dict, person_id: str, role: str,
     future_segments = _future_employment_segments(p, as_of)
     if future_segments:
         member["income_segments"] = future_segments
+    # Issue #376: declared moving expenses, carried verbatim so the fold can
+    # claim them in the year of the move. Mapped ONLY when declared -- absence
+    # stays absence (no key), and a declared amount of 0 is kept as the real
+    # claim it is rather than dropped as falsy (DP#32).
+    moving = p.get("moving_expenses")
+    if moving:
+        member["moving_expenses"] = [
+            {"year": m["year"], "amount": m["amount"]} for m in moving]
     if p.get("birth_date"):
         member["birth_year"] = int(p["birth_date"][:4])
     # Note (issue #100): a person admitted as a SIMULATED ADULT member must have

@@ -166,7 +166,19 @@
         "incomes": { "type": "array", "items": { "$ref": "#/$defs/income" } },
         "benefits": { "$ref": "#/$defs/benefit_claim" },
         "entitlements": { "$ref": "#/$defs/benefit_entitlement" },
-        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } }
+        "study_periods": { "type": "array", "items": { "$ref": "#/$defs/study_period" } },
+      "moving_expenses": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["year", "amount"],
+          "properties": {
+            "year": { "type": "integer", "description": "Issue #376: the calendar year of the MOVE. Eligible expenses are deducted in the year of the move, not every year afterwards; a later-year deduction is the carry-forward of what could not be sheltered." },
+            "amount": { "$ref": "#/$defs/money", "description": "Eligible moving costs for that year (federal ITA s.62, line 21900; Quebec TA s.348, TP-1 line 228). Capped at the income available to shelter them, with the unused balance carried forward. Declaring an amount is an ASSERTION that the move qualified: at least 40 km, to a new job, a new business, or full-time post-secondary studies. This engine holds no distances and verifies neither the 40 km test nor Canadian employment, so eligibility is the taxpayer's claim." }
+          }
+        }
+      }
       }
     }
 
