@@ -127,14 +127,35 @@ class CPPBenefitEstimate:
 # ── Year-level lookup helpers ────────────────────────────────────────────────
 
 def _ympe_for_year(year: int) -> float:
-    """Get YMPE for a given year."""
+    """Get YMPE for a given year.
+
+    For a year with a published value, that value is returned. Otherwise the
+    year is projected forward at 2%/yr from the newest year that has a value.
+
+    The anchor is the newest year available ACROSS BOTH sources (#427). It used
+    to be ``max(_HISTORICAL_YMPE)`` alone, which stops at 2022 and so ignored
+    the four newer published years in ``CPP_OAS_BY_YEAR``. The result was a
+    projection for 2027 of 71,654.84 against a published 2026 figure of
+    74,600 -- a projection that ran BACKWARDS past an already-known value,
+    which is impossible for an indexed ceiling.
+
+    A projection may be wrong by a little; it may not run backwards past an
+    actual. That is why the tests for this assert monotonicity rather than a
+    hardcoded number.
+    """
     if year in CPP_OAS_BY_YEAR:
         return CPP_OAS_BY_YEAR[year]["cpp_max_pensionable"]
     if year in _HISTORICAL_YMPE:
         return _HISTORICAL_YMPE[year]
-    # Future year: extrapolate at 2%/yr from latest historical
-    max_known = max(_HISTORICAL_YMPE.keys())
-    return _HISTORICAL_YMPE[max_known] * (1.02 ** (year - max_known))
+    # Future year: extrapolate at 2%/yr from the newest year known to EITHER
+    # source, so adding a published year immediately moves the anchor.
+    anchor = max(max(_HISTORICAL_YMPE.keys()), max(CPP_OAS_BY_YEAR.keys()))
+    base = (
+        _HISTORICAL_YMPE[anchor]
+        if anchor in _HISTORICAL_YMPE
+        else CPP_OAS_BY_YEAR[anchor]["cpp_max_pensionable"]
+    )
+    return base * (1.02 ** (year - anchor))
 
 
 def _yampe_for_year(year: int) -> float:
