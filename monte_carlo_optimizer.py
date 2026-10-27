@@ -41,6 +41,7 @@ from return_model import ReturnModel, StochasticReturn, FixedReturn, build_retur
 from objective import ObjectiveFunction, MAX_NET_BENEFIT, objective_cfg
 from strategy import AllocationStrategy
 from jurisdiction_providers import get_provider
+from tax_data import UnsupportedTaxYearError
 
 # DP#25: Use provider pattern instead of direct imports from country packages
 _RATE_MODEL_PROVIDER = get_provider('rate_model')
@@ -159,6 +160,11 @@ class MonteCarloOptimizer(Optimizer):
                         # aggregate() falls back to mean (the historical
                         # expected-value ranking).
                         expected_score = objective.aggregate(scores)
+                    except UnsupportedTaxYearError:
+                        # DP#32: a tax year the engine cannot model is a
+                        # refusal, not a low score. Ranking it -inf would make
+                        # a crashing run indistinguishable from a bad one.
+                        raise
                     except Exception:
                         expected_score = float('-inf')
                         risk = RiskMeasures()

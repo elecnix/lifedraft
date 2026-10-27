@@ -54,6 +54,7 @@ from objective import ObjectiveFunction, MAX_NET_BENEFIT, objective_cfg
 from strategy import AllocationStrategy
 from optimizer import Optimizer, RankedScenario, RiskMeasures
 from jurisdiction_providers import get_provider
+from tax_data import UnsupportedTaxYearError
 
 # DP#25: Access jurisdiction providers through registry
 _rate_model = get_provider('rate_model')
@@ -408,6 +409,12 @@ class DPOptimizer(Optimizer):
                     score = (objective.evaluate(all_results, objective_cfg(test_config))
                              if all_results else 0)
 
+            except UnsupportedTaxYearError:
+                # DP#32: a tax year the engine cannot model is a refusal, not
+                # a low score. Ranking it -inf makes a crashing run
+                # indistinguishable from a bad one, so the optimizer would
+                # recommend the runner-up with nothing saying anything failed.
+                raise
             except Exception:
                 score = float('-inf')
                 result = None

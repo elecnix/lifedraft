@@ -249,10 +249,13 @@ class RuleContext:
         import keeps the dependency pointing one way, DP#25).
 
         ``calendar_year`` is the one projected field whose value is resolved
-        rather than copied: ``YearInputs`` documents ``None`` as "use the
-        0-based index" (#343), while a rule's date-computed gates need an
-        absolute year. That resolution lives here, in one place, exactly as the
-        hand-spelled construction resolved it (``cal_year``).
+        rather than copied: ``YearInputs`` documents ``None`` as "not
+        supplied", while a rule's date-computed gates need an absolute year.
+        That resolution lives here, in one place, exactly as the
+        hand-spelled construction resolved it (``cal_year``). ``year`` is a
+        0-based projection index, so the year it resolves to is
+        ``config.start_year + year`` -- the same arithmetic the fold does
+        (#346).
 
         ``prior_gis_countable_income`` (issue #277) is REQUIRED, with no
         default: it is carried in the prior year's state, and a caller that
@@ -265,7 +268,7 @@ class RuleContext:
             if f.name not in RULE_CONTEXT_EXPLICIT_FIELDS
         }
         if projected["calendar_year"] is None:
-            projected["calendar_year"] = year
+            projected["calendar_year"] = inputs.config.start_year + year
         return cls(
             year=year,
             amt_credit_opening=amt_credit_opening,

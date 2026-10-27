@@ -106,6 +106,9 @@ def _make_state_with_lira(lira_balance=100000, lira_birth_year=1979,
 
 
 def _run_year(state, year, config, investment_return=0.07):
+    # `year` is a calendar year here, and `simulate_year_pure`'s `year` is a
+    # 0-based projection index, so the calendar year is stated explicitly
+    # (#346); an unsupplied one now resolves to config.start_year + year.
     return simulate_year_pure(
         state=state,
         year=year,
@@ -113,6 +116,7 @@ def _run_year(state, year, config, investment_return=0.07):
             allocations={'_primary_income': 130000, '_annual_savings': 0},
             config=config, investment_return=investment_return,
             primary_marginal_rate=0.40,
+            calendar_year=year,
         ),
     )
 

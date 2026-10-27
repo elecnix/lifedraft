@@ -140,6 +140,7 @@ class TestLIRAGrowth:
                 config=config,
                 investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         # LIRA should grow by 7%: 52837 * 1.07 = 56535.59
@@ -160,6 +161,7 @@ class TestLIRAGrowth:
                 config=config,
                 investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         assert _lira_bal(new_state) == 0
@@ -170,21 +172,25 @@ class TestLIRAConversionToLIF:
 
     def test_conversion_at_age_71(self):
         """Per PBSR: CRI/LIRA must convert to LIF by end of year owner turns 71.
-        For birth_year=1950, conversion year is 2021 (1950+71)."""
+        For birth_year=1955, conversion year is 2026 (1955+71)."""
         config = _make_config()
         state = _make_state_with_lira(
             lira_balance=100000,
-            lira_birth_year=1950,  # Turns 71 in 2021
+            # #346: the conversion year must be one the engine can tax. 1950
+            # turned 71 in 2021 and no schedule exists before 2023 -- there the
+            # refusal is the correct answer, not a fallback.
+            lira_birth_year=1955,  # Turns 71 in 2026
             lira_jurisdiction='federal',
         )
         result, new_state = simulate_year_pure(
             state=state,
-            year=2021,  # Year they turn 71
+            year=2026,  # Year they turn 71
             inputs=_build_year_inputs(
                 allocations={'_primary_income': 130000, '_annual_savings': 0},
                 config=config,
                 investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         # LIRA should be depleted (converted to LIF)
@@ -201,17 +207,18 @@ class TestLIRAConversionToLIF:
         config = _make_config()
         state = _make_state_with_lira(
             lira_balance=100000,
-            lira_birth_year=1950,
+            lira_birth_year=1955,  # #346: turns 71 in 2026, a modellable year
             lira_jurisdiction='quebec',
         )
         result, new_state = simulate_year_pure(
             state=state,
-            year=2021,
+            year=2026,
             inputs=_build_year_inputs(
                 allocations={'_primary_income': 130000, '_annual_savings': 0},
                 config=config,
                 investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         assert _lif_juris(new_state) == 'quebec', \
@@ -232,6 +239,7 @@ class TestLIRAConversionToLIF:
                 config=config,
                 investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         # LIRA should still exist (not converted)
@@ -261,6 +269,7 @@ class TestLIFWithdrawals:
                 config=config,
                 investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         assert result.lif_withdrawal > 0, \
@@ -284,6 +293,7 @@ class TestLIFWithdrawals:
                 config=config,
                 investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         # LIF balance after withdrawal and growth:
@@ -335,6 +345,7 @@ class TestLIRANoEffectWhenAbsent:
             inputs=_build_year_inputs(
                 allocations=allocs, config=config,
                 investment_return=0.07, primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         result_with_zero, _ = simulate_year_pure(
@@ -343,6 +354,7 @@ class TestLIRANoEffectWhenAbsent:
             inputs=_build_year_inputs(
                 allocations=allocs, config=config,
                 investment_return=0.07, primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
 
@@ -365,6 +377,7 @@ class TestYearResultLIRAFields:
                 allocations={'_primary_income': 130000, '_annual_savings': 0},
                 config=config, investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         assert result.lira_balance == 52837 * 1.07, \
@@ -381,6 +394,7 @@ class TestYearResultLIRAFields:
                 allocations={'_primary_income': 130000, '_annual_savings': 0},
                 config=config, investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         # During accumulation (no LIF), withdrawal should be 0
@@ -392,15 +406,16 @@ class TestYearResultLIRAFields:
         config = _make_config()
         state = _make_state_with_lira(
             lira_balance=100000,
-            lira_birth_year=1950,  # Turns 71 in 2021
+            lira_birth_year=1955,  # Turns 71 in 2026 (#346: modellable year)
         )
         result, _ = simulate_year_pure(
             state=state,
-            year=2021,
+            year=2026,
             inputs=_build_year_inputs(
                 allocations={'_primary_income': 130000, '_annual_savings': 0},
                 config=config, investment_return=0.07,
                 primary_marginal_rate=0.40,
+                calendar_year=2026,
             ),
         )
         assert result.lif_balance > 0, \

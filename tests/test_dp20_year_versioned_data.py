@@ -426,11 +426,22 @@ class TestTaxDataProviderYearSpecificLimits(unittest.TestCase):
         self.assertEqual(provider.get_fhsa_limit(2023), 8000)
         self.assertEqual(provider.get_fhsa_limit(2026), 8000)
     
-    def test_fhsa_limit_zero_before_2023(self):
-        """DP#20: FHSA didn't exist before 2023, so limit should be 0."""
+    def test_fhsa_limit_refused_before_2023(self):
+        """#346: a year before the first schedule is REFUSED, not answered 0.
+
+        This test used to assert ``get_fhsa_limit(2022) == 0``, i.e. that a
+        year with no FHSA at all came back as a confident zero. That zero was
+        not the absence of an FHSA -- it was the 2023 schedule's FHSA limit
+        read out of the nearest year and then not used, arriving under a year
+        number it did not belong to (DP#32). The absence is now an error that
+        names the earliest year the engine can answer for.
+        """
+        from tax_data import UnsupportedTaxYearError
+
         provider = TaxDataProvider()
-        self.assertEqual(provider.get_fhsa_limit(2022), 0)
-        self.assertEqual(provider.get_fhsa_limit(2020), 0)
+        with self.assertRaises(UnsupportedTaxYearError) as ctx:
+            provider.get_fhsa_limit(2022)
+        self.assertIn('before 2023', str(ctx.exception))
     
     def test_fhsa_account_add_annual_room_accepts_year_specific_limit(self):
         """DP#20: FHSAAccount.add_annual_room should accept a year-specific limit."""
