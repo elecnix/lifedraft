@@ -504,6 +504,13 @@ class SimulationConfig:
     # entry (DP#24/DP#32). Only present when the contract declared some.
     expense_segments: List[Dict] = field(default_factory=list)
 
+    # Issue #366: the DECLARED home-support credit facts (household_budget.
+    # home_support) -- what the household paid for eligible home-support
+    # services, or its rent, plus the family income and the situation row. None
+    # means the household does not claim the credit (DP#16); the objective's
+    # net-benefit leg prices it when present and is a strict no-op when absent.
+    home_support: Optional[Dict] = None
+
     # Issue #688: the emergency-reserve POLICY -- how many months of
     # essential outflows to hold, WHERE, and held as WHAT.
     #

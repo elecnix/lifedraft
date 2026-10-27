@@ -57,6 +57,7 @@ from member_config import find_member_by_role  # data layer (DP#25 #998)
 from tax_calculator import marginal_rate
 from net_benefit_legs import (
     _default_oas_annual,
+    home_support_credit_total as _home_support_credit_total,
     lsif_credit_total as _lsif_credit_total,
     mg_reno_credit_total as _mg_reno_credit_total,
     zev_incentive_total as _zev_incentive_total,
@@ -186,6 +187,12 @@ def objective_cfg(config: SimulationConfig) -> Dict:
         'property': {'house_value': config.house_value},
         'tax': {'province': config.province, 'start_year': config.start_year},
         'estate': config.estate_data,
+        # Issue #366: the DECLARED home-support credit facts, so
+        # net_benefit_legs.home_support_credit_total can price the Quebec
+        # refundable credit for home-support services. Additive like every
+        # other key here: an objective that does not read it is unaffected, and
+        # None (not declared) makes the leg a strict no-op (DP#16/DP#32).
+        'household_budget': {'home_support': config.home_support},
     }
 
 
@@ -375,6 +382,15 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     # moved out of this module so objective.py stays countries-free).
     zev_incentive_total = _zev_incentive_total(cfg)
 
+    # Issue #366: the Quebec refundable credit for home-support services for
+    # seniors. Fires only when the household declares
+    # household_budget.home_support; absent the block this is 0.0 and every
+    # existing household's number is byte-identical (DP#16/DP#32). The pricing
+    # (rate by year, the two expense caps, the two reduction thresholds, the
+    # 5%-of-rent rule) lives in net_benefit_legs.home_support_credit_total, so
+    # objective.py stays countries-free (DP#25/#232).
+    home_support_credit_total = _home_support_credit_total(cfg)
+
     # Issue #290 / #1034: the registered balances and the SM sleeve are priced
     # as the terminal deemed disposition with the SAME estate code path
     # compute_after_tax_estate uses (DP#9 -- one spelling, not a parallel
@@ -396,7 +412,12 @@ def compute_net_benefit(results: List[YearResult], cfg: Dict) -> float:
     return (final.total_assets - final.total_debt
             + total_rrsp_savings + total_sm_savings + total_traced_savings
             - registered_tax - cg_tax - resp_tax - sm_deemed_tax
-            + lsif_credit_total + zev_incentive_total + mg_reno_credit)
+            + lsif_credit_total + zev_incentive_total
+            # Issue #366: the Quebec home-support credit for seniors, and
+            # #447's Multigenerational Home Renovation Tax Credit. Two legs
+            # arrived independently on this line; both are added, in the order
+            # their branches were stacked.
+            + home_support_credit_total + mg_reno_credit)
 
 
 def _terminal_wealth(results: List[YearResult], cfg: Dict) -> float:
