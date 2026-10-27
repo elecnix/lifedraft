@@ -163,6 +163,45 @@ def _family_pre_window(doc: Dict, couple: List[str],
     return family_window_years(designations)
 
 
+def _pre_family_window_is_approximate(doc: Dict, couple: List[str],
+                                      as_of_year: int) -> bool:
+    """True when a PRE gain is apportioned against the FAMILY window because at
+    least one designating property does not state when it was acquired (#352).
+
+    The caveat has to be decided HERE, at the one boundary that can see both the
+    designations and the acquisitions. The internal config carries only the
+    couple's NON-principal properties, and only when non-empty, so a
+    ``model_fidelity`` predicate reading the resolved config cannot re-derive
+    this -- it would not see the principal residence at all.
+    """
+    designations = _family_pre_designations(doc, couple, as_of_year)
+    if len(designations) < 2 or not any(designations.values()):
+        return False
+    designating = {pid for pid, years in designations.items() if years}
+    for prop in doc.get("properties", []):
+        if prop["id"] in designating and prop.get("acquired") is None:
+            return True
+    return False
+
+
+def _pre_denominator(prop: Dict, family_window: int,
+                     disposition_year: Optional[int]) -> int:
+    """The C divisor for THIS property (ITA s.40(2)(b), issue #352).
+
+    Its own ownership span when the document declares an acquisition date, so
+    a cottage bought after the home is apportioned on its own C -- the
+    statutory count. Falls back to the family window (the pre-#352 behaviour)
+    when the acquisition is not declared, which is exact only when every
+    property is held for the whole window and is disclosed as an
+    approximation (`pre_family_window_denominator`).
+    """
+    acquired = prop.get("acquired")
+    if acquired is None or disposition_year is None:
+        return family_window
+    from countries.canada.pre_designation import acquisition_year, ownership_years
+    return ownership_years(acquisition_year(acquired), disposition_year)
+
+
 def _map_pre_property_gains(doc: Dict, principal: Optional[Dict],
                             principal_acb: Optional[float], couple: List[str],
                             primary_id: str) -> Optional[tuple]:
@@ -231,7 +270,12 @@ def _map_pre_property_gains(doc: Dict, principal: Optional[Dict],
             continue
         pid = prop["id"]
         is_principal = pid == principal_id
-        fraction = taxable_gain_fraction(len(designations[pid]), window)
+        # Issue #352: C is this property's own ownership span when the
+        # document states when it was acquired. The family window is only
+        # correct when every property is held for the whole of it.
+        fraction = taxable_gain_fraction(
+            len(designations[pid]),
+            _pre_denominator(prop, window, terminal_year))
         acb = principal_acb if is_principal else prop.get("acb")
         if fraction > 0.0 and acb is None:
             raise ContractAdaptationError(

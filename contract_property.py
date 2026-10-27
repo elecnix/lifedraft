@@ -507,6 +507,11 @@ def _map_owned_properties(doc: Dict, primary_id: str,
             # falls back to its own window, unchanged (DP#32).
             if family_pre_window is not None:
                 entry["sale"]["family_pre_window"] = family_pre_window
+            # Issue #352: carry the RAW acquisition date/year so the disposition
+            # rule can count C per property (ITA s.40(2)(b)). Resolved in the rule,
+            # not here: the contract layer keeps no jurisdiction import (DP#25).
+            if prop.get("acquired") is not None:
+                entry["sale"]["acquired"] = prop["acquired"]
         # Issue #693 (epic #690 bite 2): a rental property produces NET RENTAL
         # INCOME (gross rent - operating expenses, ITA/CRA T776) taxable at the
         # owner's marginal rate, and the mortgage interest on it is DEDUCTIBLE

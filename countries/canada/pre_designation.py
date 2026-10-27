@@ -48,6 +48,36 @@ def _year(iso_date: str) -> int:
     return int(iso_date[:4])
 
 
+def acquisition_year(acquired) -> int:
+    """The calendar year a property was acquired.
+
+    Accepts an ISO ``YYYY-MM-DD`` date or a bare calendar year, because the
+    schema permits both: a household that knows only the year of purchase
+    should not have to invent a day to state a fact it has (issue #352).
+    """
+    if isinstance(acquired, int) and not isinstance(acquired, bool):
+        return acquired
+    return _year(str(acquired))
+
+
+def ownership_years(acquired_year: int, disposition_year: int) -> int:
+    """C in ITA s.40(2)(b): the number of taxation years ending after the
+    acquisition date during which the taxpayer owned the property, inclusive.
+
+    Counted PER PROPERTY. ``family_window_years`` -- the span from the first
+    to the last designated year across ALL the family's properties -- equals
+    this only when every property is held for the whole window, which is
+    false in the ordinary home-plus-cottage household. There, a cottage
+    bought years after the home has a SHORTER C, and pricing it against the
+    shared window taxes a gain the +1 rule exempts in full (issue #352).
+    """
+    if disposition_year < acquired_year:
+        raise ValueError(
+            f"property disposed of in {disposition_year} before it was "
+            f"acquired in {acquired_year}")
+    return disposition_year - acquired_year + 1
+
+
 def period_years(period: Dict, as_of_year: int) -> Set[int]:
     """The inclusive set of calendar years one designation period covers.
 

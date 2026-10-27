@@ -88,7 +88,9 @@ from contract_decisions import (
     map_income_scenarios, map_mortgage_decisions, map_resp_action_scenarios,
     map_superficial_loss,
 )
-from contract_estate import _family_pre_window, _map_estate, map_insurance_premiums
+from contract_estate import (
+    _family_pre_window, _map_estate, _pre_family_window_is_approximate,
+    map_insurance_premiums)
 from contract_liabilities import map_consumer_loans, resolve_liability_facilities
 from contract_people import (
     _find_primary_and_spouse, _horizon_end_year, _map_child,
@@ -285,6 +287,15 @@ def to_internal_config(doc: Dict) -> Dict:
         "tax": {"country": doc["jurisdiction"]["country"], "province": doc["jurisdiction"]["province"]},
         "cash_flows": legacy_cash_flows,
     }
+
+    # Issue #352: the property records are not all carried into the internal
+    # config (only the couple's NON-principal ones, and only when non-empty), so
+    # no model_fidelity predicate can re-derive whether the PRE denominator is
+    # the family window rather than each property's own ownership years. The
+    # mapper records it at the one boundary that sees both, and the run
+    # DISCLOSES it (model_fidelity id 'pre_family_window_denominator').
+    if _pre_family_window_is_approximate(doc, couple_list, start_year):
+        legacy["tax"]["pre_family_window_approximate"] = True
 
     declared_objective = map_declared_objective(doc)
     if declared_objective is not None:

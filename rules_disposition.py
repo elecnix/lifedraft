@@ -101,8 +101,17 @@ def _disposition_gain_tax(
         # single-property path (DP#9/DP#32). An explicit `is None` test, never
         # `or` (DP#32: 0 is a real window value the family-window helper only
         # returns when >=2 properties designate, so a 0 here is genuine).
+        # Issue #352: C is counted PER PROPERTY. When the document states when
+        # the property was acquired, its own ownership span IS C -- the
+        # statutory count -- and the family window (which is only correct when
+        # every property is held for the whole of it) is not used.
+        acquired = sale.get('acquired')
         family_window = sale.get('family_pre_window')
-        if family_window is None:
+        if acquired is not None:
+            from countries.canada.pre_designation import (
+                acquisition_year, ownership_years)
+            window = ownership_years(acquisition_year(acquired), cal_year)
+        elif family_window is None:
             window = (max(designated) - min(designated) + 1) if designated else 0
         else:
             window = family_window
