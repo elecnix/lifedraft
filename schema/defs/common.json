@@ -9,7 +9,8 @@
     "date": {
       "type": "string",
       "format": "date",
-      "description": "RFC 3339 full-date (YYYY-MM-DD). Precision to the day, so month-granularity rules (CPP/OAS onset) and day-granularity rules (FHSA 15-year window, RRIF-at-71) are exact, not approximated to a year (#597)."
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "RFC 3339 full-date (YYYY-MM-DD). Precision to the day, so month-granularity rules (CPP/OAS onset) and day-granularity rules (FHSA 15-year window, RRIF-at-71) are exact, not approximated to a year (#597). The pattern is zero-padded shape only — it accepts 2026-02-30, which is why contract_schema also supplies a jsonschema FormatChecker so 'format: date' is asserted rather than annotated (#409)."
     },
 
     "person_id": {

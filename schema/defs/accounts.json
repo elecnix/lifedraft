@@ -24,7 +24,7 @@
       "description": "Issue #823: the unlock condition for an illiquid account balance. Exactly one of `age` or `date` is declared (enforced by minProperties/maxProperties below at the overlay level; this universal def accepts either). `age` is the owner's age at which the balance becomes liquid (e.g. 65 for Fonds FTQ shares); `date` is a calendar date (ISO YYYY-MM-DD). The balance is excluded from the solvency/runway liquidation waterfall until the condition is met, and is liquid thereafter.",
       "properties": {
         "age": { "type": "integer", "minimum": 0, "description": "The owner's age at which the balance becomes liquid (DP#1: age is date-computed from the owner's birth_year, never a hardcoded constant)." },
-        "date": { "type": "string", "format": "date", "description": "A calendar date (ISO YYYY-MM-DD) at which the balance becomes liquid." }
+        "date": { "$ref": "#/$defs/date", "description": "A calendar date (ISO YYYY-MM-DD) at which the balance becomes liquid." }
       }
     },
 

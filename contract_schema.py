@@ -157,7 +157,16 @@ def get_validator():
     if _VALIDATOR is None:
         _COMPOSED_SCHEMA = compose_schema()
         jsonschema.Draft202012Validator.check_schema(_COMPOSED_SCHEMA)
-        _VALIDATOR = jsonschema.Draft202012Validator(_COMPOSED_SCHEMA)
+        # ``format`` is ANNOTATION-ONLY unless a checker is supplied (#409).
+        # Without this, ``$defs.date`` accepts "not-a-date", "2026-7-1" and
+        # "2026-02-30" alike, and a date the engine cannot compute against
+        # enters at the one boundary meant to be strict. The pattern on the
+        # date type rejects the shape; this checker rejects the impossible
+        # calendar days a pattern cannot express.
+        _VALIDATOR = jsonschema.Draft202012Validator(
+            _COMPOSED_SCHEMA,
+            format_checker=jsonschema.FormatChecker(),
+        )
     return _VALIDATOR
 
 
