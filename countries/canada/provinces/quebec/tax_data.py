@@ -27,8 +27,17 @@ class QuebecTaxData:
 
     PROVINCE = "quebec"
     ABATEMENT = 0.165  # 16.5% Quebec abatement on federal tax
-    BASIC_PERSONAL_AMOUNT_2026 = 17383
-    BASIC_PERSONAL_AMOUNT_2025 = 17183
+    # Basic personal amount (montant personnel de base, TP-1 line 350) — Tableau 4
+    # of the Ministère des Finances du Québec parameter publication (issue #347).
+    # Each edition states the current and the preceding year, so a year is
+    # cross-read from two editions.
+    #   2026 = 18,952 / 2025 = 18,571 — AUTEN_IncomeTax2026.pdf (2.05%)
+    #   2025 = 18,571 / 2024 = 18,056 — AUTEN_IncomeTax2025.pdf (2.85%)
+    #   2024 = 18,056 / 2023 = 17,183 — AUTEN_IncomeTax2024.pdf (5.08%)
+    #   2023 = 17,183                 — AUTEN_IncomeTax2024.pdf (prior-year column)
+    # https://cdn-contenu.quebec.ca/cdn-contenu/adm/min/finances/publications-adm/parametres/
+    BASIC_PERSONAL_AMOUNT_2026 = 18952
+    BASIC_PERSONAL_AMOUNT_2025 = 18571
 
     @classmethod
     def all_years(cls) -> list:
@@ -243,7 +252,9 @@ class QuebecTaxData:
                 TaxBracket(126000, 0, 0.2575, "25.75%"),
             ],
             provincial_abatement=cls.ABATEMENT,
-            basic_personal_amount=17183,
+            # 18,056 (issue #347) — Tableau 4, AUTEN_IncomeTax2025.pdf
+            # https://cdn-contenu.quebec.ca/cdn-contenu/adm/min/finances/publications-adm/parametres/AUTEN_IncomeTax2025.pdf
+            basic_personal_amount=18056,
             cpp_max_pensionable=68500,
             cpp_rate=0.0595,
             cpp2_max_pensionable=73200,  # DP#20: CPP2 YAMPE 2024 (first year of second ceiling)
@@ -302,7 +313,9 @@ class QuebecTaxData:
                 TaxBracket(119910, 0, 0.2575, "25.75%"),
             ],
             provincial_abatement=cls.ABATEMENT,
-            basic_personal_amount=15980,
+            # 17,183 (issue #347) — Tableau 4, AUTEN_IncomeTax2024.pdf
+            # https://cdn-contenu.quebec.ca/cdn-contenu/adm/min/finances/publications-adm/parametres/AUTEN_IncomeTax2024.pdf
+            basic_personal_amount=17183,
             cpp_max_pensionable=66600,
             cpp_rate=0.0595,
             cpp2_max_pensionable=66600,  # DP#20: CPP2 YAMPE 2023 (= YMPE, no second ceiling yet)

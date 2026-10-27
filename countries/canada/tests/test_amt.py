@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 import unittest
 from dataclasses import replace
 
+from tax_data import default_tax_provider
 from countries.canada.amt import (
     AMTParameters,
     compute_amt,
@@ -642,6 +643,27 @@ class TestQuebecIMR(unittest.TestCase):
 
     def test_rate_is_nineteen_percent(self):
         self.assertAlmostEqual(QuebecIMRParameters.for_year(2024).rate, 0.19)
+
+    def test_indexation_factor_matches_the_published_quebec_rate(self):
+        """The IMR indexation factor is read as BPA(year)/BPA(year-1), so it is
+        only as trustworthy as those two BPA rows (issue #347). Assert it against
+        the rate the Quebec Finance parameter publication states directly.
+
+        Source: Tableau 4, Paramètres du régime d'imposition des particuliers,
+        https://cdn-contenu.quebec.ca/cdn-contenu/adm/min/finances/publications-adm/parametres/AUTEN_IncomeTax2026.pdf
+        """
+        from countries.canada.amt import _quebec_indexation_factor
+        for year, rate in ((2025, 0.0285), (2026, 0.0205)):
+            with self.subTest(year=year):
+                self.assertAlmostEqual(
+                    _quebec_indexation_factor(year, default_tax_provider()),
+                    1 + rate, places=4)
+
+    def test_2026_exemption_equals_the_sourced_figure_indexed_at_the_published_rate(self):
+        """179,990 (sourced 2025) x 1.0205, the 2026 exemption the Quebec
+        Finance parameter publication's own indexation rate produces."""
+        self.assertAlmostEqual(
+            QuebecIMRParameters.exemption_for(2026), 179990.0 * 1.0205, delta=5.0)
 
     def test_2026_exemption_is_indexed_from_data_not_invented(self):
         from tax_data import default_tax_provider

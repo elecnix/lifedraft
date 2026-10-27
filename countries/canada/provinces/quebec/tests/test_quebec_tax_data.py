@@ -518,5 +518,80 @@ class TestQuebecYearVersionedDataProvider(unittest.TestCase):
         self.assertEqual(d2026.qpp_max_benefit_65, 17334)
 
 
+# =============================================================================
+# Quebec basic personal amount (montant personnel de base) — issue #347
+# =============================================================================
+
+# Tableau 4, "Paramètres du régime d'imposition des particuliers", Ministère des
+# Finances du Québec. Each edition states the current and the preceding year, so a
+# year is cross-read from two editions. The rate is that edition's indexation rate
+# for the year — the factor that turns BPA(year-1) into BPA(year).
+_BASE = "https://cdn-contenu.quebec.ca/cdn-contenu/adm/min/finances/publications-adm/parametres"
+_EDITION_2024 = f"{_BASE}/AUTEN_IncomeTax2024.pdf"
+_EDITION_2025 = f"{_BASE}/AUTEN_IncomeTax2025.pdf"
+_EDITION_2026 = f"{_BASE}/AUTEN_IncomeTax2026.pdf"
+
+# year -> (basic personal amount, source, indexation rate for that year)
+PUBLISHED_BPA = {
+    2023: (17183, _EDITION_2024, None),
+    2024: (18056, _EDITION_2024, 0.0508),
+    2025: (18571, _EDITION_2025, 0.0285),
+    2026: (18952, _EDITION_2026, 0.0205),
+}
+
+
+class TestQuebecBasicPersonalAmount(unittest.TestCase):
+    """The Quebec BPA is the base of the 14% basic personal amount credit
+    (TP-1 line 350) and the numerator of the IMR indexation factor, so a stale
+    value silently mis-states another parameter (issue #347).
+
+    Before the fix every hard-coded year was wrong: 2024 held 2023's 17,183,
+    2025 repeated 2024's, 2026 held a 2025-era figure, and 2023 held 15,980,
+    which matches no published year.
+    """
+
+    def test_each_year_matches_the_published_figure(self):
+        p = _provider()
+        for year, (published, source, _) in PUBLISHED_BPA.items():
+            with self.subTest(year=year):
+                got = p._load_year(year, 'canada', 'quebec').basic_personal_amount
+                self.assertEqual(
+                    got, published,
+                    f"{year} BPA {got} != published {published} ({source})")
+
+    def test_a_year_does_not_repeat_the_prior_year(self):
+        """The defect's fingerprint was 2025 holding 2024's figure, so a flat
+        year is what a carry-forward looks like. No Quebec BPA has ever been
+        frozen across two years — each edition indexes it."""
+        p = _provider()
+        years = sorted(PUBLISHED_BPA)
+        for prior, year in zip(years, years[1:]):
+            with self.subTest(year=year):
+                self.assertGreater(
+                    p._load_year(year, 'canada', 'quebec').basic_personal_amount,
+                    p._load_year(prior, 'canada', 'quebec').basic_personal_amount)
+
+    def test_growth_matches_the_published_indexation_rate(self):
+        """BPA(year)/BPA(year-1) - 1 must equal the rate the same edition
+        states, to the dollar rounding the publisher applies."""
+        p = _provider()
+        for year, (_, source, rate) in PUBLISHED_BPA.items():
+            if rate is None:
+                continue
+            with self.subTest(year=year):
+                this_year = p._load_year(year, 'canada', 'quebec').basic_personal_amount
+                prior = p._load_year(year - 1, 'canada', 'quebec').basic_personal_amount
+                self.assertAlmostEqual(this_year / prior, 1 + rate, places=4,
+                                       msg=f"{year} BPA growth vs {source}")
+
+    def test_fourteen_percent_credit_for_2024(self):
+        """Cross-check against an independent published computation: the CFFP
+        (Université de Sherbrooke) 2024 scenario "Étudiant qui entre sur le
+        marché du travail" reports a Quebec non-refundable credit total of
+        $2,528, which is 14% of the 2024 BPA of 18,056."""
+        bpa_2024 = _provider()._load_year(2024, 'canada', 'quebec').basic_personal_amount
+        self.assertEqual(round(0.14 * bpa_2024), 2528)
+
+
 if __name__ == '__main__':
     unittest.main()
