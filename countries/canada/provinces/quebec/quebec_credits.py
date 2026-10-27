@@ -240,6 +240,14 @@ def quebec_senior_assistance_credit(
     if eligible_persons <= 0:
         return 0.0
     data = _get_quebec_data(year, provider)
+    # DP#32 note. This looked like it needed an explicit "no parameters ->
+    # refuse" guard, and I wrote one. It is UNREACHABLE and was removed: the
+    # provider resolves an unregistered year to the NEAREST Quebec row, so any
+    # year that reaches this line already carries the fields; and with no
+    # Quebec record registered at all, `_get_quebec_data` raises before here.
+    # A check that cannot fire is not a safety net -- it is a comment that
+    # looks like one. The absence this issue is really about was the DATA being
+    # absent for 2023/2024, which is fixed in the year records themselves.
     max_credit = data.qc_senior_assistance_max_per_person * min(eligible_persons, 2)
     threshold = (data.qc_senior_assistance_threshold_couple if is_couple
                  else data.qc_senior_assistance_threshold_single)

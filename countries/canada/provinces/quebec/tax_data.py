@@ -264,6 +264,20 @@ class QuebecTaxData:
             qc_solidarity_reduction_rate_low=0.03,
             qc_solidarity_reduction_rate_high=0.06,
             qc_solidarity_high_threshold=46595,
+            # ── Quebec senior assistance credit (soutien aux aînés, TP-1 line 463) ──
+            # Refundable, per person aged 70+ at year end. These were ABSENT for
+            # 2023 and 2024, so every field defaulted to 0.0 and the helper
+            # silently computed nothing for those years (issue #336).
+            # Source: Ministère des Finances du Québec, "Paramètres du régime
+            # d'imposition des particuliers pour l'année d'imposition 2024",
+            # tableau 3, "Montant pour le soutien des aînés" -- reduction
+            # threshold for a single person / for a couple, and the reduction
+            # rate. The table's footnote states the rate is "revalorisé chaque
+            # année", so it is NOT a plain indexation and must be stated per year.
+            qc_senior_assistance_max_per_person=2000,
+            qc_senior_assistance_threshold_single=27065,
+            qc_senior_assistance_threshold_couple=44015,
+            qc_senior_assistance_reduction_rate=0.0531,
             # ── Quebec health services fund (FSS) ──
             qc_fss_self_employed_rate=0.0165,  # 1.65% for 2024
             # ── QPIP ──
@@ -323,6 +337,20 @@ class QuebecTaxData:
             qc_solidarity_reduction_rate_low=0.03,
             qc_solidarity_reduction_rate_high=0.06,
             qc_solidarity_high_threshold=42367,
+            # ── Quebec senior assistance credit (soutien aux aînés, TP-1 line 463) ──
+            # Refundable, per person aged 70+ at year end. These were ABSENT for
+            # 2023 and 2024, so every field defaulted to 0.0 and the helper
+            # silently computed nothing for those years (issue #336).
+            # Source: Ministère des Finances du Québec, "Paramètres du régime
+            # d'imposition des particuliers pour l'année d'imposition 2023",
+            # tableau 3, "Montant pour le soutien des aînés" -- reduction
+            # threshold for a single person / for a couple, and the reduction
+            # rate. The table's footnote states the rate is "revalorisé chaque
+            # année", so it is NOT a plain indexation and must be stated per year.
+            qc_senior_assistance_max_per_person=2000,
+            qc_senior_assistance_threshold_single=25755,
+            qc_senior_assistance_threshold_couple=41885,
+            qc_senior_assistance_reduction_rate=0.0516,
             # ── Quebec health services fund (FSS) ──
             qc_fss_self_employed_rate=0.0165,  # 1.65% for 2023
             # ── QPIP ──
