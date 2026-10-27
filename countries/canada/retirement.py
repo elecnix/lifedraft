@@ -230,9 +230,9 @@ def get_cpp_max_benefit_65(year: int) -> float:
 
 # DP#20: Year-versioned CPP/OAS defaults (fallback per DP#13)
 CPP_OAS_BY_YEAR = {
-    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 68500, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 188, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
-    2024: {"cpp_max_pensionable": 68500, "cpp2_max_pensionable": 73300, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8291, "oas_annual_max_75plus": 9118, "oas_clawback_threshold": 87068, "gis_max_single": 1616, "gis_max_coupled": 9739},
-    2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8381, "oas_annual_max_75plus": 9218, "oas_clawback_threshold": 90997, "gis_max_single": 1657, "gis_max_coupled": 9987},
+    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 68500, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 188, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 86912, "gis_max_single": 1572, "gis_max_coupled": 9476},
+    2024: {"cpp_max_pensionable": 68500, "cpp2_max_pensionable": 73300, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8291, "oas_annual_max_75plus": 9118, "oas_clawback_threshold": 90997, "gis_max_single": 1616, "gis_max_coupled": 9739},
+    2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8381, "oas_annual_max_75plus": 9218, "oas_clawback_threshold": 93454, "gis_max_single": 1657, "gis_max_coupled": 9987},
     2026: {"cpp_max_pensionable": 74600, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 18092, "cpp2_max_benefit": 800, "oas_annual_max": 8908, "oas_annual_max_75plus": 9800, "oas_clawback_threshold": 95323, "gis_max_single": 1726, "gis_max_coupled": 10384},
 }
 OAS_CLAWBACK_RATE = 0.15        # 15% recovery tax on income above threshold

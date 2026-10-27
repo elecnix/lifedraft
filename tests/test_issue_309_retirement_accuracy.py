@@ -306,5 +306,65 @@ class TestRRIFSpouseElectionNotImplemented(unittest.TestCase):
         self.assertAlmostEqual(min_wd / 100000, 0.054, places=2)
 
 
+class TestOasRecoveryThresholdIsThePublishedTable(unittest.TestCase):
+    """Issue #345: each year carries ITS OWN published threshold, not the prior year's.
+
+    Three of the four rows held the PREVIOUS year's figure, so a 2024 retirement
+    had the recovery tax start at 87,068 where the published minimum was 90,997
+    -- $3,929 of net income too early. The 2026 row was already right, which is
+    what made the one-year lag invisible: the table looked plausible, and nothing
+    in it was pinned to a source.
+
+    Source (income year -> minimum recovery threshold, published side by side):
+        https://www.canada.ca/en/services/benefits/publicpensions/old-age-security/recovery-tax.html
+      * income year 2024 -> $90,997 (recovery-tax period July 2025 to June 2026)
+      * income year 2025 -> $93,454 (July 2026 to June 2027)
+      * income year 2026 -> $95,323 (July 2027 to June 2028)
+    2023 ($86,912) is the same published series as carried in advisor reference
+    tables for that year; Service Canada's page no longer lists the row.
+
+    What these tests deliberately do NOT pin: ``oas_annual_max``. That figure's
+    convention is undocumented in the code and the verifiable sources disagree
+    (the engine's 2026 row is ~12 x the January-to-March maximum monthly amount,
+    while its 2023-2025 rows sit more than a year behind their own year's
+    monthly rates). Choosing between the candidates without a source would be
+    the confidently-wrong number this repo exists to prevent, so it stays open
+    on #345.
+    """
+
+    PUBLISHED = {2023: 86_912, 2024: 90_997, 2025: 93_454, 2026: 95_323}
+
+    def test_each_year_carries_its_own_published_threshold(self):
+        for year, published in self.PUBLISHED.items():
+            self.assertEqual(get_oas_clawback_threshold(year), published, year)
+
+    def test_the_threshold_rises_every_year(self):
+        """A year-versioned table whose rows do not rise is a row copied from
+        the year before -- the shape of this defect."""
+        years = sorted(self.PUBLISHED)
+        for earlier, later in zip(years, years[1:]):
+            self.assertGreater(
+                get_oas_clawback_threshold(later),
+                get_oas_clawback_threshold(earlier),
+                f"{later} must be above {earlier}",
+            )
+
+    def test_the_province_records_agree_with_this_table(self):
+        """One fact, three copies (the fallback table and two province records);
+        they must not drift apart, or the provider's first-hit order decides the
+        answer."""
+        from tax_data import default_tax_provider
+
+        provider = default_tax_provider()
+        for year, published in self.PUBLISHED.items():
+            for province in ("quebec", "ontario"):
+                try:
+                    record = provider.get_year_data(year, "canada", province)
+                except Exception:
+                    continue  # this province carries no row for this year
+                self.assertEqual(record.oas_clawback_threshold, published,
+                                 (year, province))
+
+
 if __name__ == '__main__':
     unittest.main()
