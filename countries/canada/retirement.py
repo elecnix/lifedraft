@@ -230,9 +230,25 @@ def get_cpp_max_benefit_65(year: int) -> float:
 
 # DP#20: Year-versioned CPP/OAS defaults (fallback per DP#13)
 CPP_OAS_BY_YEAR = {
-    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 68500, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 188, "oas_annual_max": 8083, "oas_annual_max_75plus": 8888, "oas_clawback_threshold": 83917, "gis_max_single": 1572, "gis_max_coupled": 9476},
-    2024: {"cpp_max_pensionable": 68500, "cpp2_max_pensionable": 73300, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8291, "oas_annual_max_75plus": 9118, "oas_clawback_threshold": 87068, "gis_max_single": 1616, "gis_max_coupled": 9739},
-    2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8381, "oas_annual_max_75plus": 9218, "oas_clawback_threshold": 90997, "gis_max_single": 1657, "gis_max_coupled": 9987},
+    # Issue #345: the key is the INCOME year, and the three OAS figures below were
+    # re-sourced. The annual maximum is ESDC's sum of the four QUARTERLY maximum
+    # monthly amounts x 3 (rates change quarterly, so it is not 12 x one month):
+    #   2023: 3 x (687.56 + 691.00 + 698.60 + 707.68) = 8354.52  (65-74)
+    #         3 x (756.32 + 760.10 + 768.46 + 778.45) = 9189.99  (75+)
+    #   2024: 3 x (713.34 + 713.34 + 718.33 + 727.67) = 8618.04
+    #         3 x (784.67 + 784.67 + 790.16 + 800.44) = 9479.82
+    #   2025: 3 x (727.67 + 727.67 + 734.95 + 740.09) = 8791.14
+    #         3 x (800.44 + 800.44 + 808.45 + 814.10) = 9670.29
+    # Sources: ESDC "Quarterly Canada Pension Plan and Old Age Security benefit
+    # amounts and related figures", Table 5, for each quarter of 2023-2025
+    # (https://www.canada.ca/en/employment-social-development/programs/pensions/pension/statistics/2024-quarterly-january-march.html
+    # and its sibling quarterly pages). Recovery-tax thresholds: ESDC "Old Age
+    # Security pension recovery tax" and the CRA line 23500 page -- $86,912 for
+    # 2023, $90,997 for 2024 (https://www.canada.ca/en/services/benefits/publicpensions/old-age-security/repayment.html),
+    # $93,454 for 2025 (https://www.canada.ca/en/services/benefits/publicpensions/old-age-security/recovery-tax.html).
+    2023: {"cpp_max_pensionable": 66600, "cpp2_max_pensionable": 68500, "cpp_max_benefit_65": 14010, "cpp2_max_benefit": 188, "oas_annual_max": 8354.52, "oas_annual_max_75plus": 9189.99, "oas_clawback_threshold": 86912, "gis_max_single": 1572, "gis_max_coupled": 9476},
+    2024: {"cpp_max_pensionable": 68500, "cpp2_max_pensionable": 73300, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8618.04, "oas_annual_max_75plus": 9479.82, "oas_clawback_threshold": 90997, "gis_max_single": 1616, "gis_max_coupled": 9739},
+    2025: {"cpp_max_pensionable": 71300, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 14448, "cpp2_max_benefit": 188, "oas_annual_max": 8791.14, "oas_annual_max_75plus": 9670.29, "oas_clawback_threshold": 93454, "gis_max_single": 1657, "gis_max_coupled": 9987},
     2026: {"cpp_max_pensionable": 74600, "cpp2_max_pensionable": 81900, "cpp_max_benefit_65": 18092, "cpp2_max_benefit": 800, "oas_annual_max": 8908, "oas_annual_max_75plus": 9800, "oas_clawback_threshold": 95323, "gis_max_single": 1726, "gis_max_coupled": 10384},
 }
 OAS_CLAWBACK_RATE = 0.15        # 15% recovery tax on income above threshold

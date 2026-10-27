@@ -123,8 +123,8 @@ class OntarioTaxData:
             cpp2_rate=0.04,
             cpp_max_benefit_65=14448,
             qpp_rate=0.0,  # Ontario doesn't use QPP (DP#52)
-            oas_annual_max=8381,
-            oas_clawback_threshold=90997,
+            oas_annual_max=8791.14,   # #345: ESDC 2025 (income year); was 8381
+            oas_clawback_threshold=93454,  # #345: CRA/ESDC 2025; this row held the 2024 figure
             provincial_eligible_dtc_rate=0.1008,
             provincial_non_eligible_dtc_rate=0.0455,
             # ── Ontario surtax (2025) ──
