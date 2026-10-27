@@ -152,12 +152,23 @@ _VALIDATOR: Optional["jsonschema.protocols.Validator"] = None
 
 
 def get_validator():
-    """Lazily build (and cache) the composed-schema Draft202012Validator."""
+    """Lazily build (and cache) the composed-schema Draft202012Validator.
+
+    The ``FormatChecker`` is not optional (#409). In JSON Schema ``format`` is
+    annotation-only unless a checker is supplied, so building this validator
+    without one made ``"format": "date"`` inert: the composed schema declared
+    every date in the contract, and ``as_of`` accepted ``"not-a-date"`` and
+    ``2026-02-30`` alike. ``$defs.date`` also carries a ``pattern`` for the
+    shape, because a pattern cannot express calendar validity -- 2026-02-30 is
+    shaped correctly and does not exist.
+    """
     global _COMPOSED_SCHEMA, _VALIDATOR
     if _VALIDATOR is None:
         _COMPOSED_SCHEMA = compose_schema()
         jsonschema.Draft202012Validator.check_schema(_COMPOSED_SCHEMA)
-        _VALIDATOR = jsonschema.Draft202012Validator(_COMPOSED_SCHEMA)
+        _VALIDATOR = jsonschema.Draft202012Validator(
+            _COMPOSED_SCHEMA, format_checker=jsonschema.FormatChecker()
+        )
     return _VALIDATOR
 
 
