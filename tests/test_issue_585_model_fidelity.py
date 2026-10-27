@@ -540,6 +540,17 @@ _CODE_ANCHORS = {
     # primitive and the caveat no longer describes anything real.
     'superficial_loss_annual_window': (
         'superficial_loss.py', 'def classify_window('),
+    # Issue #438: the OAS recovery base omits the taxable portfolio's
+    # distributed income. Anchored to the KNOWN-LIMIT CLAUSE in rules_drawdown
+    # that names this exact gap (clause (d) of apply_sm_interest's limit
+    # list), not to the clawback arithmetic -- because the arithmetic is
+    # what #437 will change. Wiring the clawback requires deleting that
+    # clause, and deleting it makes this anchor stale, which fails
+    # TestNoStaleCaveats until the registry entry is deleted with it. The
+    # caveat and the defect are pinned to each other from both ends.
+    'distributed_portfolio_income_never_enters_oas_base': (
+        'rules_drawdown.py',
+        'DISTRIBUTED income still never ENTERS the base'),
     # unlabeled_dollar_basis is a config-shape gap, not a code path — it has
     # no anchor and is exempt below.
 }

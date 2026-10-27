@@ -35,6 +35,7 @@ Known approximations affecting this run's headline figures:
   - primary: RRSP room is declared but undeducted contributions are not -- the deduction ledger started empty. Declare room.rrsp.undeducted_contributions (Notice of Assessment > RRSP deduction limit statement > unused RRSP contributions available to deduct); 0 is a valid answer
   - spouse: RRSP room is declared but undeducted contributions are not -- the deduction ledger started empty. Declare room.rrsp.undeducted_contributions (Notice of Assessment > RRSP deduction limit statement > unused RRSP contributions available to deduct); 0 is a valid answer
 - The RRSP refund is the bracket tax the deduction removes from the contributor's taxable income, before non-refundable credits (basic personal amount, etc.): at low income, where credits already bring the tax to zero, the modelled refund is too high -> rrsp_tax_savings (the RRSP refund) for a low-income contributor [overstates] (#286)
+- The taxable portfolio's distributed income never enters the OAS recovery-tax base: the income is priced into the pot's GROWTH RATE and compounds inside the balance, but is never booked as income, so a household living on its distributions is modelled as keeping full, unclawed-back OAS. CRA counts that investment income toward net income whether or not it has been withdrawn -> net Old Age Security received, and every downstream figure derived from it -- terminal wealth, the retirement drawdown path, the after-tax estate, and the net_benefit ranking [overstates] (#438)
 
 ## Best Per Category
 

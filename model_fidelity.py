@@ -1654,3 +1654,196 @@ register(Approximation(
     issue='#137',
     applies=_deployment_lag_declared,
 ))
+
+
+# ── Issue #438: the OAS recovery-tax base omits distributed portfolio income ──
+#
+# The CRA's Old Age Security recovery test looks at net income FOR THE YEAR, and
+# investment income counts toward it whether or not a dollar has been withdrawn.
+# This engine never books the taxable portfolio's distributed income as income at
+# all: it is priced into the GROWTH RATE of the pot
+# (`simulation._non_reg_after_tax_return_for` -> `rules_growth.apply_non_reg_growth`),
+# so it compounds inside the balance and is never reported, never taxed in the year
+# it is earned, and never reaches the clawback base.
+#
+# Why this is a caveat and not a fix in the same PR: #438's own sequencing note is
+# that #437 must land FIRST, because it settles whether a distributed portfolio
+# dollar is taxed once or twice -- and therefore what the correct taxable base for
+# this clawback even is. Wiring the clawback before that settles would build on the
+# wrong base. What IS unconditional is the disclosure: `tools/README.md` requires a
+# biasing approximation to declare itself here so it reaches every output surface,
+# and the issue says so explicitly ("Registering the caveat is part of this work
+# even if the clawback itself is sequenced behind #437").
+#
+# The entry is anchored to the known-limit clause in `rules_drawdown.py` that names
+# this same gap, so `TestNoStaleCaveats` fails the moment the clause is deleted --
+# which is the moment the clawback is fixed. The caveat and the defect are pinned
+# to each other; neither can outlive the other.
+
+
+# The per-income-type yields that constitute DISTRIBUTED INCOME. `capital_gains`
+# is included (a realized gain is income to the extent it is taxable) and
+# `return_of_capital` is EXCLUDED on purpose: a ROC distribution reduces ACB and is
+# not included in income at all, so there is nothing for the recovery test to have
+# missed. Naming the list rather than testing `total_yield` is the DP#32 discipline
+# -- a nonzero total that is entirely ROC must NOT raise this caveat.
+_PORTFOLIO_INCOME_YIELDS = (
+    'eligible_dividends', 'non_eligible_dividends', 'interest',
+    'capital_gains', 'foreign_income',
+)
+
+
+def _portfolio_block(cfg: dict) -> dict:
+    """The ``portfolio`` block's accounts, or an empty dict when the config
+    declares none. Explicit absence-testing at every step (DP#32): a missing
+    ``portfolio`` key, a missing ``accounts`` sub-key and a non-dict value are
+    three different absences and none of them may fall through to a default
+    that invents an income figure."""
+    if not isinstance(cfg, dict):
+        return {}
+    portfolio = cfg.get('portfolio')
+    if not isinstance(portfolio, dict):
+        return {}
+    accounts = portfolio.get('accounts')
+    if not isinstance(accounts, dict):
+        return {}
+    return accounts
+
+
+def _is_number(value) -> bool:
+    # bool is an int subclass; a yield of True is malformed input, not 1.0.
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _declared_income_yield(yields: dict) -> float:
+    """The declared INCOME yield of one account's ``yield`` block, summed over
+    only the per-type yields that are actually income.
+
+    A per-type rate that is present but absent from the sum is a real value,
+    not a hole to fill with a default: a return-of-capital distribution is
+    excluded on purpose (see ``_PORTFOLIO_INCOME_YIELDS``), so a pot whose
+    only distribution is a ROC correctly totals 0.0 here. Malformed rates are
+    screened by ``_income_yield_is_unpriceable`` before this is called.
+    """
+    total = 0.0
+    for key in _PORTFOLIO_INCOME_YIELDS:
+        rate = yields.get(key)
+        if _is_number(rate):
+            total += float(rate)
+    return total
+
+
+def _income_yield_is_unpriceable(yields: dict) -> bool:
+    """Whether a yield declared in the block cannot be priced.
+
+    A present-but-malformed rate is not a zero rate. Reading it as zero would
+    turn a config that cannot be priced into a run that reports no caveat,
+    which is precisely the silent-substitution this module exists to prevent,
+    so it is reported instead.
+
+    The screen covers EVERY key the block declares, not only the five income
+    keys that get summed. Cite caught this (r4179432734): a block whose only
+    malformed entry is a non-income key such as ``return_of_capital: "high"``
+    passed the screen and then totalled 0.0, so the caveat was suppressed --
+    the docstring's promise was false for exactly the inputs it was written
+    about. A malformed ROC contributes 0 to income either way, so it cannot
+    change the arithmetic, but silently reading declared garbage as a clean
+    zero is the habit this module exists to break.
+
+    A key PRESENT with the value ``None`` is the same failure one step
+    further in, and Cite found it (r4179432734's follow-up): the screen skips
+    None, so ``{'interest': None}`` passed here AND contributed nothing to the
+    sum, and the caveat was suppressed. But "I declare an interest yield and
+    give no value" is not "I declare no interest yield" -- it is an unpriceable
+    input, which is the case this whole screen exists to catch. Only a key that
+    is ABSENT is an absence.
+    """
+    for rate in yields.values():
+        if not _is_number(rate):
+            return True
+    return False
+
+
+def _has_income_earning_portfolio(ctx: FidelityContext) -> bool:
+    """Whether THIS run's config DECLARES a taxable portfolio that distributes
+    income, and so whether there is distributed income for the OAS recovery
+    base to be missing.
+
+    Objective-independent on purpose: the clawback base is the same base
+    whichever objective ranks the run, so gating on the objective would
+    suppress the caveat on exactly the figures it applies to.
+
+    The trigger is the declared YIELD, never the opening balance. An earlier
+    draft suppressed the caveat when ``non_reg.balance`` was 0, which is wrong:
+    after-tax savings fund the non-reg pot over the projection, so a household
+    that opens with an empty taxable account and a declared dividend yield
+    DOES hold a portfolio, DOES earn investment income later, and WOULD miss it
+    in the OAS base. Suppressing on the balance would hide the caveat from
+    exactly those runs -- and it is the same false-disclosure failure this
+    registry exists to prevent, one level down. The registry's own rule decides
+    the tie: when in doubt, report the caveat rather than suppress it.
+
+    The absences are still handled separately, because they mean different
+    things and only one of them is a reason to stay quiet (DP#32):
+
+    - no ``non_reg`` account declared at all -> no taxable pot -> False.
+    - a declared pot whose ``yield`` composition is absent -- OR EMPTY -- the
+      engine falls back to its configured ``non_reg_yield_rate``
+      (``simulation._non_reg_after_tax_return_for``), so income IS being
+      distributed and the OAS base IS missing it -> True.
+    - a declared yield that cannot be priced -> report rather than exonerate ->
+      True.
+    - a yield block that declares a real NUMBER, and zero, on every income type
+      -> genuinely nothing is distributed -> False.
+    """
+    non_reg = _portfolio_block(ctx.cfg).get('non_reg')
+    if not isinstance(non_reg, dict):
+        return False
+    yields = non_reg.get('yield')
+    # `not yields` rather than a type test alone: Cite caught (r4180599342)
+    # that `isinstance(yields, dict)` lets an EMPTY block through, where the
+    # screen passes vacuously and the sum is 0.0, so `{}` suppressed the
+    # caveat while a wholly absent block fired. Both are the SAME declaration --
+    # no composition -- so both must report. A block that declares explicit
+    # zeroes is a different thing, and is handled by the sum below.
+    if not isinstance(yields, dict) or not yields:
+        return True                        # no composition declared
+    if _income_yield_is_unpriceable(yields):
+        return True                        # declared, but not a number
+    return _declared_income_yield(yields) > 0.0
+
+
+register(Approximation(
+    id='distributed_portfolio_income_never_enters_oas_base',
+    summary=("The taxable portfolio's distributed income never enters the OAS "
+             "recovery-tax base: the income is priced into the pot's GROWTH RATE "
+             "and compounds inside the balance, but is never booked as income, so "
+             "a household living on its distributions is modelled as keeping full, "
+             "unclawed-back OAS. CRA counts that investment income toward net "
+             "income whether or not it has been withdrawn"),
+    biased_figure=('net Old Age Security received, and every downstream figure '
+                   'derived from it -- terminal wealth, the retirement drawdown '
+                   'path, the after-tax estate, and the net_benefit ranking'),
+    direction=Direction.OVERSTATES,
+    detail=("The recovery base is CPP + pension + gross OAS + the year's "
+            "recognized taxable draw, and nothing else. "
+            "retirement_transition.member_retirement_income() calls "
+            "oas_after_clawback(net_income=other_net_income + cpp) with "
+            "other_net_income defaulting to 0.0 and no production caller passing "
+            "it, so ONSET is tested on CPP alone; rules_retirement_income and "
+            "plan_drawdown_net fold in the draw's per-owner taxable slice but no "
+            "term derives from the non-reg pot's declared yield. "
+            "countries/canada/portfolio.compute_investment_income has exactly one "
+            "production caller -- rules_leverage, feeding the Quebec deduction cap "
+            "-- and `portfolio.accounts.non_reg` is otherwise read only as a RATE. "
+            "Direction is OVERSTATES: the CRA would recover up to 75% of the OAS, "
+            "so every year of omitted clawback is money this model reports the "
+            "household as receiving and keeps. Tracked as #438; its fix is "
+            "sequenced behind #437, which settles whether a distributed portfolio "
+            "dollar is taxed once or twice and therefore what the correct base is. "
+            "This entry DELETES when that fix lands -- it is anchored to the "
+            "known-limit clause in rules_drawdown.py that names the same gap, so "
+            "TestNoStaleCaveats fails the moment the clause goes."),
+    issue='#438',
+    applies=_has_income_earning_portfolio,
+))
