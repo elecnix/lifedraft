@@ -907,6 +907,14 @@ class YearWorkingState:
     # the POST-credit after-tax income the pre-refactor prologue passed.
     tuition_credit_applied_primary: float = 0.0
     tuition_credit_applied_spouse: float = 0.0
+    # Issue #367: the personal_credits rule's per-member tax reduction -- the
+    # federal medical/charitable/political credits and Quebec's medical and
+    # charitable credits, each capped at that member's own pre-credit tax
+    # (non-refundable). Read by apply_solvency, exactly as the tuition-credit
+    # fields above are. 0.0 for a household that declares no personal claims
+    # (the golden path).
+    personal_credit_applied_primary: float = 0.0
+    personal_credit_applied_spouse: float = 0.0
     # The END-of-year unused-credit remainder carried to the next year
     # (per-member / per-child; #784/#785). Written to jurisdiction_state by the
     # epilogue and surfaced on YearResult by build_year_result.

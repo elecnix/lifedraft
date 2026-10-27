@@ -204,6 +204,109 @@ def _horizon_end_year(doc: Dict, primary_id: str) -> Optional[int]:
     return int(primary["birth_date"][:4]) + horizon["until_age"]
 
 
+def _annual_claims_by_year(doc: Dict, p: Dict, role: str, person_id: str,
+                           as_of: str) -> Dict[int, Dict[str, float]]:
+    """Issue #367: the member's declared personal outlays, keyed by tax year.
+
+    Each entry carries the four categories the contract can express -- medical
+    expenses, charitable donations, a federal political contribution and union
+    or professional dues -- as the CALENDAR-YEAR totals actually paid. The
+    engine applies the statutory floor, cap and rate to them; this function
+    only reads the document.
+
+    Returns {} when the member declares none (the golden path), so a household
+    that omits the block is byte-identical to before this change (DP#32).
+
+    Refusals are loud, because each one is a claim that would otherwise be
+    silently dropped and a household taxed as if it had paid nothing:
+
+    - a duplicate year (two entries for one year would make the later one win
+      silently, depending on list order -- so the ambiguity is refused);
+    - a year outside the projection. An outlay dated before the plan starts, or
+      after the primary's horizon, is not a year this run computes tax for, and
+      dropping it would understate the household's credits while looking like a
+      correct run. The upper bound is only applied when the horizon actually
+      dates against the primary (`_horizon_end_year` returns None otherwise);
+      an undatable horizon does not license inventing one;
+    - a negative amount, which the schema forbids but a direct unit-test call
+      can still construct (the same reason `birth_year` is re-checked below).
+
+    DP#1: the year is a real calendar year, never an index into the
+    projection.
+    """
+    raw = p.get("annual_claims")
+    if not raw:
+        return {}
+    if not isinstance(raw, list):
+        raise ContractAdaptationError(
+            f"person {person_id!r}: annual_claims must be a list of dated "
+            f"claims, got {type(raw).__name__} (DP#32).")
+
+    start_year = int(as_of[:4])
+    # The horizon dates against the primary, which the caller has already
+    # picked (the same `_find_primary_and_spouse` this module maps from).
+    primary_id, _spouse = _find_primary_and_spouse(doc)
+    horizon_end = _horizon_end_year(doc, primary_id)
+
+    by_year: Dict[int, Dict[str, float]] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ContractAdaptationError(
+                f"person {person_id!r}: each annual_claims entry must be an "
+                f"object, got {type(entry).__name__} (DP#32).")
+        year = entry.get("year")
+        if not isinstance(year, int) or isinstance(year, bool):
+            raise ContractAdaptationError(
+                f"person {person_id!r}: an annual_claims entry has no integer "
+                f"`year` (got {year!r}); these amounts are capped and "
+                f"thresholded by tax YEAR, so an undated claim cannot be "
+                f"applied (DP#1, DP#32).")
+        if year in by_year:
+            raise ContractAdaptationError(
+                f"person {person_id!r}: two annual_claims entries for {year}. "
+                f"Which one the year's credits came from would depend on list "
+                f"order -- refusing rather than letting the last one win "
+                f"silently (DP#32).")
+        if year < start_year:
+            raise ContractAdaptationError(
+                f"person {person_id!r}: an annual_claims entry is dated {year}, "
+                f"before this projection starts ({start_year}). A claim paid "
+                f"before the plan does not reach any year this run computes, "
+                f"so applying it would be a fabrication and dropping it would "
+                f"understate the household's credits -- refusing instead "
+                f"(DP#32).")
+        if horizon_end is not None and year > horizon_end:
+            raise ContractAdaptationError(
+                f"person {person_id!r}: an annual_claims entry is dated {year}, "
+                f"after the last simulated year ({horizon_end}). Refusing rather "
+                f"than silently ignoring a claim the document declares "
+                f"(DP#32).")
+
+        amounts: Dict[str, float] = {}
+        for key in ("medical_expenses", "charitable_donations",
+                    "political_contributions_federal", "union_dues"):
+            value = entry.get(key)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ContractAdaptationError(
+                    f"person {person_id!r}: annual_claims[{year}].{key} is "
+                    f"{value!r}, not a number (DP#32).")
+            if value < 0:
+                raise ContractAdaptationError(
+                    f"person {person_id!r}: annual_claims[{year}].{key} is "
+                    f"negative ({value!r}); an outlay cannot be negative "
+                    f"(DP#32).")
+            if value > 0:
+                amounts[key] = float(value)
+        # A year whose every line is 0 or absent claims nothing; keeping it
+        # would put an empty entry in the member's ledger and make a no-claim
+        # year look like a declared one.
+        if amounts:
+            by_year[year] = amounts
+    return by_year
+
+
 def _age_at(birth_date: Optional[str], as_of: str) -> Optional[int]:
     if not birth_date:
         return None
@@ -695,6 +798,14 @@ def _map_member(doc: Dict, person_id: str, role: str,
         # tax; a child transfers the full credit (no own tax, #701).
         transfer_to = _tuition_transfer_to(p)
         member.update({"tuition_transfer_to": transfer_to} if transfer_to else {})
+
+    # Issue #367: the member's dated personal outlays that generate a
+    # non-refundable federal and/or Quebec credit (medical, donations, a
+    # federal political contribution) or an income deduction (union dues).
+    # Absent for a household that declares none (the golden path).
+    claims_by_year = _annual_claims_by_year(doc, p, role, person_id, as_of)
+    if claims_by_year:
+        member["claims_by_year"] = claims_by_year
 
     return member
 

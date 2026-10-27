@@ -98,6 +98,7 @@ EXPECTED_RULE_NAMES = frozenset({
     'rrif_minimum',                # issue #574: mandatory RRIF minimum withdrawal from 71
     'sm_unwind',                   # issue #1017: under liquidate_to_target, unwind the SM sleeve to fund the spending shortfall (sell SM, repay HELOC, pay cap-gains tax, deliver net)
     'property_disposition',        # issue #956 bite B: a declared mid-horizon property SALE settles in its sale year (net proceeds invested post-growth, gain taxed + PRE-apportioned, conservation identity Δtotal_assets = -(selling_costs + T))
+    'personal_credits',            # issue #367: the DECLARED personal credits (medical, donations, federal political) and Quebec's own medical/charitable credits -- non-refundable, capped per member, consumed by 'solvency'
     'tuition_credit',              # epic #795 bite 3: federal (+ QC) tuition tax credit (own credit + #784 carry-forward + #785 transfers) -- was inline in the fold's prologue
     'solvency',                    # issue #679: cash-flow identity + forced-liquidation waterfall
     'superficial_loss',            # issue #141: ITA s.53(1)(c) deny a loss whose household repurchase lands in the annualized window + defer the denial into the repurchased pot's ACB under s.53(1)(f)
@@ -217,6 +218,10 @@ EXPECTED_RULE_ORDER = (
     # reduction to YearWorkingState, which apply_solvency adds to
     # `available` so the cash-flow identity counts the POST-credit
     # after-tax income. Was inline in the fold's prologue (two spellings).
+    # issue #367: the same shape for the declared personal credits --
+    # medical, donations and a federal political contribution, plus
+    # Quebec's own medical and charitable credits.
+    'personal_credits',
     'tuition_credit',
     'solvency',
     # issue #141: ITA s.53(1)(c) superficial-loss anti-avoidance. Runs AFTER
@@ -1033,6 +1038,51 @@ def test_every_rule_fires_somewhere_in_representative_households():
                 config=_make_config(), investment_return=0.06,
                 primary_marginal_rate=0.30,
                 living_costs=60_000, after_tax_income=45_000,
+            ),
+        )
+    _merge(fired)
+
+    # ── Scenario R: a household that DECLARES personal outlays generating
+    # credits (issue #367: the personal_credits rule -- medical expenses,
+    # charitable donations and a federal political contribution, plus
+    # Quebec's own medical and charitable credits). Every other scenario's
+    # members carry no ``claims_by_year``, so the rule correctly stays a no-op
+    # (fired=False) everywhere else -- its whole job is to price claims none of
+    # the other representative households declare, which is exactly the
+    # coverage property #584 asks for. Without this scenario it would be the
+    # #627 shape: registered, ordered, never reached. QC residency with tax
+    # before credits large enough that the credits APPLY rather than being
+    # floored at zero, so the rule has an observable effect. Round numbers,
+    # role-based names (DP#4/#15).
+    claims_config = _make_config(
+        family_members=[
+            {'role': 'primary', 'birth_year': 1980, 'gross_income': 120_000,
+             'rrsp_room_accumulated': 40_000, 'tfsa_room_accumulated': 20_000,
+             'claims_by_year': {2026: {
+                 'medical_expenses': 6_000.0,
+                 'charitable_donations': 2_000.0,
+                 'political_contributions_federal': 500.0,
+                 'union_dues': 900.0}}},
+            {'role': 'spouse', 'birth_year': 1982, 'gross_income': 45_000,
+             'rrsp_room_accumulated': 20_000, 'tfsa_room_accumulated': 20_000},
+        ],
+        projection_years=1,
+    )
+    with trace_firing() as fired:
+        simulate_year_pure(
+            state=SimState(jurisdiction_state={'canada': _default_canada_state()}),
+            year=0,
+            inputs=_build_year_inputs(
+                allocations={'_primary_income': 120_000, '_spouse_income': 45_000,
+                             '_annual_savings': 0},
+                config=claims_config, investment_return=0.0,
+                primary_marginal_rate=0.40, spouse_marginal_rate=0.20,
+                calendar_year=2026,
+                tax_provider=None,
+                # Deliberately far larger than the credits so the non-refundable
+                # cap does not bind -- the rule must APPLY, not merely compute.
+                primary_tax_before=30_000.0, spouse_tax_before=6_000.0,
+                primary_taxable_income=120_000.0, spouse_taxable_income=45_000.0,
             ),
         )
     _merge(fired)
