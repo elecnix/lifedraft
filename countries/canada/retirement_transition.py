@@ -212,9 +212,23 @@ def member_retirement_income(member: Dict, sim_year: int,
     birth_year = member.get('birth_year', 0)
     retirement_age = member.get('retirement_age', DEFAULT_RETIREMENT_AGE)
     retired = is_retired(birth_year, retirement_age, sim_year)
-    if not retired:
-        return MemberRetirementIncome(retired=False)
-
+    # Issue #340: stopping work and starting benefits are SEPARATE events.
+    # ``retired`` is still derived from retirement_age and still means "has
+    # this member left work" -- that is what the fold uses to zero employment
+    # income, and it is NOT changed here. What changes is that a benefit is
+    # no longer WITHHELD until the member stops working: CPP and QPP can be
+    # claimed from 60 whether or not the person is still earning, and OAS from
+    # 65 (or later, if deferred). Both are gated below by their own claim ages.
+    #
+    # Before, a member who declared claim_age 60 with retirement_age 65
+    # received $0 until 65 -- the engine knew the amount and simply withheld
+    # it, so claiming early while working was not representable.
+    #
+    # What is NOT modelled here, and is deliberately left alone rather than
+    # faked: post-retirement contributions (the CPP post-retirement benefit /
+    # QPP supplement) and post-retirement employment income for a member past
+    # retirement_age. Both are follow-ups; pretending to model them would be
+    # worse than saying so.
     age = member_age(birth_year, sim_year)
 
     # DP#32 (#606): cpp_start_age / oas_start_age of 0 is a data bug (never a
@@ -245,7 +259,8 @@ def member_retirement_income(member: Dict, sim_year: int,
 
     pension = member.get('pension_income_annual', 0) or 0
 
-    return MemberRetirementIncome(cpp=cpp, oas=oas_net, pension=pension, retired=True)
+    return MemberRetirementIncome(cpp=cpp, oas=oas_net, pension=pension,
+                                 retired=retired)
 
 
 # ── Drawdown ─────────────────────────────────────────────────────────────────
