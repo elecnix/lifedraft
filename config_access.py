@@ -136,6 +136,15 @@ _INTERNAL_ROOT_ALLOWED_KEYS = {
     # -> SimState.property_equities -> total_assets); before this seam only the
     # single principal residence's value was carried, dropping every other one.
     'properties',
+    # Issue #377: the properties declaring a BUSINESS-USE portion (a home
+    # office, or part of a principal residence converted to a shop). Its own
+    # root list rather than a block inside `properties`, because the principal
+    # residence is deliberately absent from the latter (its value reaches the
+    # engine through `property.house_value`) and the principal's business
+    # portion is this issue's case (SimulationConfig.business_use ->
+    # simulation._business_use_for_year -> the fold's claim, UCC and the
+    # estate's recapture / lost exemption).
+    'business_use',
     # issue #862 (DP#22/DP#5): the household's declared optimization objective
     # name (decisions.objective), carried through so optimize.py can resolve
     # the ObjectiveFunction the ranking is scored under. Read by optimize.py,

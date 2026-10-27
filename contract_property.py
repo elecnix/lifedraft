@@ -605,3 +605,145 @@ def _map_owned_properties(doc: Dict, primary_id: str,
                 }
         owned.append(entry)
     return owned
+
+
+def _map_business_use(doc: Dict, primary_id: str, spouse_id: Optional[str],
+                      ) -> List[Dict[str, Any]]:
+    """Every property that declares a BUSINESS-USE portion (issue #377), mapped
+    onto the internal ``business_use`` list the fold reads.
+
+    Why a list of its own, rather than a block hanging off each mapped property:
+    the PRINCIPAL residence is deliberately absent from ``cfg['properties']``
+    (its value reaches the annual side through ``cfg['property']``, and counting
+    it twice would double it), and it is exactly the principal residence whose
+    business portion this issue is about. One location reached for both kinds is
+    the only spelling that cannot leave the principal's block unreachable
+    (DP#9).
+
+    Each entry is ``{property_id, fraction, role, is_principal,
+    change_in_use_year, cca}``:
+
+    - ``fraction`` the share of the property in business use. It scales the
+      proceeds at disposition (``fmv_at_disposition`` below), not the claim: the
+      declared ``capital_cost``/``opening_ucc`` ARE the business fraction's own
+      cost, so the claim is already computed on the right pool and must not be
+      scaled twice.
+    - ``is_principal`` whether the property is the couple's principal residence
+      -- the only property that carries a principal-residence exemption to lose
+      (see the field's own comment).
+    - ``role`` whose net self-employment income the claim offsets. s.20(1)(a) is
+      an individual's deduction and Canada has no joint filing, so the claim
+      lands on ONE member's return -- and on that member's contribution base
+      (QPP/QPIP) and RRSP-room accrual, which read the same net.
+    - ``change_in_use_year`` the CALENDAR year the income-producing use
+      commenced, read from the dated leaf (or its sweepable numeric twin, exactly
+      the ``oneOf`` the purchase/sale blocks use). ITA s.45(1)(c) deems the
+      business fraction disposed of and reacquired at FMV in that year; the claim
+      therefore starts in the first FULL year after it (the deemed acquisition's
+      half-year allowance is not modelled -- see
+      ``countries.canada.business_use.business_use_claim``).
+    - ``cca`` the Capital Cost Allowance election, carried through with the same
+      ``fmv_at_disposition`` the rental path computes (the couple's share of the
+      BUSINESS FRACTION's value) so a recapture and the capital gain on the same
+      property share one valuation. Absent/null -> no CCA claimed, which is the
+      treatment that PRESERVES principal-residence status.
+
+    Refuses (loudly, never a silent drop -- DP#32):
+
+    - a ``role`` naming a member the household does not have (a single-adult
+      household declaring a spouse-owned business portion). The claim would have
+      no income to offset, and a claim against an absent member's income is a
+      plausible-looking zero;
+    - a property declaring BOTH ``business_use.cca`` and a dated ``sale``. The
+      recapture (ITA s.13(1)) and the lost principal-residence exemption both
+      fall due in the SALE year on a voluntary disposition, and the disposition
+      rules price neither for a business portion -- modelling only the death path
+      would hand the household a silently undertaxed sale, which is precisely the
+      failure this engine exists to prevent. Declaring no sale (holding to the
+      horizon, where the s.70(5) deemed disposition does price both) is honest;
+      declaring both is refused.
+    """
+    from contract_errors import ContractAdaptationError
+
+    couple = [pid for pid in (primary_id, spouse_id) if pid is not None]
+    roles = {"primary": primary_id, "spouse": spouse_id}
+    principal = _find_property(doc, "principal")
+    principal_id = principal["id"] if principal is not None else None
+    mapped: List[Dict[str, Any]] = []
+    for prop in doc.get("properties", []):
+        business_use = prop.get("business_use")
+        if business_use is None:
+            continue
+        pid = prop["id"]
+        role = business_use["role"]
+        if roles.get(role) is None or roles[role] not in couple:
+            raise ContractAdaptationError(
+                f"Property {pid!r} declares a business-use portion owned by "
+                f"role={role!r}, but this household has no such member. The CCA "
+                f"on a business portion is an INDIVIDUAL deduction (ITA "
+                f"s.20(1)(a)) offset against that person's net self-employment "
+                f"income, so a role the household does not contain has nothing "
+                f"to offset -- and returning a $0 claim for it would read as "
+                f"'the business earns nothing' rather than 'the declaration is "
+                f"wrong'. Fix the role, or add the member."
+            )
+        cca = business_use.get("cca")
+        sale = prop.get("sale")
+        if cca is not None and sale is not None:
+            raise ContractAdaptationError(
+                f"Property {pid!r} declares BOTH a business-use CCA election and "
+                f"a dated sale. A voluntary sale crystallizes the recapture (ITA "
+                f"s.13(1), 100% ordinary income) and the business fraction's "
+                f"loss of the principal-residence exemption in the SALE year, and "
+                f"this engine's disposition rules price neither for a business "
+                f"portion -- so the sale would be priced as if no CCA had ever "
+                f"been claimed, silently understating the tax. Either drop the "
+                f"sale (the s.70(5) deemed disposition at the horizon prices both) "
+                f"or drop the election (an unelected business portion keeps its "
+                f"principal-residence status)."
+            )
+        shares = _owner_shares(prop["owner"])
+        couple_share = sum(frac for pid_, frac in shares.items() if pid_ in couple)
+        if couple_share <= 0:
+            # Someone else's property -- not this household's business portion.
+            continue
+        # The PRINCIPAL residence carries its FULL value onto the estate block
+        # (its value reaches the gross estate as `house_equity`, split by
+        # `property_primary_share`), while every OTHER property carries the
+        # COUPLE'S SHARE -- the same convention `_map_pre_property_gains`
+        # documents and applies (DP#9). This portion's `fmv_at_disposition` and
+        # the estate's gain base for the SAME portion must agree on that, or the
+        # recapture and the capital gain disagree about what the property is
+        # worth.
+        is_principal = pid == principal_id
+        share = 1.0 if is_principal else couple_share
+        entry: Dict[str, Any] = {
+            "property_id": pid,
+            "fraction": business_use["fraction"],
+            "role": role,
+            # Whether this is the PRINCIPAL residence. Only the principal
+            # residence carries a principal-residence exemption to LOSE: a
+            # non-principal property's gain is already fully taxable in the
+            # estate, so the change in use costs it nothing and the fold prices
+            # no lost-exemption gain for it. Carried because the fold cannot
+            # tell the two apart from the block alone -- the principal is
+            # deliberately absent from `cfg['properties']` (#692), so nothing
+            # downstream knows which property this id names.
+            "is_principal": is_principal,
+            # The dated leaf is the real fact (DP#1); the numeric twin is read
+            # with an explicit `is not None` test, never `or` (DP#32).
+            "change_in_use_year": (
+                business_use["change_in_use_year"]
+                if business_use.get("change_in_use_year") is not None
+                else int(business_use["change_in_use_date"][:4])),
+        }
+        if cca is not None:
+            entry["cca"] = {
+                "rate": cca["rate"],
+                "capital_cost": cca["capital_cost"],
+                "opening_ucc": cca["opening_ucc"],
+                "fmv_at_disposition": (prop["value"]["amount"]
+                                       * business_use["fraction"] * share),
+            }
+        mapped.append(entry)
+    return mapped

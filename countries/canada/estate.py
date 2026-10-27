@@ -226,6 +226,20 @@ class EstatePlan:
     # exemption for a given year, and the year ranges finally move the tax (#601).
     property_gains: Optional[Tuple[Dict, ...]] = None
 
+    # Issue #377: the BUSINESS-USE PORTION's ``{fmv, acb}`` -- one entry per
+    # declared portion of a principal residence. ITA s.45(1)(c) deemed the
+    # portion disposed of and reacquired at FMV when the business use began, so
+    # its gain since then (fmv - acb) carries NO principal-residence exemption
+    # (Income Tax Folio S1-F3-C2 para 2.59-2.60). The residence's own gain stays
+    # exempt and prices as before; this slice is priced as an EXTRA gain base
+    # alongside it, at taxable_fraction 1.0 -- never by shrinking the
+    # residence's exemption fraction, which would tax the same dollars twice.
+    # Empty () (the default, and every household with no business portion) makes
+    # the estate byte-identical to today (DP#32). Both amounts are absolute: the
+    # property's own value is already in `house_equity` / `taxable_property_*`,
+    # so only the GAIN is added -- no double count in the gross estate.
+    business_use_gains: Tuple[Dict, ...] = ()
+
     def __post_init__(self):
         for name in ('non_reg_primary_share', 'property_primary_share',
                      'registered_rolled_fraction', 'non_reg_rolled_fraction'):
@@ -249,6 +263,11 @@ class EstatePlan:
                 if gain['fmv'] < 0 or gain['acb'] < 0:
                     raise EstateInputError(
                         "property_gains fmv/acb must be non-negative magnitudes.")
+        for gain in self.business_use_gains:
+            if gain['fmv'] < 0 or gain['acb'] < 0:
+                raise EstateInputError(
+                    f"business_use_gains fmv/acb must be non-negative "
+                    f"magnitudes, got {gain!r}.")
 
 
 @dataclass
@@ -697,6 +716,14 @@ def compute_estate(*, members: Sequence[TerminalReturn],
             (g['fmv'], g['acb'], g['taxable_fraction']) for g in plan.property_gains]
         taxable_property_gross = sum(
             g['fmv'] for g in plan.property_gains if not g['is_principal'])
+    # Issue #377: the business-use portion's gain, in BOTH paths -- it is a
+    # separate slice from the residence's own gain (the exemption is denied for
+    # the portion alone, ITA s.45(1)(c) / Folio S1-F3-C2 para 2.59-2.60), and it
+    # is already inside the gross estate through `house_equity` / the
+    # `taxable_property_*` pot, so only its GAIN is priced here. Empty by
+    # default -> byte-identical estate (DP#32).
+    property_gain_bases.extend(
+        (g['fmv'], g['acb'], 1.0) for g in plan.business_use_gains)
 
     def _return_tax(registered_on_return: float, nr_share: float,
                     prop_share: float) -> tuple:

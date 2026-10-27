@@ -213,6 +213,12 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         # present when the contract declared a couple-owned non-principal
         # property (DP#24/DP#32).
         properties=list(cfg.get('properties', [])),
+        # issue #377: the properties carrying a business-use portion.
+        # Absence-safe -- .get with no default returns [] (the ordinary
+        # household, which declares no business portion), never a fabricated
+        # entry; the list is only present when the contract declared one
+        # (DP#24/DP#32).
+        business_use=list(cfg.get('business_use', [])),
         # issue #759: fixed-term installment obligations. Absence-safe --
         # .get with no default returns [] (a household with no payment
         # plan), never a fabricated entry; the list is only present when
@@ -563,6 +569,11 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
         # (DP#24/DP#32).
         **({'properties': config.properties}
            if config.properties else {}),
+        # Issue #377: only re-emitted when a property actually declares a
+        # business-use portion -- an empty list round-trips to 'absent' (no
+        # business portion), never to a fabricated block (DP#24/DP#32).
+        **({'business_use': config.business_use}
+           if config.business_use else {}),
         # Issue #936: the declared deposit products and the single taken
         # product are only re-emitted when actually present -- an empty list
         # / None round-trips to 'absent' (no product), never a fabricated block

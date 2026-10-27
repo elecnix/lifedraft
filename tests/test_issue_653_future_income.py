@@ -101,24 +101,61 @@ class TestFutureDatedIncomeReachesEngine(unittest.TestCase):
 
 
 class TestFutureSegmentsHelper(unittest.TestCase):
-    """Unit coverage of ``_future_employment_segments`` in isolation (DP#11):
-    it selects strictly-future EMPLOYMENT incomes and nothing else."""
+    """Unit coverage of ``_dated_income_segments``' EMPLOYMENT rule in isolation
+    (DP#11). The helper carries one rule per KIND since #377 -- a job only needs
+    a window when it starts in the future, a self-employment income needs one
+    whenever it has not ended -- so these cases pin the #653 half of it and the
+    #377 half is pinned in tests/test_issue_377_business_home_cca.py."""
 
-    def test_only_future_employment_incomes_become_segments(self):
+    def test_employment_becomes_a_segment_only_when_it_starts_in_the_future(self):
         person = {"incomes": [
             {"id": "past", "kind": "employment", "amount": 90_000,
              "from": "2015-01-01", "to": None},          # active -> base scalar
             {"id": "future_emp", "kind": "employment", "amount": 200_000,
              "from": "2029-01-01", "to": None},           # future -> segment
-            {"id": "future_other", "kind": "self_employment", "amount": 50_000,
-             "from": "2030-01-01", "to": None},           # not employment -> skipped
         ]}
-        segments = contract_people._future_employment_segments(person, "2026-01-01")
+        segments = contract_people._dated_income_segments(person, "2026-01-01")
         self.assertEqual([s["from"] for s in segments], ["2029-01-01"])
         self.assertEqual(segments[0]["amount"], 200_000)
 
+    def test_a_self_employment_income_becomes_a_segment_whenever_it_is_live(self):
+        """The other rule in the same helper (#377): a business carries its
+        window whether it started before or after the snapshot, and one that
+        already ENDED carries nothing."""
+        person = {"incomes": [
+            {"id": "closed", "kind": "self_employment", "amount": 10_000,
+             "from": "2015-01-01", "to": "2020-01-01"},   # ended -> nothing
+            {"id": "running", "kind": "self_employment", "amount": 50_000,
+             "from": "2015-01-01", "to": None},           # live -> segment
+            {"id": "future_biz", "kind": "self_employment", "amount": 30_000,
+             "from": "2030-01-01", "to": None},           # future -> segment
+        ]}
+        segments = contract_people._dated_income_segments(person, "2026-01-01")
+        self.assertEqual([s["from"] for s in segments],
+                         ["2015-01-01", "2030-01-01"])
+
+    def test_a_kind_the_scalar_does_not_carry_yields_no_segment_either(self):
+        """Pins the fall-through explicitly rather than by omission.
+
+        The helper carries ``employment`` and ``self_employment``. The other
+        kinds the schema admits (``ei``, ``rental``, ``investment``, ``other``)
+        are carried by NEITHER this helper nor the base scalar, which folds only
+        ``employment`` -- so they contribute nothing to the projection. That is
+        a real gap, and it is recorded here so it is visible rather than an
+        untested branch: fixing it is a change to how those incomes are priced,
+        which is not #377's scope (rental income has its own path through
+        ``properties[].rental``; an ``incomes[].rental`` line would be a second
+        spelling of it, DP#9)."""
+        person = {"incomes": [
+            {"id": "ei", "kind": "ei", "amount": 32_000,
+             "from": "2026-09-01", "to": "2027-06-01"},
+            {"id": "inv", "kind": "investment", "amount": 5_000,
+             "from": "2026-01-01", "to": None},
+        ]}
+        self.assertEqual(contract_people._dated_income_segments(person, "2026-01-01"), [])
+
     def test_no_incomes_yields_no_segments(self):
-        self.assertEqual(contract_people._future_employment_segments({"incomes": []}, "2026-01-01"), [])
+        self.assertEqual(contract_people._dated_income_segments({"incomes": []}, "2026-01-01"), [])
 
 
 class TestActiveIncomeIsUnchanged(unittest.TestCase):

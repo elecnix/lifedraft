@@ -569,6 +569,21 @@ class SimulationConfig:
     # STR (#697) are later bites that give the property dynamics.
     properties: List[Dict] = field(default_factory=list)
 
+    # Issue #377: the properties that declare a BUSINESS-USE portion -- a home
+    # office, or part of a principal residence converted to a shop. Each entry
+    # is `{property_id, fraction, role, change_in_use_year, cca}` produced by
+    # input_contract._map_business_use. It is a list of its OWN rather than a
+    # block inside `properties` because the principal residence is deliberately
+    # not in that list (its value reaches the annual side through
+    # `cfg['property']`), and the principal's business portion is this issue's
+    # case. The fold claims Capital Cost Allowance against the named role's net
+    # self-employment income from the first full year after the change in use,
+    # tracks the declining UCC per property, and the estate recaptures the
+    # claimed CCA at the deemed disposition. Absence-safe: an empty list is a
+    # household with no business portion (the golden path), byte-identical
+    # (DP#32).
+    business_use: List[Dict] = field(default_factory=list)
+
     # Issue #759: fixed-term, zero-interest installment obligations -- a
     # medical/dental/education payment plan (up-front lump already paid, then
     # N equal monthly payments + optional final balloon, 0% interest, finite

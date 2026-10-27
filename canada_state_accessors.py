@@ -269,6 +269,14 @@ def _default_canada_state() -> dict:
         # disposition. Empty {} for a household with no CCA election (the golden
         # path -- inert, DP#32).
         'rental_ucc': {},
+
+        # Issue #377: per-property undepreciated capital cost for a declared
+        # BUSINESS-USE PORTION (a home office, or part of a principal residence
+        # converted to a shop). Same ledger shape and purpose as `rental_ucc`
+        # above, read by the fold to claim the year's CCA and by the estate to
+        # recapture it at the deemed disposition. Empty {} for a household with
+        # no business portion (the golden path -- inert, DP#32).
+        'business_use_ucc': {},
     }
 
 
