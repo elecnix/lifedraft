@@ -139,6 +139,19 @@ def quebec_abatement_amount(income: float, year: int = 2026,
 
     For non-Quebec provinces, the abatement is 0.
 
+    SCOPE (issue #350): this is the abatement on a base that carries NO
+    federal non-refundable credits, which is what its callers
+    (``federal_tax_combined_with_abatement``, ``combined_tax_separate``)
+    actually hold -- they take an income and no credits. It is therefore
+    arithmetically right for them.
+
+    It is NOT the right rule for a return that HAS credits. The CRA computes
+    the refundable Quebec abatement on line 42900 -- BASIC federal tax, i.e.
+    after the federal non-refundable credits (T1 Schedule 1 step 3: line 49
+    minus line 53). Use :func:`quebec_abatement_on_credits` there; that is
+    what ``compute_total_tax`` and ``rules_amt`` now use, and they cannot
+    drift from each other because there is one implementation.
+
     DP#3: Pure function.
     """
     if province.lower() not in ('quebec', 'qc'):
@@ -153,6 +166,44 @@ def quebec_abatement_amount(income: float, year: int = 2026,
     except ValueError:
         pass
     return before * abatement_rate
+
+
+def quebec_abatement_on_credits(gross_federal_tax: float,
+                               federal_nr_credits: float = 0.0,
+                               year: int = 2026,
+                               province: str = "quebec",
+                               provider: TaxDataProvider = None) -> float:
+    """The Quebec abatement: ``rate x max(0, gross federal tax - NR credits)``.
+
+    Issue #350. The CRA computes the refundable Quebec abatement on line
+    44000 as 16.5% of line 42900 -- **basic federal tax**. Basic federal tax
+    is federal tax on taxable income with the total federal non-refundable
+    credits (line 35000), the dividend tax credit and the minimum-tax
+    carryover already removed (T1 Schedule 1, step 3: "Basic federal tax 429"
+    = line 49 minus line 53).
+
+    Taking the percentage of GROSS tax instead credits each federal
+    non-refundable dollar twice: once as a full-rate credit, and once again by
+    inflating the abatement it should have shrunk. The effective rate on a
+    Quebec federal credit is ``1 - 16.5%``, not 100%.
+
+    One place owns the rule (DP#9), so `compute_total_tax` and
+    `rules_amt.apply_amt` cannot drift apart on it. Non-Quebec is 0.
+
+    DP#3: pure.
+    """
+    if province.lower() not in ('quebec', 'qc'):
+        return 0.0
+    if provider is None:
+        provider = TaxDataProvider()
+    rate = QC_ABATEMENT
+    try:
+        prov_data = provider._load_year(year, 'canada', province)
+        rate = prov_data.provincial_abatement
+    except (ValueError, IndexError, AttributeError):
+        pass
+    base = max(0.0, gross_federal_tax - (federal_nr_credits or 0.0))
+    return base * rate
 
 
 def federal_tax(income: float, year: int = 2026,
@@ -759,21 +810,36 @@ def compute_total_tax(taxable_income: float,
 
     # Step 1: Gross federal tax and provincial tax
     gross_fed = federal_tax_before_abatement(taxable_income, year, province, provider)
-    abatement = quebec_abatement_amount(taxable_income, year, province, provider)
     if province.lower() in ('quebec', 'qc'):
         prov_tax = quebec_tax(taxable_income, year, provider)
     else:
         prov_tax = _provincial_tax(taxable_income, year, province, provider)
 
-    federal_after_abatement = gross_fed - abatement
-
-    # Step 2: Federal non-refundable credits
+    # Step 2: Federal non-refundable credits. Computed BEFORE the abatement
+    # because they are part of its base -- see #350.
     nr_credits = compute_non_refundable_credits(
         employment_income, taxable_income, year, province, provider,
     )
 
-    # Step 3: Credits reduce federal tax only, not provincial
-    federal_after_credits = max(0, federal_after_abatement - nr_credits['total'])
+    # Step 3: The abatement is a share of BASIC federal tax: gross less the
+    # credits already applied. Issue #350.
+    abatement = quebec_abatement_on_credits(
+        gross_fed, nr_credits['total'], year=year, province=province,
+        provider=provider,
+    )
+
+    # Credits reduce federal tax only, not provincial.
+    #
+    # Issue #350 changed the ORDER. The abatement is a share of BASIC federal
+    # tax, so the credits come off first and the percentage applies to what
+    # remains. ``federal_after_abatement`` therefore no longer names a
+    # distinct step -- applying the abatement last makes it the final federal
+    # figure. The key is kept so nothing downstream that reads the breakdown
+    # breaks, and ``federal_basic_tax`` (the abatement's own base) is reported
+    # alongside it so the arithmetic is inspectable rather than implied.
+    federal_basic_tax = max(0.0, gross_fed - nr_credits['total'])
+    federal_after_credits = max(0.0, federal_basic_tax - abatement)
+    federal_after_abatement = federal_after_credits
 
     # Step 4: Quebec refundable credits and contributions
     from countries.canada.provinces.quebec.quebec_credits import (
@@ -832,6 +898,7 @@ def compute_total_tax(taxable_income: float,
         'quebec_refundable_credits': quebec_refundable_credits,
         'breakdown': {
             'federal_before_abatement': gross_fed,
+            'federal_basic_tax': federal_basic_tax,
             'quebec_abatement': abatement,
             'provincial_tax': prov_tax,
             'federal_after_abatement': federal_after_abatement,

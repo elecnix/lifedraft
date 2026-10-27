@@ -43,7 +43,7 @@ from trajectory_invariants import run_invariant
 from countries.canada.amt import AMTParameters, total_tax_with_amt
 from countries.canada.tax_calc import (
     compute_non_refundable_credits, federal_tax_before_abatement,
-    quebec_abatement_amount,
+    quebec_abatement_on_credits,
 )
 from tax_data import default_tax_provider
 
@@ -90,10 +90,16 @@ def _expected_federal_surcharge(taxable_income, realized_gain, inclusion,
     inclusion rate -- the oracle the wired fold must reproduce."""
     provider = default_tax_provider()
     gross_fed = federal_tax_before_abatement(taxable_income, year, province, provider)
-    abatement = quebec_abatement_amount(taxable_income, year, province, provider)
     nr = compute_non_refundable_credits(0, taxable_income, year, province, provider)['total']
+    # Issue #350: the ablation base is BASIC federal tax, so the credits
+    # come off FIRST. This oracle used to re-spell the ordering inline
+    # (`gross - abatement - credits`), which is the very bug -- an oracle
+    # that re-implements the engine drifts with it. It now calls the same
+    # helper production does, so it can only disagree if the helper is wrong.
+    abatement = quebec_abatement_on_credits(
+        gross_fed, nr, year=year, province=province, provider=provider)
     return total_tax_with_amt(
-        regular_tax=max(0.0, gross_fed - abatement - nr),
+        regular_tax=max(0.0, gross_fed - nr - abatement),
         taxable_income=taxable_income,
         taxable_capital_gains=inclusion * realized_gain,
         capital_gains_inclusion=inclusion,
