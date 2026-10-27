@@ -526,10 +526,39 @@ def _apply_first_home_to_account(acc: dict, buys_this_year: bool,
     return new
 
 
+def _close_drained_fhsa_slots(store: dict, *, drained_slots: set,
+                              lifetime_limit: float) -> dict:
+    """Close the FHSAs a first-home qualifying withdrawal drained (issue #326).
+
+    A qualifying withdrawal closes the holder's FHSA: no balance, no room, and
+    the lifetime allowance exhausted (ITA s.146.6; the child fold writes the same
+    shape as ``fhsa_lifetime_remaining = 0``). The store is rebuilt from the
+    prior one BEFORE this runs, so the closure has to be applied afterwards --
+    otherwise the rebuild would re-open the pot by compounding it, or even spill
+    household overflow back into it.
+
+    ``drained_slots`` indexes ``store`` in canonical order (slot 0 first),
+    mirroring ``adult_ids``. A slot the store does not reach (a household that
+    has since dropped that owner) is ignored: there is no pot to close. Absent a
+    purchase this returns ``store`` unchanged -- a strict no-op (DP#32).
+    """
+    if not drained_slots:
+        return store
+    out = {}
+    for slot, (aid, entry) in enumerate(store.items()):
+        if slot in drained_slots:
+            out[aid] = {'balance': 0.0, 'room': 0.0,
+                        'lifetime_used': lifetime_limit,
+                        'lifetime_limit': lifetime_limit}
+        else:
+            out[aid] = entry
+    return out
+
+
 def apply_adult_first_home_purchases(prior_adult_hbp: dict,
                                      first_home_purchases: list,
                                      adult_ids: list, *,
-                                     fhsa_balance: float,
+                                     fhsa_by_slot: dict,
                                      rrsp_by_slot: dict,
                                      non_reg_balance: float,
                                      non_reg_acb: float,
@@ -539,19 +568,32 @@ def apply_adult_first_home_purchases(prior_adult_hbp: dict,
     ``apply_child_first_home_purchases``, sharing the same per-account step
     (``_apply_first_home_to_account``, DP#9).
 
-    The engine models ONE household FHSA (slot 0), so an adult buyer's FHSA
-    qualifying withdrawal drains that household pot; the HBP comes from the
-    buyer's OWN RRSP slot (0=primary, 1=spouse) so each spouse can withdraw up to
-    their own $60k. The down payment lands in the household non-registered cash
-    (all three pots are counted in ``total_assets``, so net worth is conserved).
+    Issue #326: each buyer drains their OWN FHSA. ITA s.146.6(1) makes the
+    qualifying withdrawal the HOLDER's -- an amount "the holder receives from
+    their own FHSA" -- and CRA states that a couple buying a qualifying home
+    together may each withdraw from their own, so a married couple has two
+    FHSA pots (as the CFFP's first-home scenario models). The engine keeps them
+    as ``adult_fhsa`` slots: slot 0 is the household/primary FHSA the fold grows
+    as scalars, slots 1+ are further owners' own (issue #893). Before this, every
+    buyer drained slot 0, so when the SPOUSE bought, the PRIMARY's FHSA was
+    drained and closed on their behalf while the spouse's own pot stayed
+    invested and open, and when both bought, only one pot funded the down
+    payment. The HBP comes from the buyer's OWN RRSP slot (0=primary,
+    1=spouse) so each spouse can withdraw up to their own $60k; the FHSA side
+    now follows the same per-owner pattern. The down payment lands in the
+    household non-registered cash (all the pots are counted in
+    ``total_assets``, so net worth is conserved).
 
     Pure (DP#26): mutates nothing. ``adult_ids`` is the adult member ids in
-    canonical order (primary first); its index is the RRSP slot. ``rrsp_by_slot``
-    is ``{0: primary_own, 1: spouse_own}``. ``prior_adult_hbp`` is
+    canonical order (primary first); its index is the slot. ``fhsa_by_slot`` is
+    ``{slot: that owner's OPEN FHSA balance}`` and ``rrsp_by_slot`` is
+    ``{0: primary_own, 1: spouse_own}``. ``prior_adult_hbp`` is
     ``{buyer_id: {'slot': int, ...hbp record...}}`` carried from the prior year.
-    Returns ``(fhsa_balance, rrsp_by_slot, non_reg_balance, non_reg_acb,
-    new_adult_hbp, fhsa_closed)`` where ``fhsa_closed`` is True when a purchase
-    drained the household FHSA this year (the caller closes its room).
+    Returns ``(fhsa_by_slot, drained_slots, rrsp_by_slot, non_reg_balance,
+    non_reg_acb, new_adult_hbp, any_drained)``: ``drained_slots`` is the set of
+    slots whose FHSA a qualifying withdrawal closed this year (the caller closes
+    each one's room and lifetime), and ``any_drained`` is whether it is
+    non-empty.
 
     Absent any declared purchase AND any carried HBP this returns the inputs
     UNCHANGED (the golden household) -- a genuine no-op, so the invariant cannot
@@ -564,15 +606,17 @@ def apply_adult_first_home_purchases(prior_adult_hbp: dict,
     # step; a buyer that is a CHILD (not in slot_of) is handled by the child fold.
     active_ids = buyers_this_year | set(prior_adult_hbp)
     rrsp_by_slot = dict(rrsp_by_slot)
+    fhsa_by_slot = dict(fhsa_by_slot)
     new_adult_hbp: dict = {}
-    fhsa_closed = False
+    drained_slots: set = set()
     for aid in active_ids:
         slot = slot_of[aid]
         buys = aid in buyers_this_year
         acc = {
-            # The FHSA qualifying withdrawal always drains the single household
-            # FHSA (slot 0); a repay-only step never touches it.
-            'fhsa_balance': fhsa_balance if buys else 0.0,
+            # Issue #326: the qualifying withdrawal drains THIS buyer's own
+            # FHSA (their slot), never another owner's; a repay-only step never
+            # touches any.
+            'fhsa_balance': fhsa_by_slot.get(slot, 0.0) if buys else 0.0,
             'rrsp_balance': rrsp_by_slot[slot],
             'non_reg_balance': non_reg_balance,
             'non_reg_acb': non_reg_acb,
@@ -582,15 +626,15 @@ def apply_adult_first_home_purchases(prior_adult_hbp: dict,
                           if k != 'slot'}
         new = _apply_first_home_to_account(acc, buys, calendar_year)
         if buys:
-            fhsa_balance = new['fhsa_balance']
-            fhsa_closed = True
+            fhsa_by_slot[slot] = new['fhsa_balance']
+            drained_slots.add(slot)
         rrsp_by_slot[slot] = new['rrsp_balance']
         non_reg_balance = new['non_reg_balance']
         non_reg_acb = new['non_reg_acb']
         if new.get('hbp') is not None:
             new_adult_hbp[aid] = {'slot': slot, **new['hbp']}
-    return (fhsa_balance, rrsp_by_slot, non_reg_balance, non_reg_acb,
-            new_adult_hbp, fhsa_closed)
+    return (fhsa_by_slot, drained_slots, rrsp_by_slot, non_reg_balance,
+            non_reg_acb, new_adult_hbp, bool(drained_slots))
 
 
 def step_extra_adult_accounts(prior_adult_rrsp: dict, prior_adult_tfsa: dict,
@@ -2391,18 +2435,33 @@ def simulate_year_pure(
     # HBP (the golden household) this leaves every ws pot UNTOUCHED (DP#32).
     _adult_ids = [a.get('id', a.get('role')) for a in config.adults()]
     _prior_adult_hbp = _prior_c.get('adult_hbp', {})
+    _drained_fhsa_slots: set = set()
     if config.first_home_purchases or _prior_adult_hbp:
-        (ws.new_fhsa_bal, _rrsp_by_slot, ws.new_nonreg_bal, ws.new_nonreg_acb,
+        # Issue #326: each adult's own OPEN FHSA, by slot. Slot 0 is this year's
+        # scalar the fold grew; slot 1+ live in the carried per-adult store
+        # (issue #893), because the fold only ever grows slot 0 as scalars -- so
+        # the spouse's own pot must be read from there to be withdrawn from.
+        _fhsa_by_slot = {0: ws.new_fhsa_bal}
+        _prior_adult_fhsa = _prior_c.get('adult_fhsa', {})
+        for _slot, _aid in enumerate(_adult_ids):
+            if _slot == 0:
+                continue
+            _prior_entry = _prior_adult_fhsa.get(_aid)
+            if isinstance(_prior_entry, dict):
+                _fhsa_by_slot[_slot] = _prior_entry.get('balance', 0.0)
+        (_fhsa_by_slot, _drained_fhsa_slots, _rrsp_by_slot,
+         ws.new_nonreg_bal, ws.new_nonreg_acb,
          _new_adult_hbp, _fhsa_closed) = apply_adult_first_home_purchases(
             _prior_adult_hbp, config.first_home_purchases, _adult_ids,
-            fhsa_balance=ws.new_fhsa_bal,
+            fhsa_by_slot=_fhsa_by_slot,
             rrsp_by_slot={0: ws.new_rrsp_bal, 1: ws.new_spouse_rrsp_bal},
             non_reg_balance=ws.new_nonreg_bal, non_reg_acb=ws.new_nonreg_acb,
             calendar_year=cal_year)
+        ws.new_fhsa_bal = _fhsa_by_slot.get(0, ws.new_fhsa_bal)
         ws.new_rrsp_bal = _rrsp_by_slot[0]
         ws.new_spouse_rrsp_bal = _rrsp_by_slot[1]
         new_canada['adult_hbp'] = _new_adult_hbp
-        if _fhsa_closed:
+        if 0 in _drained_fhsa_slots:
             # A qualifying withdrawal CLOSES the FHSA: no further room/contribution
             # (mirrors the child fold's fhsa_lifetime_remaining=0).
             ws.new_fhsa_room = 0.0
@@ -2476,7 +2535,8 @@ def simulate_year_pure(
         # A second adult's FHSA (slot 1) compounds at the same investment_return
         # the compute grew slot 0 by; a second LIRA/LIF is carried unchanged
         # (2-owner conversion mechanics DEFERRED, Step 4 follow-up).
-        'adult_fhsa': rebuild_adult_fhsa(
+        'adult_fhsa': _close_drained_fhsa_slots(
+            rebuild_adult_fhsa(
             _prior_c.get('adult_fhsa', {}),
             balance=ws.new_fhsa_bal,
             room=ws.new_fhsa_room,
@@ -2488,6 +2548,14 @@ def simulate_year_pure(
             # room re-accruing the annual limit). 0 for a one-owner household.
             overflow=ws.fhsa_overflow,
             annual_limit=fhsa_annual_limit,
+            ),
+            # Issue #326: a further owner whose OWN FHSA a qualifying withdrawal
+            # closed this year. The rebuild above grows every open pot (and may
+            # spill household overflow into one), so the closure is applied
+            # after it: balance 0, room 0, lifetime exhausted -- exactly the
+            # state the child fold writes for a closed child FHSA.
+            drained_slots=_drained_fhsa_slots,
+            lifetime_limit=ws.opening_fhsa_lifetime_limit,
         ),
         # DP#16/issue #230: CRI/LIRA and LIF state after growth and conversion
         'adult_lira': rebuild_adult_lira(
