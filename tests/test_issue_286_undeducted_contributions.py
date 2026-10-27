@@ -34,6 +34,9 @@ import countries.canada  # noqa: F401  (register the jurisdiction adapter)
 import contract_schema
 import input_contract
 from contract_errors import ContractAdaptationError, ContractValidationError
+from countries.canada.employee_contributions import (
+    employee_contribution_breakdown,
+)
 from model_fidelity import FidelityContext, active_approximations
 from simulation_config import SimulationConfig
 from simulation_state import SimState
@@ -95,11 +98,19 @@ def test_declared_undeducted_reaches_engine(tmp_path):
     assert _member(cfg, "primary")["rrsp_undeducted_contributions"] == 30_000
     r0 = _year0_without_new_contributions(cfg)
     assert r0.rrsp_tax_savings > 0
-    # The seeded $30k is claimed against the primary's own year-0 income
-    # (no rental/loan left in the trimmed example, so taxable == employment
-    # income), bracket-fill.
+    # The seeded $30k is claimed against the primary's own year-0 income,
+    # bracket-fill. No rental/loan is left in the trimmed example, so the
+    # taxable base is the employment income less the ITA s.60(e) enhanced-QPP
+    # deduction (issue #289): Quebec 2026 pays the additional plan's 1% on
+    # earnings between the $3,500 basic exemption and the $74,600 MPE, plus
+    # the second additional plan's 4% on the band up to the $85,000 AYMPE
+    # (above it no second additional is due), i.e. 4% x $10,400 = $416.
+    s60e = 0.01 * (74_600 - 3_500) + 0.04 * (85_000 - 74_600)
+    ec = employee_contribution_breakdown(r0.primary_income, 'quebec', 2026,
+                                         default_tax_provider())
+    assert abs(ec.s60e_deduction - s60e) < 1e-9
     assert abs(r0.rrsp_tax_savings
-               - deduction_value(r0.primary_income, 30_000, B)) < 1e-6
+               - deduction_value(r0.primary_income - s60e, 30_000, B)) < 1e-6
     assert r0.rrsp_deduction_carried_forward == 0.0
 
 

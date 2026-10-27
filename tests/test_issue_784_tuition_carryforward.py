@@ -93,8 +93,16 @@ class TestCarryforwardEndToEnd(unittest.TestCase):
         r = self._run({2026: 50_000})
         # Year 0: the credit exceeds tax -> after_tax = gross (tax eliminated),
         # and the remainder is carried (positive carry-forward on the result).
-        self.assertAlmostEqual(r[0].after_tax_income, r[0].employment_income,
-                               places=2,
+        # Issue #289: the employee's CPP/QPP, EI and QPIP premiums are still
+        # withheld (the non-refundable credits cannot refund them), so the
+        # after-tax figure is gross minus the premiums read off the result --
+        # $995.50 here (QPP + reduced EI + QPIP on $15,000); the whole bracket
+        # tax, including what the s.118.7/s.60(e) relief left, is eliminated.
+        premiums = (r[0].payroll_pension_contributions + r[0].payroll_ei_premiums
+                    + r[0].payroll_qpip_premiums)
+        self.assertGreater(premiums, 0.0)
+        self.assertAlmostEqual(r[0].after_tax_income + premiums,
+                               r[0].employment_income, places=2,
                                msg="year-1 tax is eliminated by the credit")
         self.assertGreater(r[0].primary_tuition_carryforward, 5_000,
                           "the year-1 unused credit must carry forward")

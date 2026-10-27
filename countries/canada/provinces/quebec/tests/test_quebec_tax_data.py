@@ -93,8 +93,11 @@ class TestQuebecQPP(unittest.TestCase):
     """QPP rates and max benefit (higher than CPP) — DP#17."""
 
     def test_qpp_rate_higher_than_cpp(self):
-        # QPP rate 6.40% vs CPP rate 5.95%
-        self.assertEqual(QuebecTaxData.year_2026().qpp_rate, 0.0640)
+        # QPP employee rate 2026 = 6.30% (basic 5.3% + first additional 1%;
+        # pinned at 6.40% until #289) vs CPP rate 5.95%. Retraite Quebec:
+        # https://www.retraitequebec.gouv.qc.ca/en/professionals-employers/employer/your-role-quebec-pension-plan/contributions-quebec-pension-plan-qpp
+        self.assertEqual(QuebecTaxData.year_2026().qpp_rate, 0.0630)
+        self.assertEqual(QuebecTaxData.year_2025().qpp_rate, 0.0640)
         self.assertEqual(QuebecTaxData.year_2026().cpp_rate, 0.0595)
         self.assertGreater(QuebecTaxData.year_2026().qpp_rate,
                            QuebecTaxData.year_2026().cpp_rate)

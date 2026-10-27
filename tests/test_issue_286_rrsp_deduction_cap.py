@@ -30,6 +30,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import countries.canada  # noqa: F401  (register the jurisdiction adapter)
+from countries.canada.employee_contributions import (
+    employee_contribution_breakdown,
+)
 from rrsp_ledger import (
     RRSPListLedger,
     current_bracket_floor,
@@ -47,6 +50,26 @@ from tax_data import default_tax_provider
 B = default_tax_provider().get_combined_brackets(2026, province="quebec")
 FLOOR = lowest_taxed_floor(B)
 TOL = 1e-6
+
+# Issue #289: the ITA s.60(e) deduction for a Quebec employee, published here
+# as CONSTANTS rather than recomputed as `rate * (gross - basic_exemption)`.
+#
+# Recomputing it would make every assertion below an identity: the deduction
+# and the expectation would both move together if the first-additional rate or
+# the basic exemption were wrong, and the test would stay green.
+#
+# Quebec 2026 (Retraite Quebec): basic plan 5.3 % plus first additional plan
+# 1 % on earnings above the $3,500 basic exemption -> employee rate 6.30 % on
+# $3,500-$74,600, and the second additional plan at 4 % above it. Only the
+# first additional plan (and the second, once earnings pass the YMPE) is
+# DEDUCTIBLE; the base plan is a s.118.7 credit instead.
+#
+#   gross 20,000: (20,000 - 3,500) = 16,500 x 1% = 165.00
+#   gross 50,000: (50,000 - 3,500) = 46,500 x 1% = 465.00
+# Both sit below the 2026 MGA of $74,600, so the second additional plan
+# contributes nothing in either case.
+S60E_QC_2026_AT_20K = 165.00
+S60E_QC_2026_AT_50K = 465.00
 
 
 def _config(*, primary_income=150_000, primary_room=200_000,
@@ -383,10 +406,11 @@ def test_horizon_end_carry_is_named():
 
 def test_refund_capped_at_taxable_income_with_interest_deduction():
     """Primary earns $20k and deducts $5k of investment-loan interest: the
-    TAXABLE income is $15k. A $30k contribution can only remove tax on that
-    $15k -- valued against the $20k gross it would exceed the pre-credit tax
-    actually payable. Driven through FamilySimulation.run (the real
-    prologue computes the taxable base)."""
+    TAXABLE income is $15k less the ITA s.60(e) enhanced-QPP deduction
+    (issue #289), so $14,835. A $30k contribution can only remove tax on
+    that -- valued against the $20k gross it would exceed the pre-credit tax
+    actually payable. Driven through FamilySimulation.run (the real prologue
+    computes the taxable base)."""
     from countries.canada.adapter import CanadaAdapter
     from simulation import FamilySimulation
     from strategy import AllocationResult
@@ -408,7 +432,20 @@ def test_refund_capped_at_taxable_income_with_interest_deduction():
     with mock.patch('strategy.StrategyEngine.allocate',
                     return_value=AllocationResult(primary_rrsp=30_000.0)):
         r0 = FamilySimulation(cfg, adapter=CanadaAdapter(cfg)).run()[0]
-    taxable = 20_000 - 0.05 * 100_000
+    # Issue #289: ITA s.60(e) takes the ENHANCED part of an employee's QPP
+    # contribution -- the additional plan's 1% on earnings above the $3,500
+    # basic exemption amount (Retraite Quebec) -- as a deduction from income,
+    # so it lowers the base the RRSP deduction is claimed against, on top of
+    # the s.20(1)(c) loan interest. $20k sits below the 2026 maximum
+    # pensionable earnings ($74,600), so the second additional plan
+    # contributes nothing.
+    s60e = S60E_QC_2026_AT_20K
+    ec = employee_contribution_breakdown(20_000, 'quebec', 2026,
+                                         default_tax_provider())
+    assert abs(ec.s60e_deduction - s60e) < 1e-9, (
+        f"s.60(e) deduction is {ec.s60e_deduction!r}, expected {s60e!r} -- the "
+        f"first-additional rate or the basic exemption moved")
+    taxable = 20_000 - 0.05 * 100_000 - s60e
     assert abs(r0.rrsp_tax_savings - tax_on_income(taxable, B)) < 1e-3
     assert r0.rrsp_tax_savings < tax_on_income(20_000, B)
     assert abs(r0.rrsp_deduction_carried_forward - (30_000 - taxable)) < 1e-3
@@ -482,11 +519,11 @@ def test_partial_claim_does_not_leave_a_float_stub():
 @pytest.mark.parametrize('role', ['primary', 'spouse'])
 def test_carry_open_at_retirement_is_claimed_against_retirement_income(role):
     """Engine-driven through FamilySimulation.run: the contributor earns
-    $50,000, contributes $100,000 in year 0 (the useful deduction is $50,000,
-    so $50,000 is carried), then retires in year 1 on a $60,000 pension. The
-    prologue zeroes a retiree's employment income; the carried $50,000 must
-    still be claimed -- against the pension -- in year 1, not sit undeducted
-    for the rest of the horizon."""
+    $50,000, contributes $100,000 in year 0 (the useful deduction is the
+    taxable base, so the remainder is carried), then retires in year 1 on a
+    $60,000 pension. The prologue zeroes a retiree's employment income; the
+    carried amount must still be claimed -- against the pension -- in year 1,
+    not sit undeducted for the rest of the horizon."""
     from countries.canada.adapter import CanadaAdapter
     from simulation import FamilySimulation
     from strategy import AllocationResult
@@ -520,7 +557,19 @@ def test_carry_open_at_retirement_is_claimed_against_retirement_income(role):
                                    deduct_later=False).run()
 
     r0, r1 = results[0], results[1]
-    assert abs(r0.rrsp_deduction_carried_forward - 50_000) < 1e-3
+    # Issue #289: ITA s.60(e) -- the enhanced part of the employee's QPP
+    # contribution (the additional plan's 1% on earnings above the $3,500
+    # basic exemption amount, Retraite Quebec) is a deduction from income.
+    # The $100k contribution is therefore capped at the taxable base, which
+    # is $50,000 of employment income less that $465 -- not the full $50,000.
+    s60e = S60E_QC_2026_AT_50K
+    ec = employee_contribution_breakdown(50_000, 'quebec', 2026,
+                                         default_tax_provider())
+    assert abs(ec.s60e_deduction - s60e) < 1e-9, (
+        f"s.60(e) deduction is {ec.s60e_deduction!r}, expected {s60e!r} -- the "
+        f"first-additional rate or the basic exemption moved")
+    assert abs(r0.rrsp_deduction_carried_forward
+               - (100_000 - 50_000 + s60e)) < 1e-3
     assert r0.rrsp_tax_savings > 0
     # Year 1: retired (no employment income), the carry is claimed against
     # the pension -- the whole $50,000 fits under $60,000 of pension income.

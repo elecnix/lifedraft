@@ -32,9 +32,28 @@ from unittest.mock import patch
 
 from countries.canada.tax_calc import tuition_tax_credit, _load_fed_data
 from countries.canada.adapter import CanadaAdapter
+from countries.canada.employee_contributions import (
+    employee_contribution_breakdown,
+)
 from simulation import FamilySimulation
 from simulation_config import SimulationConfig
 from contract_people import _tuition_by_year
+from tax_data import TaxDataProvider
+
+SPOUSE_GROSS = 80_000     # the fixture spouse's employment income (DP#4/DP#15)
+FIXTURE_YEAR = 2026
+
+
+def _expected_spouse_premiums(gross: float, year: int) -> float:
+    """Issue #289: the employee payroll premiums withheld at ``gross``,
+    priced by the STANDALONE calculator -- not read back off a run being
+    asserted against. A term derived from the value under test cancels out of
+    the difference it is subtracted from, so the assertion it feeds could not
+    fail on the behaviour it names (DP#3 purity cuts both ways: the
+    expectation must be computed independently too)."""
+    c = employee_contribution_breakdown(
+        gross, 'qc', year, TaxDataProvider())
+    return c.total_premiums
 
 
 # ── The credit itself ───────────────────────────────────────────────────────
@@ -101,7 +120,7 @@ def _spouse_tuition_config(tuition_by_year=None, start_year=2026):
     members = [
         {'role': 'primary', 'birth_year': 1980, 'gross_income': 120_000,
          'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0},
-        {'role': 'spouse', 'birth_year': 1982, 'gross_income': 80_000,
+        {'role': 'spouse', 'birth_year': 1982, 'gross_income': SPOUSE_GROSS,
          'retirement_age': 95, 'rrsp_balance': 0, 'tfsa_balance': 0},
     ]
     if tuition_by_year is not None:
@@ -182,15 +201,23 @@ class TestTuitionCreditWiring(unittest.TestCase):
         # to EXACTLY 0 (non-refundable), not below. Proved by isolating the
         # spouse's contribution: a run with NO spouse income has after_tax =
         # primary net; a run with a huge spouse tuition credit has spouse tax
-        # floored to 0, so its after_tax = primary net + spouse GROSS. The
-        # difference is exactly the spouse's gross income (none of it lost to
-        # tax, none invented as a negative-tax refund).
+        # floored to 0, so its after_tax = primary net + spouse GROSS less the
+        # spouse's employee payroll premiums. The difference is exactly the
+        # spouse's gross income minus those premiums (none of it lost to tax,
+        # none invented as a negative-tax refund).
         start_year = 2026
         no_spouse = self._run_with_spouse_income(0)
         huge = self._run({start_year: 5_000_000})
+        # Issue #289: the spouse's employee premiums are still withheld -- a
+        # non-refundable credit cannot refund them. They are priced by the
+        # STANDALONE calculator (``employee_contribution_breakdown``), NOT read
+        # back off the two runs being compared: a figure derived from the value
+        # under test cancels out of the difference and cannot fail.
+        spouse_premiums = _expected_spouse_premiums(SPOUSE_GROSS, start_year)
+        self.assertGreater(spouse_premiums, 0.0)
         self.assertAlmostEqual(
             huge[0].after_tax_income - no_spouse[0].after_tax_income,
-            huge[0].spouse_income, places=2,
+            huge[0].spouse_income - spouse_premiums, places=2,
             msg="a non-refundable credit must floor tax at 0, not pay a refund")
 
     def _run_monthly(self, tuition_by_year=None):

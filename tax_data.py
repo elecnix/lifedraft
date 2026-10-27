@@ -146,6 +146,27 @@ class TaxYearData:
     qpp_rate: float = 0.0                # QPP contribution rate (6.40% for 2026, higher than CPP 5.95%)
     qpp_max_benefit_65: float = 0.0      # Max QPP retirement benefit at age 65
     qpp_survivor_flat_rate: float = 0.0   # QPP survivor flat-rate component (annual)
+    # ── Employee payroll premiums (issue #289, DP#2/#12/#20) ──
+    # None (NOT 0.0) when a record does not carry the fact: the payroll module
+    # (countries/canada/employee_contributions.py) raises on None rather than
+    # charging a silent $0 premium (DP#32). Carried forward by
+    # _project_from_base (rates unchanged, the EI ceiling indexed).
+    # EI employee premium rate (general, outside a provincial parental plan)
+    # and the EI maximum insurable earnings -- federal record.
+    ei_employee_rate: Optional[float] = None
+    ei_max_insurable_earnings: Optional[float] = None
+    # EI employee rate where a provincial plan replaces EI maternity/parental
+    # benefits (EI Act s.69(2) premium reduction; Quebec/QPIP) -- province record.
+    ei_employee_rate_provincial_plan: Optional[float] = None
+    # The first additional (enhanced) CPP / QPP employee rate: the slice of
+    # cpp_rate / qpp_rate that is deductible under ITA s.60(e) (line 22215)
+    # rather than credited under s.118.7 (line 30800).
+    cpp_first_additional_rate: Optional[float] = None   # federal record
+    qpp_first_additional_rate: Optional[float] = None   # Quebec record
+    # Does this province grant its own non-refundable credit for base CPP/QPP
+    # contributions and EI (+ PPIP) premiums at its lowest bracket rate?
+    # None = not established for this record -> the payroll module raises.
+    provincial_payroll_credit: Optional[bool] = None
     oas_annual_max: float = 0.0       # OAS maximum annual amount (DP#20)
     oas_annual_max_75plus: float = 0.0  # OAS annual amount for age 75+ (10% enhancement, DP#20)
     oas_clawback_threshold: float = 0.0  # OAS recovery threshold (DP#20)
@@ -798,12 +819,31 @@ class TaxDataProvider:
             tfsa_limit=round(base.tfsa_limit * factor, 2) if base.tfsa_limit else 0,
             cpp_max_pensionable=round(base.cpp_max_pensionable * factor, 2) if base.cpp_max_pensionable else 0,
             cpp_rate=base.cpp_rate,
-            cpp_exemption=round(base.cpp_exemption * factor, 2) if base.cpp_exemption else 0,
+            # Issue #289: the CPP/QPP basic exemption is NOT indexed. CPP Act
+            # s.19 fixes the basic exemption at $3,500 for 1998 and later years
+            # and the Year's Basic Exemption (s.20) has been prescribed at that
+            # amount every year since (CRA table, 2023-2026: $3,500):
+            # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/canada-pension-plan-cpp/cpp-contribution-rates-maximums-exemptions.html
+            # Indexing it by CPI shrank every projected year's pensionable
+            # earnings and so every projected contribution.
+            cpp_exemption=base.cpp_exemption,
             cpp2_max_pensionable=round(base.cpp2_max_pensionable * factor, 2) if base.cpp2_max_pensionable else 0,
             cpp2_rate=base.cpp2_rate,
             qpp_rate=base.qpp_rate,
             qpp_max_benefit_65=round(base.qpp_max_benefit_65 * factor, 2) if base.qpp_max_benefit_65 else 0,
             qpp_survivor_flat_rate=round(base.qpp_survivor_flat_rate * factor, 2) if base.qpp_survivor_flat_rate else 0,
+            # ── Issue #289: employee payroll premiums. Rates carry unchanged;
+            # the EI ceiling is indexed like every other earnings ceiling.
+            # None stays None (never coerced to 0.0) so a record that lacks
+            # the fact still fails loudly in the payroll module (DP#32).
+            ei_employee_rate=base.ei_employee_rate,
+            ei_max_insurable_earnings=(
+                round(base.ei_max_insurable_earnings * factor, 2)
+                if base.ei_max_insurable_earnings is not None else None),
+            ei_employee_rate_provincial_plan=base.ei_employee_rate_provincial_plan,
+            cpp_first_additional_rate=base.cpp_first_additional_rate,
+            qpp_first_additional_rate=base.qpp_first_additional_rate,
+            provincial_payroll_credit=base.provincial_payroll_credit,
             fhsa_limit=round(base.fhsa_limit * factor, 2) if base.fhsa_limit else 0,
             basic_personal_amount=round(base.basic_personal_amount * factor, 2) if base.basic_personal_amount else 0,
             bpa_phaseout_threshold=round(base.bpa_phaseout_threshold * factor, 2) if base.bpa_phaseout_threshold else 0,
@@ -1058,6 +1098,14 @@ class TaxDataProvider:
             qpp_rate=data.get("qpp_rate", 0),
             qpp_max_benefit_65=data.get("qpp_max_benefit_65", 0),
             qpp_survivor_flat_rate=data.get("qpp_survivor_flat_rate", 0),
+            # Issue #289: an absent key parses to None (never 0), so a cache
+            # file that predates the payroll fields fails loudly downstream.
+            ei_employee_rate=data.get("ei_employee_rate"),
+            ei_max_insurable_earnings=data.get("ei_max_insurable_earnings"),
+            ei_employee_rate_provincial_plan=data.get("ei_employee_rate_provincial_plan"),
+            cpp_first_additional_rate=data.get("cpp_first_additional_rate"),
+            qpp_first_additional_rate=data.get("qpp_first_additional_rate"),
+            provincial_payroll_credit=data.get("provincial_payroll_credit"),
             source=data.get("source", "cache"),
         )
 
