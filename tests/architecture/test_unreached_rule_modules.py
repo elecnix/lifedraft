@@ -68,6 +68,7 @@ allowlist can only shrink without someone noticing.
 """
 from __future__ import annotations
 
+import ast
 import os
 import sys
 
@@ -145,6 +146,32 @@ KNOWN_UNREACHED: dict[str, str] = {
     # step) builds an HBPAccount for a child who becomes a first-time home buyer,
     # withdrawing up to HBP_MAX_WITHDRAWAL from the child's RRSP non-taxably and
     # tracking its 15-year repayment schedule.
+    "countries.canada.first_home_credits": (
+        "#368 -- NOT dead code and NOT a clone: the three first-home credits "
+        "are PRICED here against the CRA line 31270 / ITA s.118.05 amounts, "
+        "the TP-1 line 396 Quebec maximum, and the Quebec bulletin 2026-2 "
+        "refundable transfer-duty bands, all year-versioned. One row, not two: "
+        "this key was previously spelled TWICE, and a duplicate key in a dict "
+        "literal silently discards every entry but the last, so the surviving "
+        "reason was whichever one happened to come second. "
+        "WHAT IS STILL MISSING IS INPUT, NOT A SEAM. An earlier version of "
+        "this row blamed #325 (the fold applied no non-refundable credits at "
+        "all); #325 has landed, so that half is gone and the wiring is now "
+        "blocked on data the contract does not carry: "
+        "(1) the first-time test needs each adult's prior-home years -- "
+        "`first_home_purchases[]` is {buyer, year} with "
+        "additionalProperties:false, and treating a declared purchase as "
+        "proof of first-time status is exactly the absence-becomes-the- "
+        "favourable-answer trap; "
+        "(2) the refundable credit needs the municipal transfer duties paid "
+        "and the basis of imposition, and the engine has no duty calculator "
+        "and no such field; "
+        "(3) line 396 is non-refundable and bounded by QUEBEC tax otherwise "
+        "payable, a figure the fold does not compute -- ``_income_tax_by_adult`` "
+        "taxes from ONE combined federal+provincial bracket list. "
+        "Wiring against invented inputs would book a credit on a basis nobody "
+        "declared. REMOVE THIS ROW when the contract carries those inputs."
+    ),
     "countries.canada.ird_penalty": (
         "#724 — IRD / breakage penalty on discharging a fixed-rate mortgage. "
         "Priced nowhere, so every refinance in the optimizer is penalty-free."
@@ -312,6 +339,51 @@ def test_every_allowlist_entry_cites_an_issue():
     assert not missing, (
         "KNOWN_UNREACHED entries with no issue reference:\n"
         + "\n".join(f"  {mod}" for mod in missing)
+    )
+
+
+def test_the_allowlist_has_no_duplicate_keys():
+    """A repeated key SILENTLY DISCARDS an allowlist row.
+
+    `KNOWN_UNREACHED` is one dict literal, so Python keeps only the LAST value
+    for a repeated key: the earlier row disappears with no error, and
+    `test_allowlist_has_no_stale_entries` cannot report a row that no longer
+    exists. #368's module was spelled twice -- once for the architectural
+    reason, once for the missing-input reason -- and the surviving text became
+    false the moment #325 landed, with nothing to say so.
+
+    The keys are read back from the SOURCE, not from the imported dict,
+    because the imported dict is exactly what lost the row.
+    """
+    with open(os.path.abspath(__file__), encoding="utf-8") as handle:
+        source = handle.read()
+    literal = None
+    for node in ast.walk(ast.parse(source)):
+        if (isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "KNOWN_UNREACHED"):
+            literal = node.value
+    assert isinstance(literal, ast.Dict), (
+        "KNOWN_UNREACHED is no longer a dict literal, so this guard cannot "
+        "check it -- teach the guard the new shape rather than deleting it."
+    )
+    first_line: dict[str, int] = {}
+    duplicates = []
+    for key_node in literal.keys:
+        key = ast.literal_eval(key_node)
+        if key in first_line:
+            duplicates.append(
+                f"  {key}: first at line {first_line[key]}, again at "
+                f"line {key_node.lineno}"
+            )
+        else:
+            first_line[key] = key_node.lineno
+    assert not duplicates, (
+        "KNOWN_UNREACHED has duplicate keys, so every earlier row for a "
+        "repeated key was silently discarded (Python keeps only the last "
+        "value in a dict literal):\n"
+        + "\n".join(duplicates)
+        + "\nMerge them into ONE row that states the current reason."
     )
 
 

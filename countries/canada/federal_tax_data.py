@@ -30,6 +30,11 @@ def federal_all_years():
     return [
         TaxYearData(
             year=2026, country="canada", province="federal",
+            # Issue #368: CRA line 31270 / ITA s.118.05(3) -- the home
+            # buyers' AMOUNT. The RATE is not stored: it is already
+            # year-versioned on federal_brackets[0].rate and is read at
+            # pricing time, so it cannot go stale against this figure.
+            home_buyers_amount=10000,
             federal_brackets=[
                 TaxBracket(0, 58523, 0.14, "14% (reduced Jul 2025)"),
                 TaxBracket(58523, 117045, 0.205, "20.5%"),
@@ -67,6 +72,11 @@ def federal_all_years():
         ),
         TaxYearData(
             year=2025, country="canada", province="federal",
+            # Issue #368: CRA line 31270 / ITA s.118.05(3) -- the home
+            # buyers' AMOUNT. The RATE is not stored: it is already
+            # year-versioned on federal_brackets[0].rate and is read at
+            # pricing time, so it cannot go stale against this figure.
+            home_buyers_amount=10000,
             federal_brackets=[
                 TaxBracket(0, 57375, 0.145, "14.5% (blended)"),
                 TaxBracket(57375, 114750, 0.205, "20.5%"),
@@ -103,6 +113,11 @@ def federal_all_years():
         ),
         TaxYearData(
             year=2024, country="canada", province="federal",
+            # Issue #368: CRA line 31270 / ITA s.118.05(3) -- the home
+            # buyers' AMOUNT. The RATE is not stored: it is already
+            # year-versioned on federal_brackets[0].rate and is read at
+            # pricing time, so it cannot go stale against this figure.
+            home_buyers_amount=10000,
             # CRA 2024 federal brackets (indexation factor 1.047 / +4.7%):
             # https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/payroll/payroll-deductions-contributions/income-tax/reducing-remuneration-subject-income-tax.html
             # 29% threshold was previously recorded as 154,906 and the 33% as
@@ -145,6 +160,11 @@ def federal_all_years():
         ),
         TaxYearData(
             year=2023, country="canada", province="federal",
+            # Issue #368: CRA line 31270 / ITA s.118.05(3) -- the home
+            # buyers' AMOUNT. The RATE is not stored: it is already
+            # year-versioned on federal_brackets[0].rate and is read at
+            # pricing time, so it cannot go stale against this figure.
+            home_buyers_amount=10000,
             # CRA 2023 federal brackets (indexation factor 1.063 / +6.3%),
             # same canada.ca source as 2024. The 26%/29%/33% thresholds were
             # previously recorded as 109,936 / 154,906 / 154,906 — stale and
