@@ -162,3 +162,74 @@ def zev_incentive_total(cfg) -> float:
                 is_quebec_resident=True,
             ).amount
     return total
+
+def mg_reno_credit_total(cfg) -> float:
+    """Total Multigenerational Home Renovation Tax Credit (ITA s.122.92) (#369).
+
+    Fires only when a principal residence declares an ``mg_reno`` block;
+    absent the block this is 0.0 and every existing household's number is
+    byte-identical (DP#32, DP#16).
+
+    Each qualifying renovation is priced ONCE, by the year its
+    ``renovation_date`` falls in. The amount is the lowest federal bracket rate
+    for that year times the least of $50,000 and the qualifying expenditures.
+    Eligibility is decided inside the credit module from the household's own
+    people block -- no names, ages or years are hardcoded here.
+
+    The credit is a deemed payment ON ACCOUNT OF TAX, so it is REFUNDABLE: it
+    reaches the household regardless of tax payable, and the Quebec abatement
+    does not reduce it.
+
+    KNOWN SIMPLIFICATION, shared verbatim with lsif_credit_total and
+    zev_incentive_total above: the credit is added to the terminal objective
+    undiscounted, as though received at the horizon rather than in the
+    renovation year. It is therefore not compounded over the intervening years.
+    Correcting it means routing it through the yearly fold as a real inflow,
+    which is the decision dimension's job, not this module's.
+    """
+    from countries.canada.mg_reno_credit import (
+        mg_reno_credit_for_year,
+        mg_reno_from_property,
+        qualifiers_from_people,
+    )
+
+    # DP#16: find the declared renovations FIRST. Building qualifiers before
+    # knowing whether any renovation exists made an unrelated member's missing
+    # person_id break runs that never mentioned a renovation at all -- a module
+    # that has nothing to contribute must not be able to stop a run (DP#32).
+    properties = cfg.get('properties')
+    if properties is None:
+        properties = []
+    renovations = []
+    for prop in properties:
+        if isinstance(prop, dict) and prop.get('mg_reno') is not None:
+            renovations.append((prop['mg_reno'],))
+    if not renovations:
+        return 0.0
+
+    members = cfg.get('people')
+    if members is None:
+        family = cfg.get('family')
+        members = family.get('members') if isinstance(family, dict) else None
+    if members is None:
+        # A renovation was declared but no people block names anyone. That is a
+        # document gap, not a household with no qualifying person -- refusing
+        # says so, where an empty list would credit $0 silently (DP#32).
+        raise ValueError(
+            "a property declares an mg_reno renovation naming qualifying "
+            "people, but the document carries no people block to match those "
+            "person_ids against. Refusing rather than crediting $0, which "
+            "would be indistinguishable from a household that does not "
+            "qualify (DP#32)."
+        )
+    qualifiers = qualifiers_from_people(members)
+
+    total = 0.0
+    for (facts,) in renovations:
+        # facts is never None here -- the collection above filtered on
+        # `prop.get('mg_reno') is not None` -- so the builder always returns a
+        # renovation. The dead None-check that used to sit here was an
+        # unreachable branch, not a defence.
+        renovation = mg_reno_from_property(facts, qualifiers)
+        total += mg_reno_credit_for_year(renovation, qualifiers)
+    return total
