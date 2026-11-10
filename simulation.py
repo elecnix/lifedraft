@@ -285,6 +285,55 @@ def _non_reg_after_tax_return_for(year: int, primary_marginal_rate: float,
     return after_tax_yield + capital_appreciation
 
 
+def _non_reg_after_tax_distribution_for(primary_marginal_rate: float, *,
+                                        portfolio,
+                                        non_reg_yield_rate: float,
+                                        province: str) -> float:
+    """Issue #437: the after-tax rate at which the non-reg pot DISTRIBUTES
+    cash (reinvested in-place), as a pure function of composition and the
+    marginal rate -- never of the balance (#575/DP#32).
+
+    A declared distribution yield is taxed as income in the year it is earned;
+    the tax leaks out of the pot and the after-tax remainder is reinvested, so
+    the pot only retains (1 - effective_rate) of each currently-taxed
+    component. Those reinvested dollars are new cost securities are purchased
+    with, so the drawdown's gain fraction must realize the gain over the new
+    cost, not the original outlay. Only the components taxed as INCOME qualify
+    (interest, eligible/non-eligible dividends, foreign income); the
+    capital-gains yield component is modeled elsewhere in this engine as
+    unrealized appreciation (taxed on withdrawal, never accreted here), and a
+    return_of_capital distribution is the investor's own capital, not new cost
+    -- neither is added to ACB. Absent an explicit ``portfolio.accounts.
+    non_reg`` block, the same configurable ``non_reg_yield_rate`` fallback as
+    the after-tax-return function applies (DP#13), resolved the same way.
+    """
+    non_reg_acct = None
+    if portfolio is not None and portfolio.has_data:
+        non_reg_acct = portfolio.accounts.get('non_reg')
+
+    if non_reg_acct is None:
+        from countries.canada.portfolio import AccountPortfolio, YieldBreakdown
+        non_reg_acct = AccountPortfolio(
+            yield_breakdown=YieldBreakdown(interest=non_reg_yield_rate),
+        )
+
+    from countries.canada.income_type import IncomeType, effective_tax_rate
+    yb = non_reg_acct.yield_breakdown
+    after_tax = 0.0
+
+    def _taxed(rate: float, income_type) -> float:
+        if rate <= 0:
+            return 0.0
+        eff = effective_tax_rate(income_type, primary_marginal_rate, province, 'non_reg')
+        return rate * (1 - eff)
+
+    after_tax += _taxed(yb.interest, IncomeType.INTEREST)
+    after_tax += _taxed(yb.eligible_dividends, IncomeType.ELIGIBLE_DIVIDEND)
+    after_tax += _taxed(yb.non_eligible_dividends, IncomeType.NON_ELIGIBLE_DIVIDEND)
+    after_tax += _taxed(yb.foreign_income, IncomeType.FOREIGN_INCOME)
+    return after_tax
+
+
 def _registered_wht_drag_for(portfolio) -> Optional[Dict[str, float]]:
     """Issue #641: the per-registered-pot WHT drag for this run's portfolio, or
     ``None`` when nothing is declared.
@@ -1685,6 +1734,10 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         year, primary_rate, ctx.return_model.return_for_year(year),
         portfolio=ctx.portfolio, non_reg_yield_rate=cfg.non_reg_yield_rate,
         province=cfg.province)
+    non_reg_dist = _non_reg_after_tax_distribution_for(
+        primary_rate,
+        portfolio=ctx.portfolio, non_reg_yield_rate=cfg.non_reg_yield_rate,
+        province=cfg.province)
 
     # Issue #899 (part a): grow each additional accumulating adult's OWN
     # RRSP/TFSA from their OWN after-tax savings (computed above) against the
@@ -1717,6 +1770,7 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
             rrsp_annual_limit=rrsp_limit,
             tfsa_annual_limit=tfsa_limit,
             non_reg_after_tax_return=non_reg_atr,
+            non_reg_after_tax_distribution_rate=non_reg_dist,
             # Issue #641: registered pots' foreign-WHT drag from their declared
             # holdings (None when no registered composition -- golden no-op).
             registered_wht_drag=_registered_wht_drag_for(ctx.portfolio),
@@ -2530,6 +2584,11 @@ class FamilySimulation:
                     tfsa_annual_limit=self.tax_provider.get_tfsa_limit(self.start_year),
                     non_reg_after_tax_return=self._get_non_reg_after_tax_return(
                         0, primary_rate, lump_return),
+                    non_reg_after_tax_distribution_rate=_non_reg_after_tax_distribution_for(
+                        primary_rate,
+                        portfolio=self._portfolio,
+                        non_reg_yield_rate=self.config.non_reg_yield_rate,
+                        province=self.config.province),
                     registered_wht_drag=_registered_wht_drag_for(self._portfolio),
                     # Issue #679: every dollar of this lump is BORROWED (margin draw
                     # + mortgage cash-out), so it is an inflow as well as an outflow.
@@ -2941,6 +3000,11 @@ class FamilySimulation:
                     rrsp_annual_limit=rrsp_limit,
                     tfsa_annual_limit=tfsa_limit,
                     non_reg_after_tax_return=non_reg_atr,
+                    non_reg_after_tax_distribution_rate=_non_reg_after_tax_distribution_for(
+                        primary_rate,
+                        portfolio=self._portfolio,
+                        non_reg_yield_rate=cfg.non_reg_yield_rate,
+                        province=cfg.province),
                     registered_wht_drag=_registered_wht_drag_for(self._portfolio),
                     # epic #795 bite 1: the retirement transition OUTPUTS are no
                     # longer passed by the prologue -- the registered
