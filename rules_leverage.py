@@ -580,10 +580,23 @@ def apply_sm_investment_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:
     contract account (it opens at 0 and is funded only by readvances), so
     charging it another account's fee would invent a fee on money that never
     declared one.
+
+    Issue #437: the sleeve's cost basis absorbs the same after-tax
+    DISTRIBUTION the non-reg pot absorbs, for the same reason. The sleeve is
+    legally non-registered, so its reinvested distributions are already-taxed
+    income -- carrying them as unrealized gain (``gain_frac`` on the unwind, at
+    ``retirement_transition.py``) taxes them a second time. It reads the
+    UNSHIFTED distribution rate for the same reason it reads the unshifted
+    growth rate: the sleeve declares no composition of its own.
     """
     if ctx.use_readvanceable:
         pre = ws.new_sm_investment
         ws.new_sm_investment *= (1 + ws.taxable_after_tax_rate)
+        # The distribution half of that same unshifted rate, so capital
+        # appreciation is never added to cost basis here either (DP#19).
+        dist_rate = ctx.non_reg_after_tax_distribution
+        if dist_rate is not None and dist_rate != 0.0:
+            ws.new_sm_cost_basis += pre * dist_rate
         return pre > 0 and ws.taxable_after_tax_rate != 0
     return False
 
