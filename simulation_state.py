@@ -1916,6 +1916,14 @@ class YearInputs:
     # None (or an absent kind) preserves the flat gross rate exactly -- the
     # no-op a household with no registered composition relies on (golden).
     registered_wht_drag: Optional[Dict[str, float]] = None
+    # Issue #437: the after-tax rate at which the non-reg pot DISTRIBUTES
+    # currently-taxed income (interest/dividends/foreign) that is reinvested
+    # in-place -- the part of the after-tax distribution that is new cost
+    # (s.49/DRIP: securities purchased with reinvested distributions are
+    # acquired at that cost). Threaded to the growth rule, which accretes it
+    # to the non-reg ACB. None -> no accretion (hand-built callers; golden
+    # byte-identical when no distribution yield is declared).
+    non_reg_after_tax_distribution_rate: Optional[float] = None
     # Issue #294: retirement transition. When a member crosses retirement_age,
     # the engine passes the family's government income (already computed from
     # member data + clawback) and a NET drawdown target; the pure step executes
@@ -2199,6 +2207,11 @@ def simulate_year_pure(
     The non_reg_after_tax_return parameter provides the blended after-tax return
     for non-reg investments, computed from portfolio composition and marginal
     tax rate by the caller. When None, falls back to investment_return (flat rate).
+    The non_reg_after_tax_distribution_rate parameter is the after-tax,
+    currently-taxed component of that distribution (interest/dividends/foreign
+    income net of tax, capital-gains yield and return of capital excluded); the
+    growth rule accretes it to the non-reg ACB each year (issue #437). When
+    None, no ACB accretion.
 
     #576: Smith-Manoeuvre investments (``sm_investment_balance``) are
     non-registered/taxable by construction and use this SAME rate to grow

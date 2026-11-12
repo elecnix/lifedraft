@@ -221,7 +221,16 @@ def apply_non_reg_growth(ws: YearWorkingState, ctx: RuleContext) -> bool:
         pot_rate -= mer_rate
     pre = ws.new_nonreg_bal
     ws.new_nonreg_bal *= (1 + pot_rate)
-    # ACB does NOT grow with returns (it's cost basis)
+    # ACB does NOT grow with returns (DP#19: cost basis is not return) --
+    # but it DOES grow with money reinvested in it. Issue #437: the
+    # currently-taxed distribution the pot retains after tax is received in
+    # cash and reinvested in the same securities, so it is new cost (the
+    # securities are acquired with it). Accrete the after-tax distribution
+    # retained this year; the deferred (capital-gains yield / return-of-
+    # capital) components are not cash received and never accrete here.
+    dist_rate = ctx.non_reg_after_tax_distribution_rate
+    if dist_rate is not None:
+        ws.new_nonreg_acb += pre * dist_rate
     return pre > 0 and pot_rate != 0
 
 @rule('emergency_reserve_growth')

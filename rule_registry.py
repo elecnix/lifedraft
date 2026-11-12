@@ -233,6 +233,15 @@ class RuleContext:
     # household's pre-retirement years price the gain at the lowest bracket).
     primary_taxable_income: float = 0.0
     spouse_taxable_income: float = 0.0
+    # Issue #437: the after-tax rate at which the non-reg pot DISTRIBUTES
+    # currently-taxed income (interest/dividends/foreign) that is reinvested
+    # in-place -- the part of the after-tax distribution that is new cost
+    # (s.49/DRIP: securities purchased with reinvested distributions are
+    # acquired at that cost). Threaded from YearInputs by name and accreted to
+    # the non-reg ACB by the growth rule. Shared, like non_reg_after_tax_
+    # return; defaulted so hand-built contexts (direct-unit-test pattern) stay
+    # a strict no-op -- no distribution rate, no accretion.
+    non_reg_after_tax_distribution_rate: Optional[float] = None
 
     @classmethod
     def from_year_inputs(cls, inputs: "YearInputs", *, year: int,
