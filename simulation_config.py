@@ -371,6 +371,10 @@ class SimulationConfig:
     first_home_purchases: List[Dict] = field(default_factory=list)  # issue #704: a member's first-home purchase -> FHSA qualifying withdrawal + HBP
     # Dated ZEV acquisitions -> federal iZEV + Quebec Roulez vert incentive inflow.
     zev_purchases: List[Dict] = field(default_factory=list)
+    # Issue #488: dated one-off contributions into registered accounts
+    # (contract_contributions.map_registered_contributions shape). Empty =
+    # none declared; the fold is then byte-identical.
+    registered_contributions: List[Dict] = field(default_factory=list)
 
     # Accounts
     rrsp_annual_percent: float = 0.18

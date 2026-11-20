@@ -471,6 +471,8 @@ class YearWorkingState:
     deduct_later_first_claim_income: float = 0.0
     deduct_later_total_deducted: float = 0.0
     deduction_advantage_vs_now: float = 0.0
+    # Issue #488: see YearResult.rrsp_deduction_base (None = not recorded).
+    rrsp_deduction_base: object = None
 
     # ── heloc_tracing rule ──
     new_tracing: dict = None

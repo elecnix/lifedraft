@@ -1530,17 +1530,51 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         cfg.children, getattr(cfg, 'gifts', []), child_savings_after_tax,
         state.jurisdiction_state.get('canada', {}).get('child_accounts', []))
 
-    # ── Build FamilyState for strategy engine ──
+    # ── Issue #488: declared one-off registered contributions this year ──
+    # Booked AHEAD of the savings flow: their amounts reserve room before the
+    # strategy engine allocates savings, then join the year's allocation
+    # below. Funded from outside the modelled cash flow, so they are also a
+    # matching inflow (free_cash_invested). All zeros for a household that
+    # declares none (DP#32: byte-identical fold).
+    from declared_contributions import declared_for_year
+    declared, declared_deferred = declared_for_year(
+        cfg.registered_contributions, sim_year, ctx.start_year)
     _canada = state.jurisdiction_state.get('canada', {})
+    _p_rrsp_room = adult_rrsp_slot(_canada, 0)[1]  # #700: per-adult own_room
+    _s_rrsp_room = adult_rrsp_slot(_canada, 1)[1]
+    _p_tfsa_room = adult_tfsa_slot(_canada, 0)[1]  # #700: per-adult room
+    _s_tfsa_room = adult_tfsa_slot(_canada, 1)[1]
+    for _label, _amount, _room in (
+            ("primary's RRSP + spousal RRSP",
+             declared['primary_rrsp'] + declared['spousal_rrsp'], _p_rrsp_room),
+            ("spouse's RRSP", declared['spouse_rrsp'], _s_rrsp_room),
+            ("primary's TFSA", declared['primary_tfsa'], _p_tfsa_room),
+            ("spouse's TFSA", declared['spouse_tfsa'], _s_tfsa_room)):
+        if _amount > _room + 1e-6:
+            # An over-contribution is a penalty-taxed fact the engine does not
+            # model. Clamping it would silently drop declared money while the
+            # matching inflow still arrived (DP#18/DP#32), so it is refused.
+            raise ValueError(
+                f"registered_contributions: the declared {_label} "
+                f"contribution of ${_amount:,.2f} in {sim_year} exceeds the "
+                f"${_room:,.2f} of room available that year; an "
+                f"over-contribution is not modelled (issue #488).")
+    if cfg.registered_contributions:
+        _p_rrsp_room -= declared['primary_rrsp'] + declared['spousal_rrsp']
+        _s_rrsp_room -= declared['spouse_rrsp']
+        _p_tfsa_room -= declared['primary_tfsa']
+        _s_tfsa_room -= declared['spouse_tfsa']
+
+    # ── Build FamilyState for strategy engine ──
     family_state = FamilyState(
         primary_income=primary_income,
         spouse_income=spouse_income,
         primary_marginal_rate=primary_rate,
         spouse_marginal_rate=spouse_rate,
-        primary_rrsp_room=adult_rrsp_slot(_canada, 0)[1],  # #700: per-adult own_room
-        spouse_rrsp_room=adult_rrsp_slot(_canada, 1)[1],
-        primary_tfsa_room=adult_tfsa_slot(_canada, 0)[1],  # #700: per-adult room
-        spouse_tfsa_room=adult_tfsa_slot(_canada, 1)[1],
+        primary_rrsp_room=_p_rrsp_room,
+        spouse_rrsp_room=_s_rrsp_room,
+        primary_tfsa_room=_p_tfsa_room,
+        spouse_tfsa_room=_s_tfsa_room,
         # Issue #893: size the household FHSA budget against the TOTAL household
         # room/lifetime so a SECOND owner's FHSA is funded (the per-owner fill
         # happens in rebuild_adult_fhsa). One owner => slot 0's values.
@@ -1653,6 +1687,20 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         free_cash_invested = ctx.free_cash
         alloc.non_reg += ctx.free_cash
 
+    # Issue #488: the declared one-off contributions join the allocation (they
+    # fit the room they reserved above, so nothing is clamped) and arrive as
+    # non-borrowed cash -- the same inflow==outflow
+    # discipline as free cash above. Zero when none are declared.
+    # Skipped entirely when nothing is declared, so no value (or its type)
+    # changes for any other household.
+    if cfg.registered_contributions:
+        alloc.primary_rrsp += declared['primary_rrsp']
+        alloc.spousal_rrsp += declared['spousal_rrsp']
+        alloc.spouse_rrsp += declared['spouse_rrsp']
+        alloc.primary_tfsa += declared['primary_tfsa']
+        alloc.spouse_tfsa += declared['spouse_tfsa']
+        free_cash_invested += sum(declared.values())
+
     # ── Build allocations dict for pure function ──
     allocations = {
         'primary_rrsp': alloc.primary_rrsp,
@@ -1685,6 +1733,9 @@ def simulate_year(state, year: int, ctx: SimulationContext) -> Tuple[YearResult,
         '_lump_sum': ctx.lump_sum if year == 0 else 0.0,
         '_lump_non_reg': lump_non_reg,
     }
+    if declared_deferred:
+        # Issue #488: read by rules_contributions.apply_rrsp_ledger.
+        allocations['_declared_rrsp_deferred'] = declared_deferred
 
     # ── Compute RESP CESG/QESI grants (pre-computed, passed as data) ──
     resp_data = []
@@ -2384,6 +2435,12 @@ class FamilySimulation:
         after the fold completes (the only mutation), preserving the previous
         contract exactly.
         """
+        # Issue #488: refuse a run that would silently drop a declared
+        # one-off contribution (monthly step, or a date past the projection).
+        from declared_contributions import check_declared_contributions_runnable
+        check_declared_contributions_runnable(
+            self.config.registered_contributions, self.start_year,
+            self.config.projection_years, self.config.time_step)
         if self.config.time_step == 'monthly':
             return self._run_monthly()
 
