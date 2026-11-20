@@ -154,6 +154,11 @@ def _deduct_from_year(where: str, plan: str, entry: Dict, year: int) -> Optional
                 f"{where}: deduct_from is only meaningful with "
                 f"deduction_timing=deferred (DP#32).")
         return year
+    if timing != 'deferred':
+        raise ContractAdaptationError(
+            f"{where}: deduction_timing {timing!r} is neither "
+            f"contribution_year nor deferred; an unknown election is refused, "
+            f"never read as a deferral (DP#32).")
     if 'deduct_from' not in entry:
         raise ContractAdaptationError(
             f"{where}: deduction_timing=deferred requires deduct_from, the "

@@ -363,6 +363,8 @@ class TestAdapterDefences:
         ({'contributor': 'gx'}, 'neither the primary nor the spouse'),
         ({'deduct_from': '2030-01-01'}, 'only meaningful with'),
         ({'deduction_timing': 'deferred'}, 'requires deduct_from'),
+        ({'deduction_timing': 'later', 'deduct_from': '2030-01-01'},
+         'neither contribution_year nor deferred'),
     ])
     def test_refusals(self, over, match):
         from contract_contributions import map_registered_contributions
