@@ -153,11 +153,12 @@ def test_ws_field_inventory(inventory: _Inventory):
     total_fields = len(inventory.fields)
     multi_module_writers = sum(1 for f in inventory.fields.values() if len(f.writer_files) > 1)
 
-    # 262: the total ws.<field> surface touched by all rules (#286 added
-    #      ws.rrsp_deduction_carried_forward, written by rrsp_deduction).
+    # 263: the total ws.<field> surface touched by all rules (#286 added
+    #      ws.rrsp_deduction_carried_forward, written by rrsp_deduction;
+    #      #488 added ws.rrsp_deduction_base, written by rrsp_deduction).
     #  26: fields written by >1 source module (module-level multi-writers).
-    assert total_fields == 262, (
-        f"expected 262 ws fields, got {total_fields} -- the scanner missed "
+    assert total_fields == 263, (
+        f"expected 263 ws fields, got {total_fields} -- the scanner missed "
         "rules_*.py files or failed to resolve a helper; the guard's"
         " measurements are no longer trustworthy."
     )

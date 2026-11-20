@@ -2880,6 +2880,7 @@ def simulate_year_pure(
         rrsp_deduction_carried_forward=ws.rrsp_deduction_carried_forward,
         deduction_claims=ws.deduction_claims,
         deduction_advantage_vs_now=ws.deduction_advantage_vs_now,
+        rrsp_deduction_base=ws.rrsp_deduction_base,
         readvance_interest=ws.readvance_interest,
         readvance_tax_savings=ws.readvance_tax_savings,
         # Issue #1083: the deduction's statutory saving on the retired

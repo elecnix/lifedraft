@@ -524,8 +524,13 @@ def evaluate_strategy_with_simulation(
     # row too (same bridge as rrsp_refusal above).
     from rules_contributions import summarize_rrsp_deduction_carry_forward
     rrsp_carry_forward = summarize_rrsp_deduction_carry_forward(results)
+    # Issue #488: the best deduction schedule for the declared one-off RRSP
+    # contributions travels with the row (absent -- no key at all -- when the
+    # household declares none, so every other row is unchanged).
+    from deduction_schedule import summarize_deduction_schedule
+    deduction_schedule = summarize_deduction_schedule(config, results)
 
-    return {
+    row = {
         'strategy': name,
         'year_by_year': year_by_year,
         'solvency': solvency,
@@ -555,6 +560,9 @@ def evaluate_strategy_with_simulation(
         'objective_name': objective.name,
         'objective_score': objective_score,
     }
+    if deduction_schedule is not None:
+        row['deduction_schedule'] = deduction_schedule
+    return row
 
 
 # ── CLI Entry Point ──────────────────────────────────────────────────────────
@@ -3026,6 +3034,7 @@ def main():
     from output_plugins import (
         _print_borrow_to_invest_report,
         _print_decumulation_shortfall_report,
+        _print_deduction_schedule_report,
         _print_income_scenario_report,
         _print_ltv_exploration,
         _print_property_funding_report,
@@ -3342,6 +3351,8 @@ def main():
     from runway import worst_runway_summary
     cfg.setdefault('assumptions', {})['runway'] = worst_runway_summary(results)
     _print_decumulation_shortfall_report(results, cfg)
+    # Issue #488: the best deduction schedule for declared contributions.
+    _print_deduction_schedule_report(results)
 
     # Issue #758: the shock-date sweep -- OPT-IN (--runway-sweep), because it
     # re-runs the optimizer once per shock date. Shows runway for a shock now

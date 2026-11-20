@@ -52,6 +52,27 @@
 
     },
 
+    "registered_contribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "contributor", "account", "date", "amount"],
+      "$comment": "Issue #488. One dated, one-off contribution INTO a declared registered account -- a lump sum, a refinance proceed, a bonus -- as distinct from the annual savings flow decisions.contribution_strategy[] allocates by percentage. The money arrives from OUTSIDE the modelled cash flow (it is not carved out of the year's savings), so it is both an inflow and a contribution in its year, exactly as a declared free-cash investment is. The adapter refuses (DP#32) an account kind it cannot book, a contributor who cannot contribute to that account, a date before as_of or after the horizon, and a missing or inapplicable deduction election.",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Stable identifier for this contribution." },
+        "contributor": { "$ref": "#/$defs/person_id", "description": "The person who pays the contribution and, for an RRSP, claims its deduction. For an rrsp or tfsa it is the account owner; for a spousal_rrsp it is the OTHER spouse (the account owner is the annuitant)." },
+        "account": { "$ref": "#/$defs/account_id", "description": "The declared account the contribution goes into. Its kind decides the treatment: rrsp and spousal_rrsp are deductible, tfsa is not." },
+        "date": { "$ref": "#/$defs/date", "description": "The date the contribution is made (DP#1). Must be on or after as_of -- a contribution already made is in the account's balance, and its undeducted part is people[].room.rrsp.undeducted_contributions -- and within the horizon." },
+        "amount": { "$ref": "#/$defs/money", "description": "The contributed amount, in dollars. It is booked against the contributor's room for that year ahead of the savings flow; an RRSP amount above room is refused and reported, never silently booked." },
+        "deduction_timing": { "type": "string", "enum": ["contribution_year", "deferred"], "description": "Required for an rrsp or spousal_rrsp contribution and refused for a tfsa (no deduction exists). contribution_year: the deduction is claimed from the contribution's tax year on, under the household's deduction policy. deferred: the deduction is deliberately not claimed until the tax year of deduct_from; it is carried until then (ITA s.146(5), Schedule 7), never lost." },
+        "deduct_from": { "$ref": "#/$defs/date", "description": "Required exactly when deduction_timing is deferred: the first tax year (this date's calendar year) in which the deduction may be claimed. Must be in a later calendar year than the contribution." }
+      },
+      "allOf": [
+        { "if": { "properties": { "deduction_timing": { "const": "deferred" } }, "required": ["deduction_timing"] },
+          "then": { "required": ["deduct_from"] },
+          "else": { "not": { "required": ["deduct_from"] } } }
+      ]
+    },
+
     "cash_flow": {
       "type": "object",
       "additionalProperties": false,

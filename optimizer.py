@@ -522,6 +522,12 @@ class Optimizer:
         # ``initial_state_for_run`` -- the same one FamilySimulation.__init__
         # and DPOptimizer use -- so this engine cannot drift from theirs on
         # what "the opening state" is.
+        # Issue #488: the same declared-contribution guard FamilySimulation.run()
+        # applies (this engine folds the same annual step).
+        from declared_contributions import check_declared_contributions_runnable
+        check_declared_contributions_runnable(
+            config.registered_contributions, config.start_year,
+            config.projection_years, 'annual')
         state = initial_state_for_run(config, lump_sum)
         ctx = self._build_context(config, strategy, use_readvanceable, deduct_later,
                                    lump_sum, state)

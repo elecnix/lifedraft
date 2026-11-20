@@ -159,6 +159,7 @@ def config_fields_from_dict(cfg: Dict) -> Dict:
         gifts=family.get('gifts', []),  # epic #841 bite 3
         first_home_purchases=family.get('first_home_purchases', []),  # issue #704
         zev_purchases=cfg.get('zev_purchases', []),
+        registered_contributions=cfg.get('registered_contributions', []),  # issue #488
         rrsp_annual_percent=accounts.get('rrsp_annual_percent', 0.18),
         rrsp_annual_max=accounts.get('rrsp_annual_max', 0),  # DP#13: set from TaxDataProvider
         tfsa_annual_room_per_person=accounts.get('tfsa_annual_room_per_person', 7000),
@@ -478,6 +479,9 @@ def config_to_dict(config: 'SimulationConfig') -> Dict:
             'first_home_purchases': config.first_home_purchases,
         },
         'zev_purchases': config.zev_purchases,
+        # Issue #488 (DP#24): only re-emitted when declared.
+        **({'registered_contributions': config.registered_contributions}
+           if config.registered_contributions else {}),
         'accounts': {
             'rrsp_annual_percent': config.rrsp_annual_percent,
             'rrsp_annual_max': config.rrsp_annual_max,

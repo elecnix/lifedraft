@@ -49,6 +49,19 @@ def current_bracket_floor(income: float, brackets: list) -> float:
 SPLIT_EPSILON = 1e-6
 
 
+def _is_claimable(entry: dict, year: int, roles: tuple) -> bool:
+    """An undeducted entry of ``roles`` that may be claimed in ``year``.
+
+    Issue #488: an entry carrying ``claimable_from`` (a declared contribution
+    whose deduction the contributor deferred) is claimable only from that
+    projection year on. An entry without the key -- every modelled
+    savings-flow contribution and every opening-position seed -- is claimable
+    as soon as it exists, exactly as before."""
+    if entry['deducted'] or entry['role'] not in roles:
+        return False
+    return 'claimable_from' not in entry or entry['claimable_from'] <= year
+
+
 class RRSPListLedger:
     """Plain-list RRSP ledger wrapper (jurisdiction-agnostic, DP#25).
 
@@ -84,13 +97,25 @@ class RRSPListLedger:
             for e in self._entries if e['deducted']
         )
 
-    def add_contribution(self, year: int, amount: float, role: str = 'primary'):
-        """Add a contribution entry."""
-        self._entries.append({
+    def add_contribution(self, year: int, amount: float, role: str = 'primary',
+                         claimable_from: int = None):
+        """Add a contribution entry.
+
+        Issue #488: ``claimable_from`` is the first projection year in which
+        the contributor has ELECTED to claim the deduction (a declared
+        ``registered_contributions[]`` entry with ``deduction_timing:
+        deferred``). Until then the entry is undeducted and carried forward
+        but no claim path may take it. ``None`` -- every modelled savings-flow
+        contribution -- adds no key, so those entries are unchanged.
+        """
+        entry = {
             'year': year, 'amount': amount, 'role': role,
             'deducted': False, 'deduction_year': None,
             'deduction_marginal_rate': None,
-        })
+        }
+        if claimable_from is not None:
+            entry['claimable_from'] = claimable_from
+        self._entries.append(entry)
 
     def clone(self) -> 'RRSPListLedger':
         """Return an independent copy (shallow dict copies of entries).
@@ -113,9 +138,9 @@ class RRSPListLedger:
                    if e['deducted'] and e['deduction_year'] == year
                    and e['role'] in roles)
 
-    def _undeducted_for(self, roles: tuple) -> float:
+    def _claimable_for(self, year: int, roles: tuple) -> float:
         return sum(e['amount'] for e in self._entries
-                   if not e['deducted'] and e['role'] in roles)
+                   if _is_claimable(e, year, roles))
 
     def _claim_down_to(self, year: int, income: float, floor: float,
                        brackets: list, roles: tuple) -> dict:
@@ -130,8 +155,9 @@ class RRSPListLedger:
         the cap is exhausted -- never only the first match.
 
         Returns ``savings``, ``amount`` claimed, ``claims`` (per-slice year,
-        amount, rate) and ``carried_forward`` (the undeducted total left for
-        ``roles`` -- deducted in a later year, never lost).
+        amount, rate) and ``carried_forward`` (the claimable total left
+        undeducted for ``roles`` -- deducted in a later year, never lost; an
+        entry the contributor deferred past ``year`` is not counted, #488).
         """
         from tax_calculator import deduction_value
 
@@ -143,13 +169,15 @@ class RRSPListLedger:
         # entry would drift below the last entry's amount (the float sum does
         # not reproduce exactly) and split off a sub-cent undeducted stub --
         # a phantom carry-forward the disclosure would then report.
-        claim_all = cap >= self._undeducted_for(roles)
+        claim_all = cap >= self._claimable_for(year, roles)
         remaining = cap
         amount_claimed = 0.0
         total_savings = 0.0
         claims = []
         for entry in list(self._entries):
-            if entry['deducted'] or entry['role'] not in roles:
+            # Issue #488: an entry whose deduction the contributor deferred
+            # past this year is skipped -- carried, never claimed early.
+            if not _is_claimable(entry, year, roles):
                 continue
             if claim_all:
                 claim_from = entry['amount']
@@ -172,7 +200,8 @@ class RRSPListLedger:
             if claim_from < entry['amount']:
                 entry['amount'] -= claim_from
                 self.add_contribution(year=entry['year'], amount=claim_from,
-                                      role=entry['role'])
+                                      role=entry['role'],
+                                      claimable_from=entry.get('claimable_from'))
                 self._entries[-1]['deducted'] = True
                 self._entries[-1]['deduction_year'] = year
                 self._entries[-1]['deduction_marginal_rate'] = slice_rate
@@ -181,9 +210,12 @@ class RRSPListLedger:
                 entry['deduction_year'] = year
                 entry['deduction_marginal_rate'] = slice_rate
 
+        # Issue #488: an entry deferred past this year by the contributor's
+        # own election is not "carried forward by the cap" -- it was never
+        # claimable here -- so only the claimable remainder is reported.
         return {'savings': total_savings, 'amount': amount_claimed,
                 'claims': claims,
-                'carried_forward': self._undeducted_for(roles)}
+                'carried_forward': self._claimable_for(year, roles)}
 
     def claim_useful_deductions(self, year: int, income: float, brackets: list,
                                 roles: tuple) -> dict:

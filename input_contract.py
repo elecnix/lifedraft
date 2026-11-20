@@ -97,6 +97,7 @@ from contract_people import (
 from contract_principal import map_property_config
 from contract_property import _find_property, _map_owned_properties
 from contract_schema import load_contract_json, validate_contract
+from contract_contributions import map_registered_contributions
 from contract_transfers import (
     map_cash_flows, map_equity_grants, map_installments, _map_first_home_purchases,
     _map_gifts, _map_private_loans, _map_zev_purchases,
@@ -402,6 +403,14 @@ def to_internal_config(doc: Dict) -> Dict:
                                              family_pre_window=family_pre_window)
     if owned_properties:
         legacy["properties"] = owned_properties
+
+    # Issue #488: dated one-off contributions into registered accounts, each
+    # with its own deduction election. Emitted only when declared, so a
+    # household without any round-trips byte-identically (DP#24/DP#32).
+    registered_contributions = map_registered_contributions(
+        doc, primary_id, spouse_id, horizon_end)
+    if registered_contributions:
+        legacy["registered_contributions"] = registered_contributions
 
     installment_plans = map_installments(doc)
     if installment_plans:
