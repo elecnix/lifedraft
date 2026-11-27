@@ -286,7 +286,7 @@ class TestSolver:
 class TestScheduleReport:
     def test_absent_when_nothing_declared(self, baseline):
         cfg = _config(_base_doc())
-        assert summarize_deduction_schedule(cfg, baseline) is None
+        assert summarize_deduction_schedule(cfg, baseline, False) is None
         assert render_deduction_schedule(None) == []
 
     def test_names_years_and_amounts_and_includes_opening_position(self):
@@ -296,7 +296,7 @@ class TestScheduleReport:
                     p['room']['rrsp']['undeducted_contributions'] = 2000
         cfg, r = _run(_doc(_contrib(deduction_timing='deferred',
                                     deduct_from='2030-01-01'), mutate=opening))
-        s = summarize_deduction_schedule(cfg, r)
+        s = summarize_deduction_schedule(cfg, r, False)
         assert set(s) == {'primary'}
         p = s['primary']
         assert p['opening_undeducted'] == 2000
@@ -317,7 +317,7 @@ class TestScheduleReport:
             _deduction_schedule_lines)
         cfg, r = _run(_doc(_contrib()))
         row = {'label': 'toy', 'net_benefit': 1.0,
-               'deduction_schedule': summarize_deduction_schedule(cfg, r)}
+               'deduction_schedule': summarize_deduction_schedule(cfg, r, False)}
         lines = _deduction_schedule_lines([row])
         assert lines[1] == '  (#1 scenario: toy)'
         assert _deduction_schedule_lines([{'label': 'x', 'net_benefit': 1.0}]) == []
@@ -387,3 +387,69 @@ def test_render_names_what_stays_carried_at_the_horizon():
     assert 'still carried at the horizon: $10,000' in text
     assert 'never deduct below $50,000 (deduct_later_bracket_target)' in text
     assert 'savings flow' not in text
+
+
+class TestScheduleFloorFollowsTheRunsStrategy:
+    """The bracket-target floor belongs to the deduct-later STRATEGY, not to the
+    household: ``decisions.contribution_strategy[].deduct_later_bracket_target``
+    is null when ``deduct_later`` is false, and the engine claims a deduct-now
+    run down to the lowest taxed income (``claim_useful_deductions``) whatever
+    target another strategy declared. The adapter lands the one declared target
+    on a config-wide key, so the schedule must take the run's own
+    ``deduct_later`` flag rather than read that key alone."""
+
+    TARGET = 110000
+
+    def _strategies(self, d):
+        alloc = {'rrsp_pct': 0.5, 'spousal_rrsp_pct': 0.0, 'tfsa_pct': 0.5,
+                 'fhsa_pct': 0.0, 'resp_pct': 0.0, 'non_reg_pct': 0.0}
+        d['decisions']['contribution_strategy'] = [
+            {'id': 'now', 'label': 'deduct now', 'allocation': alloc,
+             'use_smith': False, 'deduct_later': False,
+             'deduct_later_bracket_target': None},
+            {'id': 'later', 'label': 'deduct later', 'allocation': alloc,
+             'use_smith': False, 'deduct_later': True,
+             'deduct_later_bracket_target': self.TARGET}]
+
+    def _summary(self, deduct_later):
+        cfg = _config(_doc(_contrib(amount=30000), mutate=self._strategies))
+        assert cfg.deduct_later_bracket_target == self.TARGET
+        r = FamilySimulation(cfg, adapter=CanadaAdapter(cfg),
+                             deduct_later=deduct_later).run()
+        return summarize_deduction_schedule(cfg, r, deduct_later)['primary']
+
+    def test_deduct_now_run_is_not_floored_by_another_strategys_target(self):
+        s = self._summary(deduct_later=False)
+        assert s['floor'] == 'lowest_taxed_income'
+        assert s['bracket_target'] == 0.0
+        # Claimed whole in its year: the 110,000 target would cap it near
+        # income - target, well under 30,000.
+        assert s['claim_as_available']['claims'][0] == pytest.approx(
+            {'year': 2027, 'amount': 30000.0,
+             'tax_saved': s['claim_as_available']['claims'][0]['tax_saved']})
+        text = '\n'.join(render_deduction_schedule({'primary': s}))
+        assert 'never deduct below the lowest taxed income' in text
+
+    def test_deduct_later_run_keeps_its_declared_floor(self):
+        s = self._summary(deduct_later=True)
+        assert s['floor'] == 'deduct_later_bracket_target'
+        assert s['bracket_target'] == self.TARGET
+        first = s['claim_as_available']['claims'][0]
+        assert first['year'] == 2027 and first['amount'] < 30000
+
+    @pytest.mark.parametrize('deduct_later, floor', [
+        (False, 'lowest_taxed_income'), (True, 'deduct_later_bracket_target')])
+    def test_optimizer_row_passes_the_runs_flag(self, deduct_later, floor):
+        from optimize import evaluate_strategy_with_simulation
+        from countries.canada.rate_model import build_rate_path
+        from strategy import AllocationStrategy
+        cfg = _config(_doc(_contrib(amount=30000), mutate=self._strategies))
+        row = evaluate_strategy_with_simulation(
+            name='t', strategy=AllocationStrategy(name='t', rrsp_pct=0.5,
+                                                  tfsa_pct=0.5),
+            config=cfg, deduct_later=deduct_later,
+            rate_path=build_rate_path(name='t', initial_rate=0.05,
+                                      term_years=5, rate_type='variable',
+                                      renewal_rates=[0.05]),
+            include_year_by_year=False)
+        assert row['deduction_schedule']['primary']['floor'] == floor
