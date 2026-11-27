@@ -274,8 +274,8 @@
     }
   ],
   "projection": {
-    "full_report_bytes": 13589606,
-    "full_report_digest": "sha256:9b9fa62a068fa292078fc1f2f0acfd1e65bb375266d424a835659e49892d13f9",
+    "full_report_bytes": 13642056,
+    "full_report_digest": "sha256:e7d4d0acab7c2693cba462d685360230720fb80f3958816a24972801529bb1bd",
     "function": "tools/examples.py::project_report",
     "key_year_columns": [
       "year",

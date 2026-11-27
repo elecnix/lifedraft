@@ -92,16 +92,35 @@ def apply_rrsp_ledger(ws: YearWorkingState, ctx: RuleContext) -> bool:
     #    only .add_contribution (appends a new dict) and .claim_* (mutates
     #    existing entries' scalar values) touch the ledger after this point.
     new_ledger = RRSPListLedger([{**e} for e in ws.opening_rrsp_ledger])
+    # Issue #488: the slices of this year's booked amounts that are DECLARED
+    # one-off contributions whose deduction the contributor deferred. Each
+    # becomes its own entry, claimable only from its declared year; the rest
+    # of the booked amount is an ordinary entry, exactly as before. Absent key
+    # = nothing declared this year (every caller but simulate_year, and every
+    # household without registered_contributions[]).
+    deferred = ctx.allocations.get('_declared_rrsp_deferred', ())
     fired = False
-    if ws.p_rrsp_actual > 0:
-        new_ledger.add_contribution(year=ws.year, amount=ws.p_rrsp_actual, role='primary')
+    for role, booked in (('primary', ws.p_rrsp_actual),
+                         ('spousal', ws.s_rrsp_actual),
+                         ('spouse', ws.sp_rrsp_actual)):
+        if booked <= 0:
+            continue
         fired = True
-    if ws.s_rrsp_actual > 0:
-        new_ledger.add_contribution(year=ws.year, amount=ws.s_rrsp_actual, role='spousal')
-        fired = True
-    if ws.sp_rrsp_actual > 0:
-        new_ledger.add_contribution(year=ws.year, amount=ws.sp_rrsp_actual, role='spouse')
-        fired = True
+        # The declared contribution reserved its room before the savings flow
+        # was allocated (an over-room one is refused in simulate_year), so it
+        # is booked whole; the min() only guards a direct caller.
+        ordinary = booked
+        for d in deferred:
+            if d['role'] != role:
+                continue
+            slice_ = min(d['amount'], ordinary)
+            if slice_ > 0:
+                new_ledger.add_contribution(year=ws.year, amount=slice_,
+                                            role=role,
+                                            claimable_from=d['claimable_from'])
+                ordinary -= slice_
+        if ordinary > 0:
+            new_ledger.add_contribution(year=ws.year, amount=ordinary, role=role)
     ws.new_ledger = new_ledger
     return fired
 
@@ -117,8 +136,11 @@ def _deduction_brackets(ctx: RuleContext) -> list:
         ctx.config.start_year, province=ctx.config.province)
 
 
-def _has_undeducted(ledger, roles: tuple) -> bool:
-    return any(not e['deducted'] and e['role'] in roles for e in ledger)
+def _has_undeducted(ledger, year: int, roles: tuple) -> bool:
+    """Whether ``roles`` hold an entry claimable in ``year``. Issue #488: an
+    entry whose deduction was deferred past ``year`` does not count."""
+    from rrsp_ledger import _is_claimable
+    return any(_is_claimable(e, year, roles) for e in ledger)
 
 
 def _deduction_base(ws: YearWorkingState, ctx: RuleContext, role: str) -> float:
@@ -191,7 +213,7 @@ def apply_rrsp_deduction(ws: YearWorkingState, ctx: RuleContext) -> bool:
     # The spouse's OWN contributions are never staggered (deduct_later is the
     # primary's election): they are claimed now, capped at what still reduces
     # the spouse's tax, on both paths.
-    if _has_undeducted(ws.new_ledger, spouse_roles):
+    if _has_undeducted(ws.new_ledger, ws.year, spouse_roles):
         s = ws.new_ledger.claim_useful_deductions(
             year=ws.year, income=_deduction_base(ws, ctx, 'spouse'),
             brackets=brackets, roles=spouse_roles)
@@ -199,7 +221,7 @@ def apply_rrsp_deduction(ws: YearWorkingState, ctx: RuleContext) -> bool:
         deduction_claims += s['claims']
         carried_forward += s['carried_forward']
 
-    if _has_undeducted(ws.new_ledger, primary_roles):
+    if _has_undeducted(ws.new_ledger, ws.year, primary_roles):
         primary_income_this_year = _deduction_base(ws, ctx, 'primary')
         if not ctx.deduct_later:
             p = ws.new_ledger.claim_useful_deductions(
@@ -245,6 +267,16 @@ def apply_rrsp_deduction(ws: YearWorkingState, ctx: RuleContext) -> bool:
     ws.deduct_later_first_claim_income = deduct_later_first_claim_income
     ws.deduct_later_total_deducted = deduct_later_total_deducted
     ws.deduction_advantage_vs_now = deduction_advantage_vs_now
+
+    # Issue #488: record the income path the best-deduction-schedule report
+    # is solved against -- only when the household declared a one-off
+    # contribution, so every other run is unchanged.
+    if ctx.config.registered_contributions:
+        ws.rrsp_deduction_base = {
+            'primary': _deduction_base(ws, ctx, 'primary'),
+            'spouse': _deduction_base(ws, ctx, 'spouse'),
+            'brackets': brackets,
+        }
 
     return (rrsp_deduction_savings + spouse_deduction_savings) > 0
 

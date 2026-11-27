@@ -147,6 +147,10 @@ _INTERNAL_ROOT_ALLOWED_KEYS = {
     # Dated zero-emission vehicle acquisitions. Household-level, not under
     # 'family': the incentive is paid on the vehicle, not to a member.
     'zev_purchases',
+    # Issue #488: dated one-off registered contributions
+    # (SimulationConfig.registered_contributions -> simulation.simulate_year
+    # books them; rules_contributions.apply_rrsp_ledger defers their claim).
+    'registered_contributions',
     # DP#18/DP#24 round-trip metadata (SimulationConfig.to_dict/apply_overlay
     # attach this; a config saved and reloaded must not be rejected for
     # carrying its own provenance).

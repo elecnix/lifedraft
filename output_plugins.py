@@ -1942,6 +1942,16 @@ class MarkdownReport(OutputReport):
                 ))
                 parts.append("")
 
+        # Issue #488: the best deduction schedule for declared contributions.
+        schedule_lines = _deduction_schedule_lines(results)
+        if schedule_lines:
+            parts.append("## Best RRSP Deduction Schedule")
+            parts.append("")
+            parts.append("```")
+            parts.extend(schedule_lines)
+            parts.append("```")
+            parts.append("")
+
         # RESP cash-out analysis
         resp = _resp_cashout_comparison(results, self.base_cfg)
         if resp:
@@ -2998,6 +3008,29 @@ def _print_borrow_to_invest_report(results: List[Dict]) -> None:
     print(f"\n  The objective-winner is row 1. The no-draw baseline (—) is the")
     print(f"  frame of reference every draw is read against (DP#33); each draw")
     print(f"  amount is a real re-optimisation, not a restated input (DP#22).")
+
+
+def _deduction_schedule_lines(results: List[Dict]) -> List[str]:
+    """Issue #488: the best RRSP deduction schedule of the #1 scenario, as the
+    text lines every surface prints (one spelling, DP#9). ``[]`` when the
+    household declared no one-off RRSP contribution (the row carries no
+    ``deduction_schedule`` key)."""
+    from deduction_schedule import render_deduction_schedule
+    ranked = _sort_results(results)
+    if not ranked or 'deduction_schedule' not in ranked[0]:
+        return []
+    label = ranked[0].get('label', ranked[0].get('strategy', '?'))
+    lines = render_deduction_schedule(ranked[0]['deduction_schedule'])
+    return [lines[0], f"  (#1 scenario: {label})"] + lines[1:]
+
+
+def _print_deduction_schedule_report(results: List[Dict]) -> None:
+    """Issue #488: print the best deduction schedule on the CLI."""
+    lines = _deduction_schedule_lines(results)
+    if lines:
+        print()
+        for line in lines:
+            print(line)
 
 
 def _print_decumulation_shortfall_report(results: List[Dict], cfg: Dict) -> None:

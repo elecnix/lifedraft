@@ -8,7 +8,7 @@ behaviour and no dependencies on anything else in the config layer.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 @dataclass
 class YearResult:
@@ -85,6 +85,13 @@ class YearResult:
     # >= 0 always; > 0 exactly when spreading the deduction keeps slices in
     # higher brackets year over year instead of wasting room on low brackets.
     deduction_advantage_vs_now: float = 0.0
+    # Issue #488: the income path the best deduction schedule is solved
+    # against -- {'primary': base, 'spouse': base, 'brackets': [...]}, each
+    # base the taxable income the year's RRSP deduction is valued against
+    # (rules_contributions._deduction_base) and the brackets those deductions
+    # are valued with. Recorded ONLY when the household declares
+    # registered_contributions[]; None otherwise (not computed, never a zero).
+    rrsp_deduction_base: Optional[Dict] = None
     readvance_interest: float = 0.0
     readvance_tax_savings: float = 0.0
     # Issue #1083: the s.20(1)(c) deduction's statutory (bracket-fill) tax
