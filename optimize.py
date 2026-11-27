@@ -528,7 +528,8 @@ def evaluate_strategy_with_simulation(
     # contributions travels with the row (absent -- no key at all -- when the
     # household declares none, so every other row is unchanged).
     from deduction_schedule import summarize_deduction_schedule
-    deduction_schedule = summarize_deduction_schedule(config, results)
+    deduction_schedule = summarize_deduction_schedule(config, results,
+                                                      sim.deduct_later)
 
     row = {
         'strategy': name,

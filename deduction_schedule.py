@@ -24,9 +24,14 @@ descending rate order (earliest year first on a tie), each as large as that
 bound still allows, is optimal for this structure (a separable concave
 objective over release-date constraints).
 
-The floor is ``SimulationConfig.deduct_later_bracket_target`` when the
-household declared one (it does not want income deducted below it), and
-otherwise the lowest taxed income, below which a deduction saves nothing.
+The floor follows the run's strategy, exactly as the engine's own claim does.
+A deduct-later run is floored at ``SimulationConfig.deduct_later_bracket_target``
+(the strategy's declared target: income it does not want deducted below). A
+deduct-now run, or a deduct-later run with no declared target, is floored at
+the lowest taxed income, below which a deduction saves nothing. The target is
+a lever of ``decisions.contribution_strategy[]`` (null when ``deduct_later``
+is false); the adapter lands the one declared value on a config-wide key, so
+that key alone does not say whether this run uses it.
 
 What it does not do -- said on every surface that prints it
 -----------------------------------------------------------
@@ -156,9 +161,14 @@ def _priced(claimed: List[float], path: List[Dict], total: float) -> Dict:
             'unclaimed': max(0.0, total - got)}
 
 
-def summarize_deduction_schedule(config, results) -> Optional[Dict]:
+def summarize_deduction_schedule(config, results,
+                                 deduct_later: bool) -> Optional[Dict]:
     """Per contributor, the best schedule for the run's declared RRSP
     contributions plus that contributor's opening undeducted position.
+
+    ``deduct_later`` is the run's own flag (``FamilySimulation.deduct_later``).
+    It decides the floor, as it decides the engine's claim: the bracket target
+    only for a deduct-later run, the lowest taxed income otherwise.
 
     ``None`` when the household declared no RRSP one-off contribution --
     absence is absence (DP#32). Raises ``KeyError`` when contributions are
@@ -173,7 +183,7 @@ def summarize_deduction_schedule(config, results) -> Optional[Dict]:
         role: [{'income': r.rrsp_deduction_base[role],
                 'brackets': r.rrsp_deduction_base['brackets']} for r in results]
         for role in _ROLES}
-    target = config.deduct_later_bracket_target
+    target = config.deduct_later_bracket_target if deduct_later else 0.0
     out: Dict[str, Dict] = {}
     for role, ledger_roles in _ROLES.items():
         mine = [c for c in declared if c['role'] in ledger_roles]
